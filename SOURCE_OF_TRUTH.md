@@ -68,14 +68,14 @@ Required envelope fields:
 - received_time_ns, generated locally at receipt
 - connection_id
 - sequence_local
-- payload, unchanged from the received Hyperliquid message
+- payload, the exact UTF-8 WebSocket frame text received from Hyperliquid for valid market messages
 
 Raw events are append-only. Derived tables/features may be regenerated; raw events must not be rewritten.
 
 ## Data integrity rules
 
 - Store numeric values from wire payloads losslessly before casting for calculations.
-- Preserve the original payload.
+- Preserve the exact original WebSocket frame text for valid market messages. Parsing is for metadata extraction only; raw storage must not depend on reserialization.
 - Detect duplicate trade identifiers using the first-party trade identity fields.
 - Track gaps/reconnects explicitly as system events.
 - Never fabricate missing order-book states.
