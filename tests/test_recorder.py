@@ -34,3 +34,13 @@ def test_extract_subscription_ack_coin() -> None:
     }
 
     assert _extract_coin(message) == "HYPE"
+
+
+def test_extract_candle_symbol_and_time() -> None:
+    message = {
+        "channel": "candle",
+        "data": {"s": "HYPE", "t": 456, "o": "50", "c": "51"},
+    }
+
+    assert _extract_coin(message) == "HYPE"
+    assert _extract_exchange_time_ms(message) == 456
