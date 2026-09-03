@@ -3,7 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -25,7 +25,7 @@ class RawEventWriter:
 
     def _path_for(self, event: dict[str, Any]) -> Path:
         received_ns = int(event["received_time_ns"])
-        stamp = datetime.fromtimestamp(received_ns / 1_000_000_000, tz=timezone.utc)
+        stamp = datetime.fromtimestamp(received_ns / 1_000_000_000, tz=UTC)
         channel = _safe_component(str(event.get("channel") or "_"))
         coin = _safe_component(event.get("coin"))
         directory = self.root / stamp.strftime("%Y-%m-%d") / stamp.strftime("%H")
