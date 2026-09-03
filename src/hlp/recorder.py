@@ -26,6 +26,10 @@ def _extract_coin(message: dict[str, Any]) -> str | None:
         if isinstance(coin, str):
             return coin
 
+        symbol = data.get("s")
+        if isinstance(symbol, str):
+            return symbol
+
         subscription = data.get("subscription")
         if isinstance(subscription, dict):
             coin = subscription.get("coin")
@@ -34,8 +38,12 @@ def _extract_coin(message: dict[str, Any]) -> str | None:
 
     if isinstance(data, list):
         for item in data:
-            if isinstance(item, dict) and isinstance(item.get("coin"), str):
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("coin"), str):
                 return item["coin"]
+            if isinstance(item.get("s"), str):
+                return item["s"]
 
     return None
 
@@ -161,7 +169,7 @@ class MainnetRecorder:
                                 coin=coin,
                                 exchange_time_ms=_extract_exchange_time_ms(message),
                                 received_time_ns=received_ns,
-                                payload=message,
+                                payload=raw,
                             )
 
                         self.health.mark_message(event["channel"], event["coin"], received_ns)
@@ -226,7 +234,7 @@ class MainnetRecorder:
         coin: str | None,
         exchange_time_ms: int | None,
         received_time_ns: int,
-        payload: dict[str, Any],
+        payload: Any,
     ) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
