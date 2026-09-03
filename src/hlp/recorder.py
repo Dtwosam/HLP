@@ -148,8 +148,8 @@ class MainnetRecorder:
                         try:
                             message = json.loads(raw)
                             if not isinstance(message, dict):
-                                raise ValueError("top-level websocket payload is not an object")
-                        except (json.JSONDecodeError, ValueError) as exc:
+                                raise TypeError("top-level websocket payload is not an object")
+                        except (json.JSONDecodeError, TypeError) as exc:
                             event = self._envelope(
                                 connection_id=connection_id,
                                 sequence_local=sequence_local,
@@ -178,7 +178,7 @@ class MainnetRecorder:
 
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # network boundary: record and reconnect
+            except Exception as exc:  # noqa: BLE001 - network boundary must reconnect
                 self.health.reconnect_count += 0 if first_attempt else 1
                 received_ns = time.time_ns()
                 await self.queue.put(
