@@ -43,7 +43,7 @@ class RecorderConfig:
     reconnect_max_seconds: float = 30.0
 
     @classmethod
-    def from_env(cls) -> "RecorderConfig":
+    def from_env(cls) -> RecorderConfig:
         data_dir = Path(os.getenv("HLP_DATA_DIR", "data")).expanduser()
         return cls(data_dir=data_dir)
 
