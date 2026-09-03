@@ -36,7 +36,7 @@ class RawEventWriter:
         handle = self._handles.get(path)
         if handle is None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            handle = gzip.open(path, mode="at", encoding="utf-8", newline="\n")
+            handle = gzip.open(path, mode="at", encoding="utf-8", newline="\n")  # noqa: SIM115
             self._handles[path] = handle
 
         handle.write(json.dumps(event, separators=(",", ":"), ensure_ascii=False))
