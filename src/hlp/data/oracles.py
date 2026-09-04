@@ -52,11 +52,14 @@ def reconstruct_chainlink_usd_tape(
         )
 
     initial = read_chainlink_latest_round(rpc, feed, block=prior_block)
-    expected_description = f"RH{symbol} / USD"
-    if initial.description != expected_description:
+    accepted_descriptions = {
+        f"RH{symbol} / USD",
+        f"Robinhood {symbol} / USD",
+    }
+    if initial.description not in accepted_descriptions:
         raise ValueError(
             f"Chainlink description mismatch for {symbol}: "
-            f"{initial.description!r} != {expected_description!r}"
+            f"{initial.description!r} not in {sorted(accepted_descriptions)!r}"
         )
 
     state = {
@@ -172,11 +175,18 @@ def reconstruct_chainlink_usd_tapes(
             )
 
         initial = read_chainlink_latest_round(rpc, feed, block=prior_block)
-        expected_description = f"RH{symbol} / USD"
-        if initial.description != expected_description:
+        directory_name = raw_spec.get("directory_name")
+        accepted_descriptions = {
+            f"RH{symbol} / USD",
+            f"Robinhood {symbol} / USD",
+        }
+        if directory_name:
+            accepted_descriptions.add(str(directory_name))
+        if initial.description not in accepted_descriptions:
             raise ValueError(
                 f"Chainlink description mismatch for {symbol}: "
-                f"{initial.description!r} != {expected_description!r}"
+                f"{initial.description!r} not in "
+                f"{sorted(accepted_descriptions)!r}"
             )
         aggregator_round = initial.round_id & ((1 << 64) - 1)
         spec = {
