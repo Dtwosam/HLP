@@ -42,6 +42,7 @@ from hlp.data.reconstruct import (
 )
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
+from hlp.data.transition import summarize_v2_transition_continuity
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
     summarize_v2_curve_market_caps,
