@@ -70,7 +70,11 @@ from hlp.data.pools_trade_v4 import (
     summarize_pools_trade_market_caps,
 )
 from hlp.data.pons_v1 import iter_enriched_v1_launches
-from hlp.data.pons_v2 import ZERO_ADDRESS, iter_enriched_v2_launches
+from hlp.data.pons_v2 import (
+    ZERO_ADDRESS,
+    filter_v2_registry_to_graduated,
+    iter_enriched_v2_launches,
+)
 from hlp.data.pons_research import (
     annotate_pons_drawdowns_and_future_returns,
     build_pons_market_path,
@@ -2283,6 +2287,40 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def cmd_pons_v2_graduated_registry(args: argparse.Namespace) -> int:
+    """Reduce a full V2 registry to the tokens that actually graduated."""
+    registry = _load_jsonl(args.registry)
+    graduations = _load_jsonl(args.graduations)
+    rows = filter_v2_registry_to_graduated(registry, graduations)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "pons_v2_registry_join_pool_graduated",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "graduations": Path(args.graduations).name,
+            "full_registry_tokens": len(registry),
+            "graduated_tokens": len(rows),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "full_registry_tokens": len(registry),
+                "graduated_tokens": len(rows),
+                "reduction_ratio": (
+                    0 if not registry else len(rows) / len(registry)
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
     """Merge Pons V1/V2 market paths into the canonical research dataset."""
     v1_rows = _load_jsonl(args.v1_points) if args.v1_points else []
@@ -2843,6 +2881,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    v2_graduated_registry = sub.add_parser("pons-v2-graduated-registry")
+    v2_graduated_registry.add_argument("--registry", required=True)
+    v2_graduated_registry.add_argument("--graduations", required=True)
+    v2_graduated_registry.add_argument("--out", required=True)
+    v2_graduated_registry.set_defaults(func=cmd_pons_v2_graduated_registry)
 
     pons_research = sub.add_parser("pons-research-dataset")
     pons_research.add_argument("--v1-points")
