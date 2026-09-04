@@ -309,7 +309,7 @@ def cmd_contract_creation(args: argparse.Namespace) -> int:
 
 
 def cmd_deployment_block(args: argparse.Namespace) -> int:
-    rpc = _rpc(args)
+    rpc = _archive_rpc(args) if args.archive else _rpc(args)
     rpc.assert_robinhood()
     first = rpc.find_first_code_block(args.address, low=args.low, high=args.high)
     before_code = "0x" if first == 0 else rpc.get_code(args.address, first - 1)
@@ -4367,6 +4367,11 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("address")
     deploy.add_argument("--low", type=int, default=0)
     deploy.add_argument("--high", type=int)
+    deploy.add_argument(
+        "--archive",
+        action="store_true",
+        help="use the configured historical archive RPC route",
+    )
     deploy.set_defaults(func=cmd_deployment_block)
 
     blockscout_sample = sub.add_parser("blockscout-pons-sample")

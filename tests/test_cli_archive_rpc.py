@@ -386,3 +386,16 @@ def test_v3_quote_usd_parser_allows_direct_usdg_without_anchor_files():
     ])
     assert args.anchor_events is None
     assert args.anchor_initial is None
+
+
+
+def test_deployment_block_parser_accepts_archive_route():
+    parser = build_parser()
+    args = parser.parse_args([
+        "deployment-block",
+        "0x" + "11" * 20,
+        "--archive",
+        "--high", "1000",
+    ])
+    assert args.archive is True
+    assert args.high == 1000
