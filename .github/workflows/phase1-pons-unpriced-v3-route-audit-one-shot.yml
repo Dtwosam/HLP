@@ -1,5 +1,5 @@
 name: phase1-pons-unpriced-v3-route-audit-one-shot
-# USDG-first causal route probe; WETH is fallback only.
+# Head-discover V3 pools; prove causal state; USDG first, WETH fallback.
 
 on:
   push:
