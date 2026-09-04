@@ -1,0 +1,169 @@
+name: phase1-pons-full-quote-audit
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-full-quote-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_REGISTRY_RUN_ID: '33911022718'
+
+jobs:
+  quote-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Wait for recovered full registry artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          run_id = os.environ["SOURCE_REGISTRY_RUN_ID"]
+          url = (
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
+              f"/actions/runs/{run_id}/artifacts?per_page=100"
+          )
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          target = "phase1-pons-full-registry-recovered"
+          for attempt in range(65):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  payload = json.load(response)
+              names = {
+                  row["name"]
+                  for row in payload.get("artifacts", [])
+                  if not row.get("expired")
+              }
+              print({
+                  "attempt": attempt + 1,
+                  "registry_artifact_ready": target in names,
+                  "artifact_count": len(names),
+              })
+              if target in names:
+                  break
+              time.sleep(60)
+          else:
+              raise SystemExit("recovered Pons registry artifact did not appear")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ env.SOURCE_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Classify every Pons quote asset
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5             pons-quote-audit             --registry registry/pons-full-launch-registry.jsonl             --out artifacts/pons-quote-registry.jsonl
+      - name: Prove Stock Token feed state predates first Pons use
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-pons-quote-causality             --quote-registry artifacts/pons-quote-registry.jsonl             --out artifacts/pons-quote-causality.jsonl
+      - name: Build quote completeness report
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          quotes = [
+              json.loads(line)
+              for line in Path("artifacts/pons-quote-registry.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          causality = [
+              json.loads(line)
+              for line in Path("artifacts/pons-quote-causality.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          statuses = Counter(row["pricing_status"] for row in quotes)
+          launches = Counter()
+          for row in quotes:
+              launches[row["pricing_status"]] += int(row["launches"])
+          blocking_quotes = [
+              row for row in quotes
+              if row["pricing_status"] in {
+                  "unsupported_quote",
+                  "missing_chainlink_feed",
+              }
+          ]
+          blocking_feeds = [
+              row for row in causality if not bool(row["causal_ready"])
+          ]
+          report = {
+              "quote_assets": len(quotes),
+              "status_counts": dict(sorted(statuses.items())),
+              "launches_by_status": dict(sorted(launches.items())),
+              "stock_quote_assets": len(causality),
+              "stock_feeds_causal_ready": sum(
+                  bool(row["causal_ready"]) for row in causality
+              ),
+              "blocking_quote_assets": [
+                  {
+                      "quote_token": row["quote_token"],
+                      "status": row["pricing_status"],
+                      "launches": row["launches"],
+                      "versions": row["versions"],
+                  }
+                  for row in blocking_quotes
+              ],
+              "blocking_stock_feeds": [
+                  {
+                      "quote_token": row["quote_token"],
+                      "symbol": row["symbol"],
+                      "first_launch_block": row["first_launch_block"],
+                      "error": row["error"],
+                  }
+                  for row in blocking_feeds
+              ],
+              "complete_for_100k_eligibility": (
+                  not blocking_quotes and not blocking_feeds
+              ),
+          }
+          Path("artifacts/pons-quote-completeness.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-pons-full-quote-audit
+          path: artifacts/
+          if-no-files-found: warn
+      - name: Fail closed on incomplete USD coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(
+              Path("artifacts/pons-quote-completeness.json").read_text()
+          )
+          if not report["complete_for_100k_eligibility"]:
+              raise SystemExit(
+                  "full Pons USD quote coverage is incomplete; inspect artifact"
+              )
+          PY
