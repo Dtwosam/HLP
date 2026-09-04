@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import time
+from decimal import Decimal
 from dataclasses import asdict
 from pathlib import Path
 
@@ -426,6 +427,7 @@ def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
     registrations = _load_jsonl(args.registrations)
     v4_swaps = _load_jsonl(args.v4_swaps)
     curve_points = _load_jsonl(args.curve_points)
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
 
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
@@ -457,6 +459,8 @@ def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
             graduations,
             anchor_points,
             initial_weth_usd=initial_weth_usd,
+            initial_quote_usd=initial_quote_usd,
+            quote_usd_updates=quote_usd_updates,
         )
     )
     v4_points = list(
@@ -466,6 +470,8 @@ def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
             v4_swaps,
             anchor_points,
             initial_weth_usd=initial_weth_usd,
+            initial_quote_usd=initial_quote_usd,
+            quote_usd_updates=quote_usd_updates,
         )
     )
 
@@ -750,6 +756,7 @@ def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
         raise SystemExit("from-block must be > 0")
 
     registry = _load_jsonl(args.registry)
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
@@ -775,6 +782,8 @@ def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
         _iter_jsonl(args.curve_events),
         anchor_points,
         initial_weth_usd=initial_weth_usd,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=quote_usd_updates,
     )
     point_manifest = write_jsonl_snapshot(
         points,
@@ -788,6 +797,12 @@ def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
             "from_block": args.from_block,
             "to_block": args.to_block,
+            "oracle_state": (
+                Path(args.oracle_state).name if args.oracle_state else None
+            ),
+            "oracle_events": (
+                Path(args.oracle_events).name if args.oracle_events else None
+            ),
         },
     )
     summary = summarize_v2_curve_market_caps(_iter_jsonl(args.out))
@@ -1144,6 +1159,26 @@ def _iter_jsonl(path: str):
 
 def _load_jsonl(path: str) -> list[dict]:
     return list(_iter_jsonl(path))
+
+
+
+
+def _load_quote_oracle_inputs(args: argparse.Namespace):
+    state_path = getattr(args, "oracle_state", None)
+    event_path = getattr(args, "oracle_events", None)
+    if bool(state_path) != bool(event_path):
+        raise SystemExit(
+            "--oracle-state and --oracle-events must be supplied together"
+        )
+    if not state_path:
+        return {}, []
+    states = _load_jsonl(state_path)
+    updates = _load_jsonl(event_path)
+    initial = {
+        row["quote_token"].lower(): Decimal(row["usd_price"])
+        for row in states
+    }
+    return initial, updates
 
 
 def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
@@ -1630,6 +1665,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--usd-anchor-pool",
         default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     )
+    v2_v4_mcap.add_argument("--oracle-state")
+    v2_v4_mcap.add_argument("--oracle-events")
     v2_v4_mcap.add_argument("--seed-out", required=True)
     v2_v4_mcap.add_argument("--out", required=True)
     v2_v4_mcap.add_argument("--transition-out", required=True)
@@ -1647,6 +1684,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--usd-anchor-pool",
         default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     )
+    v2_mcap.add_argument("--oracle-state")
+    v2_mcap.add_argument("--oracle-events")
     v2_mcap.add_argument("--out", required=True)
     v2_mcap.add_argument("--summary-out", required=True)
     v2_mcap.set_defaults(func=cmd_rpc_v2_curve_market_cap_window)
