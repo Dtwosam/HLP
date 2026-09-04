@@ -1,0 +1,308 @@
+name: phase1-pons-v3-quote-fallback-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      route_audit_run_id:
+        description: "Successful phase1-pons-unpriced-v3-route-audit-one-shot run"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Successful phase1-pons-weth-usdg-anchor-full run"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v3-quote-fallback-full-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_FEEDLESS_PONS_USE: '35992329'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-unpriced-v3-route-audit
+          path: audit
+          run-id: ${{ inputs.route_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Freeze deterministic V3 fallback route choices
+        run: |
+          mkdir -p artifacts
+          hlp pons-select-v3-quote-routes \
+            --audit audit/pons-unpriced-v3-route-audit.jsonl \
+            --out artifacts/pons-v3-quote-routes.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          audit = [
+              json.loads(line)
+              for line in Path(
+                  "audit/pons-unpriced-v3-route-audit.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          selected = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          selected_tokens = {row["quote_token"] for row in selected}
+          report = {
+              "audited_assets": len(audit),
+              "audited_launches": sum(int(row["launches"]) for row in audit),
+              "selected_assets": len(selected),
+              "selected_launches": sum(
+                  int(row["launches"]) for row in selected
+              ),
+              "unresolved": [
+                  {
+                      "quote_token": row["quote_token"],
+                      "symbol": row["symbol"],
+                      "launches": row["launches"],
+                      "first_launch_block": row["first_launch_block"],
+                  }
+                  for row in audit
+                  if row["quote_token"] not in selected_tokens
+              ],
+          }
+          Path("artifacts/pons-v3-quote-route-selection-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: artifacts/
+          if-no-files-found: error
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '16'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: routes
+      - id: bounds
+        name: Compute exact fallback V3 shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_FEEDLESS_PONS_USE"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire selected route V3 price events
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-quote-route-tape \
+            --routes routes/pons-v3-quote-routes.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v3-quote-events-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v3-quote-fallback-*
+          path: downloads
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: routes
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Merge exact route-event shards
+        run: |
+          mkdir -p artifacts
+          cp routes/pons-v3-quote-routes.jsonl artifacts/
+          cp routes/pons-v3-quote-route-selection-summary.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["FIRST_FEEDLESS_PONS_USE"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          routes = [
+              json.loads(line)
+              for line in Path(
+                  "routes/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          activation = {
+              row["pool"].lower(): int(row["activation_block"])
+              for row in routes
+          }
+          files = sorted(
+              Path("downloads").glob("v3-quote-events-shard-*.jsonl")
+          )
+          assert len(files) == 16, [p.name for p in files]
+          state = {"previous_hi": None, "prior_order": None}
+          manifests = []
+          counts = {"records": 0, "initializes": 0, "swaps": 0}
+
+          def rows():
+              for path in files:
+                  manifest = json.loads(
+                      path.with_suffix(path.suffix + ".manifest.json").read_text()
+                  )
+                  prov = manifest["provenance"]
+                  lo, hi = int(prov["from_block"]), int(prov["to_block"])
+                  if state["previous_hi"] is None:
+                      assert lo == START, lo
+                  else:
+                      assert lo == state["previous_hi"] + 1, (
+                          state["previous_hi"], lo
+                      )
+                  state["previous_hi"] = hi
+                  manifests.append({
+                      "file": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+                  shard_records = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          prior = state["prior_order"]
+                          if prior is not None:
+                              assert prior < order, (prior, order)
+                          state["prior_order"] = order
+                          pool = row["pool"].lower()
+                          assert pool in activation, pool
+                          assert int(row["block_number"]) >= activation[pool]
+                          kind = row["event_type"]
+                          if kind == "v3_initialize":
+                              counts["initializes"] += 1
+                          elif kind == "v3_swap":
+                              counts["swaps"] += 1
+                          else:
+                              raise AssertionError(kind)
+                          counts["records"] += 1
+                          shard_records += 1
+                          yield row
+                  assert shard_records == int(manifest["records"]), (
+                      path.name, shard_records, manifest["records"]
+                  )
+              assert state["previous_hi"] == HEAD, (
+                  state["previous_hi"], HEAD
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path("artifacts/pons-v3-quote-fallback-events-full.jsonl"),
+              provenance={
+                  "source": "stream_merged_selected_v3_quote_route_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "route_audit_run_id": int(
+                      "${{ inputs.route_audit_run_id }}"
+                  ),
+                  "routes": len(routes),
+                  "shards": manifests,
+              },
+          )
+          summary = {
+              "snapshot_head_block": HEAD,
+              "selected_routes": len(routes),
+              **counts,
+              "event_tape_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v3-quote-fallback-events-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Convert selected V3 routes to generic quote USD tape
+        run: |
+          hlp pons-v3-quote-usd-tape \
+            --routes artifacts/pons-v3-quote-routes.jsonl \
+            --v3-events artifacts/pons-v3-quote-fallback-events-full.jsonl \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --state-out artifacts/pons-v3-quote-fallback-initial.jsonl \
+            --out artifacts/pons-v3-quote-fallback-updates.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
