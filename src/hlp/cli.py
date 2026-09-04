@@ -325,6 +325,155 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
+    """Reconstruct V2 graduation seed/V4 prices and lifecycle continuity."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+
+    registry = _load_jsonl(args.registry)
+    graduations = _load_jsonl(args.graduations)
+    registrations = _load_jsonl(args.registrations)
+    v4_swaps = _load_jsonl(args.v4_swaps)
+    curve_points = _load_jsonl(args.curve_points)
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = list(
+        reconstruct_v3_price_points(
+            rpc,
+            token=ROBINHOOD_WETH,
+            quote_token=ROBINHOOD_USDG,
+            pool=args.usd_anchor_pool,
+            from_block=args.from_block,
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+
+    seed_points = list(
+        build_v2_graduation_seed_points(
+            registry,
+            graduations,
+            anchor_points,
+            initial_weth_usd=initial_weth_usd,
+        )
+    )
+    v4_points = list(
+        build_v2_v4_market_cap_points(
+            registry,
+            registrations,
+            v4_swaps,
+            anchor_points,
+            initial_weth_usd=initial_weth_usd,
+        )
+    )
+
+    seed_manifest = write_jsonl_snapshot(
+        seed_points,
+        output=Path(args.seed_out),
+        provenance={
+            "source": "derived_v2_pool_graduated",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "graduations": Path(args.graduations).name,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+        },
+    )
+    v4_manifest = write_jsonl_snapshot(
+        v4_points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_v2_v4_swaps",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registrations": Path(args.registrations).name,
+            "v4_swaps": Path(args.v4_swaps).name,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+        },
+    )
+
+    transition_rows = summarize_v2_transition_continuity(
+        curve_points,
+        seed_points,
+        v4_points,
+    )
+    transition_manifest = write_jsonl_snapshot(
+        transition_rows,
+        output=Path(args.transition_out),
+        provenance={
+            "source": "derived_v2_curve_to_v4_continuity",
+            "curve_points": Path(args.curve_points).name,
+            "seed_points_sha256": seed_manifest["sha256"],
+            "v4_points_sha256": v4_manifest["sha256"],
+        },
+    )
+
+    lifecycle_points = [*curve_points, *seed_points, *v4_points]
+    lifecycle_points.sort(key=event_order)
+    summary = summarize_v2_curve_market_caps(lifecycle_points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_v2_full_lifecycle_market_cap_points",
+            "curve_points": Path(args.curve_points).name,
+            "seed_points_sha256": seed_manifest["sha256"],
+            "v4_points_sha256": v4_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once on curve, V4 seed, or V4 swap path",
+        },
+    )
+
+    priced_transitions = [
+        row
+        for row in transition_rows
+        if row["curve_to_seed_bps"] is not None
+    ]
+    first_v4_transitions = [
+        row
+        for row in transition_rows
+        if row["seed_to_first_v4_bps"] is not None
+    ]
+
+    print(
+        json.dumps(
+            {
+                "seed_points": seed_manifest,
+                "v4_points": v4_manifest,
+                "transition_report": transition_manifest,
+                "token_summary": summary_manifest,
+                "graduations": len(graduations),
+                "registrations": len(registrations),
+                "v4_swaps": len(v4_swaps),
+                "curve_to_seed_comparisons": len(priced_transitions),
+                "seed_to_first_v4_comparisons": len(first_v4_transitions),
+                "tokens_crossed_100k_full_lifecycle": sum(
+                    bool(row["crossed_100k"]) for row in summary
+                ),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v2_graduation_tape(args: argparse.Namespace) -> int:
     registry = _load_jsonl(args.registry)
     tokens = {row["token"].lower() for row in registry}
