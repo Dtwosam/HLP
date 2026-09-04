@@ -73,6 +73,7 @@ from hlp.data.quote_routes import (
     build_v3_route_usd_updates,
     select_v3_quote_routes,
 )
+from hlp.data.quote_usd import prepare_quote_usd_inputs
 from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
@@ -2344,11 +2345,7 @@ def cmd_pons_v1_lifecycle_eligibility(args: argparse.Namespace) -> int:
     if weth_decimals is None or usdg_decimals is None:
         raise SystemExit("quote registry is missing WETH/USDG decimals")
 
-    initial_quote_usd = _load_initial_quote_usd(args)
-    quote_updates = (
-        _iter_jsonl(args.oracle_events)
-        if args.oracle_events else ()
-    )
+    initial_quote_usd, quote_updates = _load_quote_usd_inputs(args)
     points = build_v1_market_cap_points(
         registry,
         _iter_jsonl(args.v3_events),
@@ -2422,11 +2419,7 @@ def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
     if initial_weth_usd <= 0:
         raise SystemExit("anchor initial WETH/USD must be positive")
 
-    initial_quote_usd = _load_initial_quote_usd(args)
-    quote_usd_updates = (
-        _iter_jsonl(args.oracle_events)
-        if args.oracle_events else ()
-    )
+    initial_quote_usd, quote_usd_updates = _load_quote_usd_inputs(args)
     points = build_v2_curve_market_cap_points(
         registry,
         _iter_jsonl(args.curve_events),
@@ -2490,30 +2483,31 @@ def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
     if initial_weth_usd <= 0:
         raise SystemExit("anchor initial WETH/USD must be positive")
 
-    initial_quote_usd = _load_initial_quote_usd(args)
+    seed_initial_quote_usd, seed_quote_updates = (
+        _load_quote_usd_inputs(args)
+    )
 
     seed_points = build_v2_graduation_seed_points(
         registry,
         graduations,
         _iter_jsonl(args.anchor_events),
         initial_weth_usd=initial_weth_usd,
-        initial_quote_usd=initial_quote_usd,
-        quote_usd_updates=_iter_jsonl(args.oracle_events)
-        if args.oracle_events else (),
+        initial_quote_usd=seed_initial_quote_usd,
+        quote_usd_updates=seed_quote_updates,
     )
     seed_summary = summarize_v2_curve_market_caps(seed_points)
 
-    # The V4 builder needs an independent point-in-time USD timeline, so it
-    # receives fresh iterators over the immutable anchor/oracle tapes.
+    # The V4 builder needs an independent point-in-time USD timeline, so load
+    # fresh iterators over the immutable quote source tapes.
+    v4_initial_quote_usd, v4_quote_updates = _load_quote_usd_inputs(args)
     v4_points = build_v2_v4_market_cap_points(
         registry,
         registrations,
         _iter_jsonl(args.v4_events),
         _iter_jsonl(args.anchor_events),
         initial_weth_usd=initial_weth_usd,
-        initial_quote_usd=initial_quote_usd,
-        quote_usd_updates=_iter_jsonl(args.oracle_events)
-        if args.oracle_events else (),
+        initial_quote_usd=v4_initial_quote_usd,
+        quote_usd_updates=v4_quote_updates,
     )
     v4_summary = summarize_v2_curve_market_caps(v4_points)
 
@@ -3415,33 +3409,48 @@ def _load_jsonl(path: str) -> list[dict]:
 
 
 
+def _load_quote_usd_inputs(
+    args: argparse.Namespace,
+):
+    """Load small state rows and lazily merge all causal USD update sources."""
+    pairs = [
+        (
+            getattr(args, "oracle_state", None),
+            getattr(args, "oracle_events", None),
+            "oracle",
+        ),
+        (
+            getattr(args, "fallback_state", None),
+            getattr(args, "fallback_events", None),
+            "fallback",
+        ),
+    ]
+    states = []
+    groups = []
+    for state_path, event_path, label in pairs:
+        if bool(state_path) != bool(event_path):
+            raise SystemExit(
+                f"--{label}-state and --{label}-events must be supplied together"
+            )
+        if not state_path:
+            continue
+        states.extend(_load_jsonl(state_path))
+        groups.append(_iter_jsonl(event_path))
+    return prepare_quote_usd_inputs(states, groups)
+
+
 def _load_initial_quote_usd(
     args: argparse.Namespace,
 ) -> dict[str, Decimal]:
-    """Load only the small causal activation state for quote assets."""
-    state_path = getattr(args, "oracle_state", None)
-    event_path = getattr(args, "oracle_events", None)
-    if bool(state_path) != bool(event_path):
-        raise SystemExit(
-            "--oracle-state and --oracle-events must be supplied together"
-        )
-    if not state_path:
-        return {}
-    states = _load_jsonl(state_path)
-    return {
-        row["quote_token"].lower(): Decimal(row["usd_price"])
-        for row in states
-    }
+    """Compatibility wrapper returning only truly pre-window quote state."""
+    initial, _ = _load_quote_usd_inputs(args)
+    return initial
 
 
 def _load_quote_oracle_inputs(args: argparse.Namespace):
-    """Compatibility helper for bounded replays that can materialize updates."""
-    initial = _load_initial_quote_usd(args)
-    event_path = getattr(args, "oracle_events", None)
-    if not event_path:
-        return initial, []
-    return initial, _load_jsonl(event_path)
-
+    """Compatibility helper for bounded replays that materialize USD updates."""
+    initial, updates = _load_quote_usd_inputs(args)
+    return initial, list(updates)
 
 def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
     """Acquire the shared V3 Initialize/Swap price tape for Pons V1 pools."""
@@ -4392,6 +4401,8 @@ def build_parser() -> argparse.ArgumentParser:
     v1_eligibility.add_argument("--anchor-initial", required=True)
     v1_eligibility.add_argument("--oracle-state")
     v1_eligibility.add_argument("--oracle-events")
+    v1_eligibility.add_argument("--fallback-state")
+    v1_eligibility.add_argument("--fallback-events")
     v1_eligibility.add_argument(
         "--snapshot-head", type=int, required=True
     )
@@ -4407,6 +4418,8 @@ def build_parser() -> argparse.ArgumentParser:
     v2_eligibility.add_argument("--anchor-initial", required=True)
     v2_eligibility.add_argument("--oracle-state")
     v2_eligibility.add_argument("--oracle-events")
+    v2_eligibility.add_argument("--fallback-state")
+    v2_eligibility.add_argument("--fallback-events")
     v2_eligibility.add_argument("--snapshot-head", type=int, required=True)
     v2_eligibility.add_argument("--out", required=True)
     v2_eligibility.set_defaults(func=cmd_pons_v2_curve_eligibility)
@@ -4423,6 +4436,8 @@ def build_parser() -> argparse.ArgumentParser:
     v2_lifecycle_eligibility.add_argument("--anchor-initial", required=True)
     v2_lifecycle_eligibility.add_argument("--oracle-state")
     v2_lifecycle_eligibility.add_argument("--oracle-events")
+    v2_lifecycle_eligibility.add_argument("--fallback-state")
+    v2_lifecycle_eligibility.add_argument("--fallback-events")
     v2_lifecycle_eligibility.add_argument(
         "--snapshot-head", type=int, required=True
     )

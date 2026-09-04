@@ -239,3 +239,37 @@ def test_v3_quote_route_tape_parses():
     ])
     assert args.routes == "routes.jsonl"
     assert args.from_block == 100
+
+
+
+def test_full_eligibility_parsers_accept_fallback_quote_tapes():
+    parser = build_parser()
+
+    v1 = parser.parse_args([
+        "pons-v1-lifecycle-eligibility",
+        "--registry", "registry.jsonl",
+        "--v3-events", "v3.jsonl",
+        "--quote-registry", "quotes.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor.json",
+        "--oracle-state", "chainlink-state.jsonl",
+        "--oracle-events", "chainlink-events.jsonl",
+        "--fallback-state", "fallback-state.jsonl",
+        "--fallback-events", "fallback-events.jsonl",
+        "--snapshot-head", "200",
+        "--out", "v1-summary.jsonl",
+    ])
+    assert v1.fallback_state == "fallback-state.jsonl"
+
+    v2 = parser.parse_args([
+        "pons-v2-curve-eligibility",
+        "--registry", "registry.jsonl",
+        "--curve-events", "curve.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor.json",
+        "--fallback-state", "fallback-state.jsonl",
+        "--fallback-events", "fallback-events.jsonl",
+        "--snapshot-head", "200",
+        "--out", "v2-summary.jsonl",
+    ])
+    assert v2.fallback_events == "fallback-events.jsonl"
