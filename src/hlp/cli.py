@@ -63,6 +63,7 @@ from hlp.data.flap_curve import (
 )
 from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
+from hlp.data.quote_registry import build_pons_quote_registry
 from hlp.data.oracles import reconstruct_chainlink_usd_tapes
 from hlp.data.pools_fun_registry import build_pools_fun_registry
 from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
@@ -1468,6 +1469,59 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def cmd_pons_quote_audit(args: argparse.Namespace) -> int:
+    """Classify every Pons pair token against canonical USD pricing sources."""
+    registry = _load_jsonl(args.registry)
+    assets = RobinhoodAssetsClient(timeout=args.timeout, attempts=args.attempts)
+    directory = ChainlinkDirectoryClient(
+        timeout=args.timeout,
+        attempts=args.attempts,
+    )
+    rows = build_pons_quote_registry(
+        registry,
+        assets_client=assets,
+        directory_client=directory,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "pons_registry_plus_robinhood_assets_plus_chainlink_directory",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "robinhood_assets_url": assets.url,
+            "chainlink_directory_url": directory.url,
+            "chainlink_directory_sha256": directory.last_sha256,
+        },
+    )
+    status_counts: dict[str, int] = {}
+    launches_by_status: dict[str, int] = {}
+    for row in rows:
+        status = row["pricing_status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+        launches_by_status[status] = (
+            launches_by_status.get(status, 0) + int(row["launches"])
+        )
+    blocking = [
+        row for row in rows
+        if row["pricing_status"] in {
+            "unsupported_quote",
+            "missing_chainlink_feed",
+        }
+    ]
+    print(json.dumps({
+        **manifest,
+        "quote_assets": len(rows),
+        "status_counts": status_counts,
+        "launches_by_status": launches_by_status,
+        "blocking_quote_assets": len(blocking),
+        "blocking_tokens": [row["quote_token"] for row in blocking],
+        "rhj_requests": assets.requests_made,
+        "chainlink_directory_requests": directory.requests_made,
+    }, sort_keys=True))
     return 0
 
 
@@ -3512,6 +3566,11 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    quote_audit = sub.add_parser("pons-quote-audit")
+    quote_audit.add_argument("--registry", required=True)
+    quote_audit.add_argument("--out", required=True)
+    quote_audit.set_defaults(func=cmd_pons_quote_audit)
 
     v2_stock_oracle = sub.add_parser("rpc-v2-stock-oracle-window")
     v2_stock_oracle.add_argument("--registry", required=True)
