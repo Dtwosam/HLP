@@ -33,6 +33,7 @@ def _attach_usd(
     out.update(
         {
             "token": launch["token"].lower(),
+            "curve": launch["curve"].lower(),
             "quote_token": launch["pair_token"].lower(),
             "launch_block": int(launch["block_number"]),
             "quote_per_token": str(quote_per_token),
