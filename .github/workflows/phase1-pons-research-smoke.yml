@@ -6,7 +6,11 @@ on:
       - phase1/data-acquisition-spike
     paths:
       - '.github/workflows/phase1-pons-research-smoke.yml'
+      - 'src/hlp/cli.py'
       - 'src/hlp/data/pons_research.py'
+      - 'src/hlp/data/universe.py'
+      - 'src/hlp/data/v2_curve.py'
+      - 'src/hlp/data/v4.py'
   workflow_dispatch:
 
 permissions:
