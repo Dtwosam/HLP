@@ -1,16 +1,7 @@
 name: phase1-v2-graduation-v4-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-v2-graduation-v4-smoke.yml'
-      - 'src/hlp/data/v4.py'
-      - 'src/hlp/data/transition.py'
-      - 'src/hlp/cli.py'
   workflow_dispatch:
-
 permissions:
   contents: read
 

@@ -1,17 +1,7 @@
 name: phase1-dex-pool-census
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-dex-pool-census.yml'
-      - 'src/hlp/protocols/uniswap.py'
-      - 'src/hlp/data/types.py'
-      - 'src/hlp/config.py'
-      - 'src/hlp/cli.py'
   workflow_dispatch:
-
 permissions:
   contents: read
 
