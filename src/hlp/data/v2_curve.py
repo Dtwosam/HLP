@@ -46,7 +46,8 @@ def build_v2_curve_market_cap_points(
     if initial_weth_usd <= 0:
         raise ValueError("initial_weth_usd must be positive")
 
-    launches = iter(sorted(registry_rows, key=_launch_order))
+    registry_list = sorted(list(registry_rows), key=_launch_order)
+    launches = iter(registry_list)
     events = iter(curve_event_rows)
     anchors = iter(weth_usd_anchor_points)
     next_launch = next(launches, None)
@@ -104,7 +105,7 @@ def build_v2_curve_market_cap_points(
 
     registry_by_curve = {
         row["curve"].lower(): row
-        for row in sorted(registry_rows, key=_launch_order)
+        for row in registry_list
     }
 
     # Merge launch initialization and reserve-changing events in exact order.
