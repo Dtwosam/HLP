@@ -83,13 +83,19 @@ def enrich_v1_launch(launch: PonsLaunch, timeline: PonsV1ConfigTimeline) -> dict
 
 
 
-def iter_enriched_v1_launches(rows: Iterable[RawLog]) -> Iterator[dict]:
+def iter_enriched_v1_launches(
+    rows: Iterable[RawLog],
+    *,
+    bootstrap_configs: Iterable[PonsV1LaunchConfig] = (),
+) -> Iterator[dict]:
     """Stream factory history into point-in-time enriched launch records.
 
     The input must include TokenLaunched plus LaunchConfigAdded/Updated events
     from the factory's deployment boundary onward and must be chronological.
     """
-    current: dict[int, PonsV1LaunchConfig] = {}
+    current: dict[int, PonsV1LaunchConfig] = {
+        row.config_id: row for row in bootstrap_configs
+    }
     last_order: tuple[int, int, int] | None = None
 
     for raw in rows:
