@@ -63,7 +63,10 @@ from hlp.data.flap_curve import (
 )
 from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
-from hlp.data.quote_registry import build_pons_quote_registry
+from hlp.data.quote_registry import (
+    CHAINLINK_PRICED_STATUSES,
+    build_pons_quote_registry,
+)
 from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
@@ -1562,11 +1565,11 @@ def cmd_pons_quote_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
-    """Build one shared Stock Token USD tape from each quote's first Pons use."""
+    """Build one shared Chainlink USD tape from each quote's first Pons use."""
     quote_rows = _load_jsonl(args.quote_registry)
     specs = []
     for source in quote_rows:
-        if source["pricing_status"] != "priced_chainlink_stock_token":
+        if source["pricing_status"] not in CHAINLINK_PRICED_STATUSES:
             continue
         actual_first = int(source["first_launch_block"])
         if actual_first > args.to_block:

@@ -60,3 +60,31 @@ def test_quote_causality_preserves_failure(monkeypatch):
     )
     assert rows[0]["causal_ready"] is False
     assert "no code" in rows[0]["error"]
+
+
+
+def test_quote_causality_includes_verified_crypto_chainlink_quotes(monkeypatch):
+    monkeypatch.setattr(qc, "read_chainlink_aggregator", lambda rpc, feed, block: AGG)
+    monkeypatch.setattr(
+        qc,
+        "read_chainlink_latest_round",
+        lambda rpc, feed, block: SimpleNamespace(
+            description="CBBTC / USD",
+            round_id=8,
+            updated_at=1235,
+            answer=77557,
+        ),
+    )
+    rows = qc.audit_pons_quote_causality(
+        FakeRpc(),
+        [{
+            "pricing_status": "priced_chainlink_crypto_token",
+            "quote_token": TOKEN,
+            "symbol": "CBBTC",
+            "feed": FEED,
+            "directory_name": "CBBTC / USD",
+            "first_launch_block": 100,
+        }],
+    )
+    assert rows[0]["causal_ready"] is True
+    assert rows[0]["description"] == "CBBTC / USD"

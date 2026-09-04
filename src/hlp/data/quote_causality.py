@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from hlp.data.quote_registry import CHAINLINK_PRICED_STATUSES
 from hlp.data.rpc import RpcClient
 from hlp.protocols.chainlink import (
     read_chainlink_aggregator,
@@ -18,7 +19,7 @@ def audit_pons_quote_causality(
     """Prove each Chainlink quote had valid observable state before first use."""
     output = []
     for source in quote_rows:
-        if source["pricing_status"] != "priced_chainlink_stock_token":
+        if source["pricing_status"] not in CHAINLINK_PRICED_STATUSES:
             continue
         row = dict(source)
         first_use = int(row["first_launch_block"])

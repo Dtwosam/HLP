@@ -3,7 +3,7 @@ import json
 
 from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
 from hlp.data.chainlink_directory import ChainlinkDirectoryClient
-from hlp.data.quote_registry import build_pons_quote_registry
+from hlp.data.quote_registry import PONS_CBBTC, build_pons_quote_registry
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
 
 
@@ -79,3 +79,43 @@ def test_quote_registry_marks_missing_chainlink_feed():
     assert rows[0]["pricing_status"] == "missing_chainlink_feed"
     assert rows[0]["symbol"] == "NVDA"
     assert rows[0]["feed"] is None
+
+
+
+def test_quote_registry_classifies_verified_cbbtc_chainlink_quote():
+    def no_stock_assets(request, timeout):
+        return json.dumps({"assets": []}).encode()
+
+    crypto_feed = "0x" + "44" * 20
+
+    def crypto_directory(request, timeout):
+        text = (
+            '"heartbeat":[0,3600],'
+            '"name":[0,"CBBTC / USD"],'
+            '"path":[0,"cbbtc-usd-shared-svr"],'
+            f'"proxyAddress":[0,"{crypto_feed}"],'
+            f'"secondaryProxyAddress":[0,"0x{"55" * 20}"],'
+            '"docs":[0,{"blockchainName":[0,"Robinhood"]}],'
+            '"heartbeat":[0,1],'
+        )
+        return html.escape(text).encode()
+
+    rows = build_pons_quote_registry(
+        [{
+            "version": "v2",
+            "pair_token": PONS_CBBTC,
+            "quote_decimals": 8,
+            "block_number": 48_515_552,
+        }],
+        assets_client=RobinhoodAssetsClient(transport=no_stock_assets),
+        directory_client=ChainlinkDirectoryClient(
+            transport=crypto_directory
+        ),
+    )
+
+    row = rows[0]
+    assert row["pricing_status"] == "priced_chainlink_crypto_token"
+    assert row["symbol"] == "CBBTC"
+    assert row["quote_decimals"] == 8
+    assert row["feed"] == crypto_feed
+    assert row["directory_name"] == "CBBTC / USD"
