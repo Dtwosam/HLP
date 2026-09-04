@@ -273,3 +273,17 @@ def test_full_eligibility_parsers_accept_fallback_quote_tapes():
         "--out", "v2-summary.jsonl",
     ])
     assert v2.fallback_events == "fallback-events.jsonl"
+
+
+
+def test_delayed_v3_usdg_route_probe_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-delayed-v3-usdg-routes",
+        "--audit", "audit.jsonl",
+        "--to-block", "200",
+        "--max-forward-blocks", "100000",
+        "--out", "delayed.jsonl",
+    ])
+    assert args.max_forward_blocks == 100000
+    assert args.audit == "audit.jsonl"

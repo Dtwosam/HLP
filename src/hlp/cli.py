@@ -71,6 +71,7 @@ from hlp.data.quote_routes import (
     audit_unpriced_v3_quote_routes,
     build_v3_route_initial_usd_states,
     build_v3_route_usd_updates,
+    discover_delayed_v3_usdg_routes,
     select_v3_quote_routes,
 )
 from hlp.data.quote_usd import prepare_quote_usd_inputs
@@ -1562,6 +1563,59 @@ def cmd_rpc_pons_unpriced_quote_v3_routes(
             for row in rows
             if not row["v3_causal_ready"]
         ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_delayed_v3_usdg_routes(
+    args: argparse.Namespace,
+) -> int:
+    """Find first later USDG V3 swap for unresolved quote assets."""
+    audit = _load_jsonl(args.audit)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = discover_delayed_v3_usdg_routes(
+        rpc,
+        audit,
+        to_block=args.to_block,
+        max_forward_blocks=args.max_forward_blocks,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "first_post_use_swap_on_known_uniswap_v3_usdg_routes",
+            "chain_id": 4663,
+            "audit": Path(args.audit).name,
+            "to_block": args.to_block,
+            "max_forward_blocks": args.max_forward_blocks,
+            "activation_semantics": (
+                "first observable V3 swap at or after first Pons use"
+            ),
+        },
+    )
+    ready = [row for row in rows if row["delayed_route_ready"]]
+    print(json.dumps({
+        **manifest,
+        "unresolved_assets_checked": len(rows),
+        "delayed_route_ready": len(ready),
+        "covered_launches": sum(int(row["launches"]) for row in ready),
+        "still_unresolved": [
+            {
+                "symbol": row["symbol"],
+                "quote_token": row["quote_token"],
+                "launches": row["launches"],
+                "searched_to_block": row["searched_to_block"],
+            }
+            for row in rows
+            if not row["delayed_route_ready"]
+        ],
+        "routes": [row["route"] for row in ready],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
@@ -4309,6 +4363,21 @@ def build_parser() -> argparse.ArgumentParser:
     quote_v3_routes.add_argument("--out", required=True)
     quote_v3_routes.set_defaults(
         func=cmd_rpc_pons_unpriced_quote_v3_routes
+    )
+
+    delayed_quote_v3 = sub.add_parser(
+        "rpc-pons-delayed-v3-usdg-routes"
+    )
+    delayed_quote_v3.add_argument("--audit", required=True)
+    delayed_quote_v3.add_argument("--to-block", type=int, required=True)
+    delayed_quote_v3.add_argument(
+        "--max-forward-blocks", type=int, default=100_000
+    )
+    delayed_quote_v3.add_argument("--chunk-size", type=int, default=2_000)
+    delayed_quote_v3.add_argument("--min-chunk-size", type=int, default=25)
+    delayed_quote_v3.add_argument("--out", required=True)
+    delayed_quote_v3.set_defaults(
+        func=cmd_rpc_pons_delayed_v3_usdg_routes
     )
 
     select_quote_v3 = sub.add_parser("pons-select-v3-quote-routes")
