@@ -1,0 +1,267 @@
+name: phase1-pons-v1-registry-recovery
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v1-registry-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SOURCE_V2_RUN_ID: '33907180308'
+
+jobs:
+  v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '16'
+      GENERATION_START: '8600612'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute same-head V1 shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({
+              "generation": "v1",
+              "recovery_shard": i,
+              "from_block": lo,
+              "to_block": hi,
+              "snapshot_head_block": head,
+          })
+          PY
+      - name: Acquire enriched V1 launch registry shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v1-registry-window \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v1-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-recovery-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: v1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-recovery-*
+          path: downloads/v1
+          merge-multiple: true
+      - name: Wait for all original V2 shard artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          run_id = os.environ["SOURCE_V2_RUN_ID"]
+          url = (
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
+              f"/actions/runs/{run_id}/artifacts?per_page=100"
+          )
+          expected = {f"phase1-pons-registry-v2-{i}" for i in range(8)}
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          for attempt in range(30):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = json.load(response)
+              present = {
+                  row["name"]
+                  for row in payload.get("artifacts", [])
+                  if not row.get("expired")
+              }
+              missing = sorted(expected - present)
+              print({
+                  "attempt": attempt + 1,
+                  "v2_artifacts_present": len(expected) - len(missing),
+                  "missing": missing,
+              })
+              if not missing:
+                  break
+              time.sleep(60)
+          else:
+              raise SystemExit("original V2 registry artifacts are incomplete")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-registry-v2-*
+          path: downloads/v2
+          merge-multiple: true
+          run-id: ${{ env.SOURCE_V2_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Merge same-head V1 recovery with original V2
+        env:
+          RECOVERY_RUN_ID: ${{ github.run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+
+          def read_shards(directory, prefix, expected_count, expected_start):
+              rows = []
+              manifests = []
+              files = sorted(Path(directory).glob(f"{prefix}-shard-*.jsonl"))
+              assert len(files) == expected_count, (
+                  directory,
+                  expected_count,
+                  [x.name for x in files],
+              )
+              previous_hi = None
+              for path in files:
+                  manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+                  manifest = json.loads(manifest_path.read_text())
+                  prov = manifest["provenance"]
+                  lo = int(prov["from_block"])
+                  hi = int(prov["to_block"])
+                  if previous_hi is None:
+                      assert lo == expected_start, (path.name, lo, expected_start)
+                  else:
+                      assert lo == previous_hi + 1, (previous_hi, lo, path.name)
+                  previous_hi = hi
+                  shard_rows = [
+                      json.loads(line)
+                      for line in path.read_text().splitlines()
+                      if line.strip()
+                  ]
+                  assert len(shard_rows) == int(manifest["records"])
+                  rows.extend(shard_rows)
+                  manifests.append({
+                      "path": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              assert manifests[-1]["to_block"] == HEAD, manifests[-1]
+              return rows, manifests
+
+          def event_order(row):
+              return (
+                  int(row["block_number"]),
+                  -1 if row.get("transaction_index") is None
+                  else int(row["transaction_index"]),
+                  int(row["log_index"]),
+                  row["token"].lower(),
+              )
+
+          v1, v1_manifests = read_shards(
+              "downloads/v1", "v1", 16, 8_600_612
+          )
+          v2, v2_manifests = read_shards(
+              "downloads/v2", "v2", 8, 26_841_846
+          )
+
+          assert all(row["version"] == "v1" for row in v1)
+          assert all(row["version"] == "v2" for row in v2)
+
+          v1_tokens = [row["token"].lower() for row in v1]
+          v2_tokens = [row["token"].lower() for row in v2]
+          assert len(set(v1_tokens)) == len(v1_tokens), "duplicate V1 token"
+          assert len(set(v2_tokens)) == len(v2_tokens), "duplicate V2 token"
+          assert not (set(v1_tokens) & set(v2_tokens)), "V1/V2 token overlap"
+
+          rows = [*v1, *v2]
+          rows.sort(key=event_order)
+          manifest = write_jsonl_snapshot(
+              rows,
+              output=Path("artifacts/pons-full-launch-registry.jsonl"),
+              provenance={
+                  "source": "merged_raw_rpc_registry_shards_same_head_recovery",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "pons_protocol_generations": ["v1", "v2"],
+                  "v1_recovery_run_id": int(os.environ["RECOVERY_RUN_ID"]),
+                  "v2_source_run_id": int(os.environ["SOURCE_V2_RUN_ID"]),
+                  "v1_shards": v1_manifests,
+                  "v2_shards": v2_manifests,
+              },
+          )
+
+          factory_counts = Counter(row["factory"].lower() for row in v1)
+          pair_counts = Counter(row["pair_token"].lower() for row in rows)
+          summary = {
+              "snapshot_head_block": HEAD,
+              "all_pons_launches": len(rows),
+              "v1_launches": len(v1),
+              "v2_launches": len(v2),
+              "v1_launches_by_factory": dict(sorted(factory_counts.items())),
+              "pair_token_counts": dict(sorted(pair_counts.items())),
+              "unique_pair_tokens": len(pair_counts),
+              "first_launch": rows[0] if rows else None,
+              "last_launch": rows[-1] if rows else None,
+              "registry_sha256": manifest["sha256"],
+              "registry_records": int(manifest["records"]),
+              "v1_recovery_run_id": int(os.environ["RECOVERY_RUN_ID"]),
+              "v2_source_run_id": int(os.environ["SOURCE_V2_RUN_ID"]),
+          }
+          Path("artifacts/pons-full-registry-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: artifacts/
+          if-no-files-found: error
