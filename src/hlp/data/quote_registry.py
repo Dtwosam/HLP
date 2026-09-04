@@ -6,7 +6,10 @@ from collections import Counter
 from typing import Iterable
 
 from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
-from hlp.data.chainlink_directory import ChainlinkDirectoryClient
+from hlp.data.chainlink_directory import (
+    ChainlinkDirectoryClient,
+    ChainlinkDirectoryError,
+)
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
 
 
@@ -78,10 +81,15 @@ def build_pons_quote_registry(
         asset_by_token[token] = asset
         stock_symbols.append(asset["token_symbol"].upper())
 
-    feeds = {
-        row.symbol: row
-        for row in directory_client.robinhood_feeds(sorted(set(stock_symbols)))
-    } if stock_symbols else {}
+    feeds = {}
+    if stock_symbols:
+        page = directory_client.fetch_text()
+        for symbol in sorted(set(stock_symbols)):
+            try:
+                feed = directory_client.parse_robinhood_feed(page, symbol)
+            except ChainlinkDirectoryError:
+                continue
+            feeds[feed.symbol] = feed
 
     output = []
     for token in sorted(stats):
