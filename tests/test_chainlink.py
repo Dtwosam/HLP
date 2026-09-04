@@ -3,7 +3,9 @@ from decimal import Decimal
 from hlp.protocols.chainlink import (
     DECIMALS_SELECTOR,
     DESCRIPTION_SELECTOR,
+    AGGREGATOR_SELECTOR,
     LATEST_ROUND_DATA_SELECTOR,
+    read_chainlink_aggregator,
     read_chainlink_latest_round,
 )
 
@@ -29,6 +31,8 @@ class FakeRpc:
             return "0x" + word(8)
         if data == DESCRIPTION_SELECTOR:
             return abi_string("Robinhood NVDA / USD")
+        if data == AGGREGATOR_SELECTOR:
+            return "0x" + ("22" * 20).rjust(64, "0")
         if data == LATEST_ROUND_DATA_SELECTOR:
             return (
                 "0x"
@@ -48,3 +52,8 @@ def test_read_chainlink_latest_round():
     assert row.decimals == 8
     assert row.updated_at == 110
     assert row.answer == Decimal("219.12")
+
+
+
+def test_read_chainlink_aggregator():
+    assert read_chainlink_aggregator(FakeRpc(), FEED, block=123) == "0x" + "22" * 20
