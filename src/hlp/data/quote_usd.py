@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Iterable
+from heapq import merge
+from typing import Iterable, Iterator
 
 from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
 from hlp.data.reconstruct import event_order
@@ -37,34 +38,57 @@ class QuoteUsdTimeline:
                 raise ValueError(f"initial USD price must be positive: {token}")
             self._active[token.lower()] = value
 
-        updates = []
-        for row in weth_anchor_points:
-            price = Decimal(row["quote_per_token"])
-            if price <= 0:
-                raise ValueError("WETH/USD anchor must be positive")
-            updates.append(
-                {
-                    "block_number": row["block_number"],
-                    "transaction_index": row.get("transaction_index"),
-                    "log_index": row["log_index"],
-                    "quote_token": ROBINHOOD_WETH.lower(),
-                    "usd_price": str(price),
-                    "kind": "weth_usdg_anchor",
-                }
-            )
-        for row in oracle_updates:
-            price = Decimal(row["usd_price"])
-            if price <= 0:
-                raise ValueError("oracle USD price must be positive")
-            updates.append(dict(row))
+        def checked_source(
+            rows: Iterable[dict],
+            *,
+            kind: str,
+        ) -> Iterator[dict]:
+            previous_key = None
+            for source in rows:
+                if kind == "weth_usdg_anchor":
+                    price = Decimal(source["quote_per_token"])
+                    if price <= 0:
+                        raise ValueError("WETH/USD anchor must be positive")
+                    row = {
+                        "block_number": source["block_number"],
+                        "transaction_index": source.get("transaction_index"),
+                        "log_index": source["log_index"],
+                        "quote_token": ROBINHOOD_WETH.lower(),
+                        "usd_price": str(price),
+                        "kind": kind,
+                    }
+                else:
+                    price = Decimal(source["usd_price"])
+                    if price <= 0:
+                        raise ValueError("oracle USD price must be positive")
+                    row = dict(source)
 
-        updates.sort(
+                key = (
+                    event_order(row),
+                    row["quote_token"].lower(),
+                )
+                if previous_key is not None and key < previous_key:
+                    raise ValueError(f"{kind} USD tape is not chronological")
+                previous_key = key
+                yield row
+
+        # Both source artifacts are already chronological. heapq.merge keeps
+        # only the next row from each source in memory instead of sorting the
+        # complete multi-year USD history for every lifecycle replay.
+        self._updates = merge(
+            checked_source(
+                weth_anchor_points,
+                kind="weth_usdg_anchor",
+            ),
+            checked_source(
+                oracle_updates,
+                kind="chainlink_oracle",
+            ),
             key=lambda row: (
                 event_order(row),
                 row["quote_token"].lower(),
-            )
+            ),
         )
-        self._updates = iter(updates)
         self._next = next(self._updates, None)
         self._last_target_order: tuple[int, int, int] | None = None
 
