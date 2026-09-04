@@ -77,6 +77,21 @@ class PonsLaunch:
 
 
 @dataclass(frozen=True, slots=True)
+class NoxaLaunchConfig:
+    config_id: int
+    pair_token: str
+    dex_id: int
+    initial_tick: int
+    supply: int
+    max_wallet_bps: int
+    max_tx_bps: int
+    restriction_blocks: int
+    buy_pair_hop_fee: int
+    enabled: bool
+    block_number: int
+
+
+@dataclass(frozen=True, slots=True)
 class PonsV1LaunchConfig:
     action: str
     config_id: int
