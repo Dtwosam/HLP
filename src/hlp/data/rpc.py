@@ -39,14 +39,38 @@ class RpcClient:
     timeout: float = 20.0
     attempts: int = 3
     backoff_seconds: float = 0.5
+    min_interval_seconds: float = 0.0
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
     requests_made: int = field(default=0, init=False)
+    _last_request_at: float | None = field(default=None, init=False, repr=False)
 
     def _post(self, request: urllib.request.Request, timeout: float) -> bytes:
         if self.transport is not None:
             return self.transport(request, timeout)
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
+
+    def _pace(self) -> None:
+        if self.min_interval_seconds <= 0:
+            return
+        now = time.monotonic()
+        if self._last_request_at is not None:
+            wait = self.min_interval_seconds - (now - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+        self._last_request_at = time.monotonic()
+
+    @staticmethod
+    def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
+        if exc.code != 429:
+            return None
+        value = exc.headers.get("Retry-After") if exc.headers is not None else None
+        if value is None:
+            return None
+        try:
+            return max(0.0, float(value))
+        except ValueError:
+            return None
 
     def call(self, method: str, params: list[Any] | None = None) -> Any:
         body = json.dumps(
@@ -62,6 +86,7 @@ class RpcClient:
         last_error: Exception | None = None
         for attempt in range(1, self.attempts + 1):
             try:
+                self._pace()
                 self.requests_made += 1
                 payload = json.loads(self._post(request, self.timeout))
                 if "error" in payload:
@@ -69,6 +94,16 @@ class RpcClient:
                 if "result" not in payload:
                     raise RpcError(f"{method}: malformed JSON-RPC response")
                 return payload["result"]
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if attempt == self.attempts:
+                    break
+                retry_after = self._retry_after_seconds(exc)
+                time.sleep(
+                    retry_after
+                    if retry_after is not None
+                    else self.backoff_seconds * attempt
+                )
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RpcError) as exc:
                 last_error = exc
                 if attempt == self.attempts:
