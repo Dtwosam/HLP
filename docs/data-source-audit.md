@@ -130,8 +130,11 @@ Architecture candidate:
 - free keyed endpoint for heavy historical event queries;
 - hoodexplorer as an independent indexed-log path where reachable.
 
-Phase-1 test:
-prove public historical state first, then measure actual eth_getLogs range/response limits once a free key is available.
+Phase-1 live result:
+GitHub-hosted shared runners received HTTP 429 on the first NodeFlare public request. This does not disprove historical support; it does prove that shared GitHub runner IPs are unsuitable as HLP's acquisition worker.
+
+Next test:
+use a dedicated/reachable runtime and a free keyed endpoint for heavy historical event queries, then measure actual eth_getLogs range/response limits.
 
 ## 4. Pons contracts — PASS, open source and directly decodable
 
