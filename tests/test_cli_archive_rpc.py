@@ -89,3 +89,18 @@ def test_v2_transition_tape_parses():
     assert args.registry == "v2.jsonl"
     assert args.graduations_out == "g.jsonl"
     assert args.registrations_out == "r.jsonl"
+
+
+def test_v2_curve_eligibility_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-v2-curve-eligibility",
+        "--registry", "v2.jsonl",
+        "--curve-events", "curve.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor.json",
+        "--snapshot-head", "100",
+        "--out", "summary.jsonl",
+    ])
+    assert args.snapshot_head == 100
+    assert args.oracle_state is None
