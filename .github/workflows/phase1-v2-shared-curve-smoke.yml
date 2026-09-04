@@ -78,6 +78,9 @@ jobs:
               for line in Path("artifacts/v2-curve-events.jsonl").read_text().splitlines()
               if line.strip()
           ]
+          event_manifest = json.loads(
+              Path("artifacts/v2-curve-events.jsonl.manifest.json").read_text()
+          )
           points = [
               json.loads(line)
               for line in Path("artifacts/v2-curve-market-caps.jsonl").read_text().splitlines()
@@ -90,6 +93,7 @@ jobs:
           ]
           assert len(registry) == 83, len(registry)
           assert points, "V2 replay produced no price points"
+          assert event_manifest["provenance"]["server_side_curve_address_filter"] is True
           assert len(summary) == len(registry), (len(summary), len(registry))
           assert all(
               int(row["quote_reserve_raw"]) > 0 and int(row["token_reserve_raw"]) > 0
