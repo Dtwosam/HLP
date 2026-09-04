@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from hlp.cli import _archive_rpc, build_parser
+from hlp.cli import _archive_rpc, _load_initial_quote_usd, build_parser
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
 
 
@@ -149,3 +149,27 @@ def test_v2_lifecycle_eligibility_parses():
     ])
     assert args.snapshot_head == 100
     assert args.oracle_state is None
+
+
+
+def test_initial_quote_loader_does_not_materialize_oracle_tape(monkeypatch):
+    calls = []
+
+    def fake_load(path):
+        calls.append(path)
+        assert path == "state.jsonl"
+        return [{
+            "quote_token": "0x" + "11" * 20,
+            "usd_price": "200",
+        }]
+
+    monkeypatch.setattr("hlp.cli._load_jsonl", fake_load)
+    parsed = SimpleNamespace(
+        oracle_state="state.jsonl",
+        oracle_events="updates.jsonl",
+    )
+
+    initial = _load_initial_quote_usd(parsed)
+
+    assert calls == ["state.jsonl"]
+    assert str(initial["0x" + "11" * 20]) == "200"

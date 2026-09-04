@@ -2189,7 +2189,11 @@ def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
     if initial_weth_usd <= 0:
         raise SystemExit("anchor initial WETH/USD must be positive")
 
-    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    initial_quote_usd = _load_initial_quote_usd(args)
+    quote_usd_updates = (
+        _iter_jsonl(args.oracle_events)
+        if args.oracle_events else ()
+    )
     points = build_v2_curve_market_cap_points(
         registry,
         _iter_jsonl(args.curve_events),
@@ -2253,7 +2257,7 @@ def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
     if initial_weth_usd <= 0:
         raise SystemExit("anchor initial WETH/USD must be positive")
 
-    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    initial_quote_usd = _load_initial_quote_usd(args)
 
     seed_points = build_v2_graduation_seed_points(
         registry,
@@ -3178,7 +3182,10 @@ def _load_jsonl(path: str) -> list[dict]:
 
 
 
-def _load_quote_oracle_inputs(args: argparse.Namespace):
+def _load_initial_quote_usd(
+    args: argparse.Namespace,
+) -> dict[str, Decimal]:
+    """Load only the small causal activation state for quote assets."""
     state_path = getattr(args, "oracle_state", None)
     event_path = getattr(args, "oracle_events", None)
     if bool(state_path) != bool(event_path):
@@ -3186,14 +3193,21 @@ def _load_quote_oracle_inputs(args: argparse.Namespace):
             "--oracle-state and --oracle-events must be supplied together"
         )
     if not state_path:
-        return {}, []
+        return {}
     states = _load_jsonl(state_path)
-    updates = _load_jsonl(event_path)
-    initial = {
+    return {
         row["quote_token"].lower(): Decimal(row["usd_price"])
         for row in states
     }
-    return initial, updates
+
+
+def _load_quote_oracle_inputs(args: argparse.Namespace):
+    """Compatibility helper for bounded replays that can materialize updates."""
+    initial = _load_initial_quote_usd(args)
+    event_path = getattr(args, "oracle_events", None)
+    if not event_path:
+        return initial, []
+    return initial, _load_jsonl(event_path)
 
 
 def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
