@@ -40,6 +40,8 @@ Verified current repository state:
 - V2 PonsV2LaunchFactory: 0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e
 - V1 source exposes launch/deployment events.
 - V2 source exposes TokenLaunched/PoolGraduated plus CurveBuy/CurveSell events.
+- Current V2 meme hook cross-verified from current Robinhood/Pons indexing docs: 0xe5e702641ea86f4ae6cc3cdaed2b886f976be044.
+- Current Robinhood Uniswap V4 PoolManager: 0x8366a39CC670B4001A1121B8F6A443A643e40951.
 
 Allowed use:
 protocol-specific launch/trade/graduation adapter.
