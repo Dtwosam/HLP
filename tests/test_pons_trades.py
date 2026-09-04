@@ -81,6 +81,9 @@ def test_protocol_buyback_and_initialization_are_not_wallet_trades():
             phase="curve",
             event_type="curve_buyback",
         ),
+        base(
+            event_type="v3_initialize",
+        ),
     ]
     assert normalize_pons_trades(rows) == []
 
