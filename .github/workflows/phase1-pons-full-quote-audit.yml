@@ -13,6 +13,7 @@ permissions:
   actions: read
 
 env:
+  # Same-head V1 recovery merges the already-complete original V2 shards.
   SOURCE_REGISTRY_RUN_ID: '33911022718'
 
 jobs:
