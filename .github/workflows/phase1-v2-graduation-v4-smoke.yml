@@ -1,0 +1,168 @@
+name: phase1-v2-graduation-v4-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-v2-graduation-v4-smoke.yml'
+      - 'src/hlp/data/v4.py'
+      - 'src/hlp/data/transition.py'
+      - 'src/hlp/cli.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build V2 launch cohort
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registry-window \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 50 \
+            --out artifacts/v2-registry.jsonl
+      - name: Acquire cohort curve events
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-curve-events.jsonl
+      - name: Replay cohort curve prices
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-market-cap-window \
+            --registry artifacts/v2-registry.jsonl \
+            --curve-events artifacts/v2-curve-events.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-curve-market-caps.jsonl \
+            --summary-out artifacts/v2-curve-summary.jsonl
+      - name: Acquire graduations
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-graduation-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-graduations.jsonl
+      - name: Acquire Pons V4 registrations
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registration-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-registrations.jsonl
+      - name: Acquire post-graduation V4 swaps
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-v4-tape \
+            --registrations artifacts/v2-registrations.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-v4-swaps.jsonl
+      - name: Reconstruct V4 lifecycle and continuity
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-v4-market-cap-window \
+            --registry artifacts/v2-registry.jsonl \
+            --curve-points artifacts/v2-curve-market-caps.jsonl \
+            --graduations artifacts/v2-graduations.jsonl \
+            --registrations artifacts/v2-registrations.jsonl \
+            --v4-swaps artifacts/v2-v4-swaps.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --seed-out artifacts/v2-seed-points.jsonl \
+            --out artifacts/v2-v4-market-caps.jsonl \
+            --transition-out artifacts/v2-transition.jsonl \
+            --summary-out artifacts/v2-lifecycle-summary.jsonl
+      - name: Validate lifecycle artifacts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def read(name):
+              path = Path("artifacts") / name
+              return [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+
+          registry = read("v2-registry.jsonl")
+          graduations = read("v2-graduations.jsonl")
+          registrations = read("v2-registrations.jsonl")
+          v4 = read("v2-v4-market-caps.jsonl")
+          transitions = read("v2-transition.jsonl")
+          summary = read("v2-lifecycle-summary.jsonl")
+
+          assert len(registry) == 83, len(registry)
+          assert len(summary) == 83, len(summary)
+          assert {r["token"] for r in graduations}.issubset(
+              {r["token"] for r in registry}
+          )
+          assert {r["token"] for r in registrations}.issubset(
+              {r["token"] for r in registry}
+          )
+          assert len(transitions) == len(graduations)
+          print(json.dumps({
+              "launches": len(registry),
+              "graduations": len(graduations),
+              "registrations": len(registrations),
+              "v4_price_points": len(v4),
+              "transitions": len(transitions),
+              "tokens_crossed_100k_full_lifecycle": sum(
+                  bool(r["crossed_100k"]) for r in summary
+              ),
+              "curve_to_seed_values": [
+                  r["curve_to_seed_bps"]
+                  for r in transitions
+                  if r["curve_to_seed_bps"] is not None
+              ][:10],
+              "seed_to_first_v4_values": [
+                  r["seed_to_first_v4_bps"]
+                  for r in transitions
+                  if r["seed_to_first_v4_bps"] is not None
+              ][:10],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-v2-graduation-v4
+          path: artifacts/
+          if-no-files-found: error
