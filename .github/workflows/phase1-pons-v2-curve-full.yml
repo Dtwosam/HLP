@@ -12,6 +12,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: phase1-pons-v2-curve-full-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   V2_REGISTRY_RUN_ID: '33912235341'
   SNAPSHOT_HEAD: '54486035'
@@ -23,13 +27,13 @@ jobs:
     timeout-minutes: 35
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: '8'
+      SHARD_COUNT: '16'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -104,7 +108,7 @@ jobs:
           START = int(os.environ["GENERATION_START"])
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
           files = sorted(Path("downloads").glob("v2-curve-shard-*.jsonl"))
-          assert len(files) == 8, [p.name for p in files]
+          assert len(files) == 16, [p.name for p in files]
 
           manifests = []
           previous_hi = None
