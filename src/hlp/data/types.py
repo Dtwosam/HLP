@@ -36,6 +36,27 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class FlapEvent:
+    event_type: str
+    token: str
+    actor: str | None
+    amount_raw: int | None
+    quote_amount_raw: int | None
+    fee_raw: int | None
+    post_price_raw: int | None
+    value_raw: int | None
+    value2_raw: int | None
+    pool: str | None
+    name: str | None
+    symbol: str | None
+    meta: str | None
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class InstantV3Launch:
     venue: str
     factory: str
