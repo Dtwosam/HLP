@@ -1,0 +1,193 @@
+name: phase1-hoodfun-conservation-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-hoodfun-conservation-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate hood.fun launch and trade invariants
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter, defaultdict
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.evm import abi_string_at, data_words, topic_address
+
+          ADDRESS = "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c"
+          CREATED = "0x91de26bc430b3a4f1d6cfb11d72f2e5ca75d7622d37b2a88a8998ec28e747a11"
+          TRADE = "0x2c76e7a47fd53e2854856ac3f0a5f3ee40d15cfaa82266357ea9779c486ab9c3"
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          first = rpc.find_first_code_block(ADDRESS, low=0, high=10_000_000)
+          end = first + 1_000_000
+          raw = list(
+              rpc.iter_logs_chunked(
+                  first,
+                  end,
+                  address=ADDRESS,
+                  topics=[[CREATED, TRADE]],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+
+          launches = {}
+          supply_checks = []
+          trades = []
+          for log in raw:
+              if log.topics[0] == CREATED:
+                  assert len(log.topics) == 3
+                  words = data_words(log.data)
+                  assert len(words) >= 6
+                  token = topic_address(log.topics[1])
+                  creator = topic_address(log.topics[2])
+                  initial_eth = words[3]
+                  initial_token = words[4]
+                  curve_inventory = words[5]
+                  static = read_erc20_static(rpc, token, block=log.block_number)
+                  inferred_supply_num = curve_inventory * 5
+                  exact_80_percent = inferred_supply_num % 4 == 0
+                  inferred_supply = inferred_supply_num // 4
+                  supply_checks.append({
+                      "token": token,
+                      "decimals": static.decimals,
+                      "total_supply": static.total_supply,
+                      "curve_inventory": curve_inventory,
+                      "initial_virtual_eth": initial_eth,
+                      "initial_virtual_token": initial_token,
+                      "curve_is_exactly_80pct_supply": (
+                          curve_inventory * 5 == static.total_supply * 4
+                      ),
+                      "inferred_supply": inferred_supply if exact_80_percent else None,
+                      "inferred_matches_total": (
+                          exact_80_percent and inferred_supply == static.total_supply
+                      ),
+                      "virtual_token_ratio_num": initial_token,
+                      "virtual_token_ratio_den": static.total_supply,
+                      "name": abi_string_at(log.data, 0),
+                      "symbol": abi_string_at(log.data, 1),
+                  })
+                  launches[token] = {
+                      "eth": initial_eth,
+                      "token": initial_token,
+                      "block": log.block_number,
+                      "log_index": log.log_index,
+                      "creator": creator,
+                  }
+              else:
+                  words = data_words(log.data)
+                  assert len(log.topics) == 3 and len(words) == 6
+                  trades.append({
+                      "token": topic_address(log.topics[1]),
+                      "trader": topic_address(log.topics[2]),
+                      "is_buy": bool(words[0]),
+                      "eth_amount": words[1],
+                      "token_amount": words[2],
+                      "fee": words[3],
+                      "post_eth": words[4],
+                      "post_token": words[5],
+                      "block": log.block_number,
+                      "txi": log.transaction_index or 0,
+                      "logi": log.log_index,
+                  })
+
+          states = {token: dict(v) for token, v in launches.items()}
+          residuals = Counter()
+          examples = defaultdict(list)
+          checked = 0
+          carry_in = 0
+          for row in sorted(trades, key=lambda x:(x["block"],x["txi"],x["logi"])):
+              state = states.get(row["token"])
+              if state is None:
+                  carry_in += 1
+                  continue
+              prev_eth = state["eth"]
+              prev_token = state["token"]
+              if row["is_buy"]:
+                  candidates = {
+                      "buy_gross_minus_fee": prev_eth + row["eth_amount"] - row["fee"],
+                      "buy_gross": prev_eth + row["eth_amount"],
+                      "buy_plus_fee": prev_eth + row["eth_amount"] + row["fee"],
+                  }
+                  token_expected = prev_token - row["token_amount"]
+              else:
+                  candidates = {
+                      "sell_sub_gross_plus_fee": prev_eth - row["eth_amount"] - row["fee"],
+                      "sell_sub_gross": prev_eth - row["eth_amount"],
+                      "sell_sub_net_minus_fee": prev_eth - row["eth_amount"] + row["fee"],
+                  }
+                  token_expected = prev_token + row["token_amount"]
+
+              matches = [name for name,val in candidates.items() if val == row["post_eth"]]
+              residuals[("buy" if row["is_buy"] else "sell", tuple(matches))] += 1
+              if len(examples["buy" if row["is_buy"] else "sell"]) < 8:
+                  examples["buy" if row["is_buy"] else "sell"].append({
+                      **row,
+                      "prev_eth": prev_eth,
+                      "prev_token": prev_token,
+                      "matching_eth_formulas": matches,
+                      "token_delta_matches": token_expected == row["post_token"],
+                  })
+              assert token_expected == row["post_token"], row
+              assert len(matches) == 1, (row, candidates, prev_eth)
+              state["eth"] = row["post_eth"]
+              state["token"] = row["post_token"]
+              checked += 1
+
+          print(json.dumps({
+              "first_code_block": first,
+              "to_block": end,
+              "launches": len(launches),
+              "trades": len(trades),
+              "checked_sequential_trades": checked,
+              "carry_in_trades": carry_in,
+              "all_supply_checks_pass": all(
+                  row["decimals"] == 18
+                  and row["curve_is_exactly_80pct_supply"]
+                  and row["inferred_matches_total"]
+                  for row in supply_checks
+              ),
+              "unique_supply_shapes": sorted({
+                  (row["total_supply"], row["curve_inventory"], row["initial_virtual_token"])
+                  for row in supply_checks
+              })[:30],
+              "supply_samples": supply_checks[:20],
+              "formula_counts": {
+                  str(key): value for key,value in residuals.items()
+              },
+              "formula_examples": dict(examples),
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY
