@@ -74,6 +74,8 @@ def decode_v2_launch(log: RawLog) -> PonsLaunch:
         graduation_threshold=words[2],
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
     )
 
 
@@ -98,6 +100,8 @@ def decode_v1_launch(log: RawLog) -> PonsLaunch:
         launch_config_id=words[3],
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
     )
 
 
@@ -134,5 +138,7 @@ def decode_v2_curve_trade(log: RawLog, *, token: str) -> CurveTrade:
         tax=tax,
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
         log_index=log.log_index,
     )
