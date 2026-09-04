@@ -93,3 +93,29 @@ def test_rpc_counts_transport_attempts():
     )
     assert rpc.chain_id() == 4663
     assert rpc.requests_made == 1
+
+
+def test_retry_after_header_is_parsed_for_429():
+    import urllib.error
+
+    error = urllib.error.HTTPError(
+        "https://example.invalid",
+        429,
+        "Too Many Requests",
+        {"Retry-After": "7"},
+        None,
+    )
+    assert RpcClient._retry_after_seconds(error) == 7.0
+
+
+def test_non_429_has_no_retry_after():
+    import urllib.error
+
+    error = urllib.error.HTTPError(
+        "https://example.invalid",
+        500,
+        "Server Error",
+        {"Retry-After": "7"},
+        None,
+    )
+    assert RpcClient._retry_after_seconds(error) is None
