@@ -108,7 +108,13 @@ class RpcClient:
                     if retry_after is not None
                     else self.backoff_seconds * attempt
                 )
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RpcError) as exc:
+            except RpcError:
+                # A JSON-RPC response error (bad params, provider range cap,
+                # unsupported history, revert, etc.) already reached a node.
+                # Blind retries waste quota and cannot repair a deterministic
+                # request. Higher-level callers may adapt the request shape.
+                raise
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt == self.attempts:
                     break
