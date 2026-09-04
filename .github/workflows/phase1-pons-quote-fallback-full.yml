@@ -1,0 +1,94 @@
+name: phase1-pons-quote-fallback-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      v3_run_id:
+        description: "Successful phase1-pons-v3-quote-fallback-full run"
+        required: true
+        type: string
+      v4_run_id:
+        description: "Successful phase1-pons-v4-quote-fallback-full run"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-quote-fallback-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: v3
+          run-id: ${{ inputs.v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: v4
+          run-id: ${{ inputs.v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Merge disjoint fallback sources
+        run: |
+          mkdir -p artifacts
+          hlp pons-merge-quote-usd-tapes \
+            --state v3/pons-v3-quote-fallback-initial.jsonl \
+            --events v3/pons-v3-quote-fallback-updates.jsonl \
+            --state v4/pons-v4-quote-fallback-initial.jsonl \
+            --events v4/pons-v4-quote-fallback-updates.jsonl \
+            --state-out artifacts/pons-quote-fallback-initial.jsonl \
+            --out artifacts/pons-quote-fallback-updates.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          states = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-quote-fallback-initial.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          updates = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-quote-fallback-updates.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          report = {
+              "initial_state_assets": len({
+                  row["quote_token"].lower() for row in states
+              }),
+              "update_assets": len({
+                  row["quote_token"].lower() for row in updates
+              }),
+              "updates": len(updates),
+              "v3_run_id": int("${{ inputs.v3_run_id }}"),
+              "v4_run_id": int("${{ inputs.v4_run_id }}"),
+          }
+          Path("artifacts/pons-quote-fallback-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
