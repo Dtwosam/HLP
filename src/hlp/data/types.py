@@ -36,6 +36,33 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class TrenchEvent:
+    event_type: str
+    token: str
+    actor: str | None
+    curve: str | None
+    quote_token: str | None
+    amount_raw: int | None
+    quote_amount_raw: int | None
+    protocol_fee_raw: int | None
+    extra_fee_raw: int | None
+    extra_fee_receiver: str | None
+    extra_fee_rate: int | None
+    real_quote_reserves_raw: int | None
+    real_token_reserves_raw: int | None
+    virtual_quote_raw: int | None
+    virtual_token_raw: int | None
+    name: str | None
+    symbol: str | None
+    token_uri: str | None
+    timestamp: int | None
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class FlapTokenState:
     token: str
     status: int
