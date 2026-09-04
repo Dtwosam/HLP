@@ -53,3 +53,30 @@ def word_address(value: int) -> str:
         if value >> 160:
             raise ValueError("ABI word contains non-address high bits")
     return normalize_address("0x" + f"{value & ((1 << 160) - 1):040x}")
+
+
+
+def abi_dynamic_bytes_at(data: str, head_word_index: int) -> bytes:
+    """Decode one ABI dynamic bytes/string argument from event/call data."""
+    value = data.removeprefix("0x")
+    if len(value) % 64:
+        raise ValueError("ABI data is not aligned to 32-byte words")
+    head = head_word_index * 64
+    if head < 0 or head + 64 > len(value):
+        raise ValueError("ABI head word index out of bounds")
+    offset_bytes = int(value[head : head + 64], 16)
+    if offset_bytes % 32:
+        raise ValueError("ABI dynamic offset is not word aligned")
+    start = offset_bytes * 2
+    if start + 64 > len(value):
+        raise ValueError("ABI dynamic offset out of bounds")
+    length = int(value[start : start + 64], 16)
+    body_start = start + 64
+    body_end = body_start + length * 2
+    if body_end > len(value):
+        raise ValueError("ABI dynamic body out of bounds")
+    return bytes.fromhex(value[body_start:body_end])
+
+
+def abi_string_at(data: str, head_word_index: int) -> str:
+    return abi_dynamic_bytes_at(data, head_word_index).decode("utf-8")
