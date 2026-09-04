@@ -65,8 +65,19 @@ jobs:
               Path("artifacts/v1-pons-v3-swaps.jsonl.manifest.json").read_text()
           )
           assert len(registry) == 166, len(registry)
-          assert swaps, "shared V3 tape matched zero Pons swaps"
+          assert swaps, "shared V3 tape matched zero Pons price events"
           assert swap_manifest["provenance"]["server_side_pool_address_filter"] is True
+          initializes = [
+              row for row in swaps if row.get("event_type") == "v3_initialize"
+          ]
+          trade_swaps = [
+              row for row in swaps if row.get("event_type") == "v3_swap"
+          ]
+          assert len(initializes) == len(registry), (
+              len(initializes),
+              len(registry),
+          )
+          assert trade_swaps, "shared V3 tape matched zero Pons swaps"
           pools = {row["pool"] for row in registry}
           assert all(row["pool"] in pools for row in swaps)
           assert all(row["transaction_index"] is not None for row in swaps)
@@ -83,7 +94,9 @@ jobs:
           assert summary, "no per-token market-cap summaries"
           print(json.dumps({
               "launches": len(registry),
-              "matched_swaps": len(swaps),
+              "initializes": len(initializes),
+              "matched_swaps": len(trade_swaps),
+              "price_events": len(swaps),
               "pools_with_swaps": len({row["pool"] for row in swaps}),
               "tokens_summarized": len(summary),
               "tokens_crossed_100k": sum(bool(row["crossed_100k"]) for row in summary),
