@@ -261,3 +261,150 @@ def reconstruct_chainlink_usd_tapes(
 
     states.sort(key=lambda row: row["quote_token"])
     return states, updates()
+
+
+def reconstruct_staggered_chainlink_usd_tapes(
+    rpc: RpcClient,
+    *,
+    feeds: Iterable[dict],
+    to_block: int,
+    chunk_size: int = 100_000,
+    min_chunk_size: int = 1,
+) -> tuple[list[dict], Iterator[dict]]:
+    """Reconstruct Stock Token/USD feeds from each asset's first Pons use.
+
+    Each feed row must include quote_token, symbol, feed and first_launch_block.
+    Initial state is read at first_launch_block - 1. All stable underlying
+    aggregators then share one AnswerUpdated scan from the earliest activation
+    through to_block.
+    """
+    feed_rows = list(feeds)
+    if not feed_rows:
+        return [], iter(())
+
+    states: list[dict] = []
+    by_aggregator: dict[str, dict] = {}
+    scan_from = None
+
+    for raw_spec in feed_rows:
+        quote_token = normalize_address(raw_spec["quote_token"])
+        feed = normalize_address(raw_spec["feed"])
+        symbol = str(raw_spec["symbol"]).upper().strip()
+        activation = int(raw_spec["first_launch_block"])
+        if activation <= 0:
+            raise ValueError(f"invalid first Pons use block for {symbol}")
+        if activation > to_block:
+            raise ValueError(
+                f"first Pons use is after requested oracle head for {symbol}"
+            )
+        prior_block = activation - 1
+        scan_from = activation if scan_from is None else min(scan_from, activation)
+
+        start_aggregator = read_chainlink_aggregator(
+            rpc, feed, block=prior_block
+        )
+        end_aggregator = read_chainlink_aggregator(
+            rpc, feed, block=to_block
+        )
+        if start_aggregator != end_aggregator:
+            raise RuntimeError(
+                f"Chainlink aggregator changed after first Pons use for {symbol}: "
+                f"{start_aggregator} -> {end_aggregator}"
+            )
+        if start_aggregator in by_aggregator:
+            raise ValueError(
+                f"multiple Pons quote feeds share aggregator {start_aggregator}"
+            )
+
+        initial = read_chainlink_latest_round(
+            rpc, feed, block=prior_block
+        )
+        accepted = {
+            f"RH{symbol} / USD",
+            f"Robinhood {symbol} / USD",
+        }
+        if raw_spec.get("directory_name"):
+            accepted.add(str(raw_spec["directory_name"]))
+        if initial.description not in accepted:
+            raise ValueError(
+                f"Chainlink description mismatch for {symbol}: "
+                f"{initial.description!r}"
+            )
+
+        aggregator_round = initial.round_id & ((1 << 64) - 1)
+        spec = {
+            "quote_token": quote_token,
+            "symbol": symbol,
+            "feed": feed,
+            "aggregator": start_aggregator,
+            "activation_block": activation,
+            "heartbeat_seconds": raw_spec.get("heartbeat_seconds"),
+            "quote_decimals": raw_spec.get("quote_decimals"),
+            "decimals": initial.decimals,
+            "initial_aggregator_round_id": aggregator_round,
+        }
+        by_aggregator[start_aggregator] = spec
+        states.append({
+            **spec,
+            "block_number": prior_block,
+            "proxy_round_id": initial.round_id,
+            "aggregator_round_id": aggregator_round,
+            "updated_at": initial.updated_at,
+            "usd_price": str(initial.answer),
+            "description": initial.description,
+        })
+
+    aggregators = sorted(by_aggregator)
+    raw_logs = rpc.iter_logs_chunked(
+        int(scan_from),
+        to_block,
+        address=aggregators,
+        topics=[ANSWER_UPDATED_TOPIC],
+        chunk_size=chunk_size,
+        min_chunk_size=min_chunk_size,
+    )
+    previous = {
+        aggregator: int(spec["initial_aggregator_round_id"])
+        for aggregator, spec in by_aggregator.items()
+    }
+
+    def updates() -> Iterator[dict]:
+        for raw in raw_logs:
+            aggregator = raw.address.lower()
+            spec = by_aggregator.get(aggregator)
+            if spec is None:
+                raise KeyError(
+                    f"shared oracle log came from unknown aggregator {aggregator}"
+                )
+            if int(raw.block_number) < int(spec["activation_block"]):
+                continue
+            event = decode_chainlink_answer_updated(raw)
+            if event.round_id <= previous[aggregator]:
+                raise ValueError(
+                    f"non-increasing Chainlink round for {spec['symbol']}: "
+                    f"{event.round_id} <= {previous[aggregator]}"
+                )
+            previous[aggregator] = event.round_id
+            price = Decimal(event.answer_raw) / (
+                Decimal(10) ** int(spec["decimals"])
+            )
+            yield {
+                "quote_token": spec["quote_token"],
+                "symbol": spec["symbol"],
+                "feed": spec["feed"],
+                "aggregator": aggregator,
+                "activation_block": spec["activation_block"],
+                "heartbeat_seconds": spec["heartbeat_seconds"],
+                "block_number": event.block_number,
+                "transaction_hash": event.transaction_hash,
+                "transaction_index": event.transaction_index,
+                "log_index": event.log_index,
+                "aggregator_round_id": event.round_id,
+                "updated_at": event.updated_at,
+                "decimals": spec["decimals"],
+                "usd_price": str(price),
+            }
+
+    states.sort(key=lambda row: (row["activation_block"], row["quote_token"]))
+    return states, updates()
+
