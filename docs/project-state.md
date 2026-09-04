@@ -4,13 +4,15 @@ Updated: 2026-09-04
 Repository: Dtwosam/HLP
 Current phase: Phase 1 — Historical/Live Data Acquisition Spike
 Status: ACTIVE
-Next phase: Phase 2 — Chain-Wide Universe & Outcome Dataset (LOCKED until Phase 1 PASS)
+Next phase: Phase 2 — Pons Universe & Outcome Dataset (LOCKED until Phase 1 PASS)
 
 ## Frozen user requirements
 
 - Robinhood Chain only.
-- Study every eligible speculative/memecoin token that reaches at least $100,000 market-cap proxy at any point.
+- Pons-launched tokens are the primary research universe; non-Pons launchpads are secondary/background only.
+- Include a Pons token if it reaches at least $100,000 market-cap proxy at any point in its complete observed lifecycle.
 - The only precommitted positive threshold is >=5x after the first major dump.
+- Do not predefine what counts as a major dump; derive/test candidate dump thresholds from historical data.
 - 5x is the minimum, not the target/cap.
 - Preserve full upside magnitude so 10x/20x/50x+ runners remain distinct outcomes.
 - Do not pre-assume holder/wallet/volume/liquidity/chart signals.
@@ -51,8 +53,12 @@ The master spec, build order, anti-leakage standard and $0 rules are frozen.
 - [x] SolidRPC keyless Robinhood route reachable from HLP's GitHub runner
 - [x] SolidRPC route successfully read Pons V1 bytecode at block 30,000,000
 - [x] SolidRPC route successfully returned historical Pons launch logs
-- [x] exact Pons V1 first-code block: **8,991,118** (2026-07-13 21:29:03 UTC)
-- [x] exact Pons V2 first-code block: **26,841,846** (2026-08-03 14:41:19 UTC)
+- [x] Pons protocol generation set frozen as **V1 + V2**; Uniswap V3/V4 are downstream trading venues, not extra Pons generations
+- [x] legacy V1-ABI factory `0x0c37...77a4`: exact first-code block **8,600,612**, first raw-chain launch **8,621,658**
+- [x] primary V1-ABI factory `0xa5aa...1feb`: exact first-code block **8,991,118**, first raw-chain launch **9,019,252**
+- [x] current V1-ABI factory `0xf4fc...eb75`: exact first-code block **39,010,564**, first raw-chain launch **39,497,847**
+- [x] V2 factory `0x7ed5...ec7e`: exact first-code block **26,841,846**, first raw-chain launch **27,027,321**
+- [x] all four factory deployments verified with direct archive RPC bytecode + raw TokenLaunched decode at audit head **54,478,341**
 - [x] generic adaptive eth_getLogs range splitting
 - [x] request pacing and Retry-After-aware HTTP 429 handling
 - [x] archive API-key support through headers rather than committed URLs
@@ -75,7 +81,7 @@ Verified provider facts at 2026-09-04:
 - Robinhood uses archive nodes on the Free plan;
 - authenticated route removes the public 2,000-block policy cap; practical ranges are still discovered adaptively.
 
-Secrets are never committed. HLP accepts a free archive key by environment header when sustained backfill begins.
+Secrets are never committed. No archive key is currently configured in the GitHub runner, so the verified acquisition path is the keyless public archive route. HLP automatically switches to the authenticated Free endpoint if a key is later provided.
 
 ## Query-efficiency design
 
@@ -84,19 +90,23 @@ Do not issue one historical API query per coin unless unavoidable.
 Planned high-level scans:
 1. factory launch events -> token/curve/pool registry;
 2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
-3. Uniswap V4 swaps from the single PoolManager + pool IDs;
-4. V3 swaps through protocol/indexed tape or efficiently batched pool filters;
+3. Uniswap V4 swaps from the single PoolManager with registered Pons pool IDs pushed into indexed topic1 server-side filters;
+4. V3 swaps through a shared protocol tape or efficiently sharded Pons pool filters, avoiding one historical query per token;
 5. only after the $100k universe is known, fetch ERC-20 Transfer history for eligible tokens to reconstruct historical holder state.
 
 This sequencing prevents transfer/holder backfills for the overwhelming majority of coins that never become research-eligible.
 
 ## Phase 1 remaining gates
 
-- [ ] benchmark wide authenticated Free eth_getLogs ranges and record safe adaptive widths
+- [x] verify every relevant Pons generation/factory from raw chain
+- [x] prove the canonical WETH/USDG V3 USD anchor predates Pons (anchor first-code block **1,506,281**)
+- [ ] build and freeze the complete historical Pons launch registry through one immutable snapshot head
+- [ ] build the complete historical Pons $100k+ eligible universe across V1/V2 full lifecycles
+- [ ] benchmark wide authenticated Free eth_getLogs ranges if/when a Free key is configured; keyless sharding remains the required fallback
 - [ ] reconstruct >=10 representative Pons tokens end-to-end
 - [ ] cross-check reconstructed launch/trade/price paths against independent DEX/explorer evidence
 - [ ] quantify full-history request and storage requirements
-- [ ] prove the complete-enough Pons + material chain-wide DEX acquisition plan remains within $0
+- [ ] prove the complete Pons + required downstream DEX acquisition plan remains within $0
 - [ ] record Phase 1 PASS and merge PR #3
 
 Phase 2 stays locked until these pass.
