@@ -85,6 +85,29 @@ class HoodFunEvent:
     log_index: int
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class PoolsTradeLbpInitializerCreated:
+    strategy: str
+    initializer: str
+    token: str
+    currency: str
+    migration_block: int
+    reserved_token_amount_for_lp: int
+    recipient: str
+    position_recipient: str
+    pool_fee: int
+    pool_tick_spacing: int
+    pool_hook: str
+    position_definitions_offset: int
+    lp_allocation_schedule_offset: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
 @dataclass(frozen=True, slots=True)
 class PoolsTradeTokenCreated:
     launcher: str
