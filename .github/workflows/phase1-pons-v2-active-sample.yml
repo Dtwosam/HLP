@@ -1,0 +1,60 @@
+name: phase1-pons-v2-active-sample
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v2-active-sample.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Probe active V2 window
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-pons-sample \
+            --version v2 \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --limit 10000 \
+            --chunk-size 2000 \
+            --min-chunk-size 50 \
+            --out artifacts/pons-v2-30m-100k.jsonl
+      - name: Summarize
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [
+              json.loads(line)
+              for line in Path("artifacts/pons-v2-30m-100k.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          print(json.dumps({
+              "launches": len(rows),
+              "first_block": min((r["block_number"] for r in rows), default=None),
+              "last_block": max((r["block_number"] for r in rows), default=None),
+              "curves": len({r["curve"] for r in rows}),
+              "pair_tokens": sorted({r["pair_token"] for r in rows}),
+              "config_ids": sorted({r["launch_config_id"] for r in rows}),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-30m-100k
+          path: artifacts/
+          if-no-files-found: error
