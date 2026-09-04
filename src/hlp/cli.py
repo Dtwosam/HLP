@@ -75,6 +75,11 @@ from hlp.data.pons_v2 import (
     filter_v2_registry_to_graduated,
     iter_enriched_v2_launches,
 )
+from hlp.data.pons_time import (
+    enrich_pons_episodes_with_time,
+    enrich_pons_points_with_time,
+    fetch_block_timestamp_rows,
+)
 from hlp.data.pons_research import (
     annotate_pons_drawdowns_and_future_returns,
     build_pons_market_path,
@@ -2289,6 +2294,84 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_pons_time_enrich(args: argparse.Namespace) -> int:
+    """Attach exact Robinhood block timestamps to eligible Pons research data."""
+    outcomes = _load_jsonl(args.outcomes)
+    episodes = _load_jsonl(args.episodes)
+    blocks = sorted({
+        int(row["block_number"])
+        for row in outcomes
+    })
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    timestamp_rows = fetch_block_timestamp_rows(
+        rpc,
+        blocks,
+        batch_size=args.batch_size,
+        min_batch_size=args.min_batch_size,
+    )
+    enriched_outcomes = enrich_pons_points_with_time(
+        outcomes,
+        timestamp_rows,
+    )
+    enriched_episodes = enrich_pons_episodes_with_time(
+        episodes,
+        timestamp_rows,
+    )
+
+    timestamps_manifest = write_jsonl_snapshot(
+        timestamp_rows,
+        output=Path(args.timestamps_out),
+        provenance={
+            "source": "eth_getBlockByNumber_batched",
+            "chain_id": 4663,
+            "outcomes": Path(args.outcomes).name,
+            "unique_blocks": len(blocks),
+            "requested_batch_size": args.batch_size,
+            "min_batch_size": args.min_batch_size,
+        },
+    )
+    outcomes_manifest = write_jsonl_snapshot(
+        enriched_outcomes,
+        output=Path(args.out),
+        provenance={
+            "source": "pons_outcomes_plus_exact_block_timestamps",
+            "chain_id": 4663,
+            "outcomes": Path(args.outcomes).name,
+            "timestamp_map_sha256": timestamps_manifest["sha256"],
+        },
+    )
+    episodes_manifest = write_jsonl_snapshot(
+        enriched_episodes,
+        output=Path(args.episodes_out),
+        provenance={
+            "source": "pons_drawdown_episodes_plus_exact_block_timestamps",
+            "chain_id": 4663,
+            "episodes": Path(args.episodes).name,
+            "timestamp_map_sha256": timestamps_manifest["sha256"],
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "timestamps": timestamps_manifest,
+                "outcomes": outcomes_manifest,
+                "episodes": episodes_manifest,
+                "unique_blocks": len(blocks),
+                "eligible_points": len(enriched_outcomes),
+                "drawdown_episodes": len(enriched_episodes),
+                "rpc_requests": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_pons_v2_graduated_registry(args: argparse.Namespace) -> int:
     """Reduce a full V2 registry to the tokens that actually graduated."""
     registry = _load_jsonl(args.registry)
@@ -2901,6 +2984,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    pons_time = sub.add_parser("rpc-pons-time-enrich")
+    pons_time.add_argument("--outcomes", required=True)
+    pons_time.add_argument("--episodes", required=True)
+    pons_time.add_argument("--batch-size", type=int, default=100)
+    pons_time.add_argument("--min-batch-size", type=int, default=1)
+    pons_time.add_argument("--timestamps-out", required=True)
+    pons_time.add_argument("--out", required=True)
+    pons_time.add_argument("--episodes-out", required=True)
+    pons_time.set_defaults(func=cmd_rpc_pons_time_enrich)
 
     v2_graduated_registry = sub.add_parser("pons-v2-graduated-registry")
     v2_graduated_registry.add_argument("--registry", required=True)
