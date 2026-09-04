@@ -8,6 +8,7 @@ from hlp.config import normalize_address
 from hlp.data.rpc import RpcClient
 from hlp.data.types import Erc20Transfer
 from hlp.protocols.evm import (
+    abi_string_at,
     data_words,
     event_topic,
     function_selector,
@@ -17,6 +18,7 @@ from hlp.protocols.evm import (
 
 
 DECIMALS_SELECTOR = function_selector("decimals()")
+SYMBOL_SELECTOR = function_selector("symbol()")
 TOTAL_SUPPLY_SELECTOR = function_selector("totalSupply()")
 TRANSFER_SIG = "Transfer(address,address,uint256)"
 TRANSFER_TOPIC = event_topic(TRANSFER_SIG)
@@ -35,6 +37,29 @@ def _single_word(result: str) -> int:
     if len(words) != 1:
         raise ValueError("expected exactly one ABI return word")
     return words[0]
+
+
+
+def read_erc20_symbol(
+    rpc: RpcClient,
+    token: str,
+    *,
+    block: int | str = "latest",
+) -> str:
+    """Read ERC-20 symbol(), supporting standard string and legacy bytes32."""
+    token = normalize_address(token)
+    result = rpc.eth_call(token, SYMBOL_SELECTOR, block)
+    try:
+        symbol = abi_string_at(result, 0)
+    except (ValueError, UnicodeDecodeError):
+        raw = result.removeprefix("0x")
+        if len(raw) != 64:
+            raise ValueError("unexpected ERC-20 symbol() return encoding")
+        symbol = bytes.fromhex(raw).rstrip(b"\x00").decode("utf-8")
+    symbol = symbol.strip()
+    if not symbol:
+        raise ValueError("ERC-20 symbol is empty")
+    return symbol
 
 
 def read_erc20_static(
