@@ -12,6 +12,7 @@ from dataclasses import dataclass
 ROBINHOOD_CHAIN_ID = 4663
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
 DEFAULT_SEQUENCER_WS_URL = "wss://feed.mainnet.chain.robinhood.com"
+BLOCKREQ_PUBLIC_ARCHIVE_RPC_URL = "https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public"
 
 PONS_V1_FACTORY = "0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB"
 PONS_V2_FACTORY = "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
