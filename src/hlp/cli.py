@@ -71,6 +71,12 @@ from hlp.data.pools_trade_v4 import (
 )
 from hlp.data.pons_v1 import iter_enriched_v1_launches
 from hlp.data.pons_v2 import ZERO_ADDRESS, iter_enriched_v2_launches
+from hlp.data.pons_research import (
+    annotate_pons_drawdowns_and_future_returns,
+    build_pons_market_path,
+    eligible_pons_tokens,
+    summarize_pons_eligibility,
+)
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
 from hlp.data.rpc import RpcClient
 from hlp.data.reconstruct import (
@@ -2276,6 +2282,123 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
     )
     return 0
 
+
+def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
+    """Merge Pons V1/V2 market paths into the canonical research dataset."""
+    v1_rows = _load_jsonl(args.v1_points) if args.v1_points else []
+    v2_curve_rows = (
+        _load_jsonl(args.v2_curve_points) if args.v2_curve_points else []
+    )
+    v2_seed_rows = (
+        _load_jsonl(args.v2_seed_points) if args.v2_seed_points else []
+    )
+    v2_v4_rows = (
+        _load_jsonl(args.v2_v4_points) if args.v2_v4_points else []
+    )
+
+    points = build_pons_market_path(
+        v1_rows=v1_rows,
+        v2_curve_rows=v2_curve_rows,
+        v2_seed_rows=v2_seed_rows,
+        v2_v4_rows=v2_v4_rows,
+    )
+    summary = summarize_pons_eligibility(points)
+    eligible = eligible_pons_tokens(summary)
+    annotated = annotate_pons_drawdowns_and_future_returns(
+        points,
+        eligible_tokens=eligible,
+    )
+
+    path_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.path_out),
+        provenance={
+            "source": "canonical_pons_v1_v2_market_paths",
+            "chain_id": 4663,
+            "v1_points": (
+                Path(args.v1_points).name if args.v1_points else None
+            ),
+            "v2_curve_points": (
+                Path(args.v2_curve_points).name
+                if args.v2_curve_points else None
+            ),
+            "v2_seed_points": (
+                Path(args.v2_seed_points).name
+                if args.v2_seed_points else None
+            ),
+            "v2_v4_points": (
+                Path(args.v2_v4_points).name if args.v2_v4_points else None
+            ),
+        },
+    )
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.universe_out),
+        provenance={
+            "source": "canonical_pons_market_path",
+            "market_path_sha256": path_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "eligibility_semantics": "token reached at least $100k at any point",
+        },
+    )
+    annotated_manifest = write_jsonl_snapshot(
+        annotated,
+        output=Path(args.outcomes_out),
+        provenance={
+            "source": "canonical_pons_market_path",
+            "market_path_sha256": path_manifest["sha256"],
+            "universe_sha256": summary_manifest["sha256"],
+            "recovery_floor_multiple": "5",
+            "outcome_semantics": (
+                "continuous best strictly-later multiple from each point; "
+                "5x is only the minimum recovery label"
+            ),
+            "dump_semantics": (
+                "no fixed dump threshold; drawdown from running peak retained "
+                "continuously for empirical discovery"
+            ),
+        },
+    )
+
+    version_counts = {}
+    eligible_version_counts = {}
+    by_token = {row["token"]: row for row in summary}
+    for row in summary:
+        version = row["pons_version"]
+        version_counts[version] = version_counts.get(version, 0) + 1
+        if row["reached_100k"]:
+            eligible_version_counts[version] = (
+                eligible_version_counts.get(version, 0) + 1
+            )
+
+    recoverable_points = [
+        row for row in annotated if row["reached_5x_later"]
+    ]
+    tokens_with_a_5x_later_point = {
+        row["token"] for row in recoverable_points
+    }
+
+    print(
+        json.dumps(
+            {
+                "market_path": path_manifest,
+                "universe": summary_manifest,
+                "outcomes": annotated_manifest,
+                "pons_tokens_with_priced_paths": len(by_token),
+                "pons_tokens_reached_100k": len(eligible),
+                "tokens_by_version": version_counts,
+                "eligible_tokens_by_version": eligible_version_counts,
+                "eligible_tokens_with_at_least_one_5x_later_point": len(
+                    tokens_with_a_5x_later_point
+                ),
+                "annotated_eligible_price_points": len(annotated),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _iter_jsonl(path: str):
     with Path(path).open(encoding="utf-8") as handle:
         for line in handle:
@@ -2719,6 +2842,17 @@ def build_parser() -> argparse.ArgumentParser:
     sample.set_defaults(func=cmd_hood_pons_sample)
 
 
+
+
+    pons_research = sub.add_parser("pons-research-dataset")
+    pons_research.add_argument("--v1-points")
+    pons_research.add_argument("--v2-curve-points")
+    pons_research.add_argument("--v2-seed-points")
+    pons_research.add_argument("--v2-v4-points")
+    pons_research.add_argument("--path-out", required=True)
+    pons_research.add_argument("--universe-out", required=True)
+    pons_research.add_argument("--outcomes-out", required=True)
+    pons_research.set_defaults(func=cmd_pons_research_dataset)
 
     v2_registry = sub.add_parser("rpc-v2-registry-window")
     v2_registry.add_argument("--from-block", type=int, required=True)
