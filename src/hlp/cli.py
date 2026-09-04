@@ -307,6 +307,156 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_v2_registry_window(args: argparse.Namespace) -> int:
+    """Build a point-in-time enriched Pons V2 launch-registry shard."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    if args.from_block < PONS_V2_DEPLOYMENT_BLOCK:
+        raise SystemExit(
+            f"from-block cannot precede Pons V2 deployment {PONS_V2_DEPLOYMENT_BLOCK}"
+        )
+
+    started = time.monotonic()
+    topic_or = [
+        V2_TOKEN_LAUNCHED_TOPIC,
+        V2_LAUNCH_CONFIG_ADDED_TOPIC,
+        V2_LAUNCH_CONFIG_UPDATED_TOPIC,
+        V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC,
+    ]
+    raw = list(
+        rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=PONS_V2_FACTORY,
+            topics=[topic_or],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    launches = [
+        decode_v2_launch(row)
+        for row in raw
+        if row.topics and row.topics[0] == V2_TOKEN_LAUNCHED_TOPIC
+    ]
+    config_ids = sorted(
+        {
+            launch.launch_config_id
+            for launch in launches
+            if launch.launch_config_id is not None
+        }
+    )
+    pair_tokens = sorted(
+        {
+            launch.pair_token.lower()
+            for launch in launches
+            if launch.pair_token.lower() != ZERO_ADDRESS
+        }
+    )
+
+    bootstrap_configs = []
+    bootstrap_pair_economics = []
+    if args.from_block > PONS_V2_DEPLOYMENT_BLOCK:
+        for config_id in config_ids:
+            try:
+                bootstrap_configs.append(
+                    read_v2_launch_config_state(
+                        rpc,
+                        config_id,
+                        block=args.from_block - 1,
+                    )
+                )
+            except Exception:
+                # A config created inside this shard legitimately does not
+                # exist at the prior block. Its event is resolved below.
+                pass
+        for pair in pair_tokens:
+            economics = read_v2_pair_token_economics_state(
+                rpc,
+                pair,
+                block=args.from_block - 1,
+            )
+            if economics.phantom_quote != 0:
+                bootstrap_pair_economics.append(economics)
+
+    config_events = []
+    seen_config_block: set[tuple[int, int]] = set()
+    for row in raw:
+        if not row.topics or row.topics[0] not in {
+            V2_LAUNCH_CONFIG_ADDED_TOPIC,
+            V2_LAUNCH_CONFIG_UPDATED_TOPIC,
+        }:
+            continue
+        action, config_id = decode_v2_launch_config_event_id(row)
+        ambiguity = (row.block_number, config_id)
+        if ambiguity in seen_config_block:
+            raise RuntimeError(
+                "multiple V2 config mutations for one id in one block; "
+                "transaction-input decoding is required before proceeding"
+            )
+        seen_config_block.add(ambiguity)
+        config_events.append((row, action, config_id))
+
+    resolved = {}
+    for row, action, config_id in config_events:
+        order = (
+            row.block_number,
+            -1 if row.transaction_index is None else row.transaction_index,
+            row.log_index,
+        )
+        resolved[order] = read_v2_launch_config_state(
+            rpc,
+            config_id,
+            block=row.block_number,
+            action=action,
+            transaction_hash=row.transaction_hash,
+            transaction_index=row.transaction_index,
+            log_index=row.log_index,
+        )
+
+    rows = iter_enriched_v2_launches(
+        raw,
+        bootstrap_configs=bootstrap_configs,
+        bootstrap_pair_economics=bootstrap_pair_economics,
+        resolved_config_events=resolved,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v2_registry",
+            "factory": PONS_V2_FACTORY.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "topic0_or": topic_or,
+            "bootstrap_config_ids": config_ids,
+            "bootstrap_pair_tokens": pair_tokens,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+            "token_decimals_source": (
+                "PonsV2LauncherToken inherits OpenZeppelin ERC20 default 18 decimals"
+            ),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "factory_events": len(raw),
+                "bootstrap_configs": len(bootstrap_configs),
+                "bootstrap_pair_economics": len(bootstrap_pair_economics),
+                "resolved_config_events": len(resolved),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
     """Build an independently reproducible enriched Pons V1 launch shard."""
     rpc = _archive_rpc(args)
