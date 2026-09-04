@@ -1,0 +1,90 @@
+name: phase1-pools-fun-mcap-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pools-fun-mcap-smoke.yml'
+      - 'src/hlp/data/pools_fun_registry.py'
+      - 'src/hlp/data/v3_launchpad.py'
+      - 'src/hlp/protocols/uniswap.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pools-fun-mcap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build pools.fun registry
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-pools-fun-registry-window \
+            --from-block 33570152 --to-block 33670151 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pools-fun-registry.jsonl
+      - name: Acquire matching V3 lifecycle
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-pools-fun-v3-tape \
+            --registry artifacts/pools-fun-registry.jsonl \
+            --from-block 33570152 --to-block 33670151 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --initialize-out artifacts/pools-fun-initializes.jsonl \
+            --swap-out artifacts/pools-fun-swaps.jsonl
+      - name: Price pools.fun launches
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-pools-fun-market-cap-window \
+            --registry artifacts/pools-fun-registry.jsonl \
+            --initializes artifacts/pools-fun-initializes.jsonl \
+            --swaps artifacts/pools-fun-swaps.jsonl \
+            --from-block 33570152 --to-block 33670151 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pools-fun-market-caps.jsonl \
+            --summary-out artifacts/pools-fun-summary.jsonl
+      - name: Validate cohort
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          def read(name):
+              return [
+                  json.loads(x)
+                  for x in Path("artifacts", name).read_text().splitlines()
+                  if x.strip()
+              ]
+          registry=read("pools-fun-registry.jsonl")
+          initializes=read("pools-fun-initializes.jsonl")
+          swaps=read("pools-fun-swaps.jsonl")
+          summary=read("pools-fun-summary.jsonl")
+          winners=[row for row in summary if row["crossed_100k"]]
+          assert len(registry)==111, len(registry)
+          assert len({row["pool"] for row in initializes})==111
+          assert len(summary)==111
+          assert all(row["priced_points"]>0 for row in summary)
+          print(json.dumps({
+              "launches":len(registry),
+              "initialized_pools":len({row["pool"] for row in initializes}),
+              "pools_with_swaps":len({row["pool"] for row in swaps}),
+              "matched_swaps":len(swaps),
+              "tokens_priced":len(summary),
+              "tokens_crossed_100k":len(winners),
+              "winner_examples":winners[:20],
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pools-fun-mcap
+          path: artifacts/
+          if-no-files-found: error
