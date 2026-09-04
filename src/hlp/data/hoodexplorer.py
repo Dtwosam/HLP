@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from hlp.config import ROBINHOOD_CHAIN_ID, normalize_address
@@ -46,6 +46,8 @@ class HoodExplorerClient:
     timeout: float = 30.0
     attempts: int = 3
     api_key: str | None = None
+    requests_made: int = field(default=0, init=False)
+    bytes_received: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if self.api_key is None:
@@ -64,7 +66,10 @@ class HoodExplorerClient:
         for attempt in range(1, self.attempts + 1):
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    return json.loads(response.read())
+                    raw = response.read()
+                    self.requests_made += 1
+                    self.bytes_received += len(raw)
+                    return json.loads(raw)
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt == self.attempts:
