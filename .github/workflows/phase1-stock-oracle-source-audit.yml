@@ -1,0 +1,140 @@
+name: phase1-stock-oracle-source-audit
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-stock-oracle-source-audit.yml'
+      - 'src/hlp/data/robinhood_assets.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Resolve real V2 quote assets from official Robinhood registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hlp.data.robinhood_assets import RobinhoodAssetsClient
+
+          targets = {
+              "0x117cc2133c37b721f49de2a7a74833232b3b4c0c",
+              "0x1b0e319c6a659f002271b69db8a7df2f911c153e",
+              "0x2e0847e8910a9732eb3fb1bb4b70a580adad4fe3",
+              "0x322f0929c4625ed5bad873c95208d54e1c003b2d",
+              "0x4a0e65a3eccec6dbe60ae065f2e7bb85fae35eea",
+              "0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+              "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+          }
+          client = RobinhoodAssetsClient()
+          mapping = client.address_map()
+          rows = [mapping[address] for address in sorted(targets)]
+          assert {row["contract_address"] for row in rows} == targets
+          Path("artifacts/v2-stock-quote-assets.json").write_text(
+              json.dumps(rows, indent=2, sort_keys=True)
+          )
+          print(json.dumps({
+              "resolved": [
+                  {"symbol": row["token_symbol"], "address": row["contract_address"]}
+                  for row in rows
+              ],
+              "registry_assets": len(mapping),
+              "requests_made": client.requests_made,
+              "bytes_received": client.bytes_received,
+          }, sort_keys=True))
+          PY
+      - name: Probe official Chainlink Robinhood feed directory
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          rows = json.loads(Path("artifacts/v2-stock-quote-assets.json").read_text())
+          url = "https://docs.chain.link/data-feeds/price-feeds/addresses?network=robinhood"
+          request = urllib.request.Request(
+              url,
+              headers={"user-agent": "hlp/0.1", "accept": "text/html"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              raw = response.read()
+          text = raw.decode("utf-8", errors="replace")
+          Path("artifacts/chainlink-robinhood-page-metadata.json").write_text(
+              json.dumps({
+                  "url": url,
+                  "bytes": len(raw),
+                  "sha256": __import__("hashlib").sha256(raw).hexdigest(),
+              }, indent=2, sort_keys=True)
+          )
+
+          address_re = re.compile(r"0x[a-fA-F0-9]{40}")
+          audit = []
+          for row in rows:
+              symbol = row["token_symbol"]
+              needles = [
+                  f"{symbol} / USD",
+                  f"{symbol}/USD",
+                  f"Robinhood {symbol} / USD",
+              ]
+              hits = []
+              for needle in needles:
+                  start = 0
+                  while True:
+                      i = text.find(needle, start)
+                      if i < 0:
+                          break
+                      lo = max(0, i - 2500)
+                      hi = min(len(text), i + 5000)
+                      context = text[lo:hi]
+                      hits.append({
+                          "needle": needle,
+                          "offset": i,
+                          "addresses": sorted(set(address_re.findall(context))),
+                          "context": context,
+                      })
+                      start = i + len(needle)
+              audit.append({
+                  "symbol": symbol,
+                  "token": row["contract_address"],
+                  "hits": hits,
+              })
+
+          Path("artifacts/chainlink-robinhood-target-context.json").write_text(
+              json.dumps(audit, indent=2, sort_keys=True)
+          )
+          print(json.dumps({
+              "page_bytes": len(raw),
+              "targets": [
+                  {
+                      "symbol": item["symbol"],
+                      "hit_count": len(item["hits"]),
+                      "nearby_addresses": sorted({
+                          address
+                          for hit in item["hits"]
+                          for address in hit["addresses"]
+                      }),
+                  }
+                  for item in audit
+              ],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-stock-oracle-source-audit
+          path: artifacts/
+          if-no-files-found: error
