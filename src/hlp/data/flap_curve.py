@@ -28,6 +28,7 @@ def build_flap_curve_market_cap_points(
     initial_weth_usd: Decimal,
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
+    launch_registry: Iterable[dict] = (),
 ) -> Iterator[dict]:
     """Price Flap TokenBought/TokenSold events without look-ahead.
 
@@ -44,8 +45,16 @@ def build_flap_curve_market_cap_points(
         initial_quote_usd=initial_quote_usd,
         oracle_updates=quote_usd_updates,
     )
-    quote_by_token: dict[str, str] = {}
-    seen_launches: set[str] = set()
+    registry_rows = list(launch_registry)
+    quote_by_token: dict[str, str] = {
+        row["token"].lower(): row["quote_token"].lower()
+        for row in registry_rows
+        if row.get("quote_token")
+    }
+    seen_launches: set[str] = {
+        row["token"].lower()
+        for row in registry_rows
+    }
 
     rows = sorted(list(events), key=_order)
     for event in rows:
