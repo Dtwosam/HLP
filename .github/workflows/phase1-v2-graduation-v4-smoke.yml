@@ -148,6 +148,18 @@ jobs:
               len(initializes),
               len(registrations),
           )
+          assert all(
+              row["first_v4_initialize_block"] is not None
+              for row in transitions
+          )
+          assert all(
+              row["v4_initialize_to_seed_bps"] is not None
+              for row in transitions
+          )
+          assert all(
+              row["seed_to_first_v4_bps"] is not None
+              for row in transitions
+          )
           print(json.dumps({
               "launches": len(registry),
               "graduations": len(graduations),
@@ -158,6 +170,16 @@ jobs:
               "tokens_crossed_100k_full_lifecycle": sum(
                   bool(r["crossed_100k"]) for r in summary
               ),
+              "curve_to_initialize_values": [
+                  r["curve_to_v4_initialize_bps"]
+                  for r in transitions
+                  if r["curve_to_v4_initialize_bps"] is not None
+              ][:10],
+              "initialize_to_seed_values": [
+                  r["v4_initialize_to_seed_bps"]
+                  for r in transitions
+                  if r["v4_initialize_to_seed_bps"] is not None
+              ][:10],
               "curve_to_seed_values": [
                   r["curve_to_seed_bps"]
                   for r in transitions
