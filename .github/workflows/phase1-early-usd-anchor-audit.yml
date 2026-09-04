@@ -1,0 +1,66 @@
+name: phase1-early-usd-anchor-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-early-usd-anchor-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Check WETH/USDG anchor deployment and early state
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.config import (
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+          )
+          from hlp.data.rpc import RpcClient
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          first = rpc.find_first_code_block(
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL, low=0, high=head
+          )
+          checks = {}
+          for block in [5_611_265, 6_611_265, 8_600_612, 8_991_118, 30_000_000]:
+              code = rpc.get_code(UNISWAP_V3_WETH_USDG_ANCHOR_POOL, block)
+              checks[str(block)] = {
+                  "has_code": code not in {"0x", "0x0", ""},
+                  "code_bytes": len(code.removeprefix("0x")) // 2,
+              }
+          print(json.dumps({
+              "anchor_pool": UNISWAP_V3_WETH_USDG_ANCHOR_POOL.lower(),
+              "first_code_block": first,
+              "checks": checks,
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY
