@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from hlp.config import normalize_address
 from hlp.data.rpc import RpcClient
+from hlp.data.types import Erc20Transfer
 from hlp.protocols.evm import (
     data_words,
     event_topic,
