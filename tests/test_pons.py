@@ -2,6 +2,10 @@ from hlp.config import PONS_V1_FACTORY, PONS_V2_FACTORY
 from hlp.data.types import RawLog
 from hlp.protocols.evm import event_topic
 from hlp.protocols.pons import (
+    V1_LAUNCH_CONFIG_ADDED_SIG,
+    V1_LAUNCH_CONFIG_ADDED_TOPIC,
+    V1_LAUNCH_CONFIG_UPDATED_SIG,
+    V1_LAUNCH_CONFIG_UPDATED_TOPIC,
     V1_TOKEN_LAUNCHED_SIG,
     V1_TOKEN_LAUNCHED_TOPIC,
     V2_CURVE_BUY_SIG,
@@ -11,6 +15,7 @@ from hlp.protocols.pons import (
     V2_TOKEN_LAUNCHED_SIG,
     V2_TOKEN_LAUNCHED_TOPIC,
     decode_v1_launch,
+    decode_v1_launch_config,
     decode_v2_curve_trade,
     decode_v2_launch,
 )
@@ -54,6 +59,8 @@ def raw(address, topics, data):
 
 def test_event_topics_are_ethereum_keccak():
     assert V1_TOKEN_LAUNCHED_TOPIC == event_topic(V1_TOKEN_LAUNCHED_SIG)
+    assert V1_LAUNCH_CONFIG_ADDED_TOPIC == event_topic(V1_LAUNCH_CONFIG_ADDED_SIG)
+    assert V1_LAUNCH_CONFIG_UPDATED_TOPIC == event_topic(V1_LAUNCH_CONFIG_UPDATED_SIG)
     assert V2_TOKEN_LAUNCHED_TOPIC == event_topic(V2_TOKEN_LAUNCHED_SIG)
     # Independently published current Pons V2 topic0. This catches accidental
     # signature/indexing edits that a self-derived equality would miss.
@@ -120,3 +127,55 @@ def test_decode_v2_curve_buy_and_sell():
     assert decoded_sell.side == "sell"
     assert decoded_sell.token_amount == 3000
     assert decoded_sell.quote_amount == 1500
+
+
+def test_decode_v1_launch_config_added_and_negative_tick():
+    # ABI int24(-120) is sign-extended to 256 bits.
+    negative_120 = (1 << 256) - 120
+    log = raw(
+        PONS_V1_FACTORY,
+        [V1_LAUNCH_CONFIG_ADDED_TOPIC, "0x" + uint_word(7)],
+        "0x"
+        + addr_word(PAIR)
+        + uint_word(500)
+        + uint_word(negative_120)
+        + uint_word(1_000_000_000 * 10**18)
+        + uint_word(200)
+        + uint_word(220)
+        + uint_word(50)
+        + uint_word(0)
+        + uint_word(1)
+        + uint_word(0),
+    )
+    config = decode_v1_launch_config(log)
+    assert config.action == "added"
+    assert config.config_id == 7
+    assert config.pair_token == PAIR
+    assert config.initial_tick == -120
+    assert config.supply == 1_000_000_000 * 10**18
+    assert config.enabled is True
+    assert config.router_requires_deadline is False
+
+
+def test_decode_v1_launch_config_updated():
+    log = raw(
+        PONS_V1_FACTORY,
+        [V1_LAUNCH_CONFIG_UPDATED_TOPIC, "0x" + uint_word(2)],
+        "0x"
+        + addr_word(PAIR)
+        + uint_word(1)
+        + uint_word(120)
+        + uint_word(2_000_000 * 10**18)
+        + uint_word(100)
+        + uint_word(110)
+        + uint_word(5)
+        + uint_word(1)
+        + uint_word(0)
+        + uint_word(1),
+    )
+    config = decode_v1_launch_config(log)
+    assert config.action == "updated"
+    assert config.config_id == 2
+    assert config.initial_tick == 120
+    assert config.enabled is False
+    assert config.router_requires_deadline is True
