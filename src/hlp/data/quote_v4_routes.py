@@ -37,6 +37,74 @@ def _address_topic(address: str) -> str:
     return "0x" + value[2:].rjust(64, "0")
 
 
+def validate_v4_usdg_pool_candidate(
+    rpc,
+    quote_row: dict,
+    *,
+    pool_id: str,
+    from_block: int,
+    to_block: int,
+    chunk_size: int = 2_000,
+    min_chunk_size: int = 25,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> dict:
+    """Prove one known PoolManager pool id is the quote/USDG V4 pool."""
+    candidate = pool_id.lower()
+    if not candidate.startswith("0x") or len(candidate) != 66:
+        raise ValueError(f"invalid V4 pool id: {pool_id!r}")
+    int(candidate[2:], 16)
+
+    lo = int(from_block)
+    hi = int(to_block)
+    if lo < 0 or hi < lo:
+        raise ValueError(f"invalid validation range: {lo}..{hi}")
+
+    token = quote_row["quote_token"].lower()
+    usdg = ROBINHOOD_USDG.lower()
+    raw_logs = rpc.iter_logs_chunked(
+        lo,
+        hi,
+        address=pool_manager,
+        topics=[V4_INITIALIZE_TOPIC, candidate],
+        chunk_size=chunk_size,
+        min_chunk_size=min_chunk_size,
+    )
+    initialized = [decode_v4_pool_initialized(raw) for raw in raw_logs]
+    if len(initialized) != 1:
+        raise ValueError(
+            "known V4 quote candidate must have exactly one Initialize "
+            f"in validation window: pool={candidate} found={len(initialized)}"
+        )
+
+    event = initialized[0]
+    if event.pool_id.lower() != candidate:
+        raise ValueError(
+            "V4 Initialize pool id mismatch: "
+            f"expected={candidate} observed={event.pool_id.lower()}"
+        )
+    currencies = {event.currency0.lower(), event.currency1.lower()}
+    if currencies != {token, usdg}:
+        raise ValueError(
+            "known V4 quote candidate currency mismatch: "
+            f"expected={sorted((token, usdg))} observed={sorted(currencies)}"
+        )
+
+    return {
+        "quote_token": token,
+        "symbol": quote_row.get("symbol"),
+        "quote_decimals": int(quote_row["quote_decimals"]),
+        "first_launch_block": int(quote_row["first_launch_block"]),
+        "launches": int(quote_row["launches"]),
+        "versions": quote_row.get("versions", {}),
+        "pool_manager": pool_manager.lower(),
+        "pool_id": candidate,
+        "token_is_token0": event.currency0.lower() == token,
+        "validation_from_block": lo,
+        "validation_to_block": hi,
+        "initialize": _record_dict(event),
+    }
+
+
 def probe_v4_usdg_routes(
     rpc,
     quote_rows: Iterable[dict],
