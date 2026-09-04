@@ -136,3 +136,10 @@ def test_secondary_network_smokes_are_manual_only():
         assert "\n  push:" not in trigger_block, (
             f"{name} must not consume RPC runners on ordinary pushes"
         )
+
+
+
+def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
+    content = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
+    assert "if uncovered:" in content
+    assert "cannot replay V2 lifecycle with uncovered quote assets" in content

@@ -169,6 +169,11 @@ jobs:
 
           covered = oracle_tokens | fallback_tokens | {WETH, USDG}
           uncovered = sorted(quote_tokens - covered)
+          if uncovered:
+              raise SystemExit(
+                  "cannot replay V2 lifecycle with uncovered quote assets: "
+                  f"count={len(uncovered)} sample={uncovered[:10]}"
+              )
           report = {
               "v2_launches": len(registry),
               "v2_quote_assets": len(quote_tokens),
