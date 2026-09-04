@@ -32,9 +32,10 @@ jobs:
           from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
           from hlp.data.rpc import RpcClient
           from hlp.protocols.pons import (
-              V1_BONDING_CURVE_CREATED_TOPIC,
-              V1_TOKEN_CREATED_TOPIC,
-              V1_TOKEN_PURCHASED_TOPIC,
+              V1_LAUNCH_CONFIG_ADDED_TOPIC,
+              V1_LAUNCH_CONFIG_UPDATED_TOPIC,
+              V1_TOKEN_DEPLOYED_TOPIC,
+              V1_TOKEN_LAUNCHED_TOPIC,
           )
 
           factories = {
@@ -43,9 +44,10 @@ jobs:
               "current_v1_abi": "0xf4fc0cd27fc8ecf17e55ee4c3f7201897df3eb75",
           }
           expected = {
-              V1_BONDING_CURVE_CREATED_TOPIC,
-              V1_TOKEN_CREATED_TOPIC,
-              V1_TOKEN_PURCHASED_TOPIC,
+              V1_TOKEN_DEPLOYED_TOPIC,
+              V1_TOKEN_LAUNCHED_TOPIC,
+              V1_LAUNCH_CONFIG_ADDED_TOPIC,
+              V1_LAUNCH_CONFIG_UPDATED_TOPIC,
           }
           rpc = RpcClient(
               os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
