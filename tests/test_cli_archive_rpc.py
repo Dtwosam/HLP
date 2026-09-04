@@ -118,3 +118,16 @@ def test_pons_stock_oracle_lifecycle_parses_shard():
     ])
     assert args.from_block == 100
     assert args.to_block == 200
+
+
+def test_v4_global_pool_scan_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-v2-v4-tape",
+        "--registrations", "registrations.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--global-pool-scan",
+        "--out", "v4.jsonl",
+    ])
+    assert args.global_pool_scan is True
