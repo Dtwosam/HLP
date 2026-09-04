@@ -36,6 +36,30 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class FlapTokenState:
+    token: str
+    status: int
+    reserve_raw: int
+    circulating_supply_raw: int
+    price_raw: int
+    token_version: int
+    r: int
+    h: int
+    k: int
+    dex_supply_thresh_raw: int
+    quote_token: str
+    native_to_quote_swap_enabled: bool
+    extension_id: str
+    buy_tax_rate: int
+    sell_tax_rate: int
+    pool: str
+    progress: int
+    lp_fee_profile: int
+    dex_id: int
+    block_number: int
+
+
+@dataclass(frozen=True, slots=True)
 class FlapEvent:
     event_type: str
     token: str
