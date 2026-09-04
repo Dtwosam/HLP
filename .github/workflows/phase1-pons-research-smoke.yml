@@ -120,7 +120,8 @@ jobs:
             --v2-v4-points artifacts/v2-v4-market-caps.jsonl \
             --path-out artifacts/pons-market-path.jsonl \
             --universe-out artifacts/pons-universe.jsonl \
-            --outcomes-out artifacts/pons-outcomes.jsonl
+            --outcomes-out artifacts/pons-outcomes.jsonl \
+            --episodes-out artifacts/pons-drawdown-episodes.jsonl
       - name: Validate Pons-only study semantics
         run: |
           python - <<'PY'
@@ -137,6 +138,7 @@ jobs:
 
           universe = read("pons-universe.jsonl")
           outcomes = read("pons-outcomes.jsonl")
+          episodes = read("pons-drawdown-episodes.jsonl")
           eligible = [row for row in universe if row["reached_100k"]]
           v1_eligible = [row for row in eligible if row["pons_version"] == "v1"]
           v2_eligible = [row for row in eligible if row["pons_version"] == "v2"]
@@ -175,6 +177,11 @@ jobs:
               "eligible_tokens_with_any_5x_later_point": len({
                   row["token"] for row in outcomes if row["reached_5x_later"]
               }),
+              "drawdown_episodes": len(episodes),
+              "deepest_drawdown_fraction": (
+                  str(max(Decimal(row["drawdown_fraction"]) for row in episodes))
+                  if episodes else None
+              ),
           }, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
