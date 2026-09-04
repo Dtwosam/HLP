@@ -5,12 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from dataclasses import asdict
+from pathlib import Path
 
 from hlp.config import DEFAULT_RPC_URL, PONS_V1_FACTORY, PONS_V2_FACTORY
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.rpc import RpcClient
+from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.protocols.pons import (
     V1_TOKEN_LAUNCHED_TOPIC,
     V2_TOKEN_LAUNCHED_TOPIC,
@@ -137,6 +140,56 @@ def cmd_deployment_block(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
+    hood = HoodExplorerClient(timeout=args.timeout)
+    if args.version == "v1":
+        address = PONS_V1_FACTORY
+        topic = V1_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v1_launch
+    else:
+        address = PONS_V2_FACTORY
+        topic = V2_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v2_launch
+
+    started = time.monotonic()
+    deployment = hood.contract_deployment(address)
+    raw_logs = hood.iter_logs(
+        address=address,
+        topic0=topic,
+        from_block=deployment["block_number"],
+        to_block="latest",
+        page_size=args.page_size,
+        max_records=args.limit,
+    )
+    launches = (decoder(log) for log in raw_logs)
+    output = Path(args.out)
+    manifest = write_jsonl_snapshot(
+        launches,
+        output=output,
+        provenance={
+            "source": "hoodexplorer",
+            "source_url": hood.base_url,
+            "chain_id": 4663,
+            "protocol": "pons",
+            "protocol_version": args.version,
+            "factory": address.lower(),
+            "event_topic0": topic,
+            "deployment_block": deployment["block_number"],
+            "requested_limit": args.limit,
+            "page_size": args.page_size,
+        },
+    )
+    elapsed = time.monotonic() - started
+    result = {
+        **manifest,
+        "requests_made": hood.requests_made,
+        "bytes_received": hood.bytes_received,
+        "elapsed_seconds": round(elapsed, 3),
+    }
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def cmd_pons_scan(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -182,6 +235,13 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--low", type=int, default=0)
     deploy.add_argument("--high", type=int)
     deploy.set_defaults(func=cmd_deployment_block)
+
+    sample = sub.add_parser("hood-pons-sample")
+    sample.add_argument("--version", choices=("v1", "v2"), required=True)
+    sample.add_argument("--limit", type=int, default=100)
+    sample.add_argument("--page-size", type=int, default=1000)
+    sample.add_argument("--out", required=True)
+    sample.set_defaults(func=cmd_hood_pons_sample)
 
     scan = sub.add_parser("pons-scan")
     scan.add_argument("--version", choices=("v1", "v2"), required=True)
