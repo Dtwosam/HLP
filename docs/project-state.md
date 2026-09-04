@@ -143,15 +143,22 @@ routes for TTWO, RIVN and BULL, covering another **3,744 launches**:
 - BULL first positive-liquidity V4 swap: block **54,451,385**.
 
 These are delayed routes, not evidence that the quote was priceable at first
-Pons use, so the earlier intervals remain explicitly partial. The remaining
-unresolved quote population is now only **2 assets / 255 launches**:
-SKHY (129) and FIG (126). The first bounded V4 probe found no SKHY initialize;
-FIG has a USDG V4 pool initialized at block **53,045,577** but no positive
-swap in that initial search window.
+Pons use, so the earlier intervals remain explicitly partial. A non-overlapping
+500,000-block V4 continuation then resolved FIG as well. The measured V4
+fallback now covers **3,870 launches across 4 of the 5 original V3 misses**.
+
+Only **SKHY / 129 launches** remains unresolved. Its bounded V4 search is
+complete through block **52,863,525**, leaving 1,622,510 blocks to the frozen
+snapshot head. A separate archive deployment-boundary probe proved the SKHY
+token contract already existed from block **8,691,227**, so the missing price
+history is a liquidity/venue-coverage problem rather than a token-deployment
+gap. The official Chainlink directory inventory also has no SKHY/SK hynix
+near-match, so no feed alias is assumed.
 
 V3 and V4 fallback tapes remain venue-specific for provenance, then merge into
-one disjoint generic quote/USD fallback artifact before V2 lifecycle replay.
-Source overlap fails closed.
+one disjoint generic quote/USD fallback artifact before both V1 and V2
+lifecycle replay. Chainlink and DEX fallback ownership is also checked for
+overlap and fails closed.
 
 A separate causality fix activates staggered quote-source state only at each
 asset's first Pons use. Future oracle availability is never active from the
