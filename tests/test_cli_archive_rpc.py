@@ -74,3 +74,18 @@ def test_pons_stock_oracle_alias_parses():
         "--out", "updates.jsonl",
     ])
     assert args.registry == "registry.jsonl"
+
+
+def test_v2_transition_tape_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-v2-transition-tape",
+        "--registry", "v2.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--graduations-out", "g.jsonl",
+        "--registrations-out", "r.jsonl",
+    ])
+    assert args.registry == "v2.jsonl"
+    assert args.graduations_out == "g.jsonl"
+    assert args.registrations_out == "r.jsonl"
