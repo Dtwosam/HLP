@@ -48,6 +48,7 @@ def decode_v3_swap(log: RawLog) -> V3Swap:
         tick=signed_word(words[4]),
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
         log_index=log.log_index,
     )
 
@@ -72,6 +73,7 @@ def decode_v4_swap(log: RawLog) -> V4Swap:
         fee=words[5],
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
         log_index=log.log_index,
     )
 
@@ -92,5 +94,6 @@ def decode_pons_v2_pool_registered(log: RawLog) -> PonsV2PoolRegistration:
         creator=word_address(words[2]),
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
         log_index=log.log_index,
     )
