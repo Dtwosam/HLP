@@ -271,6 +271,59 @@ class RpcClient:
             raise RpcError(f"block not found: {block}")
         return result
 
+    def get_transaction(self, transaction_hash: str) -> dict[str, Any]:
+        result = self.call("eth_getTransactionByHash", [transaction_hash])
+        if result is None:
+            raise RpcError(f"transaction not found: {transaction_hash}")
+        return result
+
+    def get_transactions_batched(
+        self,
+        transaction_hashes: list[str],
+        *,
+        batch_size: int = 100,
+        min_batch_size: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Fetch many transactions with adaptive JSON-RPC batch shrinking."""
+        if batch_size < 1 or min_batch_size < 1 or min_batch_size > batch_size:
+            raise ValueError("invalid batch sizes")
+        if not transaction_hashes:
+            return []
+
+        output: list[dict[str, Any]] = []
+        cursor = 0
+        target_size = batch_size
+        active_size = target_size
+        while cursor < len(transaction_hashes):
+            chunk = transaction_hashes[cursor : cursor + active_size]
+            calls = [
+                ("eth_getTransactionByHash", [transaction_hash])
+                for transaction_hash in chunk
+            ]
+            try:
+                results = self.batch_call(calls)
+            except RpcError:
+                if active_size <= min_batch_size:
+                    if active_size == 1:
+                        output.append(self.get_transaction(chunk[0]))
+                        cursor += 1
+                        active_size = target_size
+                        continue
+                    raise
+                active_size = max(min_batch_size, active_size // 2)
+                continue
+
+            for transaction_hash, result in zip(chunk, results):
+                if result is None:
+                    raise RpcError(
+                        f"transaction not found in batch: {transaction_hash}"
+                    )
+                output.append(result)
+            cursor += len(chunk)
+            if active_size < target_size:
+                active_size = min(target_size, active_size * 2)
+        return output
+
     def get_code(self, address: str, block: int | str = "latest") -> str:
         return self.call("eth_getCode", [address, _hex_quantity(block)])
 
