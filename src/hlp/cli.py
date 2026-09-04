@@ -65,7 +65,10 @@ from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.quote_registry import build_pons_quote_registry
 from hlp.data.quote_causality import audit_pons_quote_causality
-from hlp.data.oracles import reconstruct_chainlink_usd_tapes
+from hlp.data.oracles import (
+    reconstruct_chainlink_usd_tapes,
+    reconstruct_staggered_chainlink_usd_tapes,
+)
 from hlp.data.pools_fun_registry import build_pools_fun_registry
 from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
 from hlp.data.pools_trade_v4 import (
@@ -1553,6 +1556,59 @@ def cmd_pons_quote_audit(args: argparse.Namespace) -> int:
         "blocking_tokens": [row["quote_token"] for row in blocking],
         "rhj_requests": assets.requests_made,
         "chainlink_directory_requests": directory.requests_made,
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
+    """Build one shared Stock Token USD tape from each quote's first Pons use."""
+    quote_rows = _load_jsonl(args.quote_registry)
+    specs = [
+        row for row in quote_rows
+        if row["pricing_status"] == "priced_chainlink_stock_token"
+    ]
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    states, updates = reconstruct_staggered_chainlink_usd_tapes(
+        rpc,
+        feeds=specs,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "chainlink_state_before_each_quote_first_pons_use",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+            "to_block": args.to_block,
+        },
+    )
+    update_manifest = write_jsonl_snapshot(
+        updates,
+        output=Path(args.out),
+        provenance={
+            "source": "shared_staggered_chainlink_answer_updated_tape",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+            "to_block": args.to_block,
+            "event_topic0": "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(json.dumps({
+        "initial_states": state_manifest,
+        "updates": update_manifest,
+        "stock_quote_assets": len(specs),
+        "first_activation_block": (
+            min((int(row["first_launch_block"]) for row in specs), default=None)
+        ),
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
 
@@ -3608,6 +3664,19 @@ def build_parser() -> argparse.ArgumentParser:
     quote_causality.add_argument("--quote-registry", required=True)
     quote_causality.add_argument("--out", required=True)
     quote_causality.set_defaults(func=cmd_rpc_pons_quote_causality)
+
+    pons_oracle_lifecycle = sub.add_parser(
+        "rpc-pons-stock-oracle-lifecycle"
+    )
+    pons_oracle_lifecycle.add_argument("--quote-registry", required=True)
+    pons_oracle_lifecycle.add_argument("--to-block", type=int, required=True)
+    pons_oracle_lifecycle.add_argument("--chunk-size", type=int, default=100_000)
+    pons_oracle_lifecycle.add_argument("--min-chunk-size", type=int, default=1)
+    pons_oracle_lifecycle.add_argument("--state-out", required=True)
+    pons_oracle_lifecycle.add_argument("--out", required=True)
+    pons_oracle_lifecycle.set_defaults(
+        func=cmd_rpc_pons_stock_oracle_lifecycle
+    )
 
     v2_stock_oracle = sub.add_parser("rpc-v2-stock-oracle-window")
     v2_stock_oracle.add_argument("--registry", required=True)
