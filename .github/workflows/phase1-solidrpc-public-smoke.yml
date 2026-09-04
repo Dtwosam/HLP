@@ -25,6 +25,12 @@ jobs:
       - name: Verify SolidRPC keyless Robinhood route
         run: |
           hlp             --rpc-url https://rpc.solidrpc.io/public/evm/4663             --timeout 30 --attempts 3             network-smoke
+      - name: Locate exact Pons V1 deployment block
+        run: |
+          hlp             --rpc-url https://rpc.solidrpc.io/public/evm/4663             --timeout 30 --attempts 5 --min-interval 0.6             deployment-block 0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB
+      - name: Locate exact Pons V2 deployment block
+        run: |
+          hlp             --rpc-url https://rpc.solidrpc.io/public/evm/4663             --timeout 30 --attempts 5 --min-interval 0.6             deployment-block 0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e
       - name: Probe old Pons V1 state
         run: |
           python - <<'PY'
