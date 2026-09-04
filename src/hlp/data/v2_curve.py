@@ -181,3 +181,48 @@ def build_v2_curve_market_cap_points(
             )
         yield price_row(event, launch, event_type=kind)
         next_event = next(events, None)
+
+
+
+def summarize_v2_curve_market_caps(rows: Iterable[dict]) -> list[dict]:
+    summary: dict[str, dict] = {}
+    for row in rows:
+        token = row["token"]
+        current = summary.get(token)
+        value = row.get("market_cap_proxy_usd")
+        mcap = Decimal(value) if value is not None else None
+        if current is None:
+            current = {
+                "token": token,
+                "curve": row["curve"],
+                "quote_token": row["quote_token"],
+                "launch_block": row["launch_block"],
+                "pricing_statuses": set(),
+                "price_points": 0,
+                "priced_points": 0,
+                "max_market_cap_proxy_usd": None,
+                "max_market_cap_block": None,
+                "crossed_100k": False,
+            }
+            summary[token] = current
+        current["pricing_statuses"].add(row["pricing_status"])
+        current["price_points"] += 1
+        if mcap is None:
+            continue
+        current["priced_points"] += 1
+        previous = current["max_market_cap_proxy_usd"]
+        if previous is None or mcap > previous:
+            current["max_market_cap_proxy_usd"] = mcap
+            current["max_market_cap_block"] = row["block_number"]
+        if mcap >= Decimal("100000"):
+            current["crossed_100k"] = True
+
+    output = []
+    for current in summary.values():
+        row = dict(current)
+        row["pricing_statuses"] = sorted(row["pricing_statuses"])
+        if row["max_market_cap_proxy_usd"] is not None:
+            row["max_market_cap_proxy_usd"] = str(row["max_market_cap_proxy_usd"])
+        output.append(row)
+    output.sort(key=lambda row: (row["launch_block"], row["token"]))
+    return output
