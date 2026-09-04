@@ -61,7 +61,9 @@ def audit_unpriced_v3_quote_routes(
         candidates = []
         lookup_errors = []
 
+        searched_anchors = []
         for anchor, usd_semantics in anchor_specs:
+            searched_anchors.append(anchor)
             anchor_decimals = special_decimals.get(anchor)
             if anchor_decimals is None:
                 raise ValueError(
@@ -161,6 +163,19 @@ def audit_unpriced_v3_quote_routes(
                     candidate["error"] = f"{type(exc).__name__}: {exc}"
                 candidates.append(candidate)
 
+            # Prefer a direct USDG source. WETH is only a fallback because
+            # probing both anchors doubles archive state reads without
+            # improving coverage once a causal USDG route is already known.
+            if (
+                anchor == ROBINHOOD_USDG.lower()
+                and any(
+                    row["causal_ready"]
+                    and row["anchor_token"] == anchor
+                    for row in candidates
+                )
+            ):
+                break
+
         ready = [row for row in candidates if row["causal_ready"]]
         output.append({
             "quote_token": token,
@@ -172,6 +187,8 @@ def audit_unpriced_v3_quote_routes(
             "versions": source.get("versions", {}),
             "v3_candidates": candidates,
             "v3_ready_candidates": len(ready),
+            "searched_anchors": searched_anchors,
+            "route_search_policy": "direct_usdg_then_weth_fallback",
             "direct_usdg_ready": any(
                 row["causal_ready"]
                 and row["anchor_token"] == ROBINHOOD_USDG.lower()
