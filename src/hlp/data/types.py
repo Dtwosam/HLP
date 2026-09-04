@@ -1,0 +1,65 @@
+"""Canonical immutable records used at the ingestion boundary."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class RawLog:
+    chain_id: int
+    block_number: int
+    block_hash: str
+    transaction_hash: str
+    transaction_index: int
+    log_index: int
+    address: str
+    topics: tuple[str, ...]
+    data: str
+    removed: bool
+
+    @classmethod
+    def from_rpc(cls, chain_id: int, payload: dict[str, Any]) -> "RawLog":
+        return cls(
+            chain_id=chain_id,
+            block_number=int(payload["blockNumber"], 16),
+            block_hash=payload["blockHash"].lower(),
+            transaction_hash=payload["transactionHash"].lower(),
+            transaction_index=int(payload["transactionIndex"], 16),
+            log_index=int(payload["logIndex"], 16),
+            address=payload["address"].lower(),
+            topics=tuple(topic.lower() for topic in payload.get("topics", [])),
+            data=payload.get("data", "0x").lower(),
+            removed=bool(payload.get("removed", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PonsLaunch:
+    version: str
+    token: str
+    deployer: str
+    pair_token: str
+    block_number: int
+    transaction_hash: str
+    curve: str | None = None
+    pool: str | None = None
+    launch_config_id: int | None = None
+    graduation_threshold: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CurveTrade:
+    token: str
+    curve: str
+    side: str
+    actor: str
+    recipient: str
+    quote_amount: int
+    token_amount: int
+    fee: int
+    tax: int
+    block_number: int
+    transaction_hash: str
+    log_index: int
