@@ -9,6 +9,7 @@ from dataclasses import asdict
 
 from hlp.config import DEFAULT_RPC_URL, PONS_V1_FACTORY, PONS_V2_FACTORY
 from hlp.data.blockscout import BlockscoutClient
+from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.rpc import RpcClient
 from hlp.protocols.pons import (
     V1_TOKEN_LAUNCHED_TOPIC,
@@ -68,6 +69,40 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def cmd_hood_smoke(args: argparse.Namespace) -> int:
+    hood = HoodExplorerClient(timeout=args.timeout)
+    deployments = {}
+    for name, address, topic in (
+        ("pons_v1", PONS_V1_FACTORY, V1_TOKEN_LAUNCHED_TOPIC),
+        ("pons_v2", PONS_V2_FACTORY, V2_TOKEN_LAUNCHED_TOPIC),
+    ):
+        deployment = hood.contract_deployment(address)
+        block = deployment["block_number"]
+        code_at = hood.get_code(address, block)
+        code_before = "0x" if block == 0 else hood.get_code(address, block - 1)
+        if code_at in {"0x", "0x0", ""}:
+            raise SystemExit(f"{name}: no code at creation block {block}")
+        if block > 0 and code_before not in {"0x", "0x0", ""}:
+            raise SystemExit(f"{name}: code unexpectedly exists before creation block")
+        first_launch = hood.get_logs_page(
+            address=address,
+            topic0=topic,
+            from_block=block,
+            to_block="latest",
+            page=1,
+            offset=1,
+            sort="asc",
+        )
+        deployments[name] = {
+            **deployment,
+            "code_bytes": len(code_at.removeprefix("0x")) // 2,
+            "first_launch_block": first_launch[0].block_number if first_launch else None,
+            "first_launch_tx": first_launch[0].transaction_hash if first_launch else None,
+        }
+    print(json.dumps({"ok": True, "deployments": deployments}, sort_keys=True))
     return 0
 
 
@@ -134,6 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     smoke = sub.add_parser("network-smoke")
     smoke.set_defaults(func=cmd_network_smoke)
+
+    hood = sub.add_parser("hood-smoke")
+    hood.set_defaults(func=cmd_hood_smoke)
 
     creation = sub.add_parser("contract-creation")
     creation.add_argument("address")
