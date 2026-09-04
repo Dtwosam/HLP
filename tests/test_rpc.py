@@ -119,3 +119,21 @@ def test_non_429_has_no_retry_after():
         None,
     )
     assert RpcClient._retry_after_seconds(error) is None
+
+
+def test_extra_headers_are_attached_without_changing_url():
+    captured = {}
+
+    def transport(request, timeout):
+        captured["url"] = request.full_url
+        captured["key"] = request.get_header("X-api-key")
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": hex(4663)}).encode()
+
+    rpc = RpcClient(
+        "https://rpc.example.invalid/evm/4663",
+        extra_headers={"X-API-Key": "secret-value"},
+        transport=transport,
+    )
+    assert rpc.chain_id() == 4663
+    assert captured["url"] == "https://rpc.example.invalid/evm/4663"
+    assert captured["key"] == "secret-value"
