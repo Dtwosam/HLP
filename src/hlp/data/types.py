@@ -43,6 +43,8 @@ class PonsLaunch:
     pair_token: str
     block_number: int
     transaction_hash: str
+    transaction_index: int | None
+    log_index: int
     curve: str | None = None
     pool: str | None = None
     launch_config_id: int | None = None
@@ -62,6 +64,7 @@ class CurveTrade:
     tax: int
     block_number: int
     transaction_hash: str
+    transaction_index: int | None
     log_index: int
 
 
@@ -77,6 +80,7 @@ class V3Swap:
     tick: int
     block_number: int
     transaction_hash: str
+    transaction_index: int | None
     log_index: int
 
 
@@ -93,6 +97,7 @@ class V4Swap:
     fee: int
     block_number: int
     transaction_hash: str
+    transaction_index: int | None
     log_index: int
 
 
@@ -105,4 +110,5 @@ class PonsV2PoolRegistration:
     creator: str
     block_number: int
     transaction_hash: str
+    transaction_index: int | None
     log_index: int
