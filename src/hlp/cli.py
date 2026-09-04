@@ -1472,7 +1472,7 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
 
 
 def cmd_rpc_v2_stock_oracle_window(args: argparse.Namespace) -> int:
-    """Build official Stock Token/USD initial states and shared update tape."""
+    """Build official Pons Stock Token/USD initial states and update tape."""
     registry = _load_jsonl(args.registry)
     assets = RobinhoodAssetsClient(timeout=args.timeout, attempts=args.attempts)
     directory = ChainlinkDirectoryClient(
@@ -2896,6 +2896,15 @@ def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
     )
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    quote_decimals_by_token = {}
+    feed_path = getattr(args, "oracle_feed_registry", None)
+    if feed_path:
+        quote_decimals_by_token = {
+            row["quote_token"].lower(): int(row["quote_decimals"])
+            for row in _load_jsonl(feed_path)
+        }
+
     points = build_v1_market_cap_points(
         registry,
         _iter_jsonl(args.swaps),
@@ -2903,6 +2912,9 @@ def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
         initial_weth_usd=initial_weth_usd,
         weth_decimals=weth_state.decimals,
         usdg_decimals=usdg_state.decimals,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=quote_usd_updates,
+        quote_decimals_by_token=quote_decimals_by_token,
     )
 
     point_manifest = write_jsonl_snapshot(
@@ -2920,6 +2932,21 @@ def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
             "to_block": args.to_block,
             "weth_decimals": weth_state.decimals,
             "usdg_decimals": usdg_state.decimals,
+            "oracle_feed_registry": (
+                None
+                if not getattr(args, "oracle_feed_registry", None)
+                else Path(args.oracle_feed_registry).name
+            ),
+            "oracle_state": (
+                None
+                if not getattr(args, "oracle_state", None)
+                else Path(args.oracle_state).name
+            ),
+            "oracle_events": (
+                None
+                if not getattr(args, "oracle_events", None)
+                else Path(args.oracle_events).name
+            ),
         },
     )
 
@@ -3497,6 +3524,17 @@ def build_parser() -> argparse.ArgumentParser:
     v2_stock_oracle.add_argument("--out", required=True)
     v2_stock_oracle.set_defaults(func=cmd_rpc_v2_stock_oracle_window)
 
+    pons_stock_oracle = sub.add_parser("rpc-pons-stock-oracle-window")
+    pons_stock_oracle.add_argument("--registry", required=True)
+    pons_stock_oracle.add_argument("--from-block", type=int, required=True)
+    pons_stock_oracle.add_argument("--to-block", type=int, required=True)
+    pons_stock_oracle.add_argument("--chunk-size", type=int, default=100_000)
+    pons_stock_oracle.add_argument("--min-chunk-size", type=int, default=1)
+    pons_stock_oracle.add_argument("--feed-out", required=True)
+    pons_stock_oracle.add_argument("--state-out", required=True)
+    pons_stock_oracle.add_argument("--out", required=True)
+    pons_stock_oracle.set_defaults(func=cmd_rpc_v2_stock_oracle_window)
+
     v2_v4_mcap = sub.add_parser("rpc-v2-v4-market-cap-window")
     v2_v4_mcap.add_argument("--registry", required=True)
     v2_v4_mcap.add_argument("--curve-points", required=True)
@@ -3573,6 +3611,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--usd-anchor-pool",
         default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     )
+    market_caps.add_argument("--oracle-feed-registry")
+    market_caps.add_argument("--oracle-state")
+    market_caps.add_argument("--oracle-events")
     market_caps.add_argument("--out", required=True)
     market_caps.add_argument("--summary-out", required=True)
     market_caps.set_defaults(func=cmd_rpc_v1_market_cap_window)
