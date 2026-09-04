@@ -143,3 +143,41 @@ def test_v4_stock_quote_uses_oracle_timeline():
     )
     assert rows[0]["pricing_status"] == "priced_chainlink_stock_token"
     assert Decimal(rows[0]["quote_usd"]) == Decimal("250")
+
+
+def test_v4_initialize_event_type_is_preserved():
+    registrations = [{
+        "pool_id": POOL_ID,
+        "token": TOKEN,
+        "quote_token": ROBINHOOD_WETH.lower(),
+        "creator": "0x" + "55" * 20,
+        "block_number": 20,
+        "transaction_hash": "0x" + "cc" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }]
+    events = [{
+        "pool_id": POOL_ID,
+        "pool_manager": "0x" + "66" * 20,
+        "currency0": TOKEN,
+        "currency1": ROBINHOOD_WETH.lower(),
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "event_type": "v4_initialize",
+        "block_number": 20,
+        "transaction_hash": "0x" + "dd" * 32,
+        "transaction_index": 2,
+        "log_index": 1,
+    }]
+    rows = list(
+        build_v2_v4_market_cap_points(
+            registry(),
+            registrations,
+            events,
+            [],
+            initial_weth_usd=Decimal("2000"),
+        )
+    )
+    assert rows[0]["event_type"] == "v4_initialize"
+    assert rows[0]["phase"] == "v4"
+
