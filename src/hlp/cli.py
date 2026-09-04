@@ -26,10 +26,14 @@ from hlp.config import (
 )
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
+    V3_POOL_CREATED_TOPIC,
     V3_SWAP_TOPIC,
+    V4_INITIALIZE_TOPIC,
     V4_SWAP_TOPIC,
     decode_pons_v2_pool_registered,
+    decode_v3_pool_created,
     decode_v3_swap,
+    decode_v4_pool_initialized,
     decode_v4_swap,
 )
 from hlp.data.blockscout import BlockscoutClient
@@ -333,6 +337,75 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+
+
+def cmd_rpc_dex_pool_window(args: argparse.Namespace) -> int:
+    """Acquire chain-wide canonical Uniswap V3/V4 pool-creation tapes."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+
+    v3_raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=UNISWAP_V3_FACTORY,
+        topics=[V3_POOL_CREATED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    v3_manifest = write_jsonl_snapshot(
+        (decode_v3_pool_created(row) for row in v3_raw),
+        output=Path(args.v3_out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v3_pool_census",
+            "factory": UNISWAP_V3_FACTORY.lower(),
+            "event_topic0": V3_POOL_CREATED_TOPIC,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+
+    v4_raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=UNISWAP_V4_POOL_MANAGER,
+        topics=[V4_INITIALIZE_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    v4_manifest = write_jsonl_snapshot(
+        (decode_v4_pool_initialized(row) for row in v4_raw),
+        output=Path(args.v4_out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v4_pool_census",
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "event_topic0": V4_INITIALIZE_TOPIC,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+
+    print(
+        json.dumps(
+            {
+                "v3": v3_manifest,
+                "v4": v4_manifest,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
 
 
 def cmd_rpc_v2_stock_oracle_window(args: argparse.Namespace) -> int:
@@ -1641,6 +1714,16 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4.set_defaults(func=cmd_rpc_v2_v4_tape)
 
 
+
+
+    dex_census = sub.add_parser("rpc-dex-pool-window")
+    dex_census.add_argument("--from-block", type=int, required=True)
+    dex_census.add_argument("--to-block", type=int, required=True)
+    dex_census.add_argument("--chunk-size", type=int, default=100_000)
+    dex_census.add_argument("--min-chunk-size", type=int, default=1)
+    dex_census.add_argument("--v3-out", required=True)
+    dex_census.add_argument("--v4-out", required=True)
+    dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
 
     v2_stock_oracle = sub.add_parser("rpc-v2-stock-oracle-window")
     v2_stock_oracle.add_argument("--registry", required=True)
