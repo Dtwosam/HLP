@@ -98,6 +98,17 @@ class RpcClient:
     def get_code(self, address: str, block: int | str = "latest") -> str:
         return self.call("eth_getCode", [address, _hex_quantity(block)])
 
+    def eth_call(
+        self,
+        to: str,
+        data: str,
+        block: int | str = "latest",
+    ) -> str:
+        return self.call(
+            "eth_call",
+            [{"to": to, "data": data}, _hex_quantity(block)],
+        )
+
     def find_first_code_block(
         self,
         address: str,
