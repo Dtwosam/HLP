@@ -1,4 +1,5 @@
 name: phase1-pons-quote-audit-one-shot
+# Current-head probe: verify RH-prefixed Chainlink feed discovery.
 
 on:
   push:
