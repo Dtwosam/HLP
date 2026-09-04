@@ -149,6 +149,11 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
                 "pricing_statuses": set(),
                 "price_points": 0,
                 "priced_points": 0,
+                "unpriced_points": 0,
+                "first_priced_block": None,
+                "last_priced_block": None,
+                "first_unpriced_block": None,
+                "last_unpriced_block": None,
                 "max_market_cap_proxy_usd": None,
                 "max_market_cap_block": None,
                 "crossed_100k": False,
@@ -156,9 +161,17 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
             summary[token] = current
         current["pricing_statuses"].add(row["pricing_status"])
         current["price_points"] += 1
+        block = int(row["block_number"])
         if mcap is None:
+            current["unpriced_points"] += 1
+            if current["first_unpriced_block"] is None:
+                current["first_unpriced_block"] = block
+            current["last_unpriced_block"] = block
             continue
         current["priced_points"] += 1
+        if current["first_priced_block"] is None:
+            current["first_priced_block"] = block
+        current["last_priced_block"] = block
         previous = current["max_market_cap_proxy_usd"]
         if previous is None or mcap > previous:
             current["max_market_cap_proxy_usd"] = mcap
@@ -172,6 +185,14 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
         row["pricing_statuses"] = sorted(row["pricing_statuses"])
         if row["max_market_cap_proxy_usd"] is not None:
             row["max_market_cap_proxy_usd"] = str(row["max_market_cap_proxy_usd"])
+        row["pricing_complete"] = row["unpriced_points"] == 0
+        row["eligibility_status"] = (
+            "eligible"
+            if row["crossed_100k"]
+            else "unknown"
+            if row["unpriced_points"] > 0
+            else "ineligible"
+        )
         output.append(row)
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
     return output
