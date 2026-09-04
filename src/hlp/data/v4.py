@@ -96,7 +96,7 @@ def build_v2_v4_market_cap_points(
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
 ) -> Iterator[dict]:
-    """Price post-graduation V4 swaps through the Pons pool-id registry."""
+    """Price post-graduation V4 Initialize/Swap events through the Pons registry."""
     registry = {row["token"].lower(): row for row in registry_rows}
     registrations = {row["pool_id"].lower(): row for row in registration_rows}
     usd = QuoteUsdTimeline(
@@ -130,5 +130,5 @@ def build_v2_v4_market_cap_points(
         )
         base = dict(swap)
         base["phase"] = "v4"
-        base["event_type"] = "v4_swap"
+        base.setdefault("event_type", "v4_swap")
         yield _attach_usd(base, launch, quote_per_token, usd)
