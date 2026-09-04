@@ -32,11 +32,18 @@ class QuoteUsdTimeline:
             ZERO_ADDRESS: initial_weth_usd,
             ROBINHOOD_USDG.lower(): Decimal(1),
         }
+        self._active_status: dict[str, str] = {
+            ROBINHOOD_WETH.lower(): "priced_weth_usdg",
+            ZERO_ADDRESS: "priced_weth_usdg",
+            ROBINHOOD_USDG.lower(): "priced_usdg_nominal",
+        }
         for token, price in (initial_quote_usd or {}).items():
             value = Decimal(price)
             if value <= 0:
                 raise ValueError(f"initial USD price must be positive: {token}")
-            self._active[token.lower()] = value
+            normalized = token.lower()
+            self._active[normalized] = value
+            self._active_status[normalized] = "priced_chainlink_stock_token"
 
         def checked_source(
             rows: Iterable[dict],
@@ -101,8 +108,23 @@ class QuoteUsdTimeline:
             token = self._next["quote_token"].lower()
             price = Decimal(self._next["usd_price"])
             self._active[token] = price
+            status = self._next.get("pricing_status")
+            if status is None:
+                source = str(self._next.get("pricing_source") or "").lower()
+                if "v4" in source:
+                    status = "priced_v4_quote_fallback"
+                elif "v3" in source:
+                    status = "priced_v3_quote_fallback"
+                elif token == ROBINHOOD_WETH.lower():
+                    status = "priced_weth_usdg"
+                elif token == ROBINHOOD_USDG.lower():
+                    status = "priced_usdg_nominal"
+                else:
+                    status = "priced_chainlink_stock_token"
+            self._active_status[token] = str(status)
             if token == ROBINHOOD_WETH.lower():
                 self._active[ZERO_ADDRESS] = price
+                self._active_status[ZERO_ADDRESS] = "priced_weth_usdg"
             self._next = next(self._updates, None)
 
     def price(self, quote_token: str) -> Decimal | None:
@@ -110,13 +132,12 @@ class QuoteUsdTimeline:
 
     def pricing_status(self, quote_token: str) -> str:
         token = quote_token.lower()
-        if token in {ZERO_ADDRESS, ROBINHOOD_WETH.lower()}:
-            return "priced_weth_usdg"
-        if token == ROBINHOOD_USDG.lower():
-            return "priced_usdg_nominal"
-        if token in self._active:
-            return "priced_chainlink_stock_token"
-        return "unsupported_quote"
+        if token not in self._active:
+            return "unsupported_quote"
+        return self._active_status.get(
+            token,
+            "priced_chainlink_stock_token",
+        )
 
 
 

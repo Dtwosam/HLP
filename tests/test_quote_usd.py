@@ -170,3 +170,49 @@ def test_prepare_quote_usd_inputs_rejects_duplicate_source_state():
         assert "duplicate" in str(exc)
     else:
         raise AssertionError("duplicate quote source state must fail closed")
+
+
+
+def test_timeline_preserves_chainlink_crypto_status():
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=Decimal("1900"),
+        oracle_updates=[{
+            "quote_token": STOCK,
+            "pricing_status": "priced_chainlink_crypto_token",
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 0,
+            "usd_price": "100000",
+        }],
+    )
+    timeline.advance_to((10, 1, 0))
+    assert timeline.pricing_status(STOCK) == "priced_chainlink_crypto_token"
+
+
+def test_timeline_marks_v3_and_v4_fallback_sources():
+    v3 = "0x" + "22" * 20
+    v4 = "0x" + "33" * 20
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=Decimal("1900"),
+        oracle_updates=[
+            {
+                "quote_token": v3,
+                "pricing_source": "uniswap_v3_direct_usdg",
+                "block_number": 10,
+                "transaction_index": 1,
+                "log_index": 0,
+                "usd_price": "200",
+            },
+            {
+                "quote_token": v4,
+                "pricing_source": "uniswap_v4_direct_usdg",
+                "block_number": 11,
+                "transaction_index": 1,
+                "log_index": 0,
+                "usd_price": "210",
+            },
+        ],
+    )
+    timeline.advance_to((11, 1, 0))
+    assert timeline.pricing_status(v3) == "priced_v3_quote_fallback"
+    assert timeline.pricing_status(v4) == "priced_v4_quote_fallback"

@@ -192,6 +192,10 @@ def reconstruct_chainlink_usd_tapes(
         spec = {
             "quote_token": quote_token,
             "symbol": symbol,
+            "pricing_status": raw_spec.get(
+                "pricing_status",
+                "priced_chainlink_stock_token",
+            ),
             "feed": feed,
             "aggregator": start_aggregator,
             "heartbeat_seconds": heartbeat,
@@ -246,6 +250,7 @@ def reconstruct_chainlink_usd_tapes(
             yield {
                 "quote_token": spec["quote_token"],
                 "symbol": spec["symbol"],
+                "pricing_status": spec["pricing_status"],
                 "feed": spec["feed"],
                 "aggregator": aggregator,
                 "heartbeat_seconds": spec["heartbeat_seconds"],
@@ -335,6 +340,10 @@ def reconstruct_staggered_chainlink_usd_tapes(
         spec = {
             "quote_token": quote_token,
             "symbol": symbol,
+            "pricing_status": raw_spec.get(
+                "pricing_status",
+                "priced_chainlink_stock_token",
+            ),
             "feed": feed,
             "aggregator": start_aggregator,
             "activation_block": activation,
@@ -391,6 +400,7 @@ def reconstruct_staggered_chainlink_usd_tapes(
             yield {
                 "quote_token": spec["quote_token"],
                 "symbol": spec["symbol"],
+                "pricing_status": spec["pricing_status"],
                 "feed": spec["feed"],
                 "aggregator": aggregator,
                 "activation_block": spec["activation_block"],
