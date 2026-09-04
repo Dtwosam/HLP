@@ -140,5 +140,4 @@ def decode_v2_curve_trade(log: RawLog, *, token: str) -> CurveTrade:
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
         log_index=log.log_index,
-        log_index=log.log_index,
     )
