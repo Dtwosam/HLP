@@ -190,3 +190,15 @@ def test_v1_lifecycle_eligibility_parses():
     ])
     assert args.snapshot_head == 100
     assert args.oracle_state is None
+
+
+
+def test_unpriced_quote_v3_route_audit_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-unpriced-quote-v3-routes",
+        "--quote-registry", "quotes.jsonl",
+        "--out", "routes.jsonl",
+    ])
+    assert args.quote_registry == "quotes.jsonl"
+    assert args.out == "routes.jsonl"

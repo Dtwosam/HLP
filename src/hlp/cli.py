@@ -67,6 +67,7 @@ from hlp.data.quote_registry import (
     CHAINLINK_PRICED_STATUSES,
     build_pons_quote_registry,
 )
+from hlp.data.quote_routes import audit_unpriced_v3_quote_routes
 from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
@@ -1504,6 +1505,56 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
         "blocked": len(rows) - ready,
         "blocked_tokens": [
             row["quote_token"] for row in rows if not row["causal_ready"]
+        ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_unpriced_quote_v3_routes(
+    args: argparse.Namespace,
+) -> int:
+    """Audit causal V3 USDG/WETH routes for feedless Pons quote assets."""
+    quote_rows = _load_jsonl(args.quote_registry)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = audit_unpriced_v3_quote_routes(rpc, quote_rows)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "point_in_time_uniswap_v3_factory_route_audit",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+            "factory": UNISWAP_V3_FACTORY.lower(),
+            "anchors": [
+                ROBINHOOD_USDG.lower(),
+                ROBINHOOD_WETH.lower(),
+            ],
+            "fee_tiers": [100, 500, 3000, 10000],
+            "causal_semantics": (
+                "factory/pool state read at first Pons use block minus one"
+            ),
+        },
+    )
+    ready = [row for row in rows if row["v3_causal_ready"]]
+    print(json.dumps({
+        **manifest,
+        "unpriced_quote_assets": len(rows),
+        "v3_causal_ready": len(ready),
+        "direct_usdg_ready": sum(
+            bool(row["direct_usdg_ready"]) for row in rows
+        ),
+        "direct_weth_ready": sum(
+            bool(row["direct_weth_ready"]) for row in rows
+        ),
+        "still_unresolved": len(rows) - len(ready),
+        "unresolved_tokens": [
+            row["quote_token"]
+            for row in rows
+            if not row["v3_causal_ready"]
         ],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -4067,6 +4118,15 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    quote_v3_routes = sub.add_parser(
+        "rpc-pons-unpriced-quote-v3-routes"
+    )
+    quote_v3_routes.add_argument("--quote-registry", required=True)
+    quote_v3_routes.add_argument("--out", required=True)
+    quote_v3_routes.set_defaults(
+        func=cmd_rpc_pons_unpriced_quote_v3_routes
+    )
 
     quote_audit = sub.add_parser("pons-quote-audit")
     quote_audit.add_argument("--registry", required=True)
