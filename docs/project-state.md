@@ -2,9 +2,9 @@
 
 Updated: 2026-09-04
 Repository: Dtwosam/HLP
-Current phase: Phase 0 — Source of Truth & Free-Data Viability
-Status: IN PROGRESS
-Next phase: Phase 1 — Historical/Live Data Acquisition Spike
+Current phase: Phase 1 — Historical/Live Data Acquisition Spike
+Status: ACTIVE
+Next phase: Phase 2 — Chain-Wide Universe & Outcome Dataset (LOCKED until Phase 1 PASS)
 
 ## Frozen user requirements
 
@@ -12,74 +12,101 @@ Next phase: Phase 1 — Historical/Live Data Acquisition Spike
 - Study every eligible speculative/memecoin token that reaches at least $100,000 market-cap proxy at any point.
 - The only precommitted positive threshold is >=5x after the first major dump.
 - 5x is the minimum, not the target/cap.
-- Preserve full upside magnitude so 10x/20x/50x+ runners teach the model more than a binary label.
-- Do not pre-assume what holder/wallet/volume/liquidity signal matters.
+- Preserve full upside magnitude so 10x/20x/50x+ runners remain distinct outcomes.
+- Do not pre-assume holder/wallet/volume/liquidity/chart signals.
 - Derive predictive patterns from the studied population.
-- End product is a live buy-signal/ranking tool.
-- Live coins continue becoming training data.
-- Model updates are controlled, validated and versioned.
-- User expects HLP to be built end to end in this repository.
+- End product is a live comeback/buy-signal ranking tool.
+- Live coins continue becoming future training data.
+- Production-model updates are controlled champion/challenger promotions.
 - Development/data/infrastructure must remain $0.
 
-## Phase 0 completed
+## Phase 0 — PASS
 
-- [x] correct repository confirmed
-- [x] repository inspected: clean baseline
-- [x] official Robinhood network/access sources verified
-- [x] current official Pons source repository inspected
-- [x] Pons V1/V2 factory generations/events identified
-- [x] Alchemy free-tier capabilities/eth_getLogs limitation verified
-- [x] The Graph/Substreams Robinhood support/free allowance verified
-- [x] Robinhood canonical Stock Token registry/API verified
-- [x] local/hosted storage options reviewed
-- [x] source-of-truth documents drafted on phase0/source-of-truth
+Source-of-truth PR #2 was merged to main at:
+- `10ba7dc07f4f830211a2da70bac0327f8085dd87`
 
-## Phase 0 remaining gate
+The master spec, build order, anti-leakage standard and $0 rules are frozen.
 
-- [ ] review source-of-truth PR
-- [ ] record Phase 0 PASS/checkpoint after merge
+## Phase 1 — verified foundation
 
-## Known viability risk
+### Live/current chain access
+- [x] official Robinhood public RPC reports chain ID 4663
+- [x] current block/header access
+- [x] bounded current eth_getLogs
+- [x] current bytecode verified for Pons V1/V2 factories
+- [x] current bytecode verified for Pons V2 meme hook and Uniswap V4 PoolManager
+- [x] official public RPC proven pruned for older historical state
 
-Full historical bulk ingestion is not yet proven at $0.
+### Protocol decoding
+- [x] Pons V1/V2 launch event decoding
+- [x] Pons V2 CurveBuy/CurveSell decoding
+- [x] Uniswap V3 Swap decoding
+- [x] Uniswap V4 Swap decoding
+- [x] Pons V2 PoolRegistered token/pool bridge
+- [x] ERC-20/state helpers
+- [x] deterministic V3/V4/curve price and market-cap-proxy math
+- [x] immutable JSONL snapshot + SHA-256 provenance manifests
 
-What Phase 1 has established so far:
-- Robinhood public RPC is live and usable for current/bounded reads, but it is pruned for older state;
-- both official Pons V1/V2 factory bytecodes are present on mainnet;
-- Alchemy Free cannot efficiently crawl all Robinhood logs because its Robinhood eth_getLogs range is capped at 10 blocks;
-- hoodexplorer documents a keyless indexed-log/archive API that could avoid scanning every block, but GitHub-hosted runners currently cannot route to that service;
-- The Graph/Substreams remains the other leading bulk path, with finite free processed-block/egress quotas.
+### Historical/archive access
+- [x] SolidRPC keyless Robinhood route reachable from HLP's GitHub runner
+- [x] SolidRPC route successfully read Pons V1 bytecode at block 30,000,000
+- [x] SolidRPC route successfully returned historical Pons launch logs
+- [x] exact Pons V1 first-code block: **8,991,118** (2026-07-13 21:29:03 UTC)
+- [x] exact Pons V2 first-code block: **26,841,846** (2026-08-03 14:41:19 UTC)
+- [x] generic adaptive eth_getLogs range splitting
+- [x] request pacing and Retry-After-aware HTTP 429 handling
+- [x] archive API-key support through headers rather than committed URLs
+- [x] Blockscout legacy + V2 APIs tested and rejected as GitHub acquisition routes (HTTP 403)
+- [x] BlockReq public endpoint rejected for archive history
+- [x] NodeFlare public endpoint unsuitable from shared GitHub runner (HTTP 429)
+- [x] hoodexplorer client implemented but provider unreachable from current runner
 
-Phase 1 must prove at least one complete-enough historical path from a reachable runtime and measure it before dataset construction.
+## Current preferred zero-cost acquisition architecture
 
-## Current Phase 1 progress
+**Live/head:** official Robinhood public RPC (plus later WebSocket/Alchemy if needed).
 
-- [x] Python package/test scaffold
-- [x] canonical Robinhood RPC client with wrong-chain guard
-- [x] immutable raw-log / Pons launch / curve-trade record types
-- [x] verified Pons V1/V2 factory addresses and source event signatures
-- [x] Pons V1/V2 launch decoders
-- [x] Pons V2 CurveBuy/CurveSell decoders
-- [x] public-RPC live smoke: chain 4663, both factory bytecodes, bounded logs
-- [x] public-RPC archive limitation reproduced and documented
-- [x] hoodexplorer client, rate-aware pagination and immutable snapshot manifest writer
-- [x] reproducible hood-pons-sample CLI
-- [x] required CI unit tests green during Phase 1 iterations
-- [ ] validate hoodexplorer sampler from a network that can reach it
-- [ ] benchmark Substreams/reusable Uniswap package path
-- [x] build/test Uniswap V3/V4 swap decoders and Pons V2 pool-registration bridge
-- [x] live-bytecode smoke for current Pons V2 meme hook and Uniswap V4 PoolManager
-- [ ] reconstruct representative Pons tokens end-to-end
-- [ ] measure full-history request/block/egress projection
-- [ ] Phase 1 PASS/BLOCK decision
+**Historical archive:** SolidRPC Robinhood archive.
+
+Verified provider facts at 2026-09-04:
+- keyless public Robinhood route works from our runner;
+- public eth_getLogs maximum range is 2,000 blocks;
+- authenticated Free plan is $0, no card required;
+- Free allowance is 10,000 RPC method calls per UTC day;
+- Robinhood uses archive nodes on the Free plan;
+- authenticated route removes the public 2,000-block policy cap; practical ranges are still discovered adaptively.
+
+Secrets are never committed. HLP accepts a free archive key by environment header when sustained backfill begins.
+
+## Query-efficiency design
+
+Do not issue one historical API query per coin unless unavoidable.
+
+Planned high-level scans:
+1. factory launch events -> token/curve/pool registry;
+2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
+3. Uniswap V4 swaps from the single PoolManager + pool IDs;
+4. V3 swaps through protocol/indexed tape or efficiently batched pool filters;
+5. only after the $100k universe is known, fetch ERC-20 Transfer history for eligible tokens to reconstruct historical holder state.
+
+This sequencing prevents transfer/holder backfills for the overwhelming majority of coins that never become research-eligible.
+
+## Phase 1 remaining gates
+
+- [ ] benchmark wide authenticated Free eth_getLogs ranges and record safe adaptive widths
+- [ ] reconstruct >=10 representative Pons tokens end-to-end
+- [ ] cross-check reconstructed launch/trade/price paths against independent DEX/explorer evidence
+- [ ] quantify full-history request and storage requirements
+- [ ] prove the complete-enough Pons + material chain-wide DEX acquisition plan remains within $0
+- [ ] record Phase 1 PASS and merge PR #3
+
+Phase 2 stays locked until these pass.
 
 ## Deferred decisions
 
 - exact first-major-dump algorithm;
-- exact USD pricing route;
-- exact chronological split dates;
-- exact feature list;
+- exact chronological research split dates;
+- exact discovered feature set;
 - exact model family;
-- exact signal threshold;
-- exact live UI/notification surface;
-- any future execution/trading integration.
+- exact production signal threshold;
+- exact notification/dashboard surface;
+- any future automated execution.
