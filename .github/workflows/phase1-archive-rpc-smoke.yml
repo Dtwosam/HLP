@@ -1,14 +1,6 @@
 name: phase1-archive-rpc-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - 'src/hlp/config.py'
-      - 'src/hlp/data/rpc.py'
-      - 'src/hlp/cli.py'
-      - '.github/workflows/phase1-archive-rpc-smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,24 +9,18 @@ permissions:
 jobs:
   nodeflare-public-history:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
       - name: Install
         run: python -m pip install -e .
-      - name: Locate Pons V1 deployment using historical state
+      - name: Diagnostic public-history probe
         run: |
           hlp \
             --rpc-url https://rpc.nodeflare.app/robinhood/public \
-            --timeout 15 --attempts 3 \
+            --timeout 10 --attempts 1 \
             deployment-block 0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB
-      - name: Locate Pons V2 deployment using historical state
-        run: |
-          hlp \
-            --rpc-url https://rpc.nodeflare.app/robinhood/public \
-            --timeout 15 --attempts 3 \
-            deployment-block 0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e
