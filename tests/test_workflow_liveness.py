@@ -195,3 +195,16 @@ def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
+
+
+
+def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-weth-usdg-anchor-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
