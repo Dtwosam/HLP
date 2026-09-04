@@ -2018,10 +2018,13 @@ def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
         V2_CURVE_SELL_TOPIC,
         V2_CURVE_BUYBACK_LOCKED_TOPIC,
     ]
+    curve_address_filter = (
+        None if args.global_topic_scan else sorted(curve_to_token)
+    )
     raw_tape = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
-        address=sorted(curve_to_token),
+        address=curve_address_filter,
         topics=[topics],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
@@ -2060,7 +2063,12 @@ def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
             "protocol": "pons_v2_shared_curve_tape",
             "registry": Path(args.registry).name,
             "registry_curves": len(curve_to_token),
-            "server_side_curve_address_filter": True,
+            "server_side_curve_address_filter": curve_address_filter is not None,
+            "curve_filter_mode": (
+                "address_plus_topic"
+                if curve_address_filter is not None
+                else "global_topic_then_registry"
+            ),
             "event_topic0_or": topics,
             "from_block": args.from_block,
             "to_block": args.to_block,
@@ -2778,10 +2786,13 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
+    pool_address_filter = (
+        None if args.global_topic_scan else sorted(pool_launch_block)
+    )
     raw_tape = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
-        address=sorted(pool_launch_block),
+        address=pool_address_filter,
         topics=[[V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC]],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
@@ -2827,7 +2838,12 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
             "event_topic0_or": [V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC],
             "registry": str(Path(args.registry).name),
             "registry_pools": len(pool_launch_block),
-            "server_side_pool_address_filter": True,
+            "server_side_pool_address_filter": pool_address_filter is not None,
+            "pool_filter_mode": (
+                "address_plus_topic"
+                if pool_address_filter is not None
+                else "global_topic_then_registry"
+            ),
             "from_block": args.from_block,
             "to_block": args.to_block,
             "initial_chunk_size": args.chunk_size,
@@ -3253,6 +3269,15 @@ def build_parser() -> argparse.ArgumentParser:
     v2_tape.add_argument("--to-block", type=int, required=True)
     v2_tape.add_argument("--chunk-size", type=int, default=100_000)
     v2_tape.add_argument("--min-chunk-size", type=int, default=1)
+    v2_tape.add_argument(
+        "--global-topic-scan",
+        action="store_true",
+        help=(
+            "scan matching curve event signatures globally and filter against "
+            "the frozen Pons registry client-side; useful when the curve "
+            "address list is too large for one RPC filter"
+        ),
+    )
     v2_tape.add_argument("--out", required=True)
     v2_tape.set_defaults(func=cmd_rpc_v2_curve_tape)
 
@@ -3525,6 +3550,14 @@ def build_parser() -> argparse.ArgumentParser:
     tape.add_argument("--to-block", type=int, required=True)
     tape.add_argument("--chunk-size", type=int, default=100_000)
     tape.add_argument("--min-chunk-size", type=int, default=1)
+    tape.add_argument(
+        "--global-topic-scan",
+        action="store_true",
+        help=(
+            "scan V3 Initialize/Swap topics globally and filter against the "
+            "frozen Pons pool registry client-side"
+        ),
+    )
     tape.add_argument("--out", required=True)
     tape.set_defaults(func=cmd_rpc_v3_pons_tape)
 
