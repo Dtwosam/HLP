@@ -52,6 +52,26 @@ class PonsLaunch:
 
 
 @dataclass(frozen=True, slots=True)
+class PonsV1LaunchConfig:
+    action: str
+    config_id: int
+    pair_token: str
+    graduation_threshold: int
+    initial_tick: int
+    supply: int
+    max_wallet_bps: int
+    max_tx_bps: int
+    restriction_blocks: int
+    reserved_fee: int
+    enabled: bool
+    router_requires_deadline: bool
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class CurveTrade:
     token: str
     curve: str
