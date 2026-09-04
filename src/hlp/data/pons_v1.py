@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import asdict
 from typing import Iterable, Iterator
 
+from hlp.config import PONS_V1_FACTORY, normalize_address
 from hlp.data.types import PonsLaunch, PonsV1LaunchConfig, RawLog
 from hlp.protocols.pons import (
     V1_LAUNCH_CONFIG_ADDED_TOPIC,
@@ -15,6 +16,10 @@ from hlp.protocols.pons import (
     decode_v1_launch,
     decode_v1_launch_config,
 )
+
+
+def factory_key(row) -> str:
+    return normalize_address(row.factory or PONS_V1_FACTORY)
 
 
 def event_order(row) -> tuple[int, int, int]:
@@ -30,15 +35,19 @@ class PonsV1ConfigTimeline:
     """Lookup the exact config state visible when a token launched."""
 
     def __init__(self, rows: Iterable[PonsV1LaunchConfig]):
-        grouped: dict[int, list[PonsV1LaunchConfig]] = defaultdict(list)
+        grouped: dict[tuple[str, int], list[PonsV1LaunchConfig]] = defaultdict(list)
         for row in rows:
-            grouped[row.config_id].append(row)
-        self._rows: dict[int, tuple[PonsV1LaunchConfig, ...]] = {}
-        self._keys: dict[int, tuple[tuple[int, int, int], ...]] = {}
-        for config_id, values in grouped.items():
+            grouped[(factory_key(row), row.config_id)].append(row)
+        self._rows: dict[
+            tuple[str, int], tuple[PonsV1LaunchConfig, ...]
+        ] = {}
+        self._keys: dict[
+            tuple[str, int], tuple[tuple[int, int, int], ...]
+        ] = {}
+        for key, values in grouped.items():
             values.sort(key=event_order)
-            self._rows[config_id] = tuple(values)
-            self._keys[config_id] = tuple(event_order(value) for value in values)
+            self._rows[key] = tuple(values)
+            self._keys[key] = tuple(event_order(value) for value in values)
 
     def at_launch(self, launch: PonsLaunch) -> PonsV1LaunchConfig:
         if launch.version != "v1":
@@ -46,10 +55,13 @@ class PonsV1ConfigTimeline:
         if launch.launch_config_id is None:
             raise ValueError("launch is missing launch_config_id")
         config_id = launch.launch_config_id
-        rows = self._rows.get(config_id)
-        keys = self._keys.get(config_id)
+        key = (factory_key(launch), config_id)
+        rows = self._rows.get(key)
+        keys = self._keys.get(key)
         if not rows or not keys:
-            raise KeyError(f"no Pons V1 config history for id {config_id}")
+            raise KeyError(
+                f"no Pons V1 config history for factory {key[0]} id {config_id}"
+            )
         index = bisect_right(keys, event_order(launch)) - 1
         if index < 0:
             raise KeyError(
@@ -93,8 +105,9 @@ def iter_enriched_v1_launches(
     The input must include TokenLaunched plus LaunchConfigAdded/Updated events
     from the factory's deployment boundary onward and must be chronological.
     """
-    current: dict[int, PonsV1LaunchConfig] = {
-        row.config_id: row for row in bootstrap_configs
+    current: dict[tuple[str, int], PonsV1LaunchConfig] = {
+        (factory_key(row), row.config_id): row
+        for row in bootstrap_configs
     }
     last_order: tuple[int, int, int] | None = None
 
@@ -114,7 +127,7 @@ def iter_enriched_v1_launches(
             V1_LAUNCH_CONFIG_UPDATED_TOPIC,
         }:
             config = decode_v1_launch_config(raw)
-            current[config.config_id] = config
+            current[(factory_key(config), config.config_id)] = config
             continue
 
         if topic0 != V1_TOKEN_LAUNCHED_TOPIC:
@@ -123,11 +136,13 @@ def iter_enriched_v1_launches(
         launch = decode_v1_launch(raw)
         if launch.launch_config_id is None:
             raise ValueError("V1 launch missing config id")
-        config = current.get(launch.launch_config_id)
+        config_key = (factory_key(launch), launch.launch_config_id)
+        config = current.get(config_key)
         if config is None:
             raise KeyError(
-                f"config {launch.launch_config_id} was not observed before "
-                f"launch {launch.token}; backfill must start at factory deployment"
+                f"config {launch.launch_config_id} for factory {config_key[0]} "
+                f"was not observed before launch {launch.token}; backfill must "
+                "start at that factory deployment"
             )
 
         # Reuse the same invariant-enforcing enrichment logic.
