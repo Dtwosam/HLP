@@ -76,6 +76,35 @@ Can cached/reusable protocol Substreams, protocol deployment start blocks, targe
 
 Do not declare this solved until measured.
 
+## 3A. hoodexplorer — PROMISING KEYLESS ARCHIVE/INDEX CANDIDATE, HOST NETWORK CAVEAT
+
+Docs:
+https://www.hoodexplorer.org/apidocs
+
+Verified documentation:
+- Etherscan-compatible read API;
+- keyless access at 60 requests/minute per IP;
+- paginated list endpoints with up to 1,000 rows/page;
+- event-log filtering by address and/or topic0 across indexed history;
+- contract-creation lookup;
+- ERC-20 transfer endpoints;
+- token holder list/count endpoints for current state;
+- Proxy module backed by hoodexplorer's own archive node for read-only eth_* methods.
+
+Why this matters:
+HLP can potentially request only Pons/Uniswap event families instead of processing every Robinhood block, making the historical study dramatically cheaper in free-quota terms.
+
+Current caveat:
+GitHub-hosted Actions runners tested on 2026-09-04 could not route to hoodexplorer over IPv4 or normal Python HTTPS, while the public website/API documentation remained accessible from other networks. Therefore hoodexplorer is not a required CI dependency. Phase 1 must validate the historical sampler from a reachable runtime before promoting it to canonical bulk acquisition.
+
+Use:
+- historical Pons launch/trade event candidate;
+- archive state reads;
+- contract creation metadata;
+- bounded cross-checks and potential bulk extraction.
+
+Do not use near-live holder-count/list endpoints as historical point-in-time holder truth. Historical holder states must be reconstructed from Transfer events.
+
 ## 4. Pons contracts — PASS, open source and directly decodable
 
 Official source:
