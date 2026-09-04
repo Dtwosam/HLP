@@ -96,23 +96,28 @@ class ChainlinkDirectoryClient:
     @staticmethod
     def parse_robinhood_feed(page_text: str, symbol: str) -> RobinhoodFeedDirectoryEntry:
         symbol = symbol.upper().strip()
-        exact_name = f"Robinhood {symbol} / USD"
-        marker = f'"name":[0,"{exact_name}"]'
+        accepted_names = {
+            f"Robinhood {symbol} / USD",
+            f"Robinhood {symbol}-USD",
+        }
         positions = []
-        cursor = 0
-        while True:
-            position = page_text.find(marker, cursor)
-            if position < 0:
-                break
-            positions.append(position)
-            cursor = position + len(marker)
+        for accepted_name in sorted(accepted_names):
+            marker = f'"name":[0,"{accepted_name}"]'
+            cursor = 0
+            while True:
+                position = page_text.find(marker, cursor)
+                if position < 0:
+                    break
+                positions.append((position, marker))
+                cursor = position + len(marker)
         if not positions:
             raise ChainlinkDirectoryError(
-                f"official Chainlink directory has no exact feed {exact_name!r}"
+                "official Chainlink directory has no exact Robinhood feed "
+                f"for {symbol}: {sorted(accepted_names)}"
             )
 
         candidates: list[RobinhoodFeedDirectoryEntry] = []
-        for position in positions:
+        for position, marker in sorted(positions):
             # The server-rendered feed records place one heartbeat field before
             # each name. Bound each occurrence to adjacent heartbeat records.
             start = page_text.rfind('"heartbeat":[0,', 0, position)
@@ -134,7 +139,7 @@ class ChainlinkDirectoryClient:
                 segment, "blockchainName"
             )
 
-            if name != exact_name or blockchain != "Robinhood":
+            if name not in accepted_names or blockchain != "Robinhood":
                 continue
             if not path or not path.startswith(
                 f"robinhood-{symbol.lower()}-usd-"
@@ -174,11 +179,11 @@ class ChainlinkDirectoryClient:
         }
         if not unique:
             raise ChainlinkDirectoryError(
-                f"{exact_name}: no valid Robinhood feed record found"
+                f"{symbol}: no valid Robinhood feed record found"
             )
         if len(unique) != 1:
             raise ChainlinkDirectoryError(
-                f"{exact_name}: conflicting official feed records: "
+                f"{symbol}: conflicting official feed records: "
                 f"{sorted(unique)}"
             )
         return next(iter(unique.values()))

@@ -36,3 +36,23 @@ def test_wrong_blockchain_fails_closed():
     page = record("NVDA", "0x" + "11" * 20, chain="Ethereum")
     with pytest.raises(ChainlinkDirectoryError):
         ChainlinkDirectoryClient.parse_robinhood_feed(page, "NVDA")
+
+
+
+def test_parse_hyphenated_robinhood_feed_name():
+    proxy = "0x" + "44" * 20
+    page = (
+        '"heartbeat":[0,86400],'
+        '"history":[0,null],'
+        '"name":[0,"Robinhood AMC-USD"],'
+        '"path":[0,"robinhood-amc-usd-shared-svr"],'
+        f'"proxyAddress":[0,"{proxy}"],'
+        f'"secondaryProxyAddress":[0,"0x{"55" * 20}"],'
+        '"docs":[0,{"blockchainName":[0,"Robinhood"]}],'
+    )
+
+    row = ChainlinkDirectoryClient.parse_robinhood_feed(page, "amc")
+
+    assert row.symbol == "AMC"
+    assert row.name == "Robinhood AMC-USD"
+    assert row.proxy_address == proxy
