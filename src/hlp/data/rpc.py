@@ -121,6 +121,137 @@ class RpcClient:
                 time.sleep(self.backoff_seconds * attempt)
         raise RpcError(f"{method} failed after {self.attempts} attempts: {last_error}")
 
+    def batch_call(
+        self,
+        calls: list[tuple[str, list[Any] | None]],
+    ) -> list[Any]:
+        """Execute one JSON-RPC batch HTTP request and preserve call order."""
+        if not calls:
+            return []
+        body = json.dumps(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": index + 1,
+                    "method": method,
+                    "params": params or [],
+                }
+                for index, (method, params) in enumerate(calls)
+            ],
+            separators=(",", ":"),
+        ).encode()
+        headers = {"content-type": "application/json", "user-agent": "hlp/0.1"}
+        if self.extra_headers:
+            headers.update(self.extra_headers)
+        request = urllib.request.Request(
+            self.url,
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        last_error: Exception | None = None
+        for attempt in range(1, self.attempts + 1):
+            try:
+                self._pace()
+                self.requests_made += 1
+                payload = json.loads(self._post(request, self.timeout))
+                if not isinstance(payload, list):
+                    raise RpcError("batch JSON-RPC response is not a list")
+                by_id = {}
+                for item in payload:
+                    if "error" in item:
+                        raise RpcError(f"batch call error: {item['error']}")
+                    if "id" not in item or "result" not in item:
+                        raise RpcError("malformed batch JSON-RPC response")
+                    by_id[int(item["id"])] = item["result"]
+                expected = set(range(1, len(calls) + 1))
+                if set(by_id) != expected:
+                    raise RpcError("batch JSON-RPC response ids are incomplete")
+                return [by_id[index] for index in range(1, len(calls) + 1)]
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if attempt == self.attempts:
+                    break
+                retry_after = self._retry_after_seconds(exc)
+                time.sleep(
+                    retry_after
+                    if retry_after is not None
+                    else self.backoff_seconds * attempt
+                )
+            except RpcError:
+                raise
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                json.JSONDecodeError,
+            ) as exc:
+                last_error = exc
+                if attempt == self.attempts:
+                    break
+                time.sleep(self.backoff_seconds * attempt)
+        raise RpcError(
+            f"batch call failed after {self.attempts} attempts: {last_error}"
+        )
+
+    def get_blocks_batched(
+        self,
+        blocks: list[int],
+        *,
+        full_transactions: bool = False,
+        batch_size: int = 100,
+        min_batch_size: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Fetch many blocks with adaptive JSON-RPC batch shrinking."""
+        if batch_size < 1 or min_batch_size < 1 or min_batch_size > batch_size:
+            raise ValueError("invalid batch sizes")
+        if any(block < 0 for block in blocks):
+            raise ValueError("block numbers cannot be negative")
+        if not blocks:
+            return []
+
+        output: list[dict[str, Any]] = []
+        cursor = 0
+        target_size = batch_size
+        active_size = target_size
+        while cursor < len(blocks):
+            chunk = blocks[cursor : cursor + active_size]
+            calls = [
+                (
+                    "eth_getBlockByNumber",
+                    [_hex_quantity(block), full_transactions],
+                )
+                for block in chunk
+            ]
+            try:
+                results = self.batch_call(calls)
+            except RpcError:
+                if active_size <= min_batch_size:
+                    # Some providers disable JSON-RPC batching entirely.
+                    # A single regular call is the most compatible fallback.
+                    if active_size == 1:
+                        output.append(
+                            self.get_block(
+                                chunk[0],
+                                full_transactions=full_transactions,
+                            )
+                        )
+                        cursor += 1
+                        active_size = target_size
+                        continue
+                    raise
+                active_size = max(min_batch_size, active_size // 2)
+                continue
+
+            for block, result in zip(chunk, results):
+                if result is None:
+                    raise RpcError(f"block not found in batch: {block}")
+                output.append(result)
+            cursor += len(chunk)
+            if active_size < target_size:
+                active_size = min(target_size, active_size * 2)
+
+        return output
+
     def chain_id(self) -> int:
         return int(self.call("eth_chainId"), 16)
 
