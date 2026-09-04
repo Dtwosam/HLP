@@ -272,7 +272,7 @@ def merge_quote_usd_tapes(
 
     states.sort(
         key=lambda row: (
-            int(row.get("activation_block", row["block_number"])),
+            int(row["activation_block"] if row.get("activation_block") is not None else row.get("block_number", -1)),
             row["quote_token"],
         )
     )
