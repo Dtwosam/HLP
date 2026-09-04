@@ -72,6 +72,7 @@ from hlp.data.quote_routes import (
     build_v3_route_initial_usd_states,
     build_v3_route_usd_updates,
     discover_delayed_v3_usdg_routes,
+    merge_v3_quote_routes,
     select_v3_quote_routes,
 )
 from hlp.data.quote_usd import prepare_quote_usd_inputs
@@ -1625,7 +1626,9 @@ def cmd_rpc_pons_delayed_v3_usdg_routes(
 def cmd_pons_select_v3_quote_routes(args: argparse.Namespace) -> int:
     """Freeze one deterministic V3 fallback route per covered quote asset."""
     audit = _load_jsonl(args.audit)
-    routes = select_v3_quote_routes(audit)
+    causal = select_v3_quote_routes(audit)
+    delayed = _load_jsonl(args.delayed) if args.delayed else []
+    routes = merge_v3_quote_routes(causal, delayed)
     manifest = write_jsonl_snapshot(
         routes,
         output=Path(args.out),
@@ -1633,6 +1636,7 @@ def cmd_pons_select_v3_quote_routes(args: argparse.Namespace) -> int:
             "source": "deterministic_selection_from_v3_quote_route_audit",
             "chain_id": 4663,
             "audit": Path(args.audit).name,
+            "delayed": None if not args.delayed else Path(args.delayed).name,
             "selection_policy": (
                 "prefer direct USDG; otherwise WETH; within pair choose "
                 "highest activation liquidity then lower fee"
@@ -3604,7 +3608,13 @@ def cmd_rpc_v3_quote_route_tape(args: argparse.Namespace) -> int:
     """Acquire V3 price events only after each quote route becomes active."""
     routes = _load_jsonl(args.routes)
     activation_by_pool = {
-        row["pool"].lower(): int(row["activation_block"])
+        row["pool"].lower(): (
+            int(row["activation_block"]),
+            -1 if row.get("activation_transaction_index") is None
+            else int(row["activation_transaction_index"]),
+            -1 if row.get("activation_log_index") is None
+            else int(row["activation_log_index"]),
+        )
         for row in routes
     }
     if not activation_by_pool:
@@ -3649,7 +3659,14 @@ def cmd_rpc_v3_quote_route_tape(args: argparse.Namespace) -> int:
                 raise ValueError(
                     f"V3 route filter returned unknown pool {pool}"
                 )
-            if int(log.block_number) < activation:
+            activation_order = activation_by_pool[pool]
+            raw_order = (
+                int(log.block_number),
+                -1 if log.transaction_index is None
+                else int(log.transaction_index),
+                int(log.log_index),
+            )
+            if raw_order < activation_order:
                 counters["pre_activation_events_skipped"] += 1
                 continue
             topic0 = log.topics[0] if log.topics else None
@@ -4382,6 +4399,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     select_quote_v3 = sub.add_parser("pons-select-v3-quote-routes")
     select_quote_v3.add_argument("--audit", required=True)
+    select_quote_v3.add_argument("--delayed")
     select_quote_v3.add_argument("--out", required=True)
     select_quote_v3.set_defaults(func=cmd_pons_select_v3_quote_routes)
 

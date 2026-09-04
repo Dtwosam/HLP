@@ -199,3 +199,20 @@ def test_delayed_routes_have_no_pre_activation_state():
         "causal_state_block": None,
     }])
     assert rows == []
+
+
+
+def test_merge_v3_quote_routes_adds_ready_delayed_routes():
+    causal = [{
+        "quote_token": "0x" + "01" * 20,
+        "activation_block": 10,
+    }]
+    delayed = [{
+        "delayed_route_ready": True,
+        "route": {
+            "quote_token": "0x" + "02" * 20,
+            "activation_block": 20,
+        },
+    }]
+    rows = routes.merge_v3_quote_routes(causal, delayed)
+    assert [row["activation_block"] for row in rows] == [10, 20]

@@ -287,3 +287,15 @@ def test_delayed_v3_usdg_route_probe_parses():
     ])
     assert args.max_forward_blocks == 100000
     assert args.audit == "audit.jsonl"
+
+
+
+def test_v3_quote_route_selector_accepts_delayed_probe():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-select-v3-quote-routes",
+        "--audit", "audit.jsonl",
+        "--delayed", "delayed.jsonl",
+        "--out", "routes.jsonl",
+    ])
+    assert args.delayed == "delayed.jsonl"

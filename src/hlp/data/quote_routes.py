@@ -390,6 +390,42 @@ def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
     return selected
 
 
+
+def merge_v3_quote_routes(
+    causal_routes: Iterable[dict],
+    delayed_audit_rows: Iterable[dict] = (),
+) -> list[dict]:
+    """Merge pre-use and delayed route choices with one route per quote token."""
+    by_token = {}
+    for raw in causal_routes:
+        row = dict(raw)
+        token = row["quote_token"].lower()
+        if token in by_token:
+            raise ValueError(f"duplicate causal V3 quote route for {token}")
+        by_token[token] = row
+
+    for source in delayed_audit_rows:
+        if not bool(source.get("delayed_route_ready")):
+            continue
+        route = source.get("route")
+        if not route:
+            raise ValueError("delayed route row is marked ready without route")
+        row = dict(route)
+        token = row["quote_token"].lower()
+        if token in by_token:
+            raise ValueError(
+                f"quote token has both causal and delayed V3 routes: {token}"
+            )
+        by_token[token] = row
+
+    rows = list(by_token.values())
+    rows.sort(key=lambda row: (
+        int(row["activation_block"]),
+        row["quote_token"].lower(),
+    ))
+    return rows
+
+
 def build_v3_route_initial_usd_states(
     route_rows: Iterable[dict],
 ) -> list[dict]:

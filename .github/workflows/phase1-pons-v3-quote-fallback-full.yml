@@ -7,6 +7,10 @@ on:
         description: "Successful phase1-pons-unpriced-v3-route-audit-one-shot run"
         required: true
         type: string
+      delayed_probe_run_id:
+        description: "Successful phase1-pons-delayed-v3-route-probe-one-shot run"
+        required: true
+        type: string
       anchor_run_id:
         description: "Successful phase1-pons-weth-usdg-anchor-full run"
         required: true
@@ -41,11 +45,18 @@ jobs:
           path: audit
           run-id: ${{ inputs.route_audit_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-delayed-v3-route-probe
+          path: delayed
+          run-id: ${{ inputs.delayed_probe_run_id }}
+          github-token: ${{ github.token }}
       - name: Freeze deterministic V3 fallback route choices
         run: |
           mkdir -p artifacts
           hlp pons-select-v3-quote-routes \
             --audit audit/pons-unpriced-v3-route-audit.jsonl \
+            --delayed delayed/pons-delayed-v3-usdg-routes.jsonl \
             --out artifacts/pons-v3-quote-routes.jsonl
           python - <<'PY'
           import json
