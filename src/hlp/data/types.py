@@ -36,6 +36,26 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class InstantV3Launch:
+    venue: str
+    factory: str
+    token: str
+    deployer: str
+    dex_factory: str
+    pair_token: str
+    pool: str
+    dex_id: int
+    launch_config_id: int
+    position_id: int
+    restrictions_end_block: int
+    initial_buy_amount: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class PonsLaunch:
     version: str
     token: str
