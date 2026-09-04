@@ -43,23 +43,34 @@ Next phase: Phase 1 — Historical/Live Data Acquisition Spike
 
 Full historical bulk ingestion is not yet proven at $0.
 
-Alchemy Free cannot efficiently crawl all Robinhood logs because free eth_getLogs queries are capped at 10 blocks.
+What Phase 1 has established so far:
+- Robinhood public RPC is live and usable for current/bounded reads, but it is pruned for older state;
+- both official Pons V1/V2 factory bytecodes are present on mainnet;
+- Alchemy Free cannot efficiently crawl all Robinhood logs because its Robinhood eth_getLogs range is capped at 10 blocks;
+- hoodexplorer documents a keyless indexed-log/archive API that could avoid scanning every block, but GitHub-hosted runners currently cannot route to that service;
+- The Graph/Substreams remains the other leading bulk path, with finite free processed-block/egress quotas.
 
-The Graph/Substreams is the leading bulk path, but the current free plan includes 7M processed blocks / 5 GiB egress while Robinhood Chain history is larger. Existing cached Uniswap packages and protocol-specific start blocks may make the required dataset practical; Phase 1 must measure this.
+Phase 1 must prove at least one complete-enough historical path from a reachable runtime and measure it before dataset construction.
 
-This is not a modeling problem and must be resolved before dataset construction.
+## Current Phase 1 progress
 
-## Immediate next action after Phase 0
-
-Build the Phase 1 acquisition spike:
-1. Python project scaffold + tests.
-2. Reusable Substreams package discovery.
-3. Pons V1/V2 adapters.
-4. Uniswap adapter/tape.
-5. bounded historical sample.
-6. cross-check with explorer/DEX views.
-7. quota/cost projection.
-8. PASS/BLOCK decision for full history.
+- [x] Python package/test scaffold
+- [x] canonical Robinhood RPC client with wrong-chain guard
+- [x] immutable raw-log / Pons launch / curve-trade record types
+- [x] verified Pons V1/V2 factory addresses and source event signatures
+- [x] Pons V1/V2 launch decoders
+- [x] Pons V2 CurveBuy/CurveSell decoders
+- [x] public-RPC live smoke: chain 4663, both factory bytecodes, bounded logs
+- [x] public-RPC archive limitation reproduced and documented
+- [x] hoodexplorer client, rate-aware pagination and immutable snapshot manifest writer
+- [x] reproducible hood-pons-sample CLI
+- [x] required CI unit tests green during Phase 1 iterations
+- [ ] validate hoodexplorer sampler from a network that can reach it
+- [ ] benchmark Substreams/reusable Uniswap package path
+- [ ] build/validate Uniswap event adapter
+- [ ] reconstruct representative Pons tokens end-to-end
+- [ ] measure full-history request/block/egress projection
+- [ ] Phase 1 PASS/BLOCK decision
 
 ## Deferred decisions
 
