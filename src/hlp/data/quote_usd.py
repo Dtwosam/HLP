@@ -117,3 +117,74 @@ class QuoteUsdTimeline:
         if token in self._active:
             return "priced_chainlink_stock_token"
         return "unsupported_quote"
+
+
+
+def prepare_quote_usd_inputs(
+    state_rows: Iterable[dict],
+    update_groups: Iterable[Iterable[dict]],
+) -> tuple[dict[str, Decimal], Iterator[dict]]:
+    """Prepare causal quote/USD state without activating future sources early.
+
+    State rows with activation_block become synthetic updates ordered before
+    transaction zero of that activation block. State rows without an
+    activation block are true pre-window state and remain immediately active.
+    """
+    initial: dict[str, Decimal] = {}
+    activations: list[dict] = []
+    seen: set[str] = set()
+
+    for raw in state_rows:
+        row = dict(raw)
+        token = row["quote_token"].lower()
+        if token in seen:
+            raise ValueError(f"duplicate quote/USD activation state for {token}")
+        seen.add(token)
+        price = Decimal(row["usd_price"])
+        if price <= 0:
+            raise ValueError(f"quote/USD activation price must be positive: {token}")
+
+        activation = row.get("activation_block")
+        if activation is None:
+            initial[token] = price
+            continue
+        activation = int(activation)
+        if activation <= 0:
+            raise ValueError(f"invalid quote/USD activation block for {token}")
+        activations.append({
+            **row,
+            "quote_token": token,
+            "block_number": activation,
+            "transaction_index": None,
+            "log_index": -1,
+            "usd_price": str(price),
+            "event_type": "quote_usd_activation",
+        })
+
+    activations.sort(
+        key=lambda row: (event_order(row), row["quote_token"])
+    )
+
+    def checked(rows: Iterable[dict], source_index: int) -> Iterator[dict]:
+        previous = None
+        for raw in rows:
+            row = dict(raw)
+            row["quote_token"] = row["quote_token"].lower()
+            key = (event_order(row), row["quote_token"])
+            if previous is not None and key < previous:
+                raise ValueError(
+                    f"quote/USD update source {source_index} is not chronological"
+                )
+            previous = key
+            yield row
+
+    groups = [iter(activations)]
+    groups.extend(
+        checked(rows, index)
+        for index, rows in enumerate(update_groups)
+    )
+    merged = merge(
+        *groups,
+        key=lambda row: (event_order(row), row["quote_token"]),
+    )
+    return initial, merged
