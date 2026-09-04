@@ -88,6 +88,21 @@ class NoxaLaunchConfig:
     restriction_blocks: int
     buy_pair_hop_fee: int
     enabled: bool
+    extension_words: tuple[int, ...]
+    block_number: int
+
+
+@dataclass(frozen=True, slots=True)
+class NoxaLaunchedToken:
+    token: str
+    deployer: str
+    paired_token: str
+    position_manager: str
+    position_id: int
+    dex_id: int
+    launch_config_id: int
+    restrictions_end_block: int
+    supply: int
     block_number: int
 
 
