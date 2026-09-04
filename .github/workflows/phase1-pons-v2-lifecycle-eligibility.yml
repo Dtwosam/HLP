@@ -96,6 +96,96 @@ jobs:
           path: fallback
           run-id: ${{ inputs.fallback_run_id }}
           github-token: ${{ github.token }}
+      - name: Audit V2 quote source ownership before replay
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+          USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-v2-full-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          quote_tokens = {
+              row["pair_token"].lower()
+              for row in registry
+          }
+
+          oracle_state = [
+              json.loads(line)
+              for line in Path(
+                  "oracle/pons-stock-oracle-initial.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          oracle_tokens = {
+              row["quote_token"].lower()
+              for row in oracle_state
+          }
+
+          fallback_tokens = set()
+          state_path = Path(
+              "fallback/pons-quote-fallback-initial.jsonl"
+          )
+          if state_path.exists():
+              with state_path.open() as handle:
+                  for line in handle:
+                      if not line.strip():
+                          continue
+                      fallback_tokens.add(
+                          json.loads(line)["quote_token"].lower()
+                      )
+          event_path = Path(
+              "fallback/pons-quote-fallback-updates.jsonl"
+          )
+          with event_path.open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  fallback_tokens.add(
+                      json.loads(line)["quote_token"].lower()
+                  )
+
+          illegal_fallback = sorted(
+              fallback_tokens - quote_tokens
+          )
+          overlap = sorted(
+              fallback_tokens
+              & (oracle_tokens | {WETH, USDG})
+          )
+          if illegal_fallback or overlap:
+              raise SystemExit(
+                  "invalid V2 quote fallback ownership: "
+                  f"non_v2={illegal_fallback[:10]} "
+                  f"direct_overlap={overlap[:10]}"
+              )
+
+          covered = oracle_tokens | fallback_tokens | {WETH, USDG}
+          uncovered = sorted(quote_tokens - covered)
+          report = {
+              "v2_launches": len(registry),
+              "v2_quote_assets": len(quote_tokens),
+              "oracle_quote_assets": len(oracle_tokens & quote_tokens),
+              "fallback_quote_assets": len(
+                  fallback_tokens & quote_tokens
+              ),
+              "uncovered_quote_assets": len(uncovered),
+              "uncovered_quote_tokens": uncovered,
+          }
+          Path(
+              "artifacts/pons-v2-quote-source-coverage.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
       - name: Replay complete V2 lifecycle as token summaries
         run: |
           mkdir -p artifacts
