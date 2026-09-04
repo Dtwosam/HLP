@@ -36,6 +36,21 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class TrenchTokenInfo:
+    token: str
+    curve: str
+    creator: str
+    quote_token: str
+    real_quote_reserves_raw: int
+    real_token_reserves_raw: int
+    virtual_quote_raw: int
+    virtual_token_raw: int
+    is_migrating: bool
+    is_migrated: bool
+    block_number: int
+
+
+@dataclass(frozen=True, slots=True)
 class TrenchEvent:
     event_type: str
     token: str
