@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from hlp.data.reconstruct import reconstruct_v3_price_points
+from hlp.data.reconstruct import attach_quote_usd_anchor, reconstruct_v3_price_points
 from hlp.data.types import RawLog
 from hlp.protocols.evm import function_selector
 from hlp.protocols.state import SLOT0_SELECTOR, TOKEN0_SELECTOR, TOKEN1_SELECTOR
@@ -82,3 +82,44 @@ def test_reconstruct_v3_price_points():
     assert Decimal(row["market_cap_quote"]) == Decimal(1_000_000_000)
     assert row["token_is_token0"] is True
     assert row["block_number"] == 101
+
+
+
+def test_quote_usd_anchor_respects_within_block_order():
+    targets = [
+        {
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 5,
+            "quote_per_token": "2",
+            "market_cap_quote": "200",
+        },
+        {
+            "block_number": 10,
+            "transaction_index": 3,
+            "log_index": 1,
+            "quote_per_token": "3",
+            "market_cap_quote": "300",
+        },
+    ]
+    anchors = [
+        {
+            "block_number": 10,
+            "transaction_index": 2,
+            "log_index": 0,
+            "quote_per_token": "2500",
+        }
+    ]
+    rows = list(
+        attach_quote_usd_anchor(
+            targets,
+            anchors,
+            initial_quote_usd=Decimal("2400"),
+        )
+    )
+    # First target occurs before the same-block WETH/USD anchor swap.
+    assert Decimal(rows[0]["quote_usd"]) == Decimal("2400")
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("480000")
+    # Second target occurs after it and may use 2500.
+    assert Decimal(rows[1]["quote_usd"]) == Decimal("2500")
+    assert Decimal(rows[1]["market_cap_proxy_usd"]) == Decimal("750000")
