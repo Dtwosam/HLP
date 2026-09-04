@@ -200,6 +200,7 @@ class PonsLaunch:
     position_id: int | None = None
     restrictions_end_block: int | None = None
     initial_buy_amount: int | None = None
+    factory: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +251,7 @@ class PonsV1LaunchConfig:
     transaction_hash: str
     transaction_index: int | None
     log_index: int
+    factory: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
