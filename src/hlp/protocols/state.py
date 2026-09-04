@@ -12,6 +12,8 @@ from hlp.protocols.evm import data_words, function_selector, signed_word, word_a
 TOKEN0_SELECTOR = function_selector("token0()")
 TOKEN1_SELECTOR = function_selector("token1()")
 SLOT0_SELECTOR = function_selector("slot0()")
+LIQUIDITY_SELECTOR = function_selector("liquidity()")
+GET_POOL_SELECTOR = function_selector("getPool(address,address,uint24)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,3 +60,55 @@ def read_v3_slot0(
         sqrt_price_x96=words[0],
         tick=signed_word(words[1]),
     )
+
+
+
+def read_v3_liquidity(
+    rpc: RpcClient,
+    pool: str,
+    *,
+    block: int | str = "latest",
+) -> int:
+    """Return active Uniswap V3 liquidity at an exact historical block."""
+    words = data_words(
+        rpc.eth_call(normalize_address(pool), LIQUIDITY_SELECTOR, block)
+    )
+    if len(words) != 1:
+        raise ValueError("unexpected V3 liquidity ABI result")
+    value = int(words[0])
+    if value < 0 or value >= 1 << 128:
+        raise ValueError("invalid V3 uint128 liquidity")
+    return value
+
+
+def read_v3_factory_pool(
+    rpc: RpcClient,
+    factory: str,
+    *,
+    token_a: str,
+    token_b: str,
+    fee: int,
+    block: int | str = "latest",
+) -> str | None:
+    """Resolve a Uniswap V3 pool from factory state visible at a block."""
+    if fee < 0 or fee >= 1 << 24:
+        raise ValueError("V3 fee must fit uint24")
+    token_a = normalize_address(token_a)
+    token_b = normalize_address(token_b)
+    if token_a == token_b:
+        raise ValueError("V3 pool assets must differ")
+    token0, token1 = sorted((token_a, token_b), key=lambda value: int(value, 16))
+    calldata = (
+        GET_POOL_SELECTOR
+        + token0.removeprefix("0x").rjust(64, "0")
+        + token1.removeprefix("0x").rjust(64, "0")
+        + f"{fee:064x}"
+    )
+    words = data_words(
+        rpc.eth_call(normalize_address(factory), calldata, block)
+    )
+    if len(words) != 1:
+        raise ValueError("unexpected V3 getPool ABI result")
+    if words[0] == 0:
+        return None
+    return word_address(words[0])
