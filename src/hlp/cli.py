@@ -13,6 +13,7 @@ from pathlib import Path
 from hlp.config import (
     DEFAULT_RPC_URL,
     SOLIDRPC_PUBLIC_RPC_URL,
+    SOLIDRPC_AUTH_RPC_URL,
     ROBINHOOD_USDG,
     ROBINHOOD_WETH,
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
@@ -172,8 +173,10 @@ def _rpc(args: argparse.Namespace) -> RpcClient:
 
 def _archive_rpc(args: argparse.Namespace) -> RpcClient:
     """Build the historical RPC without exposing API keys in command lines."""
-    url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL)
     key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+    url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+    if not url:
+        url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
     headers = {"X-API-Key": key} if key else None
     return RpcClient(
         url,
