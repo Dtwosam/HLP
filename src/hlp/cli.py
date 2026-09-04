@@ -8,6 +8,7 @@ import os
 from dataclasses import asdict
 
 from hlp.config import DEFAULT_RPC_URL, PONS_V1_FACTORY, PONS_V2_FACTORY
+from hlp.data.blockscout import BlockscoutClient
 from hlp.data.rpc import RpcClient
 from hlp.protocols.pons import (
     V1_TOKEN_LAUNCHED_TOPIC,
@@ -70,6 +71,12 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_contract_creation(args: argparse.Namespace) -> int:
+    client = BlockscoutClient(timeout=args.timeout)
+    print(json.dumps(client.contract_deployment(args.address), sort_keys=True))
+    return 0
+
+
 def cmd_deployment_block(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -127,6 +134,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     smoke = sub.add_parser("network-smoke")
     smoke.set_defaults(func=cmd_network_smoke)
+
+    creation = sub.add_parser("contract-creation")
+    creation.add_argument("address")
+    creation.set_defaults(func=cmd_contract_creation)
 
     deploy = sub.add_parser("deployment-block")
     deploy.add_argument("address")
