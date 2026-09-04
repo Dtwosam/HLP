@@ -55,6 +55,11 @@ def raw(address, topics, data):
 def test_event_topics_are_ethereum_keccak():
     assert V1_TOKEN_LAUNCHED_TOPIC == event_topic(V1_TOKEN_LAUNCHED_SIG)
     assert V2_TOKEN_LAUNCHED_TOPIC == event_topic(V2_TOKEN_LAUNCHED_SIG)
+    # Independently published current Pons V2 topic0. This catches accidental
+    # signature/indexing edits that a self-derived equality would miss.
+    assert V2_TOKEN_LAUNCHED_TOPIC == (
+        "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"
+    )
     assert V2_CURVE_BUY_TOPIC == event_topic(V2_CURVE_BUY_SIG)
     assert V2_CURVE_SELL_TOPIC == event_topic(V2_CURVE_SELL_SIG)
 
