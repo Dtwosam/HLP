@@ -405,6 +405,17 @@ class V4PoolInitialized:
 
 
 @dataclass(frozen=True, slots=True)
+class V3PoolInitialized:
+    pool: str
+    sqrt_price_x96: int
+    tick: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class V3Swap:
     pool: str
     sender: str
