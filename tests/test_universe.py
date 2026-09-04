@@ -118,3 +118,50 @@ def test_summary_keeps_threshold_and_full_maximum():
     assert summary[0]["crossed_100k"] is True
     assert Decimal(summary[0]["max_market_cap_proxy_usd"]) == Decimal("750000")
     assert summary[0]["max_market_cap_block"] == 3
+
+
+def test_stock_quote_uses_causal_oracle_timeline():
+    stock = "0x" + "44" * 20
+    token = "0x0000000000000000000000000000000000000013"
+    registry = [{
+        "token": token,
+        "pair_token": stock,
+        "pool": POOL,
+        "block_number": 10,
+        "supply_raw": 100_000 * 10**18,
+        "token_decimals": 18,
+    }]
+    points = [{
+        "pool": POOL,
+        "block_number": 20,
+        "transaction_index": 1,
+        "log_index": 0,
+        "sqrt_price_x96": 2**96,
+    }, {
+        "pool": POOL,
+        "block_number": 20,
+        "transaction_index": 3,
+        "log_index": 0,
+        "sqrt_price_x96": 2**96,
+    }]
+    updates = [{
+        "quote_token": stock,
+        "block_number": 20,
+        "transaction_index": 2,
+        "log_index": 0,
+        "usd_price": "300",
+    }]
+    rows = list(build_v1_market_cap_points(
+        registry,
+        points,
+        [],
+        initial_weth_usd=Decimal("2000"),
+        weth_decimals=18,
+        usdg_decimals=6,
+        initial_quote_usd={stock: Decimal("250")},
+        quote_usd_updates=updates,
+        quote_decimals_by_token={stock: 18},
+    ))
+    assert rows[0]["pricing_status"] == "priced_chainlink_stock_token"
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("25000000")
+    assert Decimal(rows[1]["market_cap_proxy_usd"]) == Decimal("30000000")
