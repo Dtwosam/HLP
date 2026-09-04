@@ -25,6 +25,24 @@ def data_words(data: str) -> tuple[int, ...]:
     return tuple(int(value[i : i + 64], 16) for i in range(0, len(value), 64))
 
 
+def signed_word(value: int, bits: int = 256) -> int:
+    """Interpret an ABI word as a signed two's-complement integer."""
+    if bits <= 0 or bits > 256:
+        raise ValueError("bits must be between 1 and 256")
+    mask = (1 << bits) - 1
+    narrowed = value & mask
+    sign = 1 << (bits - 1)
+    return narrowed - (1 << bits) if narrowed & sign else narrowed
+
+
+def topic_bytes32(topic: str) -> str:
+    value = topic.lower()
+    if not value.startswith("0x") or len(value) != 66:
+        raise ValueError("bytes32 topic must be 32 bytes")
+    int(value[2:], 16)
+    return value
+
+
 def word_address(value: int) -> str:
     if value < 0 or value >= 1 << 160:
         # ABI address values may be zero-padded but cannot carry high bits.
