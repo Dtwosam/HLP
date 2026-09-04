@@ -1123,6 +1123,39 @@ def build_parser() -> argparse.ArgumentParser:
     sample.set_defaults(func=cmd_hood_pons_sample)
 
 
+
+    v2_registry = sub.add_parser("rpc-v2-registry-window")
+    v2_registry.add_argument("--from-block", type=int, required=True)
+    v2_registry.add_argument("--to-block", type=int, required=True)
+    v2_registry.add_argument("--chunk-size", type=int, default=100_000)
+    v2_registry.add_argument("--min-chunk-size", type=int, default=1)
+    v2_registry.add_argument("--out", required=True)
+    v2_registry.set_defaults(func=cmd_rpc_v2_registry_window)
+
+    v2_tape = sub.add_parser("rpc-v2-curve-tape")
+    v2_tape.add_argument("--registry", required=True)
+    v2_tape.add_argument("--from-block", type=int, required=True)
+    v2_tape.add_argument("--to-block", type=int, required=True)
+    v2_tape.add_argument("--chunk-size", type=int, default=100_000)
+    v2_tape.add_argument("--min-chunk-size", type=int, default=1)
+    v2_tape.add_argument("--out", required=True)
+    v2_tape.set_defaults(func=cmd_rpc_v2_curve_tape)
+
+    v2_mcap = sub.add_parser("rpc-v2-curve-market-cap-window")
+    v2_mcap.add_argument("--registry", required=True)
+    v2_mcap.add_argument("--curve-events", required=True)
+    v2_mcap.add_argument("--from-block", type=int, required=True)
+    v2_mcap.add_argument("--to-block", type=int, required=True)
+    v2_mcap.add_argument("--chunk-size", type=int, default=100_000)
+    v2_mcap.add_argument("--min-chunk-size", type=int, default=1)
+    v2_mcap.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    v2_mcap.add_argument("--out", required=True)
+    v2_mcap.add_argument("--summary-out", required=True)
+    v2_mcap.set_defaults(func=cmd_rpc_v2_curve_market_cap_window)
+
     registry = sub.add_parser("rpc-v1-registry-window")
     registry.add_argument("--from-block", type=int, required=True)
     registry.add_argument("--to-block", type=int, required=True)
