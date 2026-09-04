@@ -131,7 +131,7 @@ jobs:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
       SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: '16'
+      SHARD_COUNT: '8'
       GENERATION_START: '26841846'
     steps:
       - uses: actions/checkout@v4
@@ -208,11 +208,15 @@ jobs:
 
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          def read_shards(directory, prefix):
+          def read_shards(directory, prefix, expected_count):
               rows = []
               manifests = []
               files = sorted(Path(directory).glob(f"{prefix}-shard-*.jsonl"))
-              assert len(files) == 16, (directory, [x.name for x in files])
+              assert len(files) == expected_count, (
+                  directory,
+                  expected_count,
+                  [x.name for x in files],
+              )
               previous_hi = None
               for path in files:
                   manifest_path = path.with_suffix(path.suffix + ".manifest.json")
@@ -247,8 +251,8 @@ jobs:
                   row["token"].lower(),
               )
 
-          v1, v1_manifests = read_shards("downloads/v1", "v1")
-          v2, v2_manifests = read_shards("downloads/v2", "v2")
+          v1, v1_manifests = read_shards("downloads/v1", "v1", 16)
+          v2, v2_manifests = read_shards("downloads/v2", "v2", 8)
           assert v1_manifests[0]["from_block"] == 8_600_612
           assert v2_manifests[0]["from_block"] == 26_841_846
           head = int(os.environ["SNAPSHOT_HEAD"])
