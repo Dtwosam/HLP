@@ -12,6 +12,7 @@ NON_TRADE_EVENT_TYPES = {
     "curve_initialized",
     "pool_graduated",
     "v4_initialize",
+    "v3_initialize",
 }
 
 
