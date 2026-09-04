@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from hlp.cli import _archive_rpc
+from hlp.cli import _archive_rpc, build_parser
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
 
 
@@ -36,3 +36,27 @@ def test_archive_rpc_explicit_url_override_wins(monkeypatch):
 
     assert rpc.url == "https://example.invalid/rpc"
     assert rpc.extra_headers == {"X-API-Key": "test-key"}
+
+
+def test_large_pons_tape_modes_parse():
+    parser = build_parser()
+
+    v2 = parser.parse_args([
+        "rpc-v2-curve-tape",
+        "--registry", "registry.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--global-topic-scan",
+        "--out", "curve.jsonl",
+    ])
+    assert v2.global_topic_scan is True
+
+    v1 = parser.parse_args([
+        "rpc-v3-pons-tape",
+        "--registry", "registry.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--global-topic-scan",
+        "--out", "v3.jsonl",
+    ])
+    assert v1.global_topic_scan is True
