@@ -9,6 +9,7 @@ on:
       - '.github/workflows/phase1-pons-v1-generation-audit.yml'
       - 'src/hlp/config.py'
       - 'src/hlp/protocols/pons.py'
+      - 'src/hlp/data/blockscout.py'
 
 permissions:
   contents: read
@@ -32,7 +33,6 @@ jobs:
           python - <<'PY'
           import json
           import os
-          from collections import Counter
           from pathlib import Path
 
           from hlp.config import (
@@ -46,13 +46,10 @@ jobs:
               SOLIDRPC_AUTH_RPC_URL,
               SOLIDRPC_PUBLIC_RPC_URL,
           )
+          from hlp.data.blockscout import BlockscoutClient
           from hlp.data.rpc import RpcClient
           from hlp.protocols.pons import (
-              V1_LAUNCH_CONFIG_ADDED_TOPIC,
-              V1_LAUNCH_CONFIG_UPDATED_TOPIC,
-              V1_TOKEN_DEPLOYED_TOPIC,
               V1_TOKEN_LAUNCHED_TOPIC,
-              V2_POOL_GRADUATED_TOPIC,
               V2_TOKEN_LAUNCHED_TOPIC,
               decode_v1_launch,
               decode_v2_launch,
@@ -67,11 +64,50 @@ jobs:
               url,
               timeout=30,
               attempts=5,
-              min_interval_seconds=0.6,
+              min_interval_seconds=0.1,
               extra_headers={"X-API-Key": key} if key else None,
           )
+          indexed = BlockscoutClient(timeout=30, attempts=5)
           rpc.assert_robinhood()
           head = rpc.block_number()
+
+          def locate_and_confirm(address, topic0, decoder, from_block):
+              candidates = list(
+                  indexed.iter_indexed_logs_bisect(
+                      from_block,
+                      head,
+                      address=address,
+                      topic0=topic0,
+                      max_records=1,
+                  )
+              )
+              assert candidates, (
+                  f"no indexed launch event for {address} "
+                  f"from {from_block} through {head}"
+              )
+              candidate = candidates[0]
+
+              raw_logs = rpc.get_logs(
+                  candidate.block_number,
+                  candidate.block_number,
+                  address=address,
+                  topics=[topic0],
+              )
+              matches = [
+                  row for row in raw_logs
+                  if (
+                      row.transaction_hash == candidate.transaction_hash
+                      and row.log_index == candidate.log_index
+                  )
+              ]
+              assert len(matches) == 1, (
+                  address,
+                  candidate.transaction_hash,
+                  candidate.log_index,
+                  len(matches),
+              )
+              decoded = decoder(matches[0])
+              return candidate, decoded
 
           labels = {
               PONS_V1_FACTORY_LEGACY.lower(): "legacy_v1_abi",
@@ -81,14 +117,7 @@ jobs:
           configured_v1 = {address.lower() for address in PONS_V1_FACTORIES}
           assert configured_v1 == set(labels), (configured_v1, set(labels))
 
-          expected_v1_topics = {
-              V1_TOKEN_DEPLOYED_TOPIC,
-              V1_TOKEN_LAUNCHED_TOPIC,
-              V1_LAUNCH_CONFIG_ADDED_TOPIC,
-              V1_LAUNCH_CONFIG_UPDATED_TOPIC,
-          }
           v1 = {}
-
           for address in sorted(configured_v1):
               configured_first = PONS_V1_FACTORY_DEPLOYMENT_BLOCKS[address]
               assert configured_first <= head, (address, configured_first, head)
@@ -101,30 +130,12 @@ jobs:
                   configured_first,
               )
 
-              scan_to = min(head, first_code + 199_999)
-              logs = list(
-                  rpc.iter_logs_chunked(
-                      first_code,
-                      scan_to,
-                      address=address,
-                      topics=[sorted(expected_v1_topics)],
-                      chunk_size=50_000 if key else 2_000,
-                      min_chunk_size=25,
-                  )
+              locator, sample = locate_and_confirm(
+                  address,
+                  V1_TOKEN_LAUNCHED_TOPIC,
+                  decode_v1_launch,
+                  configured_first,
               )
-              counts = Counter(
-                  row.topics[0] if row.topics else "<none>"
-                  for row in logs
-              )
-              launch_logs = [
-                  row for row in logs
-                  if row.topics and row.topics[0] == V1_TOKEN_LAUNCHED_TOPIC
-              ]
-              assert launch_logs, (
-                  f"{labels[address]} emitted no V1 TokenLaunched event "
-                  f"in {first_code}-{scan_to}"
-              )
-              sample = decode_v1_launch(launch_logs[0])
               assert sample.factory == address
               assert sample.token and sample.pool and sample.pair_token
 
@@ -132,16 +143,17 @@ jobs:
                   "address": address,
                   "configured_first_code_block": configured_first,
                   "observed_first_code_block": first_code,
-                  "scan_to": scan_to,
-                  "known_v1_topic_counts": dict(counts),
+                  "first_indexed_launch_block": locator.block_number,
                   "sample_launch": {
                       "block_number": sample.block_number,
                       "transaction_hash": sample.transaction_hash,
+                      "log_index": sample.log_index,
                       "token": sample.token,
                       "pool": sample.pool,
                       "pair_token": sample.pair_token,
                       "launch_config_id": sample.launch_config_id,
                   },
+                  "verification": "Blockscout locator; exact event re-read and decoded from raw RPC",
               }
 
           v2_address = PONS_V2_FACTORY.lower()
@@ -151,32 +163,12 @@ jobs:
               v2_first_code,
               PONS_V2_DEPLOYMENT_BLOCK,
           )
-
-          active_from = max(PONS_V2_DEPLOYMENT_BLOCK, 30_000_000)
-          active_to = min(head, active_from + 99_999)
-          v2_logs = list(
-              rpc.iter_logs_chunked(
-                  active_from,
-                  active_to,
-                  address=v2_address,
-                  topics=[[V2_TOKEN_LAUNCHED_TOPIC, V2_POOL_GRADUATED_TOPIC]],
-                  chunk_size=50_000 if key else 2_000,
-                  min_chunk_size=25,
-              )
+          v2_locator, v2_sample = locate_and_confirm(
+              v2_address,
+              V2_TOKEN_LAUNCHED_TOPIC,
+              decode_v2_launch,
+              PONS_V2_DEPLOYMENT_BLOCK,
           )
-          v2_counts = Counter(
-              row.topics[0] if row.topics else "<none>"
-              for row in v2_logs
-          )
-          v2_launch_logs = [
-              row for row in v2_logs
-              if row.topics and row.topics[0] == V2_TOKEN_LAUNCHED_TOPIC
-          ]
-          assert v2_launch_logs, (
-              f"current V2 emitted no TokenLaunched event in "
-              f"{active_from}-{active_to}"
-          )
-          v2_sample = decode_v2_launch(v2_launch_logs[0])
           assert v2_sample.curve and v2_sample.token and v2_sample.pair_token
 
           result = {
@@ -189,19 +181,21 @@ jobs:
                   "address": v2_address,
                   "configured_first_code_block": PONS_V2_DEPLOYMENT_BLOCK,
                   "observed_first_code_block": v2_first_code,
-                  "active_sample_from": active_from,
-                  "active_sample_to": active_to,
-                  "topic_counts": dict(v2_counts),
+                  "first_indexed_launch_block": v2_locator.block_number,
                   "sample_launch": {
                       "block_number": v2_sample.block_number,
                       "transaction_hash": v2_sample.transaction_hash,
+                      "log_index": v2_sample.log_index,
                       "token": v2_sample.token,
                       "curve": v2_sample.curve,
                       "pair_token": v2_sample.pair_token,
                       "launch_config_id": v2_sample.launch_config_id,
                   },
+                  "verification": "Blockscout locator; exact event re-read and decoded from raw RPC",
               },
-              "requests_made": rpc.requests_made,
+              "raw_rpc_requests": rpc.requests_made,
+              "blockscout_requests": indexed.requests_made,
+              "blockscout_bytes": indexed.bytes_received,
           }
           Path("artifacts/pons-generation-audit.json").write_text(
               json.dumps(result, indent=2, sort_keys=True)
