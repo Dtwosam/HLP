@@ -122,3 +122,20 @@ full raw historical tape as a design assumption.
 5. third-party market-data displays.
 
 No source overrides the point-in-time or $0 rules.
+
+## SRC-009 — hoodexplorer Robinhood API
+URL: https://www.hoodexplorer.org/apidocs
+
+Verified documentation on 2026-09-04:
+- keyless Etherscan-compatible API at 60 requests/min/IP;
+- list pagination up to 1,000 rows;
+- indexed event logs filtered by address/topic0;
+- contract creation and token-transfer endpoints;
+- read-only eth_* proxy backed by an archive node.
+
+Allowed use:
+historical acquisition candidate and independent verification.
+
+Constraint:
+GitHub-hosted runners could not reach the service during Phase 1 networking tests, so this source cannot be a required CI dependency unless that changes. Promote to canonical bulk source only after the sampler is exercised successfully from a reachable runtime and reconciled against independent evidence.
+
