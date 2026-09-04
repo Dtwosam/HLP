@@ -1837,23 +1837,33 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
+    # V4 Swap indexes poolId in topic1. Filter the registered Pons pool
+    # ids at the node instead of downloading every PoolManager swap and
+    # discarding non-Pons rows client-side. This keeps the raw-chain source
+    # unchanged while making full-history acquisition substantially smaller.
     raw = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
         address=UNISWAP_V4_POOL_MANAGER,
-        topics=[V4_SWAP_TOPIC],
+        topics=[V4_SWAP_TOPIC, sorted(pool_ids)],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
     )
-    counters = {"all_v4_swaps": 0, "matched_pons_v4_swaps": 0}
+    counters = {
+        "server_filtered_v4_swaps": 0,
+        "matched_pons_v4_swaps": 0,
+    }
     matched_ids: set[str] = set()
 
     def decoded():
         for log in raw:
-            counters["all_v4_swaps"] += 1
+            counters["server_filtered_v4_swaps"] += 1
             row = decode_v4_swap(log)
+            # Fail closed if a provider ever violates the topic1 filter.
             if row.pool_id not in pool_ids:
-                continue
+                raise ValueError(
+                    f"V4 server-side pool filter returned unknown id {row.pool_id}"
+                )
             counters["matched_pons_v4_swaps"] += 1
             matched_ids.add(row.pool_id)
             yield row
@@ -1871,6 +1881,8 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "event_topic0": V4_SWAP_TOPIC,
+            "event_topic1_pool_ids": sorted(pool_ids),
+            "filter_semantics": "server-side topic1 OR over registered Pons V2 pool ids",
         },
     )
     print(
