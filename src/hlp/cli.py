@@ -17,11 +17,14 @@ from hlp.config import (
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     PONS_V1_FACTORY,
     PONS_V2_FACTORY,
+    PONS_V1_DEPLOYMENT_BLOCK,
     PONS_V2_MEME_HOOK,
     UNISWAP_V4_POOL_MANAGER,
 )
+from hlp.protocols.uniswap import V3_SWAP_TOPIC, decode_v3_swap
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.hoodexplorer import HoodExplorerClient
+from hlp.data.pons_v1 import iter_enriched_v1_launches
 from hlp.data.rpc import RpcClient
 from hlp.data.reconstruct import (
     attach_quote_usd_anchor,
@@ -29,7 +32,10 @@ from hlp.data.reconstruct import (
     v3_quote_price_at_block,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
+from hlp.protocols.pons_state import read_v1_launch_config_state
 from hlp.protocols.pons import (
+    V1_LAUNCH_CONFIG_ADDED_TOPIC,
+    V1_LAUNCH_CONFIG_UPDATED_TOPIC,
     V1_TOKEN_LAUNCHED_TOPIC,
     V2_TOKEN_LAUNCHED_TOPIC,
     decode_v1_launch,
@@ -279,6 +285,168 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
+    """Build an independently reproducible enriched Pons V1 launch shard."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    if args.from_block < PONS_V1_DEPLOYMENT_BLOCK:
+        raise SystemExit(
+            f"from-block cannot precede Pons V1 deployment {PONS_V1_DEPLOYMENT_BLOCK}"
+        )
+
+    started = time.monotonic()
+    topic_or = [
+        V1_TOKEN_LAUNCHED_TOPIC,
+        V1_LAUNCH_CONFIG_ADDED_TOPIC,
+        V1_LAUNCH_CONFIG_UPDATED_TOPIC,
+    ]
+    raw = list(
+        rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=PONS_V1_FACTORY,
+            topics=[topic_or],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+
+    launch_config_ids = sorted(
+        {
+            decode_v1_launch(row).launch_config_id
+            for row in raw
+            if row.topics and row.topics[0] == V1_TOKEN_LAUNCHED_TOPIC
+        }
+    )
+    bootstrap = []
+    if args.from_block > PONS_V1_DEPLOYMENT_BLOCK:
+        for config_id in launch_config_ids:
+            if config_id is None:
+                continue
+            bootstrap.append(
+                read_v1_launch_config_state(
+                    rpc,
+                    config_id,
+                    block=args.from_block - 1,
+                )
+            )
+
+    rows = iter_enriched_v1_launches(raw, bootstrap_configs=bootstrap)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v1_registry",
+            "factory": PONS_V1_FACTORY.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "topic0_or": topic_or,
+            "bootstrap_config_ids": launch_config_ids,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+            "token_decimals_source": "PonsLauncherToken inherits OpenZeppelin ERC20 default 18 decimals",
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "factory_events": len(raw),
+                "bootstrap_configs": len(bootstrap),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _load_jsonl(path: str) -> list[dict]:
+    rows = []
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
+    """Acquire one shared V3 Swap tape and keep only registered Pons pools."""
+    registry = _load_jsonl(args.registry)
+    pool_launch_block = {
+        row["pool"].lower(): int(row["block_number"])
+        for row in registry
+        if row.get("pool")
+    }
+    if not pool_launch_block:
+        raise SystemExit("registry contains no Pons V1 pools")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw_tape = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        topics=[V3_SWAP_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+
+    counters = {"all_v3_swap_logs": 0, "matched_pons_swaps": 0}
+    matched_pools: set[str] = set()
+
+    def matched():
+        for raw in raw_tape:
+            counters["all_v3_swap_logs"] += 1
+            pool = raw.address.lower()
+            launch_block = pool_launch_block.get(pool)
+            if launch_block is None:
+                continue
+            if raw.block_number < launch_block:
+                raise RuntimeError(
+                    f"swap for Pons pool {pool} predates recorded launch block"
+                )
+            swap = decode_v3_swap(raw)
+            counters["matched_pons_swaps"] += 1
+            matched_pools.add(pool)
+            yield swap
+
+    manifest = write_jsonl_snapshot(
+        matched(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v3_shared_swap_tape",
+            "event_topic0": V3_SWAP_TOPIC,
+            "registry": str(Path(args.registry).name),
+            "registry_pools": len(pool_launch_block),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                **counters,
+                "matched_pools": len(matched_pools),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v1_usd_path(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
@@ -525,6 +693,24 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--page-size", type=int, default=1000)
     sample.add_argument("--out", required=True)
     sample.set_defaults(func=cmd_hood_pons_sample)
+
+
+    registry = sub.add_parser("rpc-v1-registry-window")
+    registry.add_argument("--from-block", type=int, required=True)
+    registry.add_argument("--to-block", type=int, required=True)
+    registry.add_argument("--chunk-size", type=int, default=100_000)
+    registry.add_argument("--min-chunk-size", type=int, default=1)
+    registry.add_argument("--out", required=True)
+    registry.set_defaults(func=cmd_rpc_v1_registry_window)
+
+    tape = sub.add_parser("rpc-v3-pons-tape")
+    tape.add_argument("--registry", required=True)
+    tape.add_argument("--from-block", type=int, required=True)
+    tape.add_argument("--to-block", type=int, required=True)
+    tape.add_argument("--chunk-size", type=int, default=100_000)
+    tape.add_argument("--min-chunk-size", type=int, default=1)
+    tape.add_argument("--out", required=True)
+    tape.set_defaults(func=cmd_rpc_v3_pons_tape)
 
     usd_path = sub.add_parser("rpc-v1-usd-path")
     usd_path.add_argument("--token", required=True)
