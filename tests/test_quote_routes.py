@@ -41,6 +41,7 @@ def test_v3_route_audit_skips_weth_after_causal_usdg_route(monkeypatch):
     calls = []
 
     def get_pool(rpc, factory, *, token_a, token_b, fee, block):
+        assert block == "latest"
         calls.append((token_b, fee))
         if token_b == ROBINHOOD_USDG.lower() and fee == 3000:
             return POOL

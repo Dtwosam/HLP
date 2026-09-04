@@ -35,7 +35,7 @@ def audit_unpriced_v3_quote_routes(
     factory: str = UNISWAP_V3_FACTORY,
     fees: tuple[int, ...] = V3_CANONICAL_FEES,
 ) -> list[dict]:
-    """Find direct USDG/WETH V3 routes visible before first Pons quote use."""
+    """Find direct V3 routes and prove each existed before first Pons use."""
     rows = list(quote_rows)
     special_decimals = {
         row["quote_token"].lower(): int(row["quote_decimals"])
@@ -71,13 +71,17 @@ def audit_unpriced_v3_quote_routes(
                 )
             for fee in fees:
                 try:
+                    # V3 getPool mappings are immutable after creation.
+                    # Discover the pool cheaply from current factory state,
+                    # then prove that exact pool already existed at the causal
+                    # pre-Pons block before accepting it.
                     pool = read_v3_factory_pool(
                         rpc,
                         factory,
                         token_a=token,
                         token_b=anchor,
                         fee=fee,
-                        block=prior,
+                        block="latest",
                     )
                 except Exception as exc:
                     lookup_errors.append({
