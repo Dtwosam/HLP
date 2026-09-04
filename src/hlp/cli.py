@@ -2011,6 +2011,7 @@ def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
     raw_tape = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
+        address=sorted(curve_to_token),
         topics=[topics],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
@@ -2049,6 +2050,7 @@ def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
             "protocol": "pons_v2_shared_curve_tape",
             "registry": Path(args.registry).name,
             "registry_curves": len(curve_to_token),
+            "server_side_curve_address_filter": True,
             "event_topic0_or": topics,
             "from_block": args.from_block,
             "to_block": args.to_block,
@@ -2769,6 +2771,7 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
     raw_tape = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
+        address=sorted(pool_launch_block),
         topics=[V3_SWAP_TOPIC],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
@@ -2803,6 +2806,7 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
             "event_topic0": V3_SWAP_TOPIC,
             "registry": str(Path(args.registry).name),
             "registry_pools": len(pool_launch_block),
+            "server_side_pool_address_filter": True,
             "from_block": args.from_block,
             "to_block": args.to_block,
             "initial_chunk_size": args.chunk_size,
