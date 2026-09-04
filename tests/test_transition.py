@@ -48,4 +48,3 @@ def test_transition_tracks_initialize_before_graduation_event():
     assert Decimal(result["curve_to_v4_initialize_bps"]) > 0
     assert Decimal(result["v4_initialize_to_seed_bps"]) > 0
     assert Decimal(result["seed_to_first_v4_bps"]) > 0
-\n
