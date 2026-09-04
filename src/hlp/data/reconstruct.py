@@ -71,6 +71,7 @@ def reconstruct_v3_price_points(
             "pool": pool,
             "block_number": swap.block_number,
             "transaction_hash": swap.transaction_hash,
+            "transaction_index": swap.transaction_index,
             "log_index": swap.log_index,
             "quote_per_token": str(quote_per_token),
             "market_cap_quote": str(market_cap_quote),
