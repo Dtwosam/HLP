@@ -87,6 +87,21 @@ class HoodFunEvent:
 
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class CcaPriceEvent:
+    auction: str
+    event_type: str
+    checkpoint_block: int
+    clearing_price_x96: int
+    cumulative_mps: int | None
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
 @dataclass(frozen=True, slots=True)
 class PoolsTradeLbpInitializerCreated:
     strategy: str
