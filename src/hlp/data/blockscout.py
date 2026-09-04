@@ -81,6 +81,16 @@ class BlockscoutClient:
         )
         return self._get(f"{self.base_url}/api?{query}")
 
+    def block_number(self) -> int:
+        payload = self._legacy("block", "eth_block_number")
+        if str(payload.get("status")) != "1":
+            raise BlockscoutError(f"block-number lookup failed: {payload}")
+        value = payload.get("result")
+        parsed = _quantity(value)
+        if parsed is None:
+            raise BlockscoutError(f"block-number lookup returned no result: {payload}")
+        return parsed
+
     def contract_creation(self, address: str) -> dict[str, str]:
         address = normalize_address(address)
         payload = self._legacy(
