@@ -8,7 +8,12 @@ from hlp.config import (
     POOLS_TRADE_LAUNCHER_ORIGINAL,
     normalize_address,
 )
-from hlp.data.types import PoolsTradeTokenCreated, PoolsTradeTokenLaunched, RawLog
+from hlp.data.types import (
+    PoolsTradeTokenCreated,
+    PoolsTradeTokenDistributed,
+    PoolsTradeTokenLaunched,
+    RawLog,
+)
 from hlp.protocols.evm import (
     data_words,
     event_topic,
@@ -20,8 +25,10 @@ from hlp.protocols.evm import (
 
 
 TOKEN_CREATED_SIG = "TokenCreated(address)"
+TOKEN_DISTRIBUTED_SIG = "TokenDistributed(address,address,uint256)"
 TOKEN_LAUNCHED_SIG = "TokenLaunched(bytes32,address,address,(address,address,uint24,int24,address))"
 TOKEN_CREATED_TOPIC = event_topic(TOKEN_CREATED_SIG)
+TOKEN_DISTRIBUTED_TOPIC = event_topic(TOKEN_DISTRIBUTED_SIG)
 TOKEN_LAUNCHED_TOPIC = event_topic(TOKEN_LAUNCHED_SIG)
 
 LAUNCHERS = {
@@ -44,6 +51,29 @@ def decode_pools_trade_token_created(log: RawLog) -> PoolsTradeTokenCreated:
     return PoolsTradeTokenCreated(
         launcher=log.address,
         token=topic_address(log.topics[1]),
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+
+def decode_pools_trade_token_distributed(log: RawLog) -> PoolsTradeTokenDistributed:
+    if log.address not in LAUNCHERS:
+        raise ValueError("not a pools.trade LiquidityLauncher log")
+    if not log.topics or log.topics[0] != TOKEN_DISTRIBUTED_TOPIC:
+        raise ValueError("not pools.trade TokenDistributed")
+    if len(log.topics) != 3:
+        raise ValueError("unexpected pools.trade TokenDistributed topic count")
+    words = data_words(log.data)
+    if len(words) != 1:
+        raise ValueError("unexpected pools.trade TokenDistributed data length")
+    return PoolsTradeTokenDistributed(
+        launcher=log.address,
+        token=topic_address(log.topics[1]),
+        strategy=topic_address(log.topics[2]),
+        amount_raw=words[0],
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
