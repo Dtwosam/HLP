@@ -96,6 +96,34 @@ class RpcClient:
     def get_code(self, address: str, block: int | str = "latest") -> str:
         return self.call("eth_getCode", [address, _hex_quantity(block)])
 
+    def find_first_code_block(
+        self,
+        address: str,
+        *,
+        low: int = 0,
+        high: int | None = None,
+    ) -> int:
+        """Binary-search the first block where an address has bytecode.
+
+        This assumes code presence is monotonic for the address in the search
+        interval, which is valid for ordinary non-self-destructed deployments.
+        Callers should independently verify the returned boundary.
+        """
+        if high is None:
+            high = self.block_number()
+        if low < 0 or high < low:
+            raise ValueError("invalid deployment search interval")
+        if self.get_code(address, high) in {"0x", "0x0", ""}:
+            raise RpcError(f"address has no bytecode at high block {high}: {address}")
+        while low < high:
+            mid = (low + high) // 2
+            code = self.get_code(address, mid)
+            if code not in {"0x", "0x0", ""}:
+                high = mid
+            else:
+                low = mid + 1
+        return low
+
     def get_logs(
         self,
         from_block: int,
