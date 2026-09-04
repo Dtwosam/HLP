@@ -98,66 +98,90 @@ class ChainlinkDirectoryClient:
         symbol = symbol.upper().strip()
         exact_name = f"Robinhood {symbol} / USD"
         marker = f'"name":[0,"{exact_name}"]'
-        position = page_text.find(marker)
-        if position < 0:
+        positions = []
+        cursor = 0
+        while True:
+            position = page_text.find(marker, cursor)
+            if position < 0:
+                break
+            positions.append(position)
+            cursor = position + len(marker)
+        if not positions:
             raise ChainlinkDirectoryError(
                 f"official Chainlink directory has no exact feed {exact_name!r}"
             )
-        if page_text.find(marker, position + 1) >= 0:
-            raise ChainlinkDirectoryError(
-                f"official Chainlink directory contains duplicate feed {exact_name!r}"
+
+        candidates: list[RobinhoodFeedDirectoryEntry] = []
+        for position in positions:
+            # The server-rendered feed records place one heartbeat field before
+            # each name. Bound each occurrence to adjacent heartbeat records.
+            start = page_text.rfind('"heartbeat":[0,', 0, position)
+            if start < 0:
+                continue
+            end = page_text.find('"heartbeat":[0,', position + len(marker))
+            if end < 0:
+                end = min(len(page_text), position + 20_000)
+            segment = page_text[start:end]
+
+            name = ChainlinkDirectoryClient._field(segment, "name")
+            path = ChainlinkDirectoryClient._field(segment, "path")
+            proxy = ChainlinkDirectoryClient._field(segment, "proxyAddress")
+            secondary = ChainlinkDirectoryClient._field(
+                segment, "secondaryProxyAddress"
+            )
+            heartbeat = ChainlinkDirectoryClient._int_field(segment, "heartbeat")
+            blockchain = ChainlinkDirectoryClient._field(
+                segment, "blockchainName"
             )
 
-        # The server-rendered feed records place one heartbeat field before
-        # each name. Bound the parse to adjacent heartbeat records so fields
-        # from neighboring networks/feeds cannot bleed into this result.
-        start = page_text.rfind('"heartbeat":[0,', 0, position)
-        if start < 0:
-            raise ChainlinkDirectoryError(f"{exact_name}: heartbeat boundary missing")
-        end = page_text.find('"heartbeat":[0,', position + len(marker))
-        if end < 0:
-            end = min(len(page_text), position + 20_000)
-        segment = page_text[start:end]
+            if name != exact_name or blockchain != "Robinhood":
+                continue
+            if not path or not path.startswith(
+                f"robinhood-{symbol.lower()}-usd-"
+            ):
+                continue
+            if not proxy or not re.fullmatch(_ADDRESS_RE, proxy):
+                continue
+            if secondary is not None and not re.fullmatch(_ADDRESS_RE, secondary):
+                continue
+            if heartbeat is None or heartbeat <= 0:
+                continue
 
-        name = ChainlinkDirectoryClient._field(segment, "name")
-        path = ChainlinkDirectoryClient._field(segment, "path")
-        proxy = ChainlinkDirectoryClient._field(segment, "proxyAddress")
-        secondary = ChainlinkDirectoryClient._field(segment, "secondaryProxyAddress")
-        heartbeat = ChainlinkDirectoryClient._int_field(segment, "heartbeat")
-        blockchain = ChainlinkDirectoryClient._field(segment, "blockchainName")
-
-        if name != exact_name:
-            raise ChainlinkDirectoryError(
-                f"{exact_name}: bounded record name mismatch: {name!r}"
-            )
-        if not path or not path.startswith(f"robinhood-{symbol.lower()}-usd-"):
-            raise ChainlinkDirectoryError(
-                f"{exact_name}: unexpected Chainlink path {path!r}"
-            )
-        if not proxy or not re.fullmatch(_ADDRESS_RE, proxy):
-            raise ChainlinkDirectoryError(f"{exact_name}: proxy address missing")
-        if secondary is not None and not re.fullmatch(_ADDRESS_RE, secondary):
-            raise ChainlinkDirectoryError(
-                f"{exact_name}: invalid secondary proxy {secondary!r}"
-            )
-        if heartbeat is None or heartbeat <= 0:
-            raise ChainlinkDirectoryError(f"{exact_name}: invalid heartbeat")
-        if blockchain != "Robinhood":
-            raise ChainlinkDirectoryError(
-                f"{exact_name}: blockchain mismatch {blockchain!r}"
+            candidates.append(
+                RobinhoodFeedDirectoryEntry(
+                    symbol=symbol,
+                    name=name,
+                    path=path,
+                    proxy_address=proxy.lower(),
+                    secondary_proxy_address=(
+                        secondary.lower() if secondary is not None else None
+                    ),
+                    heartbeat_seconds=heartbeat,
+                    blockchain_name=blockchain,
+                )
             )
 
-        return RobinhoodFeedDirectoryEntry(
-            symbol=symbol,
-            name=name,
-            path=path,
-            proxy_address=proxy.lower(),
-            secondary_proxy_address=(
-                secondary.lower() if secondary is not None else None
-            ),
-            heartbeat_seconds=heartbeat,
-            blockchain_name=blockchain,
-        )
+        unique = {
+            (
+                row.name,
+                row.path,
+                row.proxy_address,
+                row.secondary_proxy_address,
+                row.heartbeat_seconds,
+                row.blockchain_name,
+            ): row
+            for row in candidates
+        }
+        if not unique:
+            raise ChainlinkDirectoryError(
+                f"{exact_name}: no valid Robinhood feed record found"
+            )
+        if len(unique) != 1:
+            raise ChainlinkDirectoryError(
+                f"{exact_name}: conflicting official feed records: "
+                f"{sorted(unique)}"
+            )
+        return next(iter(unique.values()))
 
     def robinhood_feeds(
         self,
