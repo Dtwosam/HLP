@@ -75,6 +75,10 @@ from hlp.data.pons_v2 import (
     filter_v2_registry_to_graduated,
     iter_enriched_v2_launches,
 )
+from hlp.data.pons_transactions import (
+    attach_pons_transaction_identities,
+    fetch_transaction_identity_rows,
+)
 from hlp.data.pons_time import (
     enrich_pons_episodes_with_time,
     enrich_pons_points_with_time,
@@ -2295,6 +2299,84 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_pons_transaction_enrich(args: argparse.Namespace) -> int:
+    """Attach batched transaction initiator identities to Pons research points."""
+    points = _load_jsonl(args.points)
+    hashes = sorted({
+        row["transaction_hash"].lower()
+        for row in points
+    })
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    transaction_rows = fetch_transaction_identity_rows(
+        rpc,
+        hashes,
+        batch_size=args.batch_size,
+        min_batch_size=args.min_batch_size,
+    )
+    enriched = attach_pons_transaction_identities(
+        points,
+        transaction_rows,
+    )
+
+    transaction_manifest = write_jsonl_snapshot(
+        transaction_rows,
+        output=Path(args.transactions_out),
+        provenance={
+            "source": "eth_getTransactionByHash_batched",
+            "chain_id": 4663,
+            "points": Path(args.points).name,
+            "unique_transactions": len(hashes),
+            "requested_batch_size": args.batch_size,
+            "min_batch_size": args.min_batch_size,
+            "identity_semantics": (
+                "initiator is transaction.from; pool/router event sender is "
+                "not substituted for wallet identity"
+            ),
+        },
+    )
+    enriched_manifest = write_jsonl_snapshot(
+        enriched,
+        output=Path(args.out),
+        provenance={
+            "source": "pons_research_points_plus_transaction_identity",
+            "chain_id": 4663,
+            "points": Path(args.points).name,
+            "transaction_map_sha256": transaction_manifest["sha256"],
+        },
+    )
+
+    unique_initiators = {
+        row["initiator"]
+        for row in transaction_rows
+    }
+    destination_counts: dict[str, int] = {}
+    for row in transaction_rows:
+        destination = row["to"] or "<contract_creation>"
+        destination_counts[destination] = (
+            destination_counts.get(destination, 0) + 1
+        )
+
+    print(
+        json.dumps(
+            {
+                "transactions": transaction_manifest,
+                "enriched_points": enriched_manifest,
+                "unique_transactions": len(transaction_rows),
+                "unique_initiators": len(unique_initiators),
+                "unique_destinations": len(destination_counts),
+                "rpc_requests": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_pons_time_enrich(args: argparse.Namespace) -> int:
     """Attach exact Robinhood block timestamps to eligible Pons research data."""
     outcomes = _load_jsonl(args.outcomes)
@@ -2985,6 +3067,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    pons_transactions = sub.add_parser("rpc-pons-transaction-enrich")
+    pons_transactions.add_argument("--points", required=True)
+    pons_transactions.add_argument("--batch-size", type=int, default=100)
+    pons_transactions.add_argument("--min-batch-size", type=int, default=1)
+    pons_transactions.add_argument("--transactions-out", required=True)
+    pons_transactions.add_argument("--out", required=True)
+    pons_transactions.set_defaults(func=cmd_rpc_pons_transaction_enrich)
 
     pons_time = sub.add_parser("rpc-pons-time-enrich")
     pons_time.add_argument("--outcomes", required=True)
