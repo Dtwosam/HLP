@@ -125,6 +125,30 @@ jobs:
               row["quote_token"].lower(),
           ))
 
+          checkpoint_identity = {}
+          for row in checkpoints:
+              token = row["quote_token"].lower()
+              assert int(row["block_number"]) == (
+                  int(row["activation_block"]) - 1
+              ), row
+              identity = (
+                  row["feed"].lower(),
+                  row["aggregator"].lower(),
+                  int(row["decimals"]),
+                  row["description"],
+                  row.get("pricing_status"),
+                  row.get("quote_decimals"),
+              )
+              prior_identity = checkpoint_identity.setdefault(
+                  token, identity
+              )
+              assert prior_identity == identity, (
+                  "oracle identity changed across shards",
+                  token,
+                  prior_identity,
+                  identity,
+              )
+
           # Earliest checkpoint for each quote is the causal activation state.
           initial_by_quote = {}
           for row in checkpoints:
