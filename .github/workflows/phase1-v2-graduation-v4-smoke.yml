@@ -127,6 +127,7 @@ jobs:
           registry = read("v2-registry.jsonl")
           graduations = read("v2-graduations.jsonl")
           registrations = read("v2-registrations.jsonl")
+          raw_v4 = read("v2-v4-swaps.jsonl")
           v4 = read("v2-v4-market-caps.jsonl")
           transitions = read("v2-transition.jsonl")
           summary = read("v2-lifecycle-summary.jsonl")
@@ -140,10 +141,18 @@ jobs:
               {r["token"] for r in registry}
           )
           assert len(transitions) == len(graduations)
+          initializes = [
+              row for row in raw_v4 if row.get("event_type") == "v4_initialize"
+          ]
+          assert len(initializes) == len(registrations), (
+              len(initializes),
+              len(registrations),
+          )
           print(json.dumps({
               "launches": len(registry),
               "graduations": len(graduations),
               "registrations": len(registrations),
+              "v4_initializes": len(initializes),
               "v4_price_points": len(v4),
               "transitions": len(transitions),
               "tokens_crossed_100k_full_lifecycle": sum(
