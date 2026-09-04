@@ -183,12 +183,15 @@ research probes.
 
 The complete downstream eligibility paths are now explicitly staged as:
 
-- shared: full Pons registry -> quote audit -> all-Pons Stock Token oracle +
-  WETH/USDG anchor;
-- V1: full registry -> globally scanned/filter-local V3 tape -> summary-only
-  lifecycle eligibility -> frozen >=$100k V1 subset;
-- V2: V2 registry -> curve/transition -> V4 tape -> summary-only lifecycle
-  eligibility -> frozen >=$100k V2 subset;
+- shared: full Pons registry -> quote audit -> Chainlink/cbBTC oracle +
+  venue-specific V3/V4 quote fallbacks -> one disjoint generic quote/USD tape,
+  plus the WETH/USDG anchor where lifecycle pricing requires it;
+- V1: full registry -> globally scanned/filter-local V3 tape -> Chainlink +
+  generic fallback USD replay -> summary-only lifecycle eligibility -> frozen
+  >=$100k V1 subset;
+- V2: V2 registry -> curve/transition -> V4 tape -> Chainlink + generic
+  fallback USD replay -> summary-only lifecycle eligibility -> frozen >=$100k
+  V2 subset;
 - final: fail closed only while any lifecycle remains eligibility-unknown;
   proven eligible histories may contain earlier unpriced intervals, then union
   the known V1 + V2 eligible tokens into the immutable all-Pons >=$100k
