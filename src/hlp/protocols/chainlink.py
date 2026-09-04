@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from hlp.config import normalize_address
 from hlp.data.rpc import RpcClient
-from hlp.protocols.evm import data_words, function_selector, signed_word
+from hlp.protocols.evm import data_words, function_selector, signed_word, word_address
 
 
 DECIMALS_SELECTOR = function_selector("decimals()")
@@ -105,3 +105,19 @@ def read_chainlink_latest_round(
         description=description,
         block_number=block,
     )
+
+
+
+def read_chainlink_aggregator(
+    rpc: RpcClient,
+    feed: str,
+    *,
+    block: int,
+) -> str:
+    """Return the underlying aggregator selected by a Chainlink proxy."""
+    words = data_words(
+        rpc.eth_call(normalize_address(feed), AGGREGATOR_SELECTOR, block)
+    )
+    if len(words) != 1:
+        raise ValueError("unexpected Chainlink aggregator() result length")
+    return word_address(words[0])
