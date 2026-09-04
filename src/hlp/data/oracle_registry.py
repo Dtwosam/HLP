@@ -1,4 +1,4 @@
-"""Resolve V2 Stock Token quote assets to official Chainlink feeds."""
+"""Resolve Pons Stock Token quote assets to official Chainlink feeds."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def resolve_stock_quote_feed_specs(
     directory_client: ChainlinkDirectoryClient,
 ) -> list[dict]:
     """Join Pons quote-token addresses to RHJ assets and Chainlink feeds."""
-    quote_decimals: dict[str, int] = {}
+    expected_decimals: dict[str, int | None] = {}
     for row in registry_rows:
         token = row["pair_token"].lower()
         if token in {
@@ -28,31 +28,42 @@ def resolve_stock_quote_feed_specs(
             ROBINHOOD_USDG.lower(),
         }:
             continue
-        decimals = int(row["quote_decimals"])
-        prior = quote_decimals.get(token)
-        if prior is not None and prior != decimals:
-            raise ValueError(
-                f"Pons V2 registry has inconsistent decimals for {token}: "
-                f"{prior} vs {decimals}"
-            )
-        quote_decimals[token] = decimals
+        value = row.get("quote_decimals")
+        decimals = None if value is None else int(value)
+        if token in expected_decimals:
+            prior = expected_decimals[token]
+            if (
+                prior is not None
+                and decimals is not None
+                and prior != decimals
+            ):
+                raise ValueError(
+                    f"Pons registry has inconsistent quote decimals for {token}: "
+                    f"{prior} vs {decimals}"
+                )
+            if prior is None and decimals is not None:
+                expected_decimals[token] = decimals
+        else:
+            expected_decimals[token] = decimals
 
-    if not quote_decimals:
+    if not expected_decimals:
         return []
 
     assets = assets_client.address_map()
     asset_rows = {}
     symbols = []
-    for token, decimals in quote_decimals.items():
+    for token, decimals in expected_decimals.items():
         asset = assets.get(token)
         if asset is None:
             raise KeyError(
-                f"V2 quote token is absent from official RHJ asset registry: {token}"
+                "Pons quote token is absent from official RHJ asset registry: "
+                f"{token}"
             )
-        if int(asset["token_decimals"]) != decimals:
+        asset_decimals = int(asset["token_decimals"])
+        if decimals is not None and asset_decimals != decimals:
             raise ValueError(
                 f"quote decimals disagree for {asset['token_symbol']} {token}: "
-                f"Pons={decimals}, RHJ={asset['token_decimals']}"
+                f"Pons={decimals}, RHJ={asset_decimals}"
             )
         symbol = asset["token_symbol"].upper()
         asset_rows[symbol] = asset
