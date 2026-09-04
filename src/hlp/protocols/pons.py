@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hlp.config import PONS_V1_FACTORY, PONS_V2_FACTORY, normalize_address
+from hlp.config import (
+    PONS_V1_FACTORIES,
+    PONS_V1_FACTORY,
+    PONS_V2_FACTORY,
+    normalize_address,
+)
 from hlp.data.types import (
     CurveBuyback,
     CurveTrade,
@@ -72,8 +77,16 @@ class PonsFactory:
     launch_topic: str
 
 
+PONS_V1_FACTORY_SET = {
+    normalize_address(address)
+    for address in PONS_V1_FACTORIES
+}
+
 PONS_FACTORIES = (
-    PonsFactory("v1", normalize_address(PONS_V1_FACTORY), V1_TOKEN_LAUNCHED_TOPIC),
+    *(
+        PonsFactory("v1", normalize_address(address), V1_TOKEN_LAUNCHED_TOPIC)
+        for address in PONS_V1_FACTORIES
+    ),
     PonsFactory("v2", normalize_address(PONS_V2_FACTORY), V2_TOKEN_LAUNCHED_TOPIC),
 )
 
@@ -81,8 +94,8 @@ PONS_FACTORIES = (
 
 def decode_v1_launch_config(log: RawLog) -> PonsV1LaunchConfig:
     """Decode a V1 LaunchConfigAdded/LaunchConfigUpdated event."""
-    if log.address != normalize_address(PONS_V1_FACTORY):
-        raise ValueError("not a Pons V1 factory log")
+    if log.address not in PONS_V1_FACTORY_SET:
+        raise ValueError("not a known Pons V1 factory log")
     if not log.topics:
         raise ValueError("missing Pons V1 config topic")
     if log.topics[0] == V1_LAUNCH_CONFIG_ADDED_TOPIC:
@@ -113,6 +126,7 @@ def decode_v1_launch_config(log: RawLog) -> PonsV1LaunchConfig:
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
         log_index=log.log_index,
+        factory=log.address,
     )
 
 
@@ -232,8 +246,8 @@ def decode_v2_launch(log: RawLog) -> PonsLaunch:
 
 
 def decode_v1_launch(log: RawLog) -> PonsLaunch:
-    if log.address != normalize_address(PONS_V1_FACTORY):
-        raise ValueError("not a Pons V1 factory log")
+    if log.address not in PONS_V1_FACTORY_SET:
+        raise ValueError("not a known Pons V1 factory log")
     if not log.topics or log.topics[0] != V1_TOKEN_LAUNCHED_TOPIC:
         raise ValueError("not a Pons V1 TokenLaunched event")
     if len(log.topics) != 4:
@@ -255,6 +269,7 @@ def decode_v1_launch(log: RawLog) -> PonsLaunch:
         position_id=words[4],
         restrictions_end_block=words[5],
         initial_buy_amount=words[6],
+        factory=log.address,
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
