@@ -10,6 +10,10 @@ from hlp.data.reconstruct import event_order
 from hlp.price import constant_product_spot_quote_per_token, human_amount
 
 
+def _launch_order(row: dict) -> tuple[int, int, int]:
+    return event_order(row)
+
+
 def build_v2_curve_market_cap_points(
     registry_rows: Iterable[dict],
     curve_event_rows: Iterable[dict],
