@@ -105,6 +105,29 @@ Use:
 
 Do not use near-live holder-count/list endpoints as historical point-in-time holder truth. Historical holder states must be reconstructed from Transfer events.
 
+## 3B. BlockReq public archive RPC — HIGH-PRIORITY ZERO-KEY CANDIDATE, LIVE SPIKE ACTIVE
+
+Docs:
+https://blockreq.com/chains/robinhood
+
+Current published endpoint:
+https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public
+
+Published properties:
+- Robinhood Chain mainnet chain ID 4663;
+- public endpoint with no API key in the documented URL;
+- archive history enabled;
+- standard EVM JSON-RPC.
+
+Why this matters:
+Unlike the official public RPC, a true archive endpoint can answer historical eth_getCode/eth_call and lets HLP scan only protocol-relevant addresses/topics with bounded eth_getLogs windows.
+
+Phase-1 acceptance:
+- verify chain ID;
+- locate exact historical Pons deployment boundaries by old eth_getCode;
+- test bounded historical Pons event queries;
+- measure practical range/rate limits before assuming full backfill viability.
+
 ## 4. Pons contracts — PASS, open source and directly decodable
 
 Official source:
