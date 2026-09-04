@@ -93,3 +93,53 @@ def test_v4_swap_price_uses_pool_registration():
     assert Decimal(rows[0]["quote_per_token"]) == Decimal(1)
     assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("2000000000")
     assert rows[0]["phase"] == "v4"
+
+
+
+def test_v4_stock_quote_uses_oracle_timeline():
+    stock = "0x" + "44" * 20
+    rows_registry = registry()
+    rows_registry[0]["pair_token"] = stock
+    rows_registry[0]["quote_decimals"] = 18
+
+    registrations = [
+        {
+            "pool_id": POOL_ID,
+            "token": TOKEN,
+            "quote_token": stock,
+            "creator": "0x" + "55" * 20,
+            "block_number": 20,
+            "transaction_hash": "0x" + "cc" * 32,
+            "transaction_index": 2,
+            "log_index": 0,
+        }
+    ]
+    swaps = [
+        {
+            "pool_id": POOL_ID,
+            "pool_manager": "0x" + "66" * 20,
+            "sender": "0x" + "77" * 20,
+            "amount0": 1,
+            "amount1": -1,
+            "sqrt_price_x96": 2**96,
+            "liquidity": 100,
+            "tick": 0,
+            "fee": 0,
+            "block_number": 21,
+            "transaction_hash": "0x" + "dd" * 32,
+            "transaction_index": 1,
+            "log_index": 0,
+        }
+    ]
+    rows = list(
+        build_v2_v4_market_cap_points(
+            rows_registry,
+            registrations,
+            swaps,
+            [],
+            initial_weth_usd=Decimal("2000"),
+            initial_quote_usd={stock: Decimal("250")},
+        )
+    )
+    assert rows[0]["pricing_status"] == "priced_chainlink_stock_token"
+    assert Decimal(rows[0]["quote_usd"]) == Decimal("250")
