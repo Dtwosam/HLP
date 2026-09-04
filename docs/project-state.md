@@ -131,17 +131,34 @@ A causal Uniswap V3 fallback audit at each quote's first Pons use proved:
 - route discovery used current immutable V3 factory mappings, then required
   pool code, initialized state and positive active liquidity at
   first-Pons-use minus one before accepting a route;
-- only **5 quote assets / 3,999 launches** remain unresolved:
-  TTWO (3,589), RIVN (67), SKHY (129), FIG (126), BULL (88).
+- all 25 selected V3 routes are direct USDG, so their historical fallback tape
+  does not depend on the separate WETH/USDG anchor.
 
-The V3 fallback is staged as a full causal USD tape and is merged lazily with
-Chainlink state during V2 lifecycle replay. Final universe freeze remains
-fail-closed until the five residual quote assets are resolved or their
-unpriced intervals are otherwise proven irrelevant to eligibility.
+The five V3 misses were then checked against Sushi V3 and bounded Uniswap V4
+history. Sushi had no candidate pools. Uniswap V4 produced delayed direct-USDG
+routes for TTWO, RIVN and BULL, covering another **3,744 launches**:
 
-A separate causality fix now activates staggered quote-source state only at
-each asset's first Pons use. Future oracle availability is never active from
-the beginning of a historical replay.
+- TTWO first positive-liquidity V4 swap: block **36,023,158**;
+- RIVN first positive-liquidity V4 swap: block **36,042,806**;
+- BULL first positive-liquidity V4 swap: block **54,451,385**.
+
+These are delayed routes, not evidence that the quote was priceable at first
+Pons use, so the earlier intervals remain explicitly partial. The remaining
+unresolved quote population is now only **2 assets / 255 launches**:
+SKHY (129) and FIG (126). The first bounded V4 probe found no SKHY initialize;
+FIG has a USDG V4 pool initialized at block **53,045,577** but no positive
+swap in that initial search window.
+
+V3 and V4 fallback tapes remain venue-specific for provenance, then merge into
+one disjoint generic quote/USD fallback artifact before V2 lifecycle replay.
+Source overlap fails closed.
+
+A separate causality fix activates staggered quote-source state only at each
+asset's first Pons use. Future oracle availability is never active from the
+beginning of a historical replay. Lifecycle summaries distinguish
+`eligible`, `ineligible` and `unknown`: a later priced >=$100k point proves
+eligibility even if an earlier interval was unpriced, while a non-crossing
+partial history remains unknown and blocks final universe freeze.
 
 ## Backfill execution guardrail
 
@@ -165,8 +182,10 @@ The complete downstream eligibility paths are now explicitly staged as:
   lifecycle eligibility -> frozen >=$100k V1 subset;
 - V2: V2 registry -> curve/transition -> V4 tape -> summary-only lifecycle
   eligibility -> frozen >=$100k V2 subset;
-- final: fail closed on unpriced lifecycles, then union V1 + V2 eligible tokens
-  into the immutable all-Pons >=$100k research universe.
+- final: fail closed only while any lifecycle remains eligibility-unknown;
+  proven eligible histories may contain earlier unpriced intervals, then union
+  the known V1 + V2 eligible tokens into the immutable all-Pons >=$100k
+  research universe.
 
 ## Query-efficiency design
 
