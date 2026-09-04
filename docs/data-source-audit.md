@@ -136,6 +136,43 @@ GitHub-hosted shared runners received HTTP 429 on the first NodeFlare public req
 Next test:
 use a dedicated/reachable runtime and a free keyed endpoint for heavy historical event queries, then measure actual eth_getLogs range/response limits.
 
+## 3D. SolidRPC — VERIFIED FREE ARCHIVE PATH / CURRENT PREFERRED PROVIDER
+
+Docs:
+https://solidrpc.io/docs/chains/robinhood-chain
+https://solidrpc.io/docs/pricing
+https://solidrpc.io/docs/public-rpc
+https://solidrpc.io/blog/eth-getlogs-backfill-without-gaps
+
+Published Free plan:
+- $0, no credit card required;
+- 10,000 response units per UTC day;
+- 10 RPC method calls/s, burst 50;
+- one billable JSON-RPC method call = one response unit;
+- Robinhood Chain is archive-backed on Free;
+- keyless public Robinhood route is available;
+- keyless public eth_getLogs range is capped at 2,000 blocks;
+- authenticated endpoints remove that public-policy range cap.
+
+HLP live evidence on 2026-09-04:
+- keyless endpoint was reachable from GitHub Actions;
+- chain ID/current reads passed;
+- historical eth_getCode returned full Pons V1 bytecode at block 30,000,000;
+- a 2,000-block historical Pons TokenLaunched query returned real logs;
+- Pons V1 deployment boundary reconstructed as block 8,991,118 (2026-07-13 21:29:03 UTC);
+- Pons V2 deployment boundary reconstructed as block 26,841,846 (2026-08-03 14:41:19 UTC).
+
+Architecture:
+- keep official Robinhood RPC for current/live control reads;
+- use SolidRPC for archive/backfill;
+- use the keyless route for bounded verification;
+- use a Free authenticated endpoint for sustained backfills so HLP can discover practical wide ranges adaptively;
+- API key is passed by X-API-Key from an environment secret, never committed.
+
+Status:
+**PASS as an archive capability.** Full-history quota/egress/request projection is still a Phase-1 gate.
+
+
 ## 4. Pons contracts — PASS, open source and directly decodable
 
 Official source:
@@ -194,17 +231,20 @@ Use:
 
 Do not classify by token symbol.
 
-## 7. Blockscout — PASS as explorer/verification/fallback
+## 7. Blockscout — EXPLORER PASS, GITHUB ACQUISITION ROUTE REJECTED
 
 Robinhood’s official explorer is Blockscout.
 
-Use:
-- deployment/contract verification;
-- transaction/log spot checks;
-- source-code verification;
-- bounded fallback discovery.
+Verified:
+- useful browser/source/transaction verification surface;
+- documented indexed log APIs exist;
+- both legacy Etherscan-compatible and modern /api/v2 log APIs returned HTTP 403 from GitHub-hosted HLP runs.
 
-Do not make Blockscout the only canonical high-frequency/live ingestion path.
+Use:
+- browser/explorer verification;
+- source and transaction spot checks from permitted runtimes.
+
+Do not require Blockscout APIs for the GitHub-hosted acquisition pipeline unless access changes and is reverified.
 
 ## 8. DEX Screener / GeckoTerminal — PASS for cross-check/current discovery, not canonical history
 
