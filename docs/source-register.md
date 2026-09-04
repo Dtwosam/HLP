@@ -166,3 +166,47 @@ https://blockreq.com/chains/robinhood
 Status: REJECTED for zero-key archive history.
 
 Live Phase-1 response from the published public endpoint stated that only the latest 1,024 blocks are served and registration is required for archive access. Keep only as evidence that provider landing-page claims must be validated against actual RPC behavior.
+
+
+## SRC-012 — SolidRPC Robinhood archive RPC
+URLs:
+https://solidrpc.io/docs/chains/robinhood-chain
+https://solidrpc.io/docs/pricing
+https://solidrpc.io/docs/public-rpc
+https://solidrpc.io/blog/eth-getlogs-backfill-without-gaps
+
+Verified on 2026-09-04:
+- Robinhood Chain ID 4663 is archive-backed;
+- Free account plan is $0, no credit card required;
+- Free allowance is 10,000 RPC method calls per UTC day;
+- Free sustained rate is 10 calls/s with burst 50;
+- each billable JSON-RPC method consumes exactly one response unit;
+- keyless public Robinhood endpoint exists at https://rpc.solidrpc.io/public/evm/4663;
+- public eth_getLogs is capped at 2,000 inclusive blocks;
+- authenticated route removes that public-policy range cap, while practical safe widths remain response-density dependent.
+
+Direct HLP evidence:
+- GitHub-hosted runner reached the keyless route successfully;
+- archive eth_getCode succeeded for Pons V1 at block 30,000,000;
+- historical Pons TokenLaunched logs were returned from block 30,000,000–30,001,999;
+- binary archive search found Pons V1 first code at block 8,991,118;
+- binary archive search found Pons V2 first code at block 26,841,846.
+
+Allowed use:
+preferred Phase-1 zero-cost archive/backfill provider, with the keyless route as a verification/development fallback and a Free authenticated key for sustained adaptive backfills.
+
+Security:
+send the key via X-API-Key/environment secret; never commit or print it in endpoint URLs.
+
+
+## SRC-013 — Robinhood Blockscout APIs
+URL:
+https://robinhoodchain.blockscout.com/
+
+Documentation supports indexed address/log APIs, but both the Etherscan-compatible API and modern /api/v2 address-log route returned HTTP 403 from HLP's GitHub-hosted acquisition runner on 2026-09-04.
+
+Allowed use:
+browser/explorer verification and bounded checks from permitted runtimes.
+
+Not allowed:
+required GitHub-hosted historical acquisition dependency unless access behavior changes and is reverified.
