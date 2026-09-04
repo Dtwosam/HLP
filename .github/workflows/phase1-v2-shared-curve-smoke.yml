@@ -1,0 +1,115 @@
+name: phase1-v2-shared-curve-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-v2-shared-curve-smoke.yml'
+      - 'src/hlp/data/pons_v2.py'
+      - 'src/hlp/data/v2_curve.py'
+      - 'src/hlp/protocols/pons.py'
+      - 'src/hlp/protocols/pons_state.py'
+      - 'src/hlp/cli.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v2-curve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build enriched V2 registry
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registry-window \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 50 \
+            --out artifacts/v2-registry.jsonl
+      - name: Acquire shared V2 reserve-changing tape
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-curve-events.jsonl
+      - name: Replay curve market caps
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-market-cap-window \
+            --registry artifacts/v2-registry.jsonl \
+            --curve-events artifacts/v2-curve-events.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v2-curve-market-caps.jsonl \
+            --summary-out artifacts/v2-curve-summary.jsonl
+      - name: Validate replay
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          registry = [
+              json.loads(line)
+              for line in Path("artifacts/v2-registry.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          events = [
+              json.loads(line)
+              for line in Path("artifacts/v2-curve-events.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          points = [
+              json.loads(line)
+              for line in Path("artifacts/v2-curve-market-caps.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          summary = [
+              json.loads(line)
+              for line in Path("artifacts/v2-curve-summary.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert len(registry) == 83, len(registry)
+          assert points, "V2 replay produced no price points"
+          assert len(summary) == len(registry), (len(summary), len(registry))
+          assert all(
+              int(row["quote_reserve_raw"]) > 0 and int(row["token_reserve_raw"]) > 0
+              for row in points
+          )
+          priced = [row for row in points if row["market_cap_proxy_usd"] is not None]
+          assert priced, "no V2 curve points could be USD-priced"
+          assert all(Decimal(row["market_cap_proxy_usd"]) > 0 for row in priced)
+          print(json.dumps({
+              "launches": len(registry),
+              "curve_events": len(events),
+              "price_points": len(points),
+              "priced_tokens": sum(row["priced_points"] > 0 for row in summary),
+              "unsupported_quote_tokens": sum(row["priced_points"] == 0 for row in summary),
+              "crossed_100k_on_curve": sum(bool(row["crossed_100k"]) for row in summary),
+              "pair_tokens": sorted({row["pair_token"] for row in registry}),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-v2-shared-curve
+          path: artifacts/
+          if-no-files-found: error
