@@ -49,6 +49,11 @@ class PonsLaunch:
     pool: str | None = None
     launch_config_id: int | None = None
     graduation_threshold: int | None = None
+    dex_factory: str | None = None
+    dex_id: int | None = None
+    position_id: int | None = None
+    restrictions_end_block: int | None = None
+    initial_buy_amount: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
