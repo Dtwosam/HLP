@@ -60,3 +60,17 @@ def test_large_pons_tape_modes_parse():
         "--out", "v3.jsonl",
     ])
     assert v1.global_topic_scan is True
+
+
+def test_pons_stock_oracle_alias_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-stock-oracle-window",
+        "--registry", "registry.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--feed-out", "feeds.jsonl",
+        "--state-out", "state.jsonl",
+        "--out", "updates.jsonl",
+    ])
+    assert args.registry == "registry.jsonl"
