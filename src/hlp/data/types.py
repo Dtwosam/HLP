@@ -10,9 +10,9 @@ from typing import Any
 class RawLog:
     chain_id: int
     block_number: int
-    block_hash: str
+    block_hash: str | None
     transaction_hash: str
-    transaction_index: int
+    transaction_index: int | None
     log_index: int
     address: str
     topics: tuple[str, ...]
