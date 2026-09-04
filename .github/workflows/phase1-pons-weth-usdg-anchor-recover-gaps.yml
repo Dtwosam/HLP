@@ -18,6 +18,20 @@ on:
         required: true
         default: "150000"
         type: string
+  workflow_call:
+    inputs:
+      preserved_run_id:
+        description: "Original run containing successful anchor prefix shards"
+        required: true
+        type: string
+      partial_recovery_run_id:
+        description: "Finished partial anchor tail-recovery run"
+        required: true
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        type: string
 
 permissions:
   contents: read
