@@ -103,3 +103,28 @@ def test_full_history_backfills_are_manual_only():
         assert "\n  push:" not in trigger_block, (
             f"{name} must not auto-start a full-history backfill on code pushes"
         )
+
+
+
+NETWORK_SMOKE_WORKFLOWS = {
+    "phase1-network-smoke.yml",
+    "phase1-hoodfun-curve-mcap-smoke.yml",
+    "phase1-v1-usd-path-smoke.yml",
+    "phase1-v2-full-priced-smoke.yml",
+    "phase1-pons-research-smoke.yml",
+    "phase1-v2-shared-curve-smoke.yml",
+    "phase1-v2-graduation-v4-smoke.yml",
+    "phase1-dex-pool-census.yml",
+    "phase1-pons-v1-multigen-smoke.yml",
+    "phase1-v1-shared-tape-smoke.yml",
+}
+
+
+def test_secondary_network_smokes_are_manual_only():
+    for name in NETWORK_SMOKE_WORKFLOWS:
+        content = _workflow(name)
+        trigger_block = content.split("\npermissions:", 1)[0]
+        assert "workflow_dispatch:" in trigger_block, name
+        assert "\n  push:" not in trigger_block, (
+            f"{name} must not consume RPC runners on ordinary pushes"
+        )

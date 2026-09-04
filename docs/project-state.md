@@ -134,7 +134,10 @@ required artifact is unavailable; runner-side polling is forbidden.
 
 This keeps normal development/tests responsive while long archive shards run,
 and prevents accidental backfills from competing for GitHub-hosted runner
-capacity.
+capacity. Secondary network/integration smokes are manual-only; the fast
+unit/compile suite remains automatic on pushes. This prevents a CLI or shared
+source edit from faning out into many unrelated RPC jobs and starving bounded
+research probes.
 
 The complete downstream eligibility paths are now explicitly staged as:
 
