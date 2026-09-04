@@ -52,3 +52,13 @@ def normalize_address(address: str) -> str:
         raise ValueError(f"invalid EVM address length: {address!r}")
     int(value[2:], 16)
     return value
+
+
+POOLS_TRADE_LAUNCHER_CURRENT = "0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0"
+POOLS_TRADE_LAUNCHER_ORIGINAL = "0x00004c4ccc709Ef590F7C81102C0689F0263D4e9"
+POOLS_TRADE_INSTANT_STRATEGIES = (
+    "0x23f8209572b4a1c2ad88a42749e830791fb027f1",
+    "0xad44d55e7f8337c3ce113fbb591486e85be104b2",
+    "0xce57498d3474dcc244dfb6710ffbe6d4441cd2b2",
+    "0x60d73b21cdf2ea846ab3d58699bbbb8f29d72491",
+)
