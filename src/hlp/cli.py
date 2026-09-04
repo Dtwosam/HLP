@@ -457,7 +457,7 @@ def cmd_rpc_dex_pool_window(args: argparse.Namespace) -> int:
             "source": "evm_json_rpc",
             "chain_id": 4663,
             "protocol": "uniswap_v3_pool_census",
-            "factory": UNISWAP_V3_FACTORY.lower(),
+            "factory": args.factory.lower(),
             "event_topic0": V3_POOL_CREATED_TOPIC,
             "from_block": args.from_block,
             "to_block": args.to_block,
@@ -1528,12 +1528,16 @@ def cmd_rpc_pons_unpriced_quote_v3_routes(
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    rows = audit_unpriced_v3_quote_routes(rpc, quote_rows)
+    rows = audit_unpriced_v3_quote_routes(
+        rpc,
+        quote_rows,
+        factory=args.factory,
+    )
     manifest = write_jsonl_snapshot(
         rows,
         output=Path(args.out),
         provenance={
-            "source": "point_in_time_uniswap_v3_factory_route_audit",
+            "source": "point_in_time_v3_factory_route_audit",
             "chain_id": 4663,
             "quote_registry": Path(args.quote_registry).name,
             "factory": UNISWAP_V3_FACTORY.lower(),
@@ -4377,6 +4381,9 @@ def build_parser() -> argparse.ArgumentParser:
         "rpc-pons-unpriced-quote-v3-routes"
     )
     quote_v3_routes.add_argument("--quote-registry", required=True)
+    quote_v3_routes.add_argument(
+        "--factory", default=UNISWAP_V3_FACTORY
+    )
     quote_v3_routes.add_argument("--out", required=True)
     quote_v3_routes.set_defaults(
         func=cmd_rpc_pons_unpriced_quote_v3_routes

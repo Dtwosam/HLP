@@ -299,3 +299,16 @@ def test_v3_quote_route_selector_accepts_delayed_probe():
         "--out", "routes.jsonl",
     ])
     assert args.delayed == "delayed.jsonl"
+
+
+
+def test_unpriced_quote_v3_route_audit_accepts_factory():
+    parser = build_parser()
+    factory = "0x" + "77" * 20
+    args = parser.parse_args([
+        "rpc-pons-unpriced-quote-v3-routes",
+        "--quote-registry", "quotes.jsonl",
+        "--factory", factory,
+        "--out", "routes.jsonl",
+    ])
+    assert args.factory == factory
