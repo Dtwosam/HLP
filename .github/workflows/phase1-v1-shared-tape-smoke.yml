@@ -61,8 +61,12 @@ jobs:
               for line in Path("artifacts/v1-pons-v3-swaps.jsonl").read_text().splitlines()
               if line.strip()
           ]
+          swap_manifest = json.loads(
+              Path("artifacts/v1-pons-v3-swaps.jsonl.manifest.json").read_text()
+          )
           assert len(registry) == 166, len(registry)
           assert swaps, "shared V3 tape matched zero Pons swaps"
+          assert swap_manifest["provenance"]["server_side_pool_address_filter"] is True
           pools = {row["pool"] for row in registry}
           assert all(row["pool"] in pools for row in swaps)
           assert all(row["transaction_index"] is not None for row in swaps)
