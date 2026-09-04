@@ -1,4 +1,4 @@
-from hlp.data.pons_v1 import PonsV1ConfigTimeline, enrich_v1_launch
+from hlp.data.pons_v1 import PonsV1ConfigTimeline, enrich_v1_launch, iter_enriched_v1_launches
 from hlp.data.types import PonsLaunch, PonsV1LaunchConfig
 
 
@@ -64,3 +64,73 @@ def test_enrichment_freezes_supply_and_18_decimals():
     assert row["supply_raw"] == 123456
     assert row["token_decimals"] == 18
     assert row["config_pair_token"] == PAIR
+
+
+
+def test_stream_registry_applies_config_before_same_block_launch(monkeypatch):
+    from hlp.data.types import RawLog
+    from hlp.protocols.pons import (
+        V1_LAUNCH_CONFIG_ADDED_TOPIC,
+        V1_TOKEN_LAUNCHED_TOPIC,
+    )
+
+    def word(value):
+        return f"{value:064x}"
+
+    def addr_word(address):
+        return address.removeprefix("0x").rjust(64, "0")
+
+    config_log = RawLog(
+        chain_id=4663,
+        block_number=10,
+        block_hash=None,
+        transaction_hash="0x" + "aa" * 32,
+        transaction_index=1,
+        log_index=0,
+        address="0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb",
+        topics=(V1_LAUNCH_CONFIG_ADDED_TOPIC, "0x" + word(7)),
+        data=(
+            "0x"
+            + addr_word(PAIR)
+            + word(100)
+            + word(120)
+            + word(1_000_000_000 * 10**18)
+            + word(200)
+            + word(220)
+            + word(10)
+            + word(0)
+            + word(1)
+            + word(0)
+        ),
+        removed=False,
+    )
+    launch_log = RawLog(
+        chain_id=4663,
+        block_number=10,
+        block_hash=None,
+        transaction_hash="0x" + "bb" * 32,
+        transaction_index=2,
+        log_index=0,
+        address="0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb",
+        topics=(
+            V1_TOKEN_LAUNCHED_TOPIC,
+            "0x" + addr_word(TOKEN),
+            "0x" + addr_word(DEPLOYER),
+            "0x" + addr_word("0x" + "55" * 20),
+        ),
+        data=(
+            "0x"
+            + addr_word(PAIR)
+            + addr_word(POOL)
+            + word(0)
+            + word(7)
+            + word(123)
+            + word(20)
+            + word(0)
+        ),
+        removed=False,
+    )
+    rows = list(iter_enriched_v1_launches([config_log, launch_log]))
+    assert len(rows) == 1
+    assert rows[0]["supply_raw"] == 1_000_000_000 * 10**18
+    assert rows[0]["dex_factory"] == "0x" + "55" * 20
