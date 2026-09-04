@@ -131,3 +131,21 @@ def test_v4_global_pool_scan_parses():
         "--out", "v4.jsonl",
     ])
     assert args.global_pool_scan is True
+
+
+def test_v2_lifecycle_eligibility_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-v2-lifecycle-eligibility",
+        "--registry", "v2.jsonl",
+        "--curve-summary", "curve-summary.jsonl",
+        "--graduations", "graduations.jsonl",
+        "--registrations", "registrations.jsonl",
+        "--v4-events", "v4.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor-initial.json",
+        "--snapshot-head", "100",
+        "--out", "lifecycle.jsonl",
+    ])
+    assert args.snapshot_head == 100
+    assert args.oracle_state is None
