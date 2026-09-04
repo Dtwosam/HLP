@@ -3858,8 +3858,7 @@ def _load_quote_usd_inputs(
             "fallback",
         ),
     ]
-    states = []
-    groups = []
+    source_pairs = []
     for state_path, event_path, label in pairs:
         if bool(state_path) != bool(event_path):
             raise SystemExit(
@@ -3867,9 +3866,14 @@ def _load_quote_usd_inputs(
             )
         if not state_path:
             continue
-        states.extend(_load_jsonl(state_path))
-        groups.append(_iter_jsonl(event_path))
-    return prepare_quote_usd_inputs(states, groups)
+        source_pairs.append((
+            _load_jsonl(state_path),
+            _iter_jsonl(event_path),
+        ))
+    if not source_pairs:
+        return prepare_quote_usd_inputs([], [])
+    states, updates = merge_quote_usd_tapes(source_pairs)
+    return prepare_quote_usd_inputs(states, [updates])
 
 
 def _load_initial_quote_usd(
