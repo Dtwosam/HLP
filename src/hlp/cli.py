@@ -77,6 +77,7 @@ from hlp.data.quote_routes import (
 )
 from hlp.data.quote_usd import prepare_quote_usd_inputs
 from hlp.data.quote_causality import audit_pons_quote_causality
+from hlp.data.quote_v4_routes import probe_v4_usdg_routes
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
     reconstruct_staggered_chainlink_usd_tapes,
@@ -1513,6 +1514,72 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
         "blocked": len(rows) - ready,
         "blocked_tokens": [
             row["quote_token"] for row in rows if not row["causal_ready"]
+        ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_unpriced_quote_v4_routes(
+    args: argparse.Namespace,
+) -> int:
+    """Probe bounded V4 USDG routes for unresolved Pons quote assets."""
+    quote_rows = _load_jsonl(args.quote_registry)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = probe_v4_usdg_routes(
+        rpc,
+        quote_rows,
+        snapshot_head=args.snapshot_head,
+        lookaround_blocks=args.lookaround_blocks,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "bounded_poolmanager_v4_usdg_route_probe",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "snapshot_head_block": args.snapshot_head,
+            "lookaround_blocks": args.lookaround_blocks,
+            "causal_semantics": (
+                "latest positive-liquidity swap strictly before first Pons "
+                "use, else first positive-liquidity swap at/after first use"
+            ),
+        },
+    )
+    causal = [row for row in rows if row["causal_route_ready"]]
+    delayed = [row for row in rows if row["delayed_route_ready"]]
+    unresolved = [
+        row for row in rows
+        if not row["causal_route_ready"] and not row["delayed_route_ready"]
+    ]
+    print(json.dumps({
+        **manifest,
+        "quote_assets": len(rows),
+        "causal_route_ready": len(causal),
+        "delayed_route_ready": len(delayed),
+        "covered_launches": sum(
+            int(row["launches"]) for row in causal + delayed
+        ),
+        "unresolved_launches": sum(
+            int(row["launches"]) for row in unresolved
+        ),
+        "unresolved": [
+            {
+                "symbol": row["symbol"],
+                "quote_token": row["quote_token"],
+                "launches": row["launches"],
+                "initialize_events": row["initialize_events"],
+                "search_from_block": row["search_from_block"],
+                "search_to_block": row["search_to_block"],
+            }
+            for row in unresolved
         ],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -4376,6 +4443,23 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    quote_v4_routes = sub.add_parser(
+        "rpc-pons-unpriced-quote-v4-routes"
+    )
+    quote_v4_routes.add_argument("--quote-registry", required=True)
+    quote_v4_routes.add_argument(
+        "--snapshot-head", type=int, required=True
+    )
+    quote_v4_routes.add_argument(
+        "--lookaround-blocks", type=int, default=100_000
+    )
+    quote_v4_routes.add_argument("--chunk-size", type=int, default=2_000)
+    quote_v4_routes.add_argument("--min-chunk-size", type=int, default=25)
+    quote_v4_routes.add_argument("--out", required=True)
+    quote_v4_routes.set_defaults(
+        func=cmd_rpc_pons_unpriced_quote_v4_routes
+    )
 
     quote_v3_routes = sub.add_parser(
         "rpc-pons-unpriced-quote-v3-routes"

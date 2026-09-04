@@ -312,3 +312,17 @@ def test_unpriced_quote_v3_route_audit_accepts_factory():
         "--out", "routes.jsonl",
     ])
     assert args.factory == factory
+
+
+
+def test_unpriced_quote_v4_route_probe_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-unpriced-quote-v4-routes",
+        "--quote-registry", "residual.jsonl",
+        "--snapshot-head", "1000",
+        "--lookaround-blocks", "100",
+        "--out", "v4.jsonl",
+    ])
+    assert args.snapshot_head == 1000
+    assert args.lookaround_blocks == 100
