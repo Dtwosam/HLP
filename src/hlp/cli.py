@@ -18,6 +18,9 @@ from hlp.config import (
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     UNISWAP_V3_FACTORY,
     PONS_V1_FACTORY,
+    PONS_V1_FACTORIES,
+    PONS_V1_FACTORY_DEPLOYMENT_BLOCKS,
+    PONS_V1_FIRST_DEPLOYMENT_BLOCK,
     PONS_V2_FACTORY,
     PONS_V1_DEPLOYMENT_BLOCK,
     PONS_V2_DEPLOYMENT_BLOCK,
@@ -1802,15 +1805,17 @@ def cmd_rpc_v2_registry_window(args: argparse.Namespace) -> int:
 
 
 def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
-    """Build an independently reproducible enriched Pons V1 launch shard."""
+    """Build a reproducible Pons V1 registry across all factory generations."""
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
-    if args.from_block < PONS_V1_DEPLOYMENT_BLOCK:
+    if args.from_block < PONS_V1_FIRST_DEPLOYMENT_BLOCK:
         raise SystemExit(
-            f"from-block cannot precede Pons V1 deployment {PONS_V1_DEPLOYMENT_BLOCK}"
+            "from-block cannot precede first known Pons V1 deployment "
+            f"{PONS_V1_FIRST_DEPLOYMENT_BLOCK}"
         )
 
     started = time.monotonic()
+    factories = [address.lower() for address in PONS_V1_FACTORIES]
     topic_or = [
         V1_TOKEN_LAUNCHED_TOPIC,
         V1_LAUNCH_CONFIG_ADDED_TOPIC,
@@ -1820,30 +1825,36 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
         rpc.iter_logs_chunked(
             args.from_block,
             args.to_block,
-            address=PONS_V1_FACTORY,
+            address=factories,
             topics=[topic_or],
             chunk_size=args.chunk_size,
             min_chunk_size=args.min_chunk_size,
         )
     )
 
-    launch_config_ids = sorted(
-        {
-            decode_v1_launch(row).launch_config_id
-            for row in raw
-            if row.topics and row.topics[0] == V1_TOKEN_LAUNCHED_TOPIC
-        }
-    )
+    launch_config_ids_by_factory: dict[str, set[int]] = {}
+    for row in raw:
+        if not row.topics or row.topics[0] != V1_TOKEN_LAUNCHED_TOPIC:
+            continue
+        launch = decode_v1_launch(row)
+        if launch.launch_config_id is None:
+            continue
+        launch_config_ids_by_factory.setdefault(
+            row.address.lower(), set()
+        ).add(launch.launch_config_id)
+
     bootstrap = []
-    if args.from_block > PONS_V1_DEPLOYMENT_BLOCK:
-        for config_id in launch_config_ids:
-            if config_id is None:
-                continue
+    for factory, config_ids in sorted(launch_config_ids_by_factory.items()):
+        deployment = PONS_V1_FACTORY_DEPLOYMENT_BLOCKS[factory]
+        if args.from_block <= deployment:
+            continue
+        for config_id in sorted(config_ids):
             bootstrap.append(
                 read_v1_launch_config_state(
                     rpc,
                     config_id,
                     block=args.from_block - 1,
+                    factory=factory,
                 )
             )
 
@@ -1854,15 +1865,21 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
         provenance={
             "source": "evm_json_rpc",
             "chain_id": 4663,
-            "protocol": "pons_v1_registry",
-            "factory": PONS_V1_FACTORY.lower(),
+            "protocol": "pons_v1_registry_multi_generation",
+            "factories": factories,
+            "factory_deployment_blocks": PONS_V1_FACTORY_DEPLOYMENT_BLOCKS,
             "from_block": args.from_block,
             "to_block": args.to_block,
             "topic0_or": topic_or,
-            "bootstrap_config_ids": launch_config_ids,
+            "bootstrap_config_ids_by_factory": {
+                factory: sorted(ids)
+                for factory, ids in launch_config_ids_by_factory.items()
+            },
             "initial_chunk_size": args.chunk_size,
             "min_chunk_size": args.min_chunk_size,
-            "token_decimals_source": "PonsLauncherToken inherits OpenZeppelin ERC20 default 18 decimals",
+            "token_decimals_source": (
+                "PonsLauncherToken inherits OpenZeppelin ERC20 default 18 decimals"
+            ),
         },
     )
     print(
@@ -1870,6 +1887,7 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
             {
                 **manifest,
                 "factory_events": len(raw),
+                "factories_with_launches": len(launch_config_ids_by_factory),
                 "bootstrap_configs": len(bootstrap),
                 "requests_made": rpc.requests_made,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -1878,7 +1896,6 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
         )
     )
     return 0
-
 
 def _iter_jsonl(path: str):
     with Path(path).open(encoding="utf-8") as handle:
