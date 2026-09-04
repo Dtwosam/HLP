@@ -1,0 +1,110 @@
+name: phase1-pons-v1-generation-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v1-generation-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Compare Pons V1 generations against known V1 event topics
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.pons import (
+              V1_BONDING_CURVE_CREATED_TOPIC,
+              V1_TOKEN_CREATED_TOPIC,
+              V1_TOKEN_PURCHASED_TOPIC,
+          )
+
+          factories = {
+              "legacy": "0x0c37a24f5d23a486fa692d1500881d698b1f77a4",
+              "v1": "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb",
+              "current_v1_abi": "0xf4fc0cd27fc8ecf17e55ee4c3f7201897df3eb75",
+          }
+          expected = {
+              V1_BONDING_CURVE_CREATED_TOPIC,
+              V1_TOKEN_CREATED_TOPIC,
+              V1_TOKEN_PURCHASED_TOPIC,
+          }
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          result = {}
+
+          for label, address in factories.items():
+              assert rpc.get_code(address, head) not in {"0x", "0x0", ""}
+              first = rpc.find_first_code_block(address, low=0, high=head)
+              end = min(head, first + 199_999)
+              logs = list(
+                  rpc.iter_logs_chunked(
+                      first,
+                      end,
+                      address=address,
+                      chunk_size=2000,
+                      min_chunk_size=25,
+                  )
+              )
+              counts = Counter(
+                  row.topics[0] if row.topics else "<none>"
+                  for row in logs
+              )
+              matched = {
+                  topic: count for topic, count in counts.items()
+                  if topic in expected
+              }
+              samples = {}
+              for row in logs:
+                  topic = row.topics[0] if row.topics else "<none>"
+                  if topic in expected and topic not in samples:
+                      samples[topic] = {
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "topics": list(row.topics),
+                          "data": row.data,
+                      }
+              result[label] = {
+                  "address": address,
+                  "first_code_block": first,
+                  "scan_to": end,
+                  "logs": len(logs),
+                  "known_v1_topic_counts": matched,
+                  "all_topic_counts": dict(counts),
+                  "known_v1_samples": samples,
+              }
+
+          print(json.dumps({
+              "generations": result,
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY
