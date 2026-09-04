@@ -308,6 +308,89 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
+    """Acquire one shared Pons V2 reserve-changing event tape."""
+    registry = _load_jsonl(args.registry)
+    curve_to_token = {
+        row["curve"].lower(): row["token"].lower()
+        for row in registry
+        if row.get("curve")
+    }
+    if not curve_to_token:
+        raise SystemExit("V2 registry contains no curves")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    topics = [
+        V2_CURVE_BUY_TOPIC,
+        V2_CURVE_SELL_TOPIC,
+        V2_CURVE_BUYBACK_LOCKED_TOPIC,
+    ]
+    raw_tape = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        topics=[topics],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {"all_curve_signature_logs": 0, "matched_pons_curve_events": 0}
+    matched_curves: set[str] = set()
+
+    def decoded():
+        for raw in raw_tape:
+            counters["all_curve_signature_logs"] += 1
+            curve = raw.address.lower()
+            token = curve_to_token.get(curve)
+            if token is None:
+                continue
+            topic0 = raw.topics[0] if raw.topics else None
+            if topic0 in {V2_CURVE_BUY_TOPIC, V2_CURVE_SELL_TOPIC}:
+                event = asdict(decode_v2_curve_trade(raw, token=token))
+                event["event_type"] = (
+                    "curve_buy" if event["side"] == "buy" else "curve_sell"
+                )
+            elif topic0 == V2_CURVE_BUYBACK_LOCKED_TOPIC:
+                event = asdict(decode_v2_curve_buyback(raw))
+                event["event_type"] = "curve_buyback"
+            else:
+                continue
+            counters["matched_pons_curve_events"] += 1
+            matched_curves.add(curve)
+            yield event
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v2_shared_curve_tape",
+            "registry": Path(args.registry).name,
+            "registry_curves": len(curve_to_token),
+            "event_topic0_or": topics,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                **counters,
+                "matched_curves": len(matched_curves),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v2_registry_window(args: argparse.Namespace) -> int:
     """Build a point-in-time enriched Pons V2 launch-registry shard."""
     rpc = _archive_rpc(args)
