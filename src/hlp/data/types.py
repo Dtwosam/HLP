@@ -77,6 +77,58 @@ class PonsV1LaunchConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PonsV2LaunchConfig:
+    action: str
+    config_id: int
+    supply: int
+    curve_fee_bps: int
+    phantom_quote: int
+    graduation_threshold: int
+    pool_fee: int
+    tick_spacing: int
+    enabled: bool
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class PonsV2PairEconomics:
+    pair_token: str
+    phantom_quote: int
+    graduation_threshold: int
+    decimals: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class CurveBuyback:
+    curve: str
+    quote_spent: int
+    tokens_locked: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class PonsV2PoolGraduation:
+    token: str
+    position_id: int
+    token_amount: int
+    pair_token_amount: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class CurveTrade:
     token: str
     curve: str
