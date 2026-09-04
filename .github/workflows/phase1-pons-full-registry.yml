@@ -2,18 +2,6 @@ name: phase1-pons-full-registry
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-full-registry.yml'
-      - 'src/hlp/cli.py'
-      - 'src/hlp/config.py'
-      - 'src/hlp/data/pons_v1.py'
-      - 'src/hlp/data/pons_v2.py'
-      - 'src/hlp/protocols/pons.py'
-      - 'src/hlp/protocols/pons_state.py'
-
 permissions:
   contents: read
 

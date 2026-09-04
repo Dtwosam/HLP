@@ -1,19 +1,19 @@
 name: phase1-pons-v2-registry-freeze
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-v2-registry-freeze.yml'
   workflow_dispatch:
-
+    inputs:
+      source_run_id:
+        description: "Successful source run containing the complete V2 registry shards"
+        required: true
+        default: "33907180308"
+        type: string
 permissions:
   contents: read
   actions: read
 
 env:
-  SOURCE_RUN_ID: '33907180308'
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
   SNAPSHOT_HEAD: '54486035'
 
 jobs:

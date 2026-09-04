@@ -1,13 +1,13 @@
 name: phase1-pons-v1-registry-recovery
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-v1-registry-recovery.yml'
   workflow_dispatch:
-
+    inputs:
+      source_v2_run_id:
+        description: "Successful run containing the frozen source V2 shards"
+        required: true
+        default: "33907180308"
+        type: string
 permissions:
   contents: read
   actions: read
@@ -18,7 +18,7 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
-  SOURCE_V2_RUN_ID: '33907180308'
+  SOURCE_V2_RUN_ID: ${{ inputs.source_v2_run_id }}
 
 jobs:
   v1:

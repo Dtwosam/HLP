@@ -1,13 +1,13 @@
 name: phase1-pons-full-quote-audit
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-full-quote-audit.yml'
   workflow_dispatch:
-
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        default: "33911022718"
+        type: string
 permissions:
   contents: read
   actions: read
@@ -18,7 +18,7 @@ concurrency:
 
 env:
   # Same-head V1 recovery merges the already-complete original V2 shards.
-  SOURCE_REGISTRY_RUN_ID: '33911022718'
+  SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
 
 jobs:
   quote-audit:
