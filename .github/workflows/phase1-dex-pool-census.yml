@@ -1,0 +1,108 @@
+name: phase1-dex-pool-census
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-dex-pool-census.yml'
+      - 'src/hlp/protocols/uniswap.py'
+      - 'src/hlp/data/types.py'
+      - 'src/hlp/config.py'
+      - 'src/hlp/cli.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build known Pons registries
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-registry-window \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 50 \
+            --out artifacts/v1-registry.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registry-window \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 50 \
+            --out artifacts/v2-registry.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registration-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-registrations.jsonl
+      - name: Acquire global V3/V4 pool census
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-dex-pool-window \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --v3-out artifacts/all-v3-pools.jsonl \
+            --v4-out artifacts/all-v4-pools.jsonl
+      - name: Reconcile known and unknown pools
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def read(name):
+              return [
+                  json.loads(line)
+                  for line in (Path("artifacts") / name).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          v1 = read("v1-registry.jsonl")
+          v2_regs = read("v2-registrations.jsonl")
+          v3 = read("all-v3-pools.jsonl")
+          v4 = read("all-v4-pools.jsonl")
+
+          known_v3 = {row["pool"].lower() for row in v1}
+          all_v3 = {row["pool"].lower(): row for row in v3}
+          known_v4 = {row["pool_id"].lower() for row in v2_regs}
+          all_v4 = {row["pool_id"].lower(): row for row in v4}
+
+          missing_v3 = sorted(known_v3 - set(all_v3))
+          missing_v4 = sorted(known_v4 - set(all_v4))
+          assert not missing_v3, missing_v3[:10]
+          assert not missing_v4, missing_v4[:10]
+          assert len(known_v3) == 166, len(known_v3)
+
+          unknown_v3 = [
+              row for pool, row in all_v3.items()
+              if pool not in known_v3
+          ]
+          unknown_v4 = [
+              row for pool, row in all_v4.items()
+              if pool not in known_v4
+          ]
+
+          print(json.dumps({
+              "all_v3_pools": len(v3),
+              "pons_v1_pools": len(known_v3),
+              "unmatched_v3_pools": len(unknown_v3),
+              "all_v4_pools": len(v4),
+              "pons_v2_registered_pools": len(known_v4),
+              "unmatched_v4_pools": len(unknown_v4),
+              "unknown_v3_examples": unknown_v3[:10],
+              "unknown_v4_examples": unknown_v4[:10],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-dex-pool-census
+          path: artifacts/
+          if-no-files-found: error
