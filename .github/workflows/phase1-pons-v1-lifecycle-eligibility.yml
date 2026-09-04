@@ -82,6 +82,64 @@ jobs:
           path: oracle
           run-id: ${{ inputs.oracle_run_id }}
           github-token: ${{ github.token }}
+      - name: Validate complete direct-USD coverage for V1 quotes
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-full-launch-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v1 = [row for row in registry if row.get("version") == "v1"]
+          quote_tokens = {
+              row["pair_token"].lower()
+              for row in v1
+          }
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          by_token = {
+              row["quote_token"].lower(): row
+              for row in quotes
+          }
+          missing = sorted(quote_tokens - set(by_token))
+          blockers = [
+              by_token[token]
+              for token in sorted(quote_tokens & set(by_token))
+              if by_token[token]["pricing_status"] in {
+                  "missing_chainlink_feed",
+                  "unsupported_quote",
+              }
+          ]
+          if missing or blockers:
+              raise SystemExit(
+                  "V1 quote coverage is not complete: "
+                  f"missing={missing[:10]} "
+                  f"blockers={[r['quote_token'] for r in blockers[:10]]}"
+              )
+
+          statuses = Counter(
+              by_token[token]["pricing_status"]
+              for token in quote_tokens
+          )
+          print(json.dumps({
+              "v1_launches": len(v1),
+              "v1_quote_assets": len(quote_tokens),
+              "pricing_status_counts": dict(sorted(statuses.items())),
+              "blocking_quote_assets": 0,
+          }, sort_keys=True))
+          PY
       - name: Replay complete V1 lifecycle as token summaries
         run: |
           mkdir -p artifacts
