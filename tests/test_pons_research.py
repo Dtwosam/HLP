@@ -5,6 +5,7 @@ from hlp.data.pons_research import (
     annotate_pons_drawdowns_and_future_returns,
     build_pons_market_path,
     eligible_pons_tokens,
+    extract_pons_drawdown_episodes,
     summarize_pons_eligibility,
 )
 
@@ -69,3 +70,32 @@ def test_future_return_is_strictly_later_not_same_point():
     annotated = annotate_pons_drawdowns_and_future_returns(path)
     assert Decimal(annotated[0]["max_future_multiple"]) == Decimal("0.9")
     assert annotated[-1]["max_future_multiple"] is None
+
+
+
+def test_drawdown_episodes_preserve_depth_without_major_threshold():
+    path = build_pons_market_path(
+        v1_rows=[
+            point(TOKEN, 1, 100_000),
+            point(TOKEN, 2, 80_000),
+            point(TOKEN, 3, 70_000),
+            point(TOKEN, 4, 105_000),
+            point(TOKEN, 5, 90_000),
+        ]
+    )
+    annotated = annotate_pons_drawdowns_and_future_returns(path)
+    episodes = extract_pons_drawdown_episodes(annotated)
+    assert len(episodes) == 2
+
+    first = episodes[0]
+    assert Decimal(first["drawdown_fraction"]) == Decimal("0.3")
+    assert first["trough_block"] == 3
+    assert first["recovered_prior_peak"] is True
+    assert Decimal(first["trough_to_recovery_multiple"]) == Decimal("1.5")
+
+    second = episodes[1]
+    assert second["open_at_history_end"] is True
+    assert second["recovery_block"] is None
+    assert Decimal(second["drawdown_fraction"]) == (
+        Decimal(1) - Decimal("90000") / Decimal("105000")
+    )
