@@ -102,9 +102,8 @@ def test_timeline_rejects_out_of_order_source_lazily():
             },
         ],
     )
-    timeline.advance_to((20, 1, 0))
     try:
-        timeline.advance_to((30, 1, 0))
+        timeline.advance_to((20, 1, 0))
     except ValueError as exc:
         assert "not chronological" in str(exc)
     else:
