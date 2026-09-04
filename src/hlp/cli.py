@@ -122,6 +122,7 @@ from hlp.data.v3_launchpad import (
 )
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
+    merge_v2_lifecycle_market_cap_summaries,
     summarize_v2_curve_market_caps,
 )
 from hlp.data.v4 import (
@@ -2241,6 +2242,98 @@ def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
+    """Reduce the complete V2 curve -> graduation -> V4 path to token maxima."""
+    registry = _load_jsonl(args.registry)
+    curve_summary = _load_jsonl(args.curve_summary)
+    graduations = _load_jsonl(args.graduations)
+    registrations = _load_jsonl(args.registrations)
+    initial = json.loads(Path(args.anchor_initial).read_text())
+    initial_weth_usd = Decimal(initial["weth_usd"])
+    if initial_weth_usd <= 0:
+        raise SystemExit("anchor initial WETH/USD must be positive")
+
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+
+    seed_points = build_v2_graduation_seed_points(
+        registry,
+        graduations,
+        _iter_jsonl(args.anchor_events),
+        initial_weth_usd=initial_weth_usd,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=_iter_jsonl(args.oracle_events)
+        if args.oracle_events else (),
+    )
+    seed_summary = summarize_v2_curve_market_caps(seed_points)
+
+    # The V4 builder needs an independent point-in-time USD timeline, so it
+    # receives fresh iterators over the immutable anchor/oracle tapes.
+    v4_points = build_v2_v4_market_cap_points(
+        registry,
+        registrations,
+        _iter_jsonl(args.v4_events),
+        _iter_jsonl(args.anchor_events),
+        initial_weth_usd=initial_weth_usd,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=_iter_jsonl(args.oracle_events)
+        if args.oracle_events else (),
+    )
+    v4_summary = summarize_v2_curve_market_caps(v4_points)
+
+    summary = merge_v2_lifecycle_market_cap_summaries(
+        registry,
+        curve_summary=curve_summary,
+        seed_summary=seed_summary,
+        v4_summary=v4_summary,
+    )
+    manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.out),
+        provenance={
+            "source": "summary_only_complete_v2_lifecycle_replay",
+            "chain_id": 4663,
+            "snapshot_head_block": args.snapshot_head,
+            "registry": Path(args.registry).name,
+            "curve_summary": Path(args.curve_summary).name,
+            "graduations": Path(args.graduations).name,
+            "registrations": Path(args.registrations).name,
+            "v4_events": Path(args.v4_events).name,
+            "anchor_events": Path(args.anchor_events).name,
+            "anchor_initial": Path(args.anchor_initial).name,
+            "oracle_state": (
+                None if not args.oracle_state else Path(args.oracle_state).name
+            ),
+            "oracle_events": (
+                None if not args.oracle_events else Path(args.oracle_events).name
+            ),
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": (
+                "reached at least once across complete V2 curve, graduation "
+                "seed, V4 Initialize, or V4 Swap path"
+            ),
+            "materialization": "one final summary row per V2 launch",
+        },
+    )
+    eligible = [row for row in summary if row["crossed_100k"]]
+    phases = {}
+    for row in eligible:
+        phase = row["max_market_cap_phase"]
+        phases[phase] = phases.get(phase, 0) + 1
+    unpriced = [row for row in summary if row["priced_points"] == 0]
+    print(json.dumps({
+        **manifest,
+        "registry_tokens": len(registry),
+        "summary_tokens": len(summary),
+        "graduated_tokens": len(seed_summary),
+        "tokens_with_v4_points": len(v4_summary),
+        "tokens_crossed_100k_full_lifecycle": len(eligible),
+        "eligible_max_phase_counts": phases,
+        "tokens_without_priced_points": len(unpriced),
+        "unpriced_sample": [row["token"] for row in unpriced[:20]],
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
     """Replay V2 curve spot prices and emit $100k eligibility evidence."""
     if args.from_block <= 0:
@@ -3940,6 +4033,26 @@ def build_parser() -> argparse.ArgumentParser:
     v2_eligibility.add_argument("--snapshot-head", type=int, required=True)
     v2_eligibility.add_argument("--out", required=True)
     v2_eligibility.set_defaults(func=cmd_pons_v2_curve_eligibility)
+
+    v2_lifecycle_eligibility = sub.add_parser(
+        "pons-v2-lifecycle-eligibility"
+    )
+    v2_lifecycle_eligibility.add_argument("--registry", required=True)
+    v2_lifecycle_eligibility.add_argument("--curve-summary", required=True)
+    v2_lifecycle_eligibility.add_argument("--graduations", required=True)
+    v2_lifecycle_eligibility.add_argument("--registrations", required=True)
+    v2_lifecycle_eligibility.add_argument("--v4-events", required=True)
+    v2_lifecycle_eligibility.add_argument("--anchor-events", required=True)
+    v2_lifecycle_eligibility.add_argument("--anchor-initial", required=True)
+    v2_lifecycle_eligibility.add_argument("--oracle-state")
+    v2_lifecycle_eligibility.add_argument("--oracle-events")
+    v2_lifecycle_eligibility.add_argument(
+        "--snapshot-head", type=int, required=True
+    )
+    v2_lifecycle_eligibility.add_argument("--out", required=True)
+    v2_lifecycle_eligibility.set_defaults(
+        func=cmd_pons_v2_lifecycle_eligibility
+    )
 
     v2_mcap = sub.add_parser("rpc-v2-curve-market-cap-window")
     v2_mcap.add_argument("--registry", required=True)
