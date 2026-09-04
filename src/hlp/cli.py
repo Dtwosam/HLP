@@ -75,6 +75,8 @@ from hlp.data.pons_v2 import (
     filter_v2_registry_to_graduated,
     iter_enriched_v2_launches,
 )
+from hlp.data.pons_trade_features import build_pons_causal_trade_features
+from hlp.data.pons_trades import normalize_pons_trades
 from hlp.data.pons_transactions import (
     attach_pons_transaction_identities,
     fetch_transaction_identity_rows,
@@ -2300,6 +2302,88 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_pons_normalize_trades(args: argparse.Namespace) -> int:
+    """Normalize Pons V1/V2/V4 events into one wallet-level trade schema."""
+    points = _load_jsonl(args.points)
+    trades = normalize_pons_trades(points)
+    manifest = write_jsonl_snapshot(
+        trades,
+        output=Path(args.out),
+        provenance={
+            "source": "pons_transaction_enriched_market_points",
+            "chain_id": 4663,
+            "points": Path(args.points).name,
+            "side_semantics": (
+                "V2 curve uses explicit CurveBuy/CurveSell; V1/V4 use signed "
+                "Pons-token pool leg"
+            ),
+            "wallet_identity": "transaction.from",
+        },
+    )
+    side_counts: dict[str, int] = {}
+    version_counts: dict[str, int] = {}
+    for row in trades:
+        side_counts[row["side"]] = side_counts.get(row["side"], 0) + 1
+        version_counts[row["pons_version"]] = (
+            version_counts.get(row["pons_version"], 0) + 1
+        )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "side_counts": side_counts,
+                "version_counts": version_counts,
+                "unique_tokens": len({row["token"] for row in trades}),
+                "unique_initiators": len({
+                    row["initiator"] for row in trades
+                }),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_pons_trade_features(args: argparse.Namespace) -> int:
+    """Build causal wallet participation features for normalized Pons trades."""
+    trades = _load_jsonl(args.trades)
+    rows = build_pons_causal_trade_features(trades)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "normalized_pons_wallet_trades",
+            "chain_id": 4663,
+            "trades": Path(args.trades).name,
+            "feature_semantics": (
+                "strictly causal cumulative participation; no fixed time "
+                "window or dump threshold"
+            ),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "tokens": len({row["token"] for row in rows}),
+                "trades": len(rows),
+                "new_buyer_trades": sum(
+                    bool(row["is_new_buyer"]) for row in rows
+                ),
+                "repeat_buyer_trades": sum(
+                    bool(row["is_repeat_buyer"]) for row in rows
+                ),
+                "new_seller_trades": sum(
+                    bool(row["is_new_seller"]) for row in rows
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_pons_transaction_enrich(args: argparse.Namespace) -> int:
     """Attach batched transaction initiator identities to Pons research points."""
     points = _load_jsonl(args.points)
@@ -3068,6 +3152,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    pons_normalized_trades = sub.add_parser("pons-normalize-trades")
+    pons_normalized_trades.add_argument("--points", required=True)
+    pons_normalized_trades.add_argument("--out", required=True)
+    pons_normalized_trades.set_defaults(func=cmd_pons_normalize_trades)
+
+    pons_trade_features = sub.add_parser("pons-trade-features")
+    pons_trade_features.add_argument("--trades", required=True)
+    pons_trade_features.add_argument("--out", required=True)
+    pons_trade_features.set_defaults(func=cmd_pons_trade_features)
 
     pons_transactions = sub.add_parser("rpc-pons-transaction-enrich")
     pons_transactions.add_argument("--points", required=True)
