@@ -36,6 +36,18 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class DopplerLaunch:
+    asset: str
+    numeraire: str
+    initializer: str
+    pool_or_hook: str
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class PoolsFunLaunch:
     token: str
     pool: str
