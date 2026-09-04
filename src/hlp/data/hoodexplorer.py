@@ -22,7 +22,7 @@ from hlp.config import ROBINHOOD_CHAIN_ID, normalize_address
 from hlp.data.types import RawLog
 
 
-DEFAULT_HOOD_API = "https://hoodexplorer.org/api"
+DEFAULT_HOOD_API = "https://www.hoodexplorer.org/api"
 
 
 class HoodExplorerError(RuntimeError):
