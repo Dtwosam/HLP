@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from hlp.config import ROBINHOOD_USDG
 from hlp.data.quote_v4_routes import (
     _address_topic,
@@ -8,6 +10,7 @@ from hlp.data.quote_v4_routes import (
     extend_v4_usdg_routes,
     probe_v4_usdg_routes,
     select_v4_quote_routes,
+    validate_v4_usdg_pool_candidate,
 )
 from hlp.protocols.uniswap import V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC
 
@@ -302,3 +305,106 @@ def test_extend_v4_known_pool_can_find_first_later_swap(monkeypatch):
     assert row["selected_delayed_candidate"]["first_post_use_swap"][
         "block_number"
     ] == 1200
+
+
+def test_validate_known_v4_usdg_pool_candidate(monkeypatch):
+    manager = "0x" + "55" * 20
+    observed = SimpleNamespace(
+        pool_manager=manager,
+        pool_id=POOL_ID,
+        currency0=TOKEN,
+        currency1=ROBINHOOD_USDG.lower(),
+        fee=500,
+        tick_spacing=10,
+        hooks="0x" + "00" * 20,
+        sqrt_price_x96=2**96,
+        tick=0,
+        block_number=100,
+        transaction_hash="0x" + "22" * 32,
+        transaction_index=1,
+        log_index=2,
+    )
+    monkeypatch.setattr(
+        "hlp.data.quote_v4_routes.decode_v4_pool_initialized",
+        lambda raw: observed,
+    )
+    calls = []
+
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            calls.append((start, end, kwargs))
+            return iter([object()])
+
+    row = validate_v4_usdg_pool_candidate(
+        Rpc(),
+        {
+            "quote_token": TOKEN,
+            "symbol": "TEST",
+            "quote_decimals": 18,
+            "first_launch_block": 1000,
+            "launches": 3,
+            "versions": {"v2": 3},
+        },
+        pool_id=POOL_ID,
+        from_block=90,
+        to_block=110,
+        pool_manager=manager,
+    )
+
+    assert row["pool_id"] == POOL_ID
+    assert row["token_is_token0"] is True
+    assert row["initialize"]["block_number"] == 100
+    assert calls[0][0:2] == (90, 110)
+    assert calls[0][2]["topics"] == [V4_INITIALIZE_TOPIC, POOL_ID]
+
+
+def test_validate_known_v4_candidate_rejects_wrong_currencies(monkeypatch):
+    observed = SimpleNamespace(
+        pool_id=POOL_ID,
+        currency0="0x" + "77" * 20,
+        currency1=ROBINHOOD_USDG.lower(),
+    )
+    monkeypatch.setattr(
+        "hlp.data.quote_v4_routes.decode_v4_pool_initialized",
+        lambda raw: observed,
+    )
+
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            return iter([object()])
+
+    with pytest.raises(ValueError, match="currency mismatch"):
+        validate_v4_usdg_pool_candidate(
+            Rpc(),
+            {
+                "quote_token": TOKEN,
+                "symbol": "TEST",
+                "quote_decimals": 18,
+                "first_launch_block": 1000,
+                "launches": 3,
+            },
+            pool_id=POOL_ID,
+            from_block=90,
+            to_block=110,
+        )
+
+
+def test_validate_known_v4_candidate_requires_exactly_one_initialize():
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            return iter(())
+
+    with pytest.raises(ValueError, match="exactly one Initialize"):
+        validate_v4_usdg_pool_candidate(
+            Rpc(),
+            {
+                "quote_token": TOKEN,
+                "symbol": "TEST",
+                "quote_decimals": 18,
+                "first_launch_block": 1000,
+                "launches": 3,
+            },
+            pool_id=POOL_ID,
+            from_block=90,
+            to_block=110,
+        )
