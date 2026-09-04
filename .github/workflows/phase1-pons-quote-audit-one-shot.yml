@@ -1,5 +1,5 @@
 name: phase1-pons-quote-audit-one-shot
-# Current-head probe: verify RH-prefixed Chainlink feed discovery.
+# Current-head probe: freeze cbBTC-aware full quote registry.
 
 on:
   push:
