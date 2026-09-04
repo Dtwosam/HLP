@@ -1,0 +1,111 @@
+name: phase1-stock-feed-verify
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-stock-feed-verify.yml'
+      - 'src/hlp/data/chainlink_directory.py'
+      - 'src/hlp/protocols/chainlink.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Resolve and verify Stock Token feeds
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.chainlink_directory import ChainlinkDirectoryClient
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.chainlink import (
+              ANSWER_UPDATED_TOPIC,
+              decode_chainlink_answer_updated,
+              read_chainlink_aggregator,
+              read_chainlink_latest_round,
+          )
+
+          symbols = ["SPY", "GME", "GOOGL", "TSLA", "SPCX", "AAPL", "NVDA"]
+          directory = ChainlinkDirectoryClient()
+          feeds = directory.robinhood_feeds(symbols)
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          block = 30_000_000
+          rows = []
+          for feed in feeds:
+              round_data = read_chainlink_latest_round(
+                  rpc, feed.proxy_address, block=block
+              )
+              aggregator = read_chainlink_aggregator(
+                  rpc, feed.proxy_address, block=block
+              )
+              expected_description = f"RH{feed.symbol} / USD"
+              assert round_data.description == expected_description, (
+                  feed.symbol,
+                  round_data.description,
+                  expected_description,
+              )
+              assert round_data.answer > 0
+              rows.append(
+                  {
+                      "symbol": feed.symbol,
+                      "directory_name": feed.name,
+                      "path": feed.path,
+                      "proxy_address": feed.proxy_address,
+                      "secondary_proxy_address": feed.secondary_proxy_address,
+                      "heartbeat_seconds": feed.heartbeat_seconds,
+                      "historical_block": block,
+                      "aggregator": aggregator,
+                      "onchain_description": round_data.description,
+                      "decimals": round_data.decimals,
+                      "answer": str(round_data.answer),
+                      "round_id": round_data.round_id,
+                      "updated_at": round_data.updated_at,
+                  }
+              )
+
+          Path("artifacts/stock-feed-registry.json").write_text(
+              json.dumps(rows, indent=2, sort_keys=True)
+          )
+          print(json.dumps({
+              "feeds": rows,
+              "directory_sha256": directory.last_sha256,
+              "directory_requests": directory.requests_made,
+              "directory_bytes": directory.bytes_received,
+              "rpc_requests": rpc.requests_made,
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-stock-feed-registry
+          path: artifacts/
+          if-no-files-found: error
