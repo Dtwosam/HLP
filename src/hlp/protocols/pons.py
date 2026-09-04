@@ -12,7 +12,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hlp.config import PONS_V1_FACTORY, PONS_V2_FACTORY, normalize_address
-from hlp.data.types import CurveTrade, PonsLaunch, PonsV1LaunchConfig, RawLog
+from hlp.data.types import (
+    CurveBuyback,
+    CurveTrade,
+    PonsLaunch,
+    PonsV1LaunchConfig,
+    PonsV2PairEconomics,
+    PonsV2PoolGraduation,
+    RawLog,
+)
 from hlp.protocols.evm import data_words, event_topic, signed_word, topic_address, word_address
 
 
@@ -32,6 +40,12 @@ V2_TOKEN_LAUNCHED_SIG = (
     "TokenLaunched(address,address,address,address,uint256,uint256)"
 )
 V2_POOL_GRADUATED_SIG = "PoolGraduated(address,uint256,uint256,uint256)"
+V2_LAUNCH_CONFIG_ADDED_SIG = "LaunchConfigAdded(uint256)"
+V2_LAUNCH_CONFIG_UPDATED_SIG = "LaunchConfigUpdated(uint256)"
+V2_PAIR_TOKEN_ECONOMICS_UPDATED_SIG = (
+    "PairTokenEconomicsUpdated(address,uint256,uint256,uint8)"
+)
+V2_CURVE_BUYBACK_LOCKED_SIG = "BuybackLocked(uint256,uint256)"
 V2_CURVE_BUY_SIG = "CurveBuy(address,address,uint256,uint256,uint256,uint256)"
 V2_CURVE_SELL_SIG = "CurveSell(address,address,uint256,uint256,uint256,uint256)"
 
@@ -41,6 +55,12 @@ V1_LAUNCH_CONFIG_ADDED_TOPIC = event_topic(V1_LAUNCH_CONFIG_ADDED_SIG)
 V1_LAUNCH_CONFIG_UPDATED_TOPIC = event_topic(V1_LAUNCH_CONFIG_UPDATED_SIG)
 V2_TOKEN_LAUNCHED_TOPIC = event_topic(V2_TOKEN_LAUNCHED_SIG)
 V2_POOL_GRADUATED_TOPIC = event_topic(V2_POOL_GRADUATED_SIG)
+V2_LAUNCH_CONFIG_ADDED_TOPIC = event_topic(V2_LAUNCH_CONFIG_ADDED_SIG)
+V2_LAUNCH_CONFIG_UPDATED_TOPIC = event_topic(V2_LAUNCH_CONFIG_UPDATED_SIG)
+V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC = event_topic(
+    V2_PAIR_TOKEN_ECONOMICS_UPDATED_SIG
+)
+V2_CURVE_BUYBACK_LOCKED_TOPIC = event_topic(V2_CURVE_BUYBACK_LOCKED_SIG)
 V2_CURVE_BUY_TOPIC = event_topic(V2_CURVE_BUY_SIG)
 V2_CURVE_SELL_TOPIC = event_topic(V2_CURVE_SELL_SIG)
 
@@ -89,6 +109,73 @@ def decode_v1_launch_config(log: RawLog) -> PonsV1LaunchConfig:
         reserved_fee=words[7],
         enabled=bool(words[8]),
         router_requires_deadline=bool(words[9]),
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+
+def decode_v2_pair_token_economics(log: RawLog) -> PonsV2PairEconomics:
+    if log.address != normalize_address(PONS_V2_FACTORY):
+        raise ValueError("not a Pons V2 factory log")
+    if not log.topics or log.topics[0] != V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC:
+        raise ValueError("not a Pons V2 PairTokenEconomicsUpdated event")
+    if len(log.topics) != 2:
+        raise ValueError("unexpected pair-economics topic count")
+    words = data_words(log.data)
+    if len(words) != 3:
+        raise ValueError("unexpected pair-economics data length")
+    decimals = words[2]
+    if decimals > 255:
+        raise ValueError("invalid pair-token decimals")
+    return PonsV2PairEconomics(
+        pair_token=topic_address(log.topics[1]),
+        phantom_quote=words[0],
+        graduation_threshold=words[1],
+        decimals=decimals,
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+def decode_v2_curve_buyback(log: RawLog) -> CurveBuyback:
+    if not log.topics or log.topics[0] != V2_CURVE_BUYBACK_LOCKED_TOPIC:
+        raise ValueError("not a Pons V2 BuybackLocked event")
+    if len(log.topics) != 1:
+        raise ValueError("unexpected BuybackLocked topic count")
+    words = data_words(log.data)
+    if len(words) != 2:
+        raise ValueError("unexpected BuybackLocked data length")
+    return CurveBuyback(
+        curve=log.address,
+        quote_spent=words[0],
+        tokens_locked=words[1],
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+def decode_v2_pool_graduation(log: RawLog) -> PonsV2PoolGraduation:
+    if log.address != normalize_address(PONS_V2_FACTORY):
+        raise ValueError("not a Pons V2 factory log")
+    if not log.topics or log.topics[0] != V2_POOL_GRADUATED_TOPIC:
+        raise ValueError("not a Pons V2 PoolGraduated event")
+    if len(log.topics) != 2:
+        raise ValueError("unexpected PoolGraduated topic count")
+    words = data_words(log.data)
+    if len(words) != 3:
+        raise ValueError("unexpected PoolGraduated data length")
+    return PonsV2PoolGraduation(
+        token=topic_address(log.topics[1]),
+        position_id=words[0],
+        token_amount=words[1],
+        pair_token_amount=words[2],
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
