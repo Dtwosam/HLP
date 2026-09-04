@@ -50,3 +50,19 @@ def test_get_logs_normalizes_rpc_record():
     assert records[0].block_number == 10
     assert records[0].log_index == 2
     assert records[0].chain_id == 4663
+
+
+def test_find_first_code_block_binary_search():
+    seen = []
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        assert payload["method"] == "eth_getCode"
+        block = int(payload["params"][1], 16)
+        seen.append(block)
+        result = "0x6000" if block >= 37 else "0x"
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    assert rpc.find_first_code_block("0x" + "11" * 20, low=0, high=100) == 37
+    assert len(seen) < 12
