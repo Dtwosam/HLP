@@ -1,0 +1,118 @@
+name: phase1-pons-v4-quote-continuation
+
+on:
+  workflow_dispatch:
+    inputs:
+      prior_probe_run_id:
+        description: "Successful V4 quote probe/continuation run"
+        required: true
+        type: string
+      prior_artifact_name:
+        description: "Artifact containing the prior V4 probe JSONL"
+        required: true
+        default: "phase1-pons-residual-v4-forward-probe"
+        type: string
+      prior_filename:
+        description: "Prior V4 probe JSONL filename"
+        required: true
+        default: "pons-residual-v4-forward-probe.jsonl"
+        type: string
+      snapshot_head:
+        description: "Frozen snapshot head block"
+        required: true
+        default: "54486035"
+        type: string
+      forward_blocks:
+        description: "Maximum non-overlapping blocks to scan per unresolved quote"
+        required: true
+        default: "500000"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v4-quote-continuation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  continue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.prior_artifact_name }}
+          path: prior
+          run-id: ${{ inputs.prior_probe_run_id }}
+          github-token: ${{ github.token }}
+      - name: Continue unresolved V4 routes without overlap
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-extend-v4-quote-routes \
+            --probe "prior/${{ inputs.prior_filename }}" \
+            --snapshot-head "${{ inputs.snapshot_head }}" \
+            --forward-blocks "${{ inputs.forward_blocks }}" \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pons-v4-quote-continuation.jsonl
+      - name: Summarize continuation boundary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-v4-quote-continuation.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          unresolved = [
+              row for row in rows
+              if not row.get("causal_route_ready")
+              and not row.get("delayed_route_ready")
+          ]
+          report = {
+              "records": len(rows),
+              "covered_assets": len(rows) - len(unresolved),
+              "covered_launches": sum(
+                  int(row["launches"])
+                  for row in rows
+                  if row.get("causal_route_ready")
+                  or row.get("delayed_route_ready")
+              ),
+              "unresolved_assets": len(unresolved),
+              "unresolved_launches": sum(
+                  int(row["launches"]) for row in unresolved
+              ),
+              "unresolved": [
+                  {
+                      "symbol": row["symbol"],
+                      "quote_token": row["quote_token"],
+                      "launches": row["launches"],
+                      "search_to_block": row["search_to_block"],
+                  }
+                  for row in unresolved
+              ],
+          }
+          Path("artifacts/pons-v4-quote-continuation-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-continuation
+          path: artifacts/
+          if-no-files-found: error

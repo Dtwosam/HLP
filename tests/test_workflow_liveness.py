@@ -17,6 +17,7 @@ WORKFLOWS = [
     "phase1-pons-v3-quote-fallback-full.yml",
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-continuation.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -98,6 +99,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v3-quote-fallback-full.yml",
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-continuation.yml",
 }
 
 
