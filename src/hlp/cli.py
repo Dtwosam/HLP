@@ -40,6 +40,15 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
         }
         if not factories[name]["has_code"]:
             raise SystemExit(f"{name} factory has no bytecode at head {head}")
+    # A deliberately tiny query proves log access without pretending the
+    # public RPC is suitable for bulk history.
+    bounded_from = max(0, head - 9)
+    bounded_logs = rpc.get_logs(
+        bounded_from,
+        head,
+        address=[PONS_V1_FACTORY, PONS_V2_FACTORY],
+    )
+
     print(
         json.dumps(
             {
@@ -48,6 +57,11 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
                 "head": head,
                 "head_hash": block["hash"],
                 "head_timestamp": int(block["timestamp"], 16),
+                "bounded_log_query": {
+                    "from_block": bounded_from,
+                    "to_block": head,
+                    "logs": len(bounded_logs),
+                },
                 "factories": factories,
             },
             sort_keys=True,
