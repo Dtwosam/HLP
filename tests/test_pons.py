@@ -8,15 +8,24 @@ from hlp.protocols.pons import (
     V1_LAUNCH_CONFIG_UPDATED_TOPIC,
     V1_TOKEN_LAUNCHED_SIG,
     V1_TOKEN_LAUNCHED_TOPIC,
+    V2_CURVE_BUYBACK_LOCKED_SIG,
+    V2_CURVE_BUYBACK_LOCKED_TOPIC,
     V2_CURVE_BUY_SIG,
     V2_CURVE_BUY_TOPIC,
     V2_CURVE_SELL_SIG,
     V2_CURVE_SELL_TOPIC,
+    V2_PAIR_TOKEN_ECONOMICS_UPDATED_SIG,
+    V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC,
+    V2_POOL_GRADUATED_SIG,
+    V2_POOL_GRADUATED_TOPIC,
     V2_TOKEN_LAUNCHED_SIG,
     V2_TOKEN_LAUNCHED_TOPIC,
     decode_v1_launch,
     decode_v1_launch_config,
+    decode_v2_curve_buyback,
     decode_v2_curve_trade,
+    decode_v2_pair_token_economics,
+    decode_v2_pool_graduation,
     decode_v2_launch,
 )
 
@@ -68,6 +77,11 @@ def test_event_topics_are_ethereum_keccak():
         "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"
     )
     assert V2_CURVE_BUY_TOPIC == event_topic(V2_CURVE_BUY_SIG)
+    assert V2_CURVE_BUYBACK_LOCKED_TOPIC == event_topic(V2_CURVE_BUYBACK_LOCKED_SIG)
+    assert V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC == event_topic(
+        V2_PAIR_TOKEN_ECONOMICS_UPDATED_SIG
+    )
+    assert V2_POOL_GRADUATED_TOPIC == event_topic(V2_POOL_GRADUATED_SIG)
     assert V2_CURVE_SELL_TOPIC == event_topic(V2_CURVE_SELL_SIG)
 
 
@@ -179,3 +193,42 @@ def test_decode_v1_launch_config_updated():
     assert config.initial_tick == 120
     assert config.enabled is False
     assert config.router_requires_deadline is True
+
+
+
+def test_decode_v2_pair_token_economics():
+    log = raw(
+        PONS_V2_FACTORY,
+        [V2_PAIR_TOKEN_ECONOMICS_UPDATED_TOPIC, topic_addr(PAIR)],
+        "0x" + uint_word(5_000_000) + uint_word(50_000_000) + uint_word(6),
+    )
+    row = decode_v2_pair_token_economics(log)
+    assert row.pair_token == PAIR
+    assert row.phantom_quote == 5_000_000
+    assert row.graduation_threshold == 50_000_000
+    assert row.decimals == 6
+
+
+def test_decode_v2_curve_buyback():
+    log = raw(
+        CURVE,
+        [V2_CURVE_BUYBACK_LOCKED_TOPIC],
+        "0x" + uint_word(1000) + uint_word(25),
+    )
+    row = decode_v2_curve_buyback(log)
+    assert row.curve == CURVE
+    assert row.quote_spent == 1000
+    assert row.tokens_locked == 25
+
+
+def test_decode_v2_pool_graduation():
+    log = raw(
+        PONS_V2_FACTORY,
+        [V2_POOL_GRADUATED_TOPIC, topic_addr(TOKEN)],
+        "0x" + uint_word(123) + uint_word(456) + uint_word(789),
+    )
+    row = decode_v2_pool_graduation(log)
+    assert row.token == TOKEN
+    assert row.position_id == 123
+    assert row.token_amount == 456
+    assert row.pair_token_amount == 789
