@@ -44,6 +44,7 @@ from hlp.data.flap_curve import (
     build_flap_curve_market_cap_points,
     summarize_flap_curve_market_caps,
 )
+from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.oracles import reconstruct_chainlink_usd_tapes
 from hlp.data.pons_v1 import iter_enriched_v1_launches
@@ -417,6 +418,37 @@ def cmd_rpc_dex_pool_window(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_flap_registry(args: argparse.Namespace) -> int:
+    """Build a persistent Flap launch/config registry from a Portal tape."""
+    events = [FlapEvent(**row) for row in _load_jsonl(args.events)]
+    rows = build_flap_launch_registry(events)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_flap_portal_launch_config_events",
+            "chain_id": 4663,
+            "portal": FLAP_PORTAL.lower(),
+            "events": Path(args.events).name,
+            "fixed_supply_raw": str(1_000_000_000 * 10**18),
+            "token_decimals": 18,
+        },
+    )
+    incomplete_quotes = sum(row["quote_token"] is None for row in rows)
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "tokens": len(rows),
+                "tokens_missing_quote_event": incomplete_quotes,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_flap_tape(args: argparse.Namespace) -> int:
     """Acquire one shared Flap launch/bonding-curve lifecycle tape."""
     rpc = _archive_rpc(args)
@@ -473,6 +505,7 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
         raise SystemExit("from-block must be > 0")
     event_rows = _load_jsonl(args.events)
     events = [FlapEvent(**row) for row in event_rows]
+    launch_registry = _load_jsonl(args.registry)
     initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
 
     rpc = _archive_rpc(args)
@@ -504,6 +537,7 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             initial_weth_usd=initial_weth_usd,
             initial_quote_usd=initial_quote_usd,
             quote_usd_updates=quote_usd_updates,
+            launch_registry=launch_registry,
         )
     )
     point_manifest = write_jsonl_snapshot(
@@ -514,6 +548,7 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             "chain_id": 4663,
             "portal": FLAP_PORTAL.lower(),
             "events": Path(args.events).name,
+            "registry": Path(args.registry).name,
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
@@ -1868,6 +1903,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+    flap_registry = sub.add_parser("flap-registry")
+    flap_registry.add_argument("--events", required=True)
+    flap_registry.add_argument("--out", required=True)
+    flap_registry.set_defaults(func=cmd_flap_registry)
+
     flap_tape = sub.add_parser("rpc-flap-tape")
     flap_tape.add_argument("--from-block", type=int, required=True)
     flap_tape.add_argument("--to-block", type=int, required=True)
@@ -1878,6 +1918,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     flap_mcap = sub.add_parser("rpc-flap-curve-market-cap-window")
     flap_mcap.add_argument("--events", required=True)
+    flap_mcap.add_argument("--registry", required=True)
     flap_mcap.add_argument("--from-block", type=int, required=True)
     flap_mcap.add_argument("--to-block", type=int, required=True)
     flap_mcap.add_argument("--chunk-size", type=int, default=100_000)
