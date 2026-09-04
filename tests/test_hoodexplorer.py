@@ -54,3 +54,35 @@ def test_logs_page_normalizes_indexed_log():
     assert rows[0].block_number == 12345
     assert rows[0].log_index == 7
     assert rows[0].block_hash is None
+
+
+def test_iter_logs_pages_until_short_page():
+    calls = []
+
+    class Paged(FakeHood):
+        def get_logs_page(self, **kwargs):
+            calls.append(kwargs["page"])
+            if kwargs["page"] == 1:
+                return ["a", "b"]
+            if kwargs["page"] == 2:
+                return ["c"]
+            return []
+
+    rows = list(Paged(api_key="test").iter_logs(topic0="0x" + "55" * 32, page_size=2))
+    assert rows == ["a", "b", "c"]
+    assert calls == [1, 2]
+
+
+def test_iter_logs_respects_max_records():
+    class Paged(FakeHood):
+        def get_logs_page(self, **kwargs):
+            return ["a", "b", "c"]
+
+    rows = list(
+        Paged(api_key="test").iter_logs(
+            topic0="0x" + "55" * 32,
+            page_size=3,
+            max_records=2,
+        )
+    )
+    assert rows == ["a", "b"]
