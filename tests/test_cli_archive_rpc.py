@@ -372,3 +372,17 @@ def test_quote_usd_merge_parser_accepts_repeated_source_pairs():
     ])
     assert args.state == ["v3-state.jsonl", "v4-state.jsonl"]
     assert args.events == ["v3-events.jsonl", "v4-events.jsonl"]
+
+
+
+def test_v3_quote_usd_parser_allows_direct_usdg_without_anchor_files():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-v3-quote-usd-tape",
+        "--routes", "routes.jsonl",
+        "--v3-events", "events.jsonl",
+        "--state-out", "state.jsonl",
+        "--out", "updates.jsonl",
+    ])
+    assert args.anchor_events is None
+    assert args.anchor_initial is None

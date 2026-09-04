@@ -288,3 +288,51 @@ def test_v3_route_audit_does_not_require_anchor_rows(monkeypatch):
 
     assert rows[0]["v3_causal_ready"] is True
     assert rows[0]["direct_usdg_ready"] is True
+
+
+
+def test_direct_usdg_route_updates_do_not_require_weth_anchor():
+    from decimal import Decimal
+
+    route = {
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "activation_block": 100,
+        "pool": POOL,
+        "anchor_token": ROBINHOOD_USDG.lower(),
+        "anchor_decimals": 6,
+        "route_type": "uniswap_v3_direct_usdg",
+    }
+    rows = list(routes.build_v3_route_usd_updates(
+        [route],
+        [{
+            "pool": POOL,
+            "sqrt_price_x96": 2**96,
+            "block_number": 100,
+            "transaction_hash": "0x" + "77" * 32,
+            "transaction_index": 1,
+            "log_index": 0,
+        }],
+    ))
+    assert len(rows) == 1
+    assert Decimal(rows[0]["anchor_usd"]) == Decimal(1)
+
+
+def test_weth_route_still_requires_anchor():
+    route = {
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "activation_block": 100,
+        "pool": POOL,
+        "anchor_token": ROBINHOOD_WETH.lower(),
+        "anchor_decimals": 18,
+        "route_type": "uniswap_v3_direct_weth",
+    }
+    try:
+        list(routes.build_v3_route_usd_updates([route], []))
+    except ValueError as exc:
+        assert "initial WETH/USD" in str(exc)
+    else:
+        raise AssertionError("WETH route without USD anchor must fail closed")

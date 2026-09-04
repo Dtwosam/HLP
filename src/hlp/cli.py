@@ -1945,10 +1945,24 @@ def cmd_pons_select_v3_quote_routes(args: argparse.Namespace) -> int:
 def cmd_pons_v3_quote_usd_tape(args: argparse.Namespace) -> int:
     """Convert selected V3 fallback routes into generic causal USD state/tape."""
     routes = _load_jsonl(args.routes)
-    initial = json.loads(Path(args.anchor_initial).read_text())
-    initial_weth_usd = Decimal(initial["weth_usd"])
-    if initial_weth_usd <= 0:
-        raise SystemExit("anchor initial WETH/USD must be positive")
+    needs_weth = any(
+        row["anchor_token"].lower() == ROBINHOOD_WETH.lower()
+        for row in routes
+    )
+    if bool(args.anchor_initial) != bool(args.anchor_events):
+        raise SystemExit(
+            "--anchor-initial and --anchor-events must be supplied together"
+        )
+    if needs_weth and not args.anchor_initial:
+        raise SystemExit(
+            "WETH fallback routes require --anchor-initial/--anchor-events"
+        )
+    initial_weth_usd = None
+    if args.anchor_initial:
+        initial = json.loads(Path(args.anchor_initial).read_text())
+        initial_weth_usd = Decimal(initial["weth_usd"])
+        if initial_weth_usd <= 0:
+            raise SystemExit("anchor initial WETH/USD must be positive")
 
     states = build_v3_route_initial_usd_states(routes)
     state_manifest = write_jsonl_snapshot(
@@ -1958,13 +1972,20 @@ def cmd_pons_v3_quote_usd_tape(args: argparse.Namespace) -> int:
             "source": "selected_v3_route_state_before_first_pons_use",
             "chain_id": 4663,
             "routes": Path(args.routes).name,
-            "anchor_initial": Path(args.anchor_initial).name,
+            "anchor_initial": (
+                None if not args.anchor_initial
+                else Path(args.anchor_initial).name
+            ),
         },
     )
     updates = build_v3_route_usd_updates(
         routes,
         _iter_jsonl(args.v3_events),
-        _iter_jsonl(args.anchor_events),
+        (
+            _iter_jsonl(args.anchor_events)
+            if args.anchor_events
+            else ()
+        ),
         initial_weth_usd=initial_weth_usd,
     )
     update_manifest = write_jsonl_snapshot(
@@ -1975,8 +1996,14 @@ def cmd_pons_v3_quote_usd_tape(args: argparse.Namespace) -> int:
             "chain_id": 4663,
             "routes": Path(args.routes).name,
             "v3_events": Path(args.v3_events).name,
-            "anchor_events": Path(args.anchor_events).name,
-            "anchor_initial": Path(args.anchor_initial).name,
+            "anchor_events": (
+                None if not args.anchor_events
+                else Path(args.anchor_events).name
+            ),
+            "anchor_initial": (
+                None if not args.anchor_initial
+                else Path(args.anchor_initial).name
+            ),
         },
     )
     print(json.dumps({
@@ -4737,8 +4764,8 @@ def build_parser() -> argparse.ArgumentParser:
     quote_v3_usd = sub.add_parser("pons-v3-quote-usd-tape")
     quote_v3_usd.add_argument("--routes", required=True)
     quote_v3_usd.add_argument("--v3-events", required=True)
-    quote_v3_usd.add_argument("--anchor-events", required=True)
-    quote_v3_usd.add_argument("--anchor-initial", required=True)
+    quote_v3_usd.add_argument("--anchor-events")
+    quote_v3_usd.add_argument("--anchor-initial")
     quote_v3_usd.add_argument("--state-out", required=True)
     quote_v3_usd.add_argument("--out", required=True)
     quote_v3_usd.set_defaults(func=cmd_pons_v3_quote_usd_tape)

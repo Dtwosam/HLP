@@ -487,9 +487,9 @@ def build_v3_route_initial_usd_states(
 def build_v3_route_usd_updates(
     route_rows: Iterable[dict],
     v3_price_events: Iterable[dict],
-    weth_usd_anchor_points: Iterable[dict],
+    weth_usd_anchor_points: Iterable[dict] = (),
     *,
-    initial_weth_usd: Decimal,
+    initial_weth_usd: Decimal | None = None,
 ):
     """Convert selected V3 route price events into causal quote/USD updates."""
     routes = {
@@ -501,10 +501,20 @@ def build_v3_route_usd_updates(
     from hlp.data.quote_usd import QuoteUsdTimeline
     from hlp.data.reconstruct import event_order
 
-    usd = QuoteUsdTimeline(
-        initial_weth_usd=initial_weth_usd,
-        weth_anchor_points=weth_usd_anchor_points,
+    needs_weth = any(
+        row["anchor_token"].lower() == ROBINHOOD_WETH.lower()
+        for row in routes.values()
     )
+    usd = None
+    if needs_weth:
+        if initial_weth_usd is None or initial_weth_usd <= 0:
+            raise ValueError(
+                "positive initial WETH/USD is required for WETH fallback routes"
+            )
+        usd = QuoteUsdTimeline(
+            initial_weth_usd=initial_weth_usd,
+            weth_anchor_points=weth_usd_anchor_points,
+        )
     last_order = None
     for event in v3_price_events:
         order = event_order(event)
@@ -528,7 +538,8 @@ def build_v3_route_usd_updates(
         if order < activation_order:
             continue
 
-        usd.advance_to(order)
+        if usd is not None:
+            usd.advance_to(order)
         token = route["quote_token"].lower()
         anchor = route["anchor_token"].lower()
         token_is_token0 = int(token, 16) < int(anchor, 16)
@@ -541,6 +552,8 @@ def build_v3_route_usd_updates(
         if anchor == ROBINHOOD_USDG.lower():
             anchor_usd = Decimal(1)
         elif anchor == ROBINHOOD_WETH.lower():
+            if usd is None:
+                raise ValueError("WETH/USD timeline is unavailable")
             anchor_usd = usd.price(ROBINHOOD_WETH)
             if anchor_usd is None:
                 raise ValueError("WETH/USD price is unavailable")
