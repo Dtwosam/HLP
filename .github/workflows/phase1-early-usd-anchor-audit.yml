@@ -15,6 +15,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,21 +31,22 @@ jobs:
           import os
 
           from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
           )
           from hlp.data.rpc import RpcClient
 
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
           rpc = RpcClient(
-              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              url,
               timeout=30,
               attempts=5,
-              min_interval_seconds=0.6,
-              extra_headers=(
-                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
-                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
-                  else None
-              ),
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
           )
           rpc.assert_robinhood()
           head = rpc.block_number()
