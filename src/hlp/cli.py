@@ -868,7 +868,7 @@ def cmd_rpc_pools_trade_v4_tape(args: argparse.Namespace) -> int:
             "registered_pool_ids": len(pool_ids),
             "from_block": args.from_block,
             "to_block": args.to_block,
-            "event_topic0": V4_SWAP_TOPIC,
+            "event_topic0_or": [V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC],
         },
     )
     print(
@@ -1824,7 +1824,7 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
             provenance={
                 "source": "evm_json_rpc",
                 "chain_id": 4663,
-                "protocol": "pons_v2_v4_swaps",
+                "protocol": "pons_v2_v4_price_events",
                 "registrations": Path(args.registrations).name,
                 "from_block": args.from_block,
                 "to_block": args.to_block,
@@ -1837,36 +1837,43 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    # V4 Swap indexes poolId in topic1. Filter the registered Pons pool
-    # ids at the node instead of downloading every PoolManager swap and
-    # discarding non-Pons rows client-side. This keeps the raw-chain source
-    # unchanged while making full-history acquisition substantially smaller.
+    # V4 Initialize and Swap both index poolId in topic1. Keep the exact
+    # initialized price as part of the lifecycle instead of assuming the
+    # PoolGraduated seed ratio is identical to the initialized pool price.
     raw = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
         address=UNISWAP_V4_POOL_MANAGER,
-        topics=[V4_SWAP_TOPIC, sorted(pool_ids)],
+        topics=[[V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC], sorted(pool_ids)],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
     )
     counters = {
-        "server_filtered_v4_swaps": 0,
+        "matched_pons_v4_initializes": 0,
         "matched_pons_v4_swaps": 0,
     }
     matched_ids: set[str] = set()
 
     def decoded():
         for log in raw:
-            counters["server_filtered_v4_swaps"] += 1
-            row = decode_v4_swap(log)
-            # Fail closed if a provider ever violates the topic1 filter.
-            if row.pool_id not in pool_ids:
+            topic0 = log.topics[0] if log.topics else None
+            if topic0 == V4_INITIALIZE_TOPIC:
+                event = asdict(decode_v4_pool_initialized(log))
+                event["event_type"] = "v4_initialize"
+                counters["matched_pons_v4_initializes"] += 1
+            elif topic0 == V4_SWAP_TOPIC:
+                event = asdict(decode_v4_swap(log))
+                event["event_type"] = "v4_swap"
+                counters["matched_pons_v4_swaps"] += 1
+            else:
+                continue
+            if event["pool_id"] not in pool_ids:
                 raise ValueError(
-                    f"V4 server-side pool filter returned unknown id {row.pool_id}"
+                    "V4 server-side pool filter returned unknown id "
+                    f"{event['pool_id']}"
                 )
-            counters["matched_pons_v4_swaps"] += 1
-            matched_ids.add(row.pool_id)
-            yield row
+            matched_ids.add(event["pool_id"])
+            yield event
 
     manifest = write_jsonl_snapshot(
         decoded(),
