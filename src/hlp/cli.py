@@ -33,6 +33,7 @@ def _rpc(args: argparse.Namespace) -> RpcClient:
         os.environ.get("ROBINHOOD_RPC_URL", args.rpc_url),
         timeout=args.timeout,
         attempts=args.attempts,
+        min_interval_seconds=args.min_interval,
     )
 
 
@@ -349,6 +350,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rpc-url", default=DEFAULT_RPC_URL)
     parser.add_argument("--timeout", type=float, default=20)
     parser.add_argument("--attempts", type=int, default=3)
+    parser.add_argument(
+        "--min-interval",
+        type=float,
+        default=0.0,
+        help="minimum seconds between RPC attempts for provider pacing",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     smoke = sub.add_parser("network-smoke")
