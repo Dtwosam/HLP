@@ -210,3 +210,12 @@ def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
+
+
+
+def test_v4_quote_continuation_is_reusable_without_push_trigger():
+    content = _workflow("phase1-pons-v4-quote-continuation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block

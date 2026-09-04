@@ -27,6 +27,28 @@ on:
         required: true
         default: "500000"
         type: string
+  workflow_call:
+    inputs:
+      prior_probe_run_id:
+        description: "Successful V4 quote probe/continuation run"
+        required: true
+        type: string
+      prior_artifact_name:
+        description: "Artifact containing the prior V4 probe JSONL"
+        required: true
+        type: string
+      prior_filename:
+        description: "Prior V4 probe JSONL filename"
+        required: true
+        type: string
+      snapshot_head:
+        description: "Frozen snapshot head block"
+        required: true
+        type: string
+      forward_blocks:
+        description: "Maximum non-overlapping blocks to scan per unresolved quote"
+        required: true
+        type: string
 
 permissions:
   contents: read
