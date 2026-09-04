@@ -22,6 +22,7 @@ from hlp.config import (
     PONS_V1_DEPLOYMENT_BLOCK,
     PONS_V2_DEPLOYMENT_BLOCK,
     PONS_V2_MEME_HOOK,
+    FLAP_PORTAL,
     UNISWAP_V4_POOL_MANAGER,
 )
 from hlp.protocols.uniswap import (
@@ -39,6 +40,10 @@ from hlp.protocols.uniswap import (
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.chainlink_directory import ChainlinkDirectoryClient
 from hlp.data.hoodexplorer import HoodExplorerClient
+from hlp.data.flap_curve import (
+    build_flap_curve_market_cap_points,
+    summarize_flap_curve_market_caps,
+)
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.oracles import reconstruct_chainlink_usd_tapes
 from hlp.data.pons_v1 import iter_enriched_v1_launches
@@ -54,6 +59,7 @@ from hlp.data.reconstruct import (
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
 from hlp.data.transition import summarize_v2_transition_continuity
+from hlp.data.types import FlapEvent
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
     summarize_v2_curve_market_caps,
@@ -63,6 +69,7 @@ from hlp.data.v4 import (
     build_v2_v4_market_cap_points,
 )
 from hlp.protocols.erc20 import read_erc20_static
+from hlp.protocols.flap import FLAP_RECONSTRUCTION_TOPICS, decode_flap_event
 from hlp.protocols.pons_state import (
     read_v1_launch_config_state,
     read_v2_launch_config_state,
@@ -122,6 +129,7 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
         ("pons_v1", PONS_V1_FACTORY),
         ("pons_v2", PONS_V2_FACTORY),
         ("uniswap_v3_factory", UNISWAP_V3_FACTORY),
+        ("flap_portal", FLAP_PORTAL),
         ("pons_v2_meme_hook", PONS_V2_MEME_HOOK),
         ("uniswap_v4_pool_manager", UNISWAP_V4_POOL_MANAGER),
     ):
@@ -399,6 +407,149 @@ def cmd_rpc_dex_pool_window(args: argparse.Namespace) -> int:
             {
                 "v3": v3_manifest,
                 "v4": v4_manifest,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+
+def cmd_rpc_flap_tape(args: argparse.Namespace) -> int:
+    """Acquire one shared Flap launch/bonding-curve lifecycle tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=FLAP_PORTAL,
+        topics=[list(FLAP_RECONSTRUCTION_TOPICS)],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters: dict[str, int] = {}
+
+    def decoded():
+        for log in raw:
+            row = decode_flap_event(log)
+            counters[row.event_type] = counters.get(row.event_type, 0) + 1
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "flap_portal_shared_tape",
+            "portal": FLAP_PORTAL.lower(),
+            "event_topic0_or": list(FLAP_RECONSTRUCTION_TOPICS),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "event_counts": counters,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
+    """Price Flap bonding-curve trades and emit $100k eligibility."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    event_rows = _load_jsonl(args.events)
+    events = [FlapEvent(**row) for row in event_rows]
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = list(
+        reconstruct_v3_price_points(
+            rpc,
+            token=ROBINHOOD_WETH,
+            quote_token=ROBINHOOD_USDG,
+            pool=args.usd_anchor_pool,
+            from_block=args.from_block,
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    points = list(
+        build_flap_curve_market_cap_points(
+            events,
+            anchor_points,
+            initial_weth_usd=initial_weth_usd,
+            initial_quote_usd=initial_quote_usd,
+            quote_usd_updates=quote_usd_updates,
+        )
+    )
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_flap_portal_trade_post_price",
+            "chain_id": 4663,
+            "portal": FLAP_PORTAL.lower(),
+            "events": Path(args.events).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "price_semantics": "postPrice is quote-token units with 18 decimals",
+            "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
+            "oracle_state": (
+                Path(args.oracle_state).name if args.oracle_state else None
+            ),
+            "oracle_events": (
+                Path(args.oracle_events).name if args.oracle_events else None
+            ),
+        },
+    )
+    summary = summarize_flap_curve_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_flap_curve_market_cap_points",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once on Flap bonding curve",
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "market_cap_points": point_manifest,
+                "token_summary": summary_manifest,
+                "tokens_with_curve_trades": len(summary),
+                "tokens_priced": sum(r["priced_points"] > 0 for r in summary),
+                "tokens_crossed_100k_on_curve": sum(
+                    bool(r["crossed_100k"]) for r in summary
+                ),
+                "unpriced_tokens": sum(r["priced_points"] == 0 for r in summary),
+                "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
@@ -1715,6 +1866,31 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    flap_tape = sub.add_parser("rpc-flap-tape")
+    flap_tape.add_argument("--from-block", type=int, required=True)
+    flap_tape.add_argument("--to-block", type=int, required=True)
+    flap_tape.add_argument("--chunk-size", type=int, default=100_000)
+    flap_tape.add_argument("--min-chunk-size", type=int, default=1)
+    flap_tape.add_argument("--out", required=True)
+    flap_tape.set_defaults(func=cmd_rpc_flap_tape)
+
+    flap_mcap = sub.add_parser("rpc-flap-curve-market-cap-window")
+    flap_mcap.add_argument("--events", required=True)
+    flap_mcap.add_argument("--from-block", type=int, required=True)
+    flap_mcap.add_argument("--to-block", type=int, required=True)
+    flap_mcap.add_argument("--chunk-size", type=int, default=100_000)
+    flap_mcap.add_argument("--min-chunk-size", type=int, default=1)
+    flap_mcap.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    flap_mcap.add_argument("--oracle-state")
+    flap_mcap.add_argument("--oracle-events")
+    flap_mcap.add_argument("--out", required=True)
+    flap_mcap.add_argument("--summary-out", required=True)
+    flap_mcap.set_defaults(func=cmd_rpc_flap_curve_market_cap_window)
 
     dex_census = sub.add_parser("rpc-dex-pool-window")
     dex_census.add_argument("--from-block", type=int, required=True)
