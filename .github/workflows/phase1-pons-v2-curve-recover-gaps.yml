@@ -23,6 +23,24 @@ on:
         required: true
         default: "200000"
         type: string
+  workflow_call:
+    inputs:
+      v2_registry_run_id:
+        description: "Run containing phase1-pons-v2-full-registry"
+        required: true
+        type: string
+      preserved_run_id:
+        description: "Original run containing successful V2 curve prefix shards"
+        required: true
+        type: string
+      partial_recovery_run_id:
+        description: "Finished partial tail-recovery run with successful shard artifacts"
+        required: true
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        type: string
 
 permissions:
   contents: read
