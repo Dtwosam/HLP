@@ -41,3 +41,71 @@ def test_timeline_respects_same_block_order_for_stock_and_weth():
     timeline.advance_to((10, 4, 0))
     assert timeline.price(STOCK) == Decimal("205")
     assert timeline.pricing_status(STOCK) == "priced_chainlink_stock_token"
+
+
+
+def test_timeline_does_not_materialize_full_sources():
+    consumed = {"anchor": 0, "oracle": 0}
+
+    def anchors():
+        for block in (10, 20, 30):
+            consumed["anchor"] += 1
+            yield {
+                "block_number": block,
+                "transaction_index": 1,
+                "log_index": 0,
+                "quote_per_token": str(1900 + block),
+            }
+
+    def oracles():
+        for block in (15, 25, 35):
+            consumed["oracle"] += 1
+            yield {
+                "quote_token": STOCK,
+                "block_number": block,
+                "transaction_index": 1,
+                "log_index": 0,
+                "usd_price": str(200 + block),
+            }
+
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=Decimal("1900"),
+        initial_quote_usd={STOCK: Decimal("200")},
+        weth_anchor_points=anchors(),
+        oracle_updates=oracles(),
+    )
+
+    # Lazy merge seeds at most one row from each source.
+    assert consumed == {"anchor": 1, "oracle": 1}
+
+    timeline.advance_to((10, 1, 0))
+    assert timeline.price(ROBINHOOD_WETH) == Decimal("1910")
+    assert consumed["anchor"] <= 2
+    assert consumed["oracle"] == 1
+
+
+def test_timeline_rejects_out_of_order_source_lazily():
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=Decimal("1900"),
+        weth_anchor_points=[
+            {
+                "block_number": 20,
+                "transaction_index": 1,
+                "log_index": 0,
+                "quote_per_token": "1920",
+            },
+            {
+                "block_number": 10,
+                "transaction_index": 1,
+                "log_index": 0,
+                "quote_per_token": "1910",
+            },
+        ],
+    )
+    timeline.advance_to((20, 1, 0))
+    try:
+        timeline.advance_to((30, 1, 0))
+    except ValueError as exc:
+        assert "not chronological" in str(exc)
+    else:
+        raise AssertionError("out-of-order USD source must fail closed")
