@@ -202,3 +202,26 @@ def test_unpriced_quote_v3_route_audit_parses():
     ])
     assert args.quote_registry == "quotes.jsonl"
     assert args.out == "routes.jsonl"
+
+
+
+def test_v3_quote_route_selection_and_usd_tape_parse():
+    parser = build_parser()
+    selected = parser.parse_args([
+        "pons-select-v3-quote-routes",
+        "--audit", "audit.jsonl",
+        "--out", "routes.jsonl",
+    ])
+    assert selected.audit == "audit.jsonl"
+
+    tape = parser.parse_args([
+        "pons-v3-quote-usd-tape",
+        "--routes", "routes.jsonl",
+        "--v3-events", "v3.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor-initial.json",
+        "--state-out", "state.jsonl",
+        "--out", "updates.jsonl",
+    ])
+    assert tape.routes == "routes.jsonl"
+    assert tape.state_out == "state.jsonl"

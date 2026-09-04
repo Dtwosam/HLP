@@ -67,7 +67,12 @@ from hlp.data.quote_registry import (
     CHAINLINK_PRICED_STATUSES,
     build_pons_quote_registry,
 )
-from hlp.data.quote_routes import audit_unpriced_v3_quote_routes
+from hlp.data.quote_routes import (
+    audit_unpriced_v3_quote_routes,
+    build_v3_route_initial_usd_states,
+    build_v3_route_usd_updates,
+    select_v3_quote_routes,
+)
 from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
@@ -1558,6 +1563,84 @@ def cmd_rpc_pons_unpriced_quote_v3_routes(
         ],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pons_select_v3_quote_routes(args: argparse.Namespace) -> int:
+    """Freeze one deterministic V3 fallback route per covered quote asset."""
+    audit = _load_jsonl(args.audit)
+    routes = select_v3_quote_routes(audit)
+    manifest = write_jsonl_snapshot(
+        routes,
+        output=Path(args.out),
+        provenance={
+            "source": "deterministic_selection_from_v3_quote_route_audit",
+            "chain_id": 4663,
+            "audit": Path(args.audit).name,
+            "selection_policy": (
+                "prefer direct USDG; otherwise WETH; within pair choose "
+                "highest activation liquidity then lower fee"
+            ),
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "selected_routes": len(routes),
+        "covered_launches": sum(int(row["launches"]) for row in routes),
+        "direct_usdg_routes": sum(
+            row["route_type"] == "uniswap_v3_direct_usdg"
+            for row in routes
+        ),
+        "direct_weth_routes": sum(
+            row["route_type"] == "uniswap_v3_direct_weth"
+            for row in routes
+        ),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pons_v3_quote_usd_tape(args: argparse.Namespace) -> int:
+    """Convert selected V3 fallback routes into generic causal USD state/tape."""
+    routes = _load_jsonl(args.routes)
+    initial = json.loads(Path(args.anchor_initial).read_text())
+    initial_weth_usd = Decimal(initial["weth_usd"])
+    if initial_weth_usd <= 0:
+        raise SystemExit("anchor initial WETH/USD must be positive")
+
+    states = build_v3_route_initial_usd_states(routes)
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "selected_v3_route_state_before_first_pons_use",
+            "chain_id": 4663,
+            "routes": Path(args.routes).name,
+            "anchor_initial": Path(args.anchor_initial).name,
+        },
+    )
+    updates = build_v3_route_usd_updates(
+        routes,
+        _iter_jsonl(args.v3_events),
+        _iter_jsonl(args.anchor_events),
+        initial_weth_usd=initial_weth_usd,
+    )
+    update_manifest = write_jsonl_snapshot(
+        updates,
+        output=Path(args.out),
+        provenance={
+            "source": "selected_v3_route_swap_close_usd_tape",
+            "chain_id": 4663,
+            "routes": Path(args.routes).name,
+            "v3_events": Path(args.v3_events).name,
+            "anchor_events": Path(args.anchor_events).name,
+            "anchor_initial": Path(args.anchor_initial).name,
+        },
+    )
+    print(json.dumps({
+        "initial_states": state_manifest,
+        "updates": update_manifest,
+        "selected_routes": len(routes),
     }, sort_keys=True))
     return 0
 
@@ -4127,6 +4210,20 @@ def build_parser() -> argparse.ArgumentParser:
     quote_v3_routes.set_defaults(
         func=cmd_rpc_pons_unpriced_quote_v3_routes
     )
+
+    select_quote_v3 = sub.add_parser("pons-select-v3-quote-routes")
+    select_quote_v3.add_argument("--audit", required=True)
+    select_quote_v3.add_argument("--out", required=True)
+    select_quote_v3.set_defaults(func=cmd_pons_select_v3_quote_routes)
+
+    quote_v3_usd = sub.add_parser("pons-v3-quote-usd-tape")
+    quote_v3_usd.add_argument("--routes", required=True)
+    quote_v3_usd.add_argument("--v3-events", required=True)
+    quote_v3_usd.add_argument("--anchor-events", required=True)
+    quote_v3_usd.add_argument("--anchor-initial", required=True)
+    quote_v3_usd.add_argument("--state-out", required=True)
+    quote_v3_usd.add_argument("--out", required=True)
+    quote_v3_usd.set_defaults(func=cmd_pons_v3_quote_usd_tape)
 
     quote_audit = sub.add_parser("pons-quote-audit")
     quote_audit.add_argument("--registry", required=True)
