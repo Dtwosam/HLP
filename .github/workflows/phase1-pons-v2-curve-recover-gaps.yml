@@ -1,0 +1,358 @@
+name: phase1-pons-v2-curve-recover-gaps
+
+on:
+  workflow_dispatch:
+    inputs:
+      v2_registry_run_id:
+        description: "Run containing phase1-pons-v2-full-registry"
+        required: true
+        default: "33912235341"
+        type: string
+      preserved_run_id:
+        description: "Original run containing successful V2 curve prefix shards"
+        required: true
+        default: "33912593934"
+        type: string
+      partial_recovery_run_id:
+        description: "Finished partial tail-recovery run with successful shard artifacts"
+        required: true
+        default: "33925648297"
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        default: "200000"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-curve-recover-gaps-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GENERATION_START: '26841846'
+  TAIL_START: '47574988'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-curve-recovery-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_recovery_run_id }}
+          github-token: ${{ github.token }}
+      - id: plan
+        name: Derive only missing tail ranges
+        env:
+          MAX_GAP_BLOCKS: ${{ inputs.max_gap_blocks }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import plan_missing_subranges
+
+          tail_start = int(os.environ["TAIL_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
+          if max_blocks <= 0:
+              raise SystemExit("max_gap_blocks must be positive")
+
+          manifests = sorted(
+              Path("partial").glob(
+                  "v2-curve-recovery-*.jsonl.manifest.json"
+              )
+          )
+          if not manifests:
+              raise SystemExit(
+                  "partial recovery run has no successful curve artifacts"
+              )
+
+          covered = []
+          sources = []
+          for path in manifests:
+              manifest = json.loads(path.read_text())
+              prov = manifest["provenance"]
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "manifest": path.name,
+                  "from_block": lo,
+                  "to_block": hi,
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+              })
+
+          gaps = plan_missing_subranges(
+              tail_start,
+              head,
+              covered,
+              max_blocks=max_blocks,
+          )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(gaps)
+          ]
+          matrix = {"include": include}
+          report = {
+              "tail_start": tail_start,
+              "snapshot_head": head,
+              "max_gap_blocks": max_blocks,
+              "successful_partial_artifacts": sources,
+              "gap_jobs": include,
+              "gap_job_count": len(include),
+              "gap_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
+          }
+          Path("artifacts/curve-gap-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "matrix="
+                  + json.dumps(matrix, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(f"gap_count={len(include)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  recover:
+    needs: plan
+    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing curve interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-curve-tape \
+            --registry registry/pons-v2-full-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-topic-scan \
+            --out "artifacts/curve-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, recover]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover.result == 'success' || needs.recover.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-curve-*
+          path: preserved
+          merge-multiple: true
+          run-id: ${{ inputs.preserved_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-curve-recovery-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_recovery_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.gap_count != '0' }}
+        with:
+          pattern: phase1-pons-v2-curve-gap-*
+          path: gaps
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-gap-plan
+          path: plan
+      - name: Merge preserved prefix, successful tail shards, and exact gaps
+        run: |
+          mkdir -p artifacts
+          cp plan/curve-gap-plan.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          files = (
+              list(Path("preserved").glob("v2-curve-shard-*.jsonl"))
+              + list(Path("partial").glob("v2-curve-recovery-*.jsonl"))
+              + list(Path("gaps").glob("curve-gap-*.jsonl"))
+          )
+          if not files:
+              raise SystemExit("no curve artifacts available for final merge")
+
+          entries = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              prov = manifest["provenance"]
+              entries.append((
+                  int(prov["from_block"]),
+                  int(prov["to_block"]),
+                  path,
+                  manifest,
+              ))
+          entries.sort(key=lambda item: item[0])
+
+          previous_hi = None
+          expected_records = 0
+          manifests = []
+          for lo, hi, path, manifest in entries:
+              if previous_hi is None:
+                  assert lo == start, (lo, start, path.name)
+              else:
+                  assert lo == previous_hi + 1, (
+                      previous_hi, lo, path.name
+                  )
+              previous_hi = hi
+              expected_records += int(manifest["records"])
+              manifests.append({
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == head, (previous_hi, head)
+
+          stats = {
+              "records": 0,
+              "curve_buy": 0,
+              "curve_sell": 0,
+              "curve_buyback": 0,
+          }
+          curves = set()
+
+          def rows():
+              prior = None
+              for _, _, path, manifest in entries:
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if prior is not None:
+                              assert prior < order, (prior, order, path.name)
+                          prior = order
+                          kind = row["event_type"]
+                          assert kind in stats, kind
+                          stats[kind] += 1
+                          stats["records"] += 1
+                          curves.add(row["curve"].lower())
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path("artifacts/pons-v2-curve-full.jsonl"),
+              provenance={
+                  "source": "manifest_gap_aware_curve_recovery",
+                  "chain_id": 4663,
+                  "snapshot_head_block": head,
+                  "preserved_run_id": int(
+                      "${{ inputs.preserved_run_id }}"
+                  ),
+                  "partial_recovery_run_id": int(
+                      "${{ inputs.partial_recovery_run_id }}"
+                  ),
+                  "shards": manifests,
+              },
+          )
+          assert stats["records"] == expected_records
+          report = {
+              "snapshot_head_block": head,
+              "records": stats["records"],
+              "curve_buys": stats["curve_buy"],
+              "curve_sells": stats["curve_sell"],
+              "curve_buybacks": stats["curve_buyback"],
+              "curves_with_activity": len(curves),
+              "registry_curves": 225_951,
+              "tape_sha256": snapshot["sha256"],
+              "source_files": len(entries),
+          }
+          Path("artifacts/pons-v2-curve-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: artifacts/
+          if-no-files-found: error
