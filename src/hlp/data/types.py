@@ -36,6 +36,23 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class PoolsFunLaunch:
+    token: str
+    pool: str
+    paired_asset: str
+    creator: str
+    deployer: str
+    fee_recipient: str
+    start_tick: int
+    metadata_uri: str
+    dev_buy_amount_out: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class HoodFunEvent:
     event_type: str
     token: str
