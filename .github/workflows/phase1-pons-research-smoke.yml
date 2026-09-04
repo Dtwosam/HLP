@@ -1,0 +1,185 @@
+name: phase1-pons-research-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-research-smoke.yml'
+      - 'src/hlp/data/pons_research.py'
+      - 'src/hlp/cli.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pons-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Pons V1 market paths
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-registry-window \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 50 \
+            --out artifacts/v1-registry.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v3-pons-tape \
+            --registry artifacts/v1-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v1-swaps.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-market-cap-window \
+            --registry artifacts/v1-registry.jsonl \
+            --swaps artifacts/v1-swaps.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v1-market-caps.jsonl \
+            --summary-out artifacts/v1-summary.jsonl
+      - name: Pons V2 registry and stock oracle
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registry-window \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 50 \
+            --out artifacts/v2-registry.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-stock-oracle-window \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --feed-out artifacts/stock-feed-registry.jsonl \
+            --state-out artifacts/stock-oracle-state.jsonl \
+            --out artifacts/stock-oracle-updates.jsonl
+      - name: Pons V2 full lifecycle
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-curve-events.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-curve-market-cap-window \
+            --registry artifacts/v2-registry.jsonl \
+            --curve-events artifacts/v2-curve-events.jsonl \
+            --oracle-state artifacts/stock-oracle-state.jsonl \
+            --oracle-events artifacts/stock-oracle-updates.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-curve-market-caps.jsonl \
+            --summary-out artifacts/v2-curve-summary.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-graduation-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-graduations.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-registration-tape \
+            --registry artifacts/v2-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-registrations.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-v4-tape \
+            --registrations artifacts/v2-registrations.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/v2-v4-swaps.jsonl
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v2-v4-market-cap-window \
+            --registry artifacts/v2-registry.jsonl \
+            --curve-points artifacts/v2-curve-market-caps.jsonl \
+            --graduations artifacts/v2-graduations.jsonl \
+            --registrations artifacts/v2-registrations.jsonl \
+            --v4-swaps artifacts/v2-v4-swaps.jsonl \
+            --oracle-state artifacts/stock-oracle-state.jsonl \
+            --oracle-events artifacts/stock-oracle-updates.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --seed-out artifacts/v2-seed-points.jsonl \
+            --out artifacts/v2-v4-market-caps.jsonl \
+            --transition-out artifacts/v2-transition.jsonl \
+            --summary-out artifacts/v2-lifecycle-summary.jsonl
+      - name: Build canonical Pons research dataset
+        run: |
+          hlp pons-research-dataset \
+            --v1-points artifacts/v1-market-caps.jsonl \
+            --v2-curve-points artifacts/v2-curve-market-caps.jsonl \
+            --v2-seed-points artifacts/v2-seed-points.jsonl \
+            --v2-v4-points artifacts/v2-v4-market-caps.jsonl \
+            --path-out artifacts/pons-market-path.jsonl \
+            --universe-out artifacts/pons-universe.jsonl \
+            --outcomes-out artifacts/pons-outcomes.jsonl
+      - name: Validate Pons-only study semantics
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          def read(name):
+              return [
+                  json.loads(x)
+                  for x in Path("artifacts", name).read_text().splitlines()
+                  if x.strip()
+              ]
+
+          universe = read("pons-universe.jsonl")
+          outcomes = read("pons-outcomes.jsonl")
+          eligible = [row for row in universe if row["reached_100k"]]
+          v1_eligible = [row for row in eligible if row["pons_version"] == "v1"]
+          v2_eligible = [row for row in eligible if row["pons_version"] == "v2"]
+          multiples = [
+              Decimal(row["max_future_multiple"])
+              for row in outcomes
+              if row["max_future_multiple"] is not None
+          ]
+
+          assert len(universe) == 249, len(universe)
+          assert len(v1_eligible) == 4, v1_eligible
+          assert len(v2_eligible) == 1, v2_eligible
+          assert all(row["token"] in {x["token"] for x in eligible} for row in outcomes)
+          assert all(
+              Decimal(row["drawdown_from_running_peak"]) >= 0
+              for row in outcomes
+          )
+          assert all(
+              row["reached_5x_later"]
+              == (
+                  row["max_future_multiple"] is not None
+                  and Decimal(row["max_future_multiple"]) >= Decimal("5")
+              )
+              for row in outcomes
+          )
+
+          print(json.dumps({
+              "pons_tokens_with_paths": len(universe),
+              "eligible_100k": len(eligible),
+              "eligible_v1": len(v1_eligible),
+              "eligible_v2": len(v2_eligible),
+              "eligible_price_points": len(outcomes),
+              "largest_observed_future_multiple_in_window": (
+                  str(max(multiples)) if multiples else None
+              ),
+              "eligible_tokens_with_any_5x_later_point": len({
+                  row["token"] for row in outcomes if row["reached_5x_later"]
+              }),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-research-smoke
+          path: artifacts/
+          if-no-files-found: error
