@@ -1,0 +1,209 @@
+name: phase1-pons-weth-usdg-anchor-full
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-weth-usdg-anchor-full.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_PONS_LAUNCH: '8621658'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+  ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '16'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact anchor shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_PONS_LAUNCH"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire WETH/USDG anchor price events
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v1-price-path             --token "$WETH"             --quote-token "$USDG"             --pool "$ANCHOR_POOL"             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --out "artifacts/anchor-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-anchor-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-anchor-*
+          path: downloads
+          merge-multiple: true
+      - name: Merge and freeze shared anchor tape
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.reconstruct import event_order, v3_quote_price_at_block
+          from hlp.data.rpc import RpcClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          start = int(os.environ["FIRST_PONS_LAUNCH"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          files = sorted(Path("downloads").glob("anchor-shard-*.jsonl"))
+          assert len(files) == 16, [path.name for path in files]
+
+          rows = []
+          manifests = []
+          previous_hi = None
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              prov = manifest["provenance"]
+              lo, hi = int(prov["from_block"]), int(prov["to_block"])
+              if previous_hi is None:
+                  assert lo == start, lo
+              else:
+                  assert lo == previous_hi + 1, (previous_hi, lo)
+              previous_hi = hi
+              shard_rows = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+              assert len(shard_rows) == int(manifest["records"])
+              rows.extend(shard_rows)
+              manifests.append({
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == head, (previous_hi, head)
+
+          rows.sort(key=event_order)
+          for left, right in zip(rows, rows[1:]):
+              assert event_order(left) < event_order(right), (
+                  event_order(left),
+                  event_order(right),
+              )
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          initial = v3_quote_price_at_block(
+              rpc,
+              token=os.environ["WETH"],
+              quote_token=os.environ["USDG"],
+              pool=os.environ["ANCHOR_POOL"],
+              block=start - 1,
+          )
+          assert initial > 0
+
+          tape = write_jsonl_snapshot(
+              rows,
+              output=Path("artifacts/pons-weth-usdg-anchor-full.jsonl"),
+              provenance={
+                  "source": "merged_raw_uniswap_v3_anchor_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": head,
+                  "first_pons_launch_block": start,
+                  "state_block": start - 1,
+                  "weth": os.environ["WETH"].lower(),
+                  "usdg": os.environ["USDG"].lower(),
+                  "pool": os.environ["ANCHOR_POOL"].lower(),
+                  "shards": manifests,
+              },
+          )
+          initial_state = {
+              "block_number": start - 1,
+              "weth_usd": str(initial),
+              "pricing_semantics": "WETH per USDG pool spot; USDG nominal USD 1",
+              "pool": os.environ["ANCHOR_POOL"].lower(),
+          }
+          Path("artifacts/pons-weth-usdg-anchor-initial.json").write_text(
+              json.dumps(initial_state, indent=2, sort_keys=True) + "\n"
+          )
+          summary = {
+              "snapshot_head_block": head,
+              "state_block": start - 1,
+              "initial_weth_usd": str(initial),
+              "anchor_price_events": len(rows),
+              "first_event": rows[0] if rows else None,
+              "last_event": rows[-1] if rows else None,
+              "tape_sha256": tape["sha256"],
+              "state_rpc_requests": rpc.requests_made,
+          }
+          Path("artifacts/pons-weth-usdg-anchor-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: artifacts/
+          if-no-files-found: error
