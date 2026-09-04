@@ -16,6 +16,19 @@ from hlp.protocols.uniswap import (
 )
 
 
+def _record_dict(value) -> dict:
+    """Normalize decoded event records and lightweight test doubles."""
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        return asdict(value)
+    except TypeError:
+        fields = getattr(value, "__dict__", None)
+        if fields is None:
+            raise
+        return dict(fields)
+
+
 def _address_topic(address: str) -> str:
     value = address.lower()
     if not value.startswith("0x") or len(value) != 42:
@@ -458,7 +471,7 @@ def extend_v4_usdg_routes(
                 event.currency1.lower(),
             } != {token, usdg}:
                 raise ValueError("continued V4 Initialize currency mismatch")
-            new_initializes.append(asdict(event))
+            new_initializes.append(_record_dict(event))
 
         candidates = [dict(row) for row in source.get("v4_candidates", [])]
         known_ids = {row["pool_id"].lower() for row in candidates}
@@ -509,7 +522,7 @@ def extend_v4_usdg_routes(
                 )
                 if quote_per_token <= 0:
                     raise ValueError("continued V4 fallback price is not positive")
-                first_post = asdict(swap)
+                first_post = _record_dict(swap)
                 first_post.update({
                     "quote_per_token": str(quote_per_token),
                     "usd_price": str(quote_per_token),
