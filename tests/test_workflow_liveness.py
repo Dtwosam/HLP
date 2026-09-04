@@ -8,6 +8,8 @@ WORKFLOWS = [
     "phase1-pons-v2-curve-full.yml",
     "phase1-pons-v2-transition-full.yml",
     "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-v2-lifecycle-eligibility.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -16,6 +18,7 @@ MATRIX_WORKFLOWS = {
     "phase1-pons-v2-curve-full.yml",
     "phase1-pons-v2-transition-full.yml",
     "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
 }
 
 
@@ -64,3 +67,29 @@ def test_full_quote_audit_has_short_fail_fast_bound():
     content = _workflow("phase1-pons-full-quote-audit.yml")
     assert "timeout-minutes: 20" in content
     assert "timeout-minutes: 75" not in content
+
+
+
+BACKFILL_WORKFLOWS = {
+    "phase1-pons-full-registry.yml",
+    "phase1-pons-full-census.yml",
+    "phase1-pons-v1-registry-recovery.yml",
+    "phase1-pons-v2-registry-freeze.yml",
+    "phase1-pons-full-quote-audit.yml",
+    "phase1-pons-v2-stock-oracle-full.yml",
+    "phase1-pons-v2-curve-full.yml",
+    "phase1-pons-v2-transition-full.yml",
+    "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-v2-lifecycle-eligibility.yml",
+}
+
+
+def test_full_history_backfills_are_manual_only():
+    for name in BACKFILL_WORKFLOWS:
+        content = _workflow(name)
+        trigger_block = content.split("\npermissions:", 1)[0]
+        assert "workflow_dispatch:" in trigger_block, name
+        assert "\n  push:" not in trigger_block, (
+            f"{name} must not auto-start a full-history backfill on code pushes"
+        )

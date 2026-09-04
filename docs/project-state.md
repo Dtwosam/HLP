@@ -127,6 +127,22 @@ non-WETH/USDG Pons pairs cannot be silently excluded from the $100k universe.
 Unknown quote assets remain explicit unsupported rows; they are never assigned
 a guessed USD price.
 
+## Backfill execution guardrail
+
+Full-history Pons backfills are manual-only workflows. Code/workflow pushes must
+not auto-launch archive matrices. Dependency run IDs are workflow-dispatch
+inputs rather than reasons to edit workflow YAML. Heavy jobs fail fast when a
+required artifact is unavailable; runner-side polling is forbidden.
+
+This keeps normal development/tests responsive while long archive shards run,
+and prevents accidental backfills from competing for GitHub-hosted runner
+capacity.
+
+The complete V2 downstream path is now explicitly staged as:
+
+registry -> curve/transition/anchor/oracle -> V4 tape -> summary-only lifecycle
+eligibility -> frozen >=$100k V2 subset.
+
 ## Query-efficiency design
 
 Do not issue one historical API query per coin unless unavoidable.
