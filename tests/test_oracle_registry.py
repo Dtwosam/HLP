@@ -61,3 +61,12 @@ def test_resolve_stock_quote_feed_specs():
     assert result[0]["quote_token"] == STOCK
     assert result[0]["feed"] == FEED
     assert result[0]["heartbeat_seconds"] == 86400
+
+
+def test_resolve_stock_quote_without_registry_decimals():
+    result = resolve_stock_quote_feed_specs(
+        [{"pair_token": STOCK}],
+        assets_client=RobinhoodAssetsClient(transport=asset_transport),
+        directory_client=ChainlinkDirectoryClient(transport=directory_transport),
+    )
+    assert result[0]["quote_decimals"] == 18
