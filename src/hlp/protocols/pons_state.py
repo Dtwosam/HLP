@@ -24,11 +24,12 @@ def read_v1_launch_config_state(
     config_id: int,
     *,
     block: int,
+    factory: str = PONS_V1_FACTORY,
 ) -> PonsV1LaunchConfig:
     """Read the V1 launch config as it existed at the end of a historical block."""
     data = GET_V1_LAUNCH_CONFIG_SELECTOR + _uint_arg(config_id)
     words = data_words(
-        rpc.eth_call(normalize_address(PONS_V1_FACTORY), data, block)
+        rpc.eth_call(normalize_address(factory), data, block)
     )
     if len(words) != 10:
         raise ValueError(
@@ -51,6 +52,7 @@ def read_v1_launch_config_state(
         transaction_hash="0x" + "00" * 32,
         transaction_index=None,
         log_index=-1,
+        factory=normalize_address(factory),
     )
 
 
