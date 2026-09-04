@@ -258,3 +258,29 @@ def test_batched_transactions_preserve_hash_order():
     rows = rpc.get_transactions_batched(hashes, batch_size=2)
     assert [row["hash"] for row in rows] == hashes
     assert rpc.requests_made == 1
+
+def test_get_logs_preserves_positional_topic_or_filter():
+    topic0 = "0x" + "11" * 32
+    pool1 = "0x" + "22" * 32
+    pool2 = "0x" + "33" * 32
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        assert payload["method"] == "eth_getLogs"
+        query = payload["params"][0]
+        assert query["fromBlock"] == hex(10)
+        assert query["toBlock"] == hex(20)
+        assert query["topics"] == [topic0, [pool1, pool2]]
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": [],
+        }).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    assert rpc.get_logs(
+        10,
+        20,
+        topics=[topic0, [pool1, pool2]],
+    ) == []
+
