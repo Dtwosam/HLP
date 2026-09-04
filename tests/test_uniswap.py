@@ -1,10 +1,14 @@
 from hlp.data.types import RawLog
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
+    V3_POOL_CREATED_TOPIC,
     V3_SWAP_TOPIC,
+    V4_INITIALIZE_TOPIC,
     V4_SWAP_TOPIC,
     decode_pons_v2_pool_registered,
+    decode_v3_pool_created,
     decode_v3_swap,
+    decode_v4_pool_initialized,
     decode_v4_swap,
 )
 
@@ -79,3 +83,50 @@ def test_decode_pons_pool_registration_maps_v4_pool_to_token():
     assert registration.token == TOKEN
     assert registration.quote_token == QUOTE
     assert registration.creator == CREATOR
+
+
+
+def test_decode_v3_pool_created():
+    factory = "0x" + "88" * 20
+    fee_topic = "0x" + uint_word(10_000)
+    log = raw(
+        factory,
+        [
+            V3_POOL_CREATED_TOPIC,
+            topic_addr(TOKEN),
+            topic_addr(QUOTE),
+            fee_topic,
+        ],
+        [-200, int(POOL, 16)],
+    )
+    row = decode_v3_pool_created(log)
+    assert row.factory == factory
+    assert row.token0 == TOKEN
+    assert row.token1 == QUOTE
+    assert row.fee == 10_000
+    assert row.tick_spacing == -200
+    assert row.pool == POOL
+
+
+def test_decode_v4_pool_initialized():
+    manager = "0x" + "99" * 20
+    hook = "0x" + "aa" * 20
+    log = raw(
+        manager,
+        [
+            V4_INITIALIZE_TOPIC,
+            POOL_ID,
+            topic_addr(TOKEN),
+            topic_addr(QUOTE),
+        ],
+        [0, 60, int(hook, 16), 2**96, -17],
+    )
+    row = decode_v4_pool_initialized(log)
+    assert row.pool_id == POOL_ID
+    assert row.currency0 == TOKEN
+    assert row.currency1 == QUOTE
+    assert row.fee == 0
+    assert row.tick_spacing == 60
+    assert row.hooks == hook
+    assert row.sqrt_price_x96 == 2**96
+    assert row.tick == -17
