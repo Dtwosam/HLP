@@ -399,3 +399,17 @@ def test_deployment_block_parser_accepts_archive_route():
     ])
     assert args.archive is True
     assert args.high == 1000
+
+
+
+def test_extend_v4_quote_route_probe_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-extend-v4-quote-routes",
+        "--probe", "prior.jsonl",
+        "--snapshot-head", "2000",
+        "--forward-blocks", "500000",
+        "--out", "next.jsonl",
+    ])
+    assert args.forward_blocks == 500000
+    assert args.probe == "prior.jsonl"

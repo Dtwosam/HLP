@@ -83,6 +83,7 @@ from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.quote_v4_routes import (
     build_v4_route_initial_usd_states,
     build_v4_route_usd_updates,
+    extend_v4_usdg_routes,
     probe_v4_usdg_routes,
     select_v4_quote_routes,
 )
@@ -1522,6 +1523,70 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
         "blocked": len(rows) - ready,
         "blocked_tokens": [
             row["quote_token"] for row in rows if not row["causal_ready"]
+        ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_extend_v4_quote_routes(
+    args: argparse.Namespace,
+) -> int:
+    """Continue only unresolved V4 quote searches after prior bounds."""
+    prior = _load_jsonl(args.probe)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = extend_v4_usdg_routes(
+        rpc,
+        prior,
+        snapshot_head=args.snapshot_head,
+        forward_blocks=args.forward_blocks,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "continued_bounded_poolmanager_v4_usdg_route_probe",
+            "chain_id": 4663,
+            "prior_probe": Path(args.probe).name,
+            "snapshot_head_block": args.snapshot_head,
+            "forward_blocks": args.forward_blocks,
+            "continuation_semantics": (
+                "start exactly one block after each unresolved prior search end"
+            ),
+        },
+    )
+    ready = [
+        row for row in rows
+        if row.get("causal_route_ready") or row.get("delayed_route_ready")
+    ]
+    unresolved = [
+        row for row in rows
+        if not row.get("causal_route_ready") and not row.get("delayed_route_ready")
+    ]
+    print(json.dumps({
+        **manifest,
+        "covered_assets_total": len(ready),
+        "covered_launches_total": sum(
+            int(row["launches"]) for row in ready
+        ),
+        "unresolved_assets": len(unresolved),
+        "unresolved_launches": sum(
+            int(row["launches"]) for row in unresolved
+        ),
+        "unresolved": [
+            {
+                "symbol": row["symbol"],
+                "quote_token": row["quote_token"],
+                "launches": row["launches"],
+                "search_to_block": row["search_to_block"],
+                "initialize_events": row["initialize_events"],
+            }
+            for row in unresolved
         ],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -4687,6 +4752,23 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    extend_quote_v4 = sub.add_parser(
+        "rpc-pons-extend-v4-quote-routes"
+    )
+    extend_quote_v4.add_argument("--probe", required=True)
+    extend_quote_v4.add_argument(
+        "--snapshot-head", type=int, required=True
+    )
+    extend_quote_v4.add_argument(
+        "--forward-blocks", type=int, default=500_000
+    )
+    extend_quote_v4.add_argument("--chunk-size", type=int, default=2_000)
+    extend_quote_v4.add_argument("--min-chunk-size", type=int, default=25)
+    extend_quote_v4.add_argument("--out", required=True)
+    extend_quote_v4.set_defaults(
+        func=cmd_rpc_pons_extend_v4_quote_routes
+    )
 
     select_quote_v4 = sub.add_parser("pons-select-v4-quote-routes")
     select_quote_v4.add_argument("--probe", required=True)
