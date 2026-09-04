@@ -10,6 +10,10 @@ WORKFLOWS = [
     "phase1-pons-weth-usdg-anchor-full.yml",
     "phase1-pons-v2-v4-full.yml",
     "phase1-pons-v2-lifecycle-eligibility.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
+    "phase1-pons-v1-lifecycle-eligibility.yml",
+    "phase1-pons-eligible-universe-freeze.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -19,6 +23,8 @@ MATRIX_WORKFLOWS = {
     "phase1-pons-v2-transition-full.yml",
     "phase1-pons-weth-usdg-anchor-full.yml",
     "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
 }
 
 
@@ -82,6 +88,10 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-weth-usdg-anchor-full.yml",
     "phase1-pons-v2-v4-full.yml",
     "phase1-pons-v2-lifecycle-eligibility.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
+    "phase1-pons-v1-lifecycle-eligibility.yml",
+    "phase1-pons-eligible-universe-freeze.yml",
 }
 
 

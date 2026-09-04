@@ -87,27 +87,24 @@ Secrets are never committed. No archive key is currently configured in the GitHu
 
 Frozen registry snapshot head: **54,486,035**.
 
-The first full-registry run proved that the launch population is much larger
-than the bounded smoke cohorts. Six completed V2 shards already contain
-**106,428 V2 launches** before shards 5 and 7 are counted:
+The complete same-head Pons registry recovery finished successfully in run
+**33911022718** and is now frozen as the canonical Phase 1 launch registry:
 
-- V2 shard 0: 6,800 launches;
-- V2 shard 1: 4,007 launches;
-- V2 shard 2: 9,252 launches;
-- V2 shard 3: 8,708 launches;
-- V2 shard 4: 9,894 launches;
-- V2 shard 6: 67,767 launches.
+- **494,639 total Pons launches**;
+- **268,688 V1 launches**;
+- **225,951 V2 launches**;
+- V1 factories: 1,895 legacy + 266,221 primary + 572 current;
+- **57 unique pair-token addresses**;
+- registry SHA-256:
+  `c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed`.
 
-The original eight-way V1 geometry covered about 5.74M blocks/job and hit the
-35-minute GitHub Actions ceiling without a chain/data error. A same-head
-**16-way V1 recovery** is active; it reuses the successful original V2
-artifacts rather than crawling V2 twice. The recovered merge fails closed on
-block continuity, duplicate tokens, V1/V2 overlap, record counts and snapshot
-head mismatch.
+The merge proved exact shard block continuity, unique tokens within each
+generation, zero V1/V2 token overlap, exact manifest record counts and exact
+snapshot-head closure. The immutable recovered artifact is
+`phase1-pons-full-registry-recovered`.
 
-Measured V2 registry storage remains small relative to lifecycle tapes: the
-8,708-launch shard-3 artifact was about 1.06 MB compressed. Raw swaps and
-transfers, not launch metadata, are the expected storage driver.
+Measured V2 registry storage remains small relative to lifecycle tapes. Raw V3,
+V4 and anchor price events are expected to dominate Phase 1 storage.
 
 ### Lifecycle boundary completeness
 
@@ -121,11 +118,12 @@ transfers, not launch metadata, are the expected storage driver.
 
 ### Quote-asset completeness
 
-V2 already uses official Robinhood Stock Token identities plus historical
-Chainlink USD feeds. V1 is being moved onto the same causal quote timeline so
-non-WETH/USDG Pons pairs cannot be silently excluded from the $100k universe.
-Unknown quote assets remain explicit unsupported rows; they are never assigned
-a guessed USD price.
+V1 and V2 now target one all-Pons causal Stock Token/USD oracle tape derived
+from the complete 494,639-launch registry. The full registry exposed current
+Chainlink directory naming variants, so feed discovery accepts both official
+`Robinhood TICKER / USD` and `Robinhood TICKER-USD` forms while still
+requiring exact Robinhood-chain records. Unknown or genuinely feedless quote
+assets remain explicit blockers; they are never assigned a guessed USD price.
 
 ## Backfill execution guardrail
 
@@ -138,10 +136,16 @@ This keeps normal development/tests responsive while long archive shards run,
 and prevents accidental backfills from competing for GitHub-hosted runner
 capacity.
 
-The complete V2 downstream path is now explicitly staged as:
+The complete downstream eligibility paths are now explicitly staged as:
 
-registry -> curve/transition/anchor/oracle -> V4 tape -> summary-only lifecycle
-eligibility -> frozen >=$100k V2 subset.
+- shared: full Pons registry -> quote audit -> all-Pons Stock Token oracle +
+  WETH/USDG anchor;
+- V1: full registry -> globally scanned/filter-local V3 tape -> summary-only
+  lifecycle eligibility -> frozen >=$100k V1 subset;
+- V2: V2 registry -> curve/transition -> V4 tape -> summary-only lifecycle
+  eligibility -> frozen >=$100k V2 subset;
+- final: fail closed on unpriced lifecycles, then union V1 + V2 eligible tokens
+  into the immutable all-Pons >=$100k research universe.
 
 ## Query-efficiency design
 
@@ -151,7 +155,7 @@ Planned high-level scans:
 1. factory launch events -> token/curve/pool registry;
 2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
 3. Uniswap V4 swaps from the single PoolManager with registered Pons pool IDs pushed into indexed topic1 server-side filters;
-4. V3 Initialize/Swap through efficiently sharded Pons pool filters, avoiding one historical query per token;
+4. V3 Initialize/Swap through block-sharded global topic scans followed by frozen Pons V1 pool membership locally; the 268,688-pool V1 registry is too large to push as one RPC address filter;
 5. first-pass price/mcap reconstruction keeps eligibility evidence for the full launch population without doing holder/wallet backfills;
 6. only after the $100k universe is known, fetch complete market/transfer history for eligible tokens to reconstruct wallet and historical holder state.
 
@@ -161,7 +165,7 @@ This sequencing prevents transfer/holder backfills for the overwhelming majority
 
 - [x] verify every relevant Pons generation/factory from raw chain
 - [x] prove the canonical WETH/USDG V3 USD anchor predates Pons (anchor first-code block **1,506,281**)
-- [ ] build and freeze the complete historical Pons launch registry through one immutable snapshot head
+- [x] build and freeze the complete historical Pons launch registry through one immutable snapshot head
 - [ ] build the complete historical Pons $100k+ eligible universe across V1/V2 full lifecycles
 - [ ] benchmark wide authenticated Free eth_getLogs ranges if/when a Free key is configured; keyless sharding remains the required fallback
 - [ ] reconstruct >=10 representative Pons tokens end-to-end

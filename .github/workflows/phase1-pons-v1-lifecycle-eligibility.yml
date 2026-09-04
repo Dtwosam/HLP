@@ -1,23 +1,25 @@
-name: phase1-pons-v2-lifecycle-eligibility
+name: phase1-pons-v1-lifecycle-eligibility
 
 on:
   workflow_dispatch:
     inputs:
-      v2_registry_run_id:
-        description: "Successful phase1-pons-v2-registry-freeze run"
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        default: "33911022718"
+        type: string
+      v1_v3_run_id:
+        description: "Successful phase1-pons-v1-v3-full run"
         required: true
         type: string
-      curve_run_id:
-        description: "Successful phase1-pons-v2-curve-full run"
+      quote_audit_run_id:
+        description: "Successful full-Pons quote-audit run"
         required: true
         type: string
-      transition_run_id:
-        description: "Successful phase1-pons-v2-transition-full run"
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
         required: true
-        type: string
-      v4_run_id:
-        description: "Successful phase1-pons-v2-v4-full run"
-        required: true
+        default: "phase1-pons-full-quote-audit"
         type: string
       anchor_run_id:
         description: "Successful phase1-pons-weth-usdg-anchor-full run"
@@ -33,7 +35,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: phase1-pons-v2-lifecycle-eligibility-${{ github.ref }}
+  group: phase1-pons-v1-lifecycle-eligibility-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -52,27 +54,21 @@ jobs:
         run: python -m pip install -e .
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v2-full-registry
+          name: phase1-pons-full-registry-recovered
           path: registry
-          run-id: ${{ inputs.v2_registry_run_id }}
+          run-id: ${{ inputs.source_registry_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v2-curve-full
-          path: curve
-          run-id: ${{ inputs.curve_run_id }}
+          name: phase1-pons-v1-v3-full
+          path: v3
+          run-id: ${{ inputs.v1_v3_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v2-transition-full
-          path: transition
-          run-id: ${{ inputs.transition_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: phase1-pons-v2-v4-full
-          path: v4
-          run-id: ${{ inputs.v4_run_id }}
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
@@ -86,40 +82,27 @@ jobs:
           path: oracle
           run-id: ${{ inputs.oracle_run_id }}
           github-token: ${{ github.token }}
-      - name: Replay complete V2 lifecycle as token summaries
+      - name: Replay complete V1 lifecycle as token summaries
         run: |
           mkdir -p artifacts
-          hlp pons-v2-curve-eligibility \
-            --registry registry/pons-v2-full-registry.jsonl \
-            --curve-events curve/pons-v2-curve-full.jsonl \
+          hlp pons-v1-lifecycle-eligibility \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --v3-events v3/pons-v1-v3-full.jsonl \
+            --quote-registry quotes/pons-quote-registry.jsonl \
             --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
             --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
             --oracle-state oracle/pons-stock-oracle-initial.jsonl \
             --oracle-events oracle/pons-stock-oracle-updates.jsonl \
             --snapshot-head "$SNAPSHOT_HEAD" \
-            --out artifacts/pons-v2-curve-eligibility.jsonl
-
-          hlp pons-v2-lifecycle-eligibility \
-            --registry registry/pons-v2-full-registry.jsonl \
-            --curve-summary artifacts/pons-v2-curve-eligibility.jsonl \
-            --graduations transition/pons-v2-graduations-full.jsonl \
-            --registrations transition/pons-v2-registrations-full.jsonl \
-            --v4-events v4/pons-v2-v4-full.jsonl \
-            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
-            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
-            --oracle-state oracle/pons-stock-oracle-initial.jsonl \
-            --oracle-events oracle/pons-stock-oracle-updates.jsonl \
-            --snapshot-head "$SNAPSHOT_HEAD" \
-            --out artifacts/pons-v2-lifecycle-eligibility.jsonl
-      - name: Freeze V2 tokens that ever reached the $100k universe gate
+            --out artifacts/pons-v1-lifecycle-eligibility.jsonl
+      - name: Freeze V1 tokens that ever reached the $100k universe gate
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          source = Path("artifacts/pons-v2-lifecycle-eligibility.jsonl")
+          source = Path("artifacts/pons-v1-lifecycle-eligibility.jsonl")
           rows = [
               json.loads(line)
               for line in source.read_text().splitlines()
@@ -127,46 +110,33 @@ jobs:
           ]
           eligible = [row for row in rows if bool(row["crossed_100k"])]
           eligible.sort(key=lambda row: (row["launch_block"], row["token"]))
-
           snapshot = write_jsonl_snapshot(
               eligible,
-              output=Path("artifacts/pons-v2-eligible-100k.jsonl"),
+              output=Path("artifacts/pons-v1-eligible-100k.jsonl"),
               provenance={
                   "source": source.name,
                   "chain_id": 4663,
                   "snapshot_head_block": 54_486_035,
                   "eligibility_threshold_usd": "100000",
-                  "threshold_semantics": (
-                      "reached >=$100k market-cap proxy at least once across "
-                      "the complete observed V2 curve/graduation/V4 lifecycle"
-                  ),
               },
           )
-
-          phase_counts = {}
-          for row in eligible:
-              phase = row["max_market_cap_phase"]
-              phase_counts[phase] = phase_counts.get(phase, 0) + 1
           report = {
               "snapshot_head_block": 54_486_035,
               "registry_tokens": len(rows),
               "eligible_tokens": len(eligible),
-              "eligible_share": (
-                  0 if not rows else len(eligible) / len(rows)
-              ),
-              "eligible_max_phase_counts": phase_counts,
+              "eligible_share": 0 if not rows else len(eligible) / len(rows),
               "tokens_without_priced_points": sum(
                   int(row["priced_points"]) == 0 for row in rows
               ),
               "eligible_sha256": snapshot["sha256"],
           }
-          Path("artifacts/pons-v2-eligibility-summary.json").write_text(
+          Path("artifacts/pons-v1-eligibility-summary.json").write_text(
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phase1-pons-v2-lifecycle-eligibility
+          name: phase1-pons-v1-lifecycle-eligibility
           path: artifacts/
           if-no-files-found: error
