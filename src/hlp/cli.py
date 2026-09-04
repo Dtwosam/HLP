@@ -2145,6 +2145,67 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
+    """Replay the full V2 curve tape and keep only per-token eligibility maxima."""
+    registry = _load_jsonl(args.registry)
+    initial = json.loads(Path(args.anchor_initial).read_text())
+    initial_weth_usd = Decimal(initial["weth_usd"])
+    if initial_weth_usd <= 0:
+        raise SystemExit("anchor initial WETH/USD must be positive")
+
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    points = build_v2_curve_market_cap_points(
+        registry,
+        _iter_jsonl(args.curve_events),
+        _iter_jsonl(args.anchor_events),
+        initial_weth_usd=initial_weth_usd,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=quote_usd_updates,
+    )
+    summary = summarize_v2_curve_market_caps(points)
+    manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.out),
+        provenance={
+            "source": "streamed_full_v2_curve_replay_summary_only",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "curve_events": Path(args.curve_events).name,
+            "anchor_events": Path(args.anchor_events).name,
+            "anchor_initial": Path(args.anchor_initial).name,
+            "oracle_state": (
+                None if not args.oracle_state else Path(args.oracle_state).name
+            ),
+            "oracle_events": (
+                None if not args.oracle_events else Path(args.oracle_events).name
+            ),
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": (
+                "reached at least once on complete reconstructed V2 curve path"
+            ),
+            "snapshot_head_block": args.snapshot_head,
+            "materialization": "one summary row per token; no full point tape",
+        },
+    )
+    priced = sum(row["priced_points"] > 0 for row in summary)
+    crossed = sum(bool(row["crossed_100k"]) for row in summary)
+    unsupported = [
+        row["token"]
+        for row in summary
+        if row["priced_points"] == 0
+    ]
+    print(json.dumps({
+        **manifest,
+        "registry_tokens": len(registry),
+        "summary_tokens": len(summary),
+        "tokens_priced": priced,
+        "tokens_crossed_100k_on_curve": crossed,
+        "tokens_without_priced_points": len(unsupported),
+        "unsupported_sample": unsupported[:20],
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
     """Replay V2 curve spot prices and emit $100k eligibility evidence."""
     if args.from_block <= 0:
@@ -3824,6 +3885,17 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4_mcap.add_argument("--transition-out", required=True)
     v2_v4_mcap.add_argument("--summary-out", required=True)
     v2_v4_mcap.set_defaults(func=cmd_rpc_v2_v4_market_cap_window)
+
+    v2_eligibility = sub.add_parser("pons-v2-curve-eligibility")
+    v2_eligibility.add_argument("--registry", required=True)
+    v2_eligibility.add_argument("--curve-events", required=True)
+    v2_eligibility.add_argument("--anchor-events", required=True)
+    v2_eligibility.add_argument("--anchor-initial", required=True)
+    v2_eligibility.add_argument("--oracle-state")
+    v2_eligibility.add_argument("--oracle-events")
+    v2_eligibility.add_argument("--snapshot-head", type=int, required=True)
+    v2_eligibility.add_argument("--out", required=True)
+    v2_eligibility.set_defaults(func=cmd_pons_v2_curve_eligibility)
 
     v2_mcap = sub.add_parser("rpc-v2-curve-market-cap-window")
     v2_mcap.add_argument("--registry", required=True)
