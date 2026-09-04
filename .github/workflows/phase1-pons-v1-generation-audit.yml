@@ -1,4 +1,4 @@
-name: phase1-pons-v1-generation-audit
+name: phase1-pons-generation-audit
 
 on:
   workflow_dispatch:
@@ -7,6 +7,8 @@ on:
       - phase1/data-acquisition-spike
     paths:
       - '.github/workflows/phase1-pons-v1-generation-audit.yml'
+      - 'src/hlp/config.py'
+      - 'src/hlp/protocols/pons.py'
 
 permissions:
   contents: read
@@ -15,6 +17,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,58 +26,89 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - name: Compare Pons V1 generations against known V1 event topics
+      - name: Verify every known Pons generation and factory
         run: |
+          mkdir -p artifacts
           python - <<'PY'
           import json
           import os
           from collections import Counter
+          from pathlib import Path
 
-          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.config import (
+              PONS_V1_FACTORIES,
+              PONS_V1_FACTORY,
+              PONS_V1_FACTORY_CURRENT,
+              PONS_V1_FACTORY_DEPLOYMENT_BLOCKS,
+              PONS_V1_FACTORY_LEGACY,
+              PONS_V2_DEPLOYMENT_BLOCK,
+              PONS_V2_FACTORY,
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
           from hlp.data.rpc import RpcClient
           from hlp.protocols.pons import (
               V1_LAUNCH_CONFIG_ADDED_TOPIC,
               V1_LAUNCH_CONFIG_UPDATED_TOPIC,
               V1_TOKEN_DEPLOYED_TOPIC,
               V1_TOKEN_LAUNCHED_TOPIC,
+              V2_POOL_GRADUATED_TOPIC,
+              V2_TOKEN_LAUNCHED_TOPIC,
+              decode_v1_launch,
+              decode_v2_launch,
           )
 
-          factories = {
-              "legacy": "0x0c37a24f5d23a486fa692d1500881d698b1f77a4",
-              "v1": "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb",
-              "current_v1_abi": "0xf4fc0cd27fc8ecf17e55ee4c3f7201897df3eb75",
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+
+          labels = {
+              PONS_V1_FACTORY_LEGACY.lower(): "legacy_v1_abi",
+              PONS_V1_FACTORY.lower(): "primary_v1_abi",
+              PONS_V1_FACTORY_CURRENT.lower(): "current_v1_abi",
           }
-          expected = {
+          configured_v1 = {address.lower() for address in PONS_V1_FACTORIES}
+          assert configured_v1 == set(labels), (configured_v1, set(labels))
+
+          expected_v1_topics = {
               V1_TOKEN_DEPLOYED_TOPIC,
               V1_TOKEN_LAUNCHED_TOPIC,
               V1_LAUNCH_CONFIG_ADDED_TOPIC,
               V1_LAUNCH_CONFIG_UPDATED_TOPIC,
           }
-          rpc = RpcClient(
-              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
-              timeout=30,
-              attempts=5,
-              min_interval_seconds=0.6,
-              extra_headers=(
-                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
-                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
-                  else None
-              ),
-          )
-          rpc.assert_robinhood()
-          head = rpc.block_number()
-          result = {}
+          v1 = {}
 
-          for label, address in factories.items():
+          for address in sorted(configured_v1):
+              configured_first = PONS_V1_FACTORY_DEPLOYMENT_BLOCKS[address]
+              assert configured_first <= head, (address, configured_first, head)
               assert rpc.get_code(address, head) not in {"0x", "0x0", ""}
-              first = rpc.find_first_code_block(address, low=0, high=head)
-              end = min(head, first + 199_999)
+
+              first_code = rpc.find_first_code_block(address, low=0, high=head)
+              assert first_code == configured_first, (
+                  address,
+                  first_code,
+                  configured_first,
+              )
+
+              scan_to = min(head, first_code + 199_999)
               logs = list(
                   rpc.iter_logs_chunked(
-                      first,
-                      end,
+                      first_code,
+                      scan_to,
                       address=address,
-                      chunk_size=2000,
+                      topics=[sorted(expected_v1_topics)],
+                      chunk_size=50_000 if key else 2_000,
                       min_chunk_size=25,
                   )
               )
@@ -81,32 +116,100 @@ jobs:
                   row.topics[0] if row.topics else "<none>"
                   for row in logs
               )
-              matched = {
-                  topic: count for topic, count in counts.items()
-                  if topic in expected
-              }
-              samples = {}
-              for row in logs:
-                  topic = row.topics[0] if row.topics else "<none>"
-                  if topic in expected and topic not in samples:
-                      samples[topic] = {
-                          "block_number": row.block_number,
-                          "transaction_hash": row.transaction_hash,
-                          "topics": list(row.topics),
-                          "data": row.data,
-                      }
-              result[label] = {
+              launch_logs = [
+                  row for row in logs
+                  if row.topics and row.topics[0] == V1_TOKEN_LAUNCHED_TOPIC
+              ]
+              assert launch_logs, (
+                  f"{labels[address]} emitted no V1 TokenLaunched event "
+                  f"in {first_code}-{scan_to}"
+              )
+              sample = decode_v1_launch(launch_logs[0])
+              assert sample.factory == address
+              assert sample.token and sample.pool and sample.pair_token
+
+              v1[labels[address]] = {
                   "address": address,
-                  "first_code_block": first,
-                  "scan_to": end,
-                  "logs": len(logs),
-                  "known_v1_topic_counts": matched,
-                  "all_topic_counts": dict(counts),
-                  "known_v1_samples": samples,
+                  "configured_first_code_block": configured_first,
+                  "observed_first_code_block": first_code,
+                  "scan_to": scan_to,
+                  "known_v1_topic_counts": dict(counts),
+                  "sample_launch": {
+                      "block_number": sample.block_number,
+                      "transaction_hash": sample.transaction_hash,
+                      "token": sample.token,
+                      "pool": sample.pool,
+                      "pair_token": sample.pair_token,
+                      "launch_config_id": sample.launch_config_id,
+                  },
               }
 
-          print(json.dumps({
-              "generations": result,
+          v2_address = PONS_V2_FACTORY.lower()
+          assert rpc.get_code(v2_address, head) not in {"0x", "0x0", ""}
+          v2_first_code = rpc.find_first_code_block(v2_address, low=0, high=head)
+          assert v2_first_code == PONS_V2_DEPLOYMENT_BLOCK, (
+              v2_first_code,
+              PONS_V2_DEPLOYMENT_BLOCK,
+          )
+
+          active_from = max(PONS_V2_DEPLOYMENT_BLOCK, 30_000_000)
+          active_to = min(head, active_from + 99_999)
+          v2_logs = list(
+              rpc.iter_logs_chunked(
+                  active_from,
+                  active_to,
+                  address=v2_address,
+                  topics=[[V2_TOKEN_LAUNCHED_TOPIC, V2_POOL_GRADUATED_TOPIC]],
+                  chunk_size=50_000 if key else 2_000,
+                  min_chunk_size=25,
+              )
+          )
+          v2_counts = Counter(
+              row.topics[0] if row.topics else "<none>"
+              for row in v2_logs
+          )
+          v2_launch_logs = [
+              row for row in v2_logs
+              if row.topics and row.topics[0] == V2_TOKEN_LAUNCHED_TOPIC
+          ]
+          assert v2_launch_logs, (
+              f"current V2 emitted no TokenLaunched event in "
+              f"{active_from}-{active_to}"
+          )
+          v2_sample = decode_v2_launch(v2_launch_logs[0])
+          assert v2_sample.curve and v2_sample.token and v2_sample.pair_token
+
+          result = {
+              "chain_id": 4663,
+              "head_block": head,
+              "archive_route": "authenticated_free" if key else "keyless_public",
+              "protocol_generations": ["v1", "v2"],
+              "v1_abi_factory_generations": v1,
+              "v2": {
+                  "address": v2_address,
+                  "configured_first_code_block": PONS_V2_DEPLOYMENT_BLOCK,
+                  "observed_first_code_block": v2_first_code,
+                  "active_sample_from": active_from,
+                  "active_sample_to": active_to,
+                  "topic_counts": dict(v2_counts),
+                  "sample_launch": {
+                      "block_number": v2_sample.block_number,
+                      "transaction_hash": v2_sample.transaction_hash,
+                      "token": v2_sample.token,
+                      "curve": v2_sample.curve,
+                      "pair_token": v2_sample.pair_token,
+                      "launch_config_id": v2_sample.launch_config_id,
+                  },
+              },
               "requests_made": rpc.requests_made,
-          }, sort_keys=True))
+          }
+          Path("artifacts/pons-generation-audit.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True)
+          )
+          print(json.dumps(result, sort_keys=True))
           PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-generation-audit
+          path: artifacts/
+          if-no-files-found: error
