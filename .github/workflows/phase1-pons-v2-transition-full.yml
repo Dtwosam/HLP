@@ -1,0 +1,228 @@
+name: phase1-pons-v2-transition-full
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v2-transition-full.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  V2_REGISTRY_RUN_ID: '33912235341'
+  SNAPSHOT_HEAD: '54486035'
+  GENERATION_START: '26841846'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '8'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ env.V2_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - id: bounds
+        name: Compute shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire shared transition control tape
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v2-transition-tape             --registry registry/pons-v2-full-registry.jsonl             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --graduations-out "artifacts/graduations-shard-${SHARD}.jsonl"             --registrations-out "artifacts/registrations-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-transition-*
+          path: downloads
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ env.V2_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Merge and validate V2 transitions
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          START = int(os.environ["GENERATION_START"])
+
+          def read_family(prefix):
+              files = sorted(Path("downloads").glob(f"{prefix}-shard-*.jsonl"))
+              assert len(files) == 8, (prefix, [p.name for p in files])
+              rows = []
+              manifests = []
+              previous_hi = None
+              for path in files:
+                  manifest = json.loads(
+                      path.with_suffix(path.suffix + ".manifest.json").read_text()
+                  )
+                  prov = manifest["provenance"]
+                  lo, hi = int(prov["from_block"]), int(prov["to_block"])
+                  if previous_hi is None:
+                      assert lo == START, (prefix, lo)
+                  else:
+                      assert lo == previous_hi + 1, (prefix, previous_hi, lo)
+                  previous_hi = hi
+                  shard_rows = [
+                      json.loads(line)
+                      for line in path.read_text().splitlines()
+                      if line.strip()
+                  ]
+                  assert len(shard_rows) == int(manifest["records"])
+                  rows.extend(shard_rows)
+                  manifests.append({
+                      "file": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              assert previous_hi == HEAD, (prefix, previous_hi, HEAD)
+              return rows, manifests
+
+          registry = [
+              json.loads(line)
+              for line in Path("registry/pons-v2-full-registry.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          tokens = {row["token"].lower() for row in registry}
+          graduations, g_manifests = read_family("graduations")
+          registrations, r_manifests = read_family("registrations")
+
+          assert all(row["token"].lower() in tokens for row in graduations)
+          assert all(row["token"].lower() in tokens for row in registrations)
+
+          grad_tokens = [row["token"].lower() for row in graduations]
+          reg_tokens = [row["token"].lower() for row in registrations]
+          grad_keys = [
+              (row["token"].lower(), row["transaction_hash"].lower(), int(row["log_index"]))
+              for row in graduations
+          ]
+          reg_keys = [
+              (row["pool_id"].lower(), row["transaction_hash"].lower(), int(row["log_index"]))
+              for row in registrations
+          ]
+          assert len(set(grad_keys)) == len(grad_keys), "duplicate graduation event"
+          assert len(set(reg_keys)) == len(reg_keys), "duplicate registration event"
+
+          def order(row):
+              return (
+                  int(row["block_number"]),
+                  -1 if row.get("transaction_index") is None
+                  else int(row["transaction_index"]),
+                  int(row["log_index"]),
+              )
+
+          graduations.sort(key=order)
+          registrations.sort(key=order)
+
+          g_snapshot = write_jsonl_snapshot(
+              graduations,
+              output=Path("artifacts/pons-v2-graduations-full.jsonl"),
+              provenance={
+                  "source": "merged_shared_v2_transition_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "registry_sha256": "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f",
+                  "shards": g_manifests,
+              },
+          )
+          r_snapshot = write_jsonl_snapshot(
+              registrations,
+              output=Path("artifacts/pons-v2-registrations-full.jsonl"),
+              provenance={
+                  "source": "merged_shared_v2_transition_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "registry_sha256": "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f",
+                  "shards": r_manifests,
+              },
+          )
+
+          grad_set = set(grad_tokens)
+          reg_set = set(reg_tokens)
+          report = {
+              "snapshot_head_block": HEAD,
+              "registry_tokens": len(tokens),
+              "graduations": len(graduations),
+              "graduated_tokens": len(grad_set),
+              "registrations": len(registrations),
+              "registered_tokens": len(reg_set),
+              "graduated_without_registration": sorted(grad_set - reg_set),
+              "registered_without_graduation": sorted(reg_set - grad_set),
+              "graduation_sha256": g_snapshot["sha256"],
+              "registration_sha256": r_snapshot["sha256"],
+          }
+          Path("artifacts/pons-v2-transition-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: artifacts/
+          if-no-files-found: error
