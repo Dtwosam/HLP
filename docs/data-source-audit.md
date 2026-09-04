@@ -105,28 +105,33 @@ Use:
 
 Do not use near-live holder-count/list endpoints as historical point-in-time holder truth. Historical holder states must be reconstructed from Transfer events.
 
-## 3B. BlockReq public archive RPC — HIGH-PRIORITY ZERO-KEY CANDIDATE, LIVE SPIKE ACTIVE
+## 3B. BlockReq public endpoint — REJECTED AS ARCHIVE SOURCE
+
+Docs advertised the public Robinhood endpoint as archive-enabled, but the live Phase-1 test returned:
+"public endpoint only serves recent blocks (last 1024). Register at blockreq.com for historical / archive access."
+
+Conclusion:
+Do not use BlockReq public as HLP's zero-key historical source.
+
+## 3C. NodeFlare — HIGH-PRIORITY FREE CANDIDATE, LIVE SPIKE ACTIVE
 
 Docs:
-https://blockreq.com/chains/robinhood
+https://nodeflare.app/chains/robinhood
+https://nodeflare.app/chains/robinhood/eth_getlogs
 
-Current published endpoint:
-https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public
+Published:
+- no-key public Robinhood RPC;
+- historical state methods such as eth_getCode/eth_getStorageAt exposed on the public endpoint;
+- free keyed tier: 2,000,000 CU/month, no credit card;
+- eth_getLogs requires a free key and costs 25 CU/call (~80,000 calls/month before other usage).
 
-Published properties:
-- Robinhood Chain mainnet chain ID 4663;
-- public endpoint with no API key in the documented URL;
-- archive history enabled;
-- standard EVM JSON-RPC.
+Architecture candidate:
+- public endpoint for archive state verification and block reads;
+- free keyed endpoint for heavy historical event queries;
+- hoodexplorer as an independent indexed-log path where reachable.
 
-Why this matters:
-Unlike the official public RPC, a true archive endpoint can answer historical eth_getCode/eth_call and lets HLP scan only protocol-relevant addresses/topics with bounded eth_getLogs windows.
-
-Phase-1 acceptance:
-- verify chain ID;
-- locate exact historical Pons deployment boundaries by old eth_getCode;
-- test bounded historical Pons event queries;
-- measure practical range/rate limits before assuming full backfill viability.
+Phase-1 test:
+prove public historical state first, then measure actual eth_getLogs range/response limits once a free key is available.
 
 ## 4. Pons contracts — PASS, open source and directly decodable
 
