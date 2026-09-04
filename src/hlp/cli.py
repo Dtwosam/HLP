@@ -1540,7 +1540,7 @@ def cmd_rpc_pons_unpriced_quote_v3_routes(
             "source": "point_in_time_v3_factory_route_audit",
             "chain_id": 4663,
             "quote_registry": Path(args.quote_registry).name,
-            "factory": UNISWAP_V3_FACTORY.lower(),
+            "factory": args.factory.lower(),
             "anchors": [
                 ROBINHOOD_USDG.lower(),
                 ROBINHOOD_WETH.lower(),
