@@ -66,3 +66,30 @@ def test_find_first_code_block_binary_search():
     rpc = RpcClient("https://example.invalid", transport=transport)
     assert rpc.find_first_code_block("0x" + "11" * 20, low=0, high=100) == 37
     assert len(seen) < 12
+
+
+def test_chunked_logs_adapts_to_provider_range_limit():
+    calls = []
+
+    class Limited(RpcClient):
+        def get_logs(self, from_block, to_block, **kwargs):
+            calls.append((from_block, to_block))
+            if to_block - from_block + 1 > 4:
+                raise __import__("hlp.data.rpc", fromlist=["RpcError"]).RpcError("range too wide")
+            return []
+
+    rpc = Limited("https://example.invalid")
+    assert list(rpc.iter_logs_chunked(0, 9, chunk_size=8)) == []
+    assert calls[0] == (0, 7)
+    assert calls[1] == (0, 3)
+    assert (4, 9) in calls
+    assert calls[-1] == (8, 9)
+
+
+def test_rpc_counts_transport_attempts():
+    rpc = RpcClient(
+        "https://example.invalid",
+        transport=make_transport([("eth_chainId", hex(4663))]),
+    )
+    assert rpc.chain_id() == 4663
+    assert rpc.requests_made == 1
