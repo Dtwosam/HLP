@@ -1,13 +1,13 @@
 name: phase1-pons-v2-transition-full
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-v2-transition-full.yml'
   workflow_dispatch:
-
+    inputs:
+      v2_registry_run_id:
+        description: "Successful V2 registry-freeze run"
+        required: true
+        default: "33912235341"
+        type: string
 permissions:
   contents: read
   actions: read
@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  V2_REGISTRY_RUN_ID: '33912235341'
+  V2_REGISTRY_RUN_ID: ${{ inputs.v2_registry_run_id }}
   SNAPSHOT_HEAD: '54486035'
   GENERATION_START: '26841846'
 

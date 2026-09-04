@@ -1,13 +1,13 @@
 name: phase1-pons-v2-stock-oracle-full
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pons-v2-stock-oracle-full.yml'
   workflow_dispatch:
-
+    inputs:
+      quote_audit_run_id:
+        description: "Successful quote-audit run containing phase1-pons-v2-quote-audit"
+        required: true
+        default: "33912818816"
+        type: string
 permissions:
   contents: read
   actions: read
@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  QUOTE_AUDIT_RUN_ID: '33912818816'
+  QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
   SNAPSHOT_HEAD: '54486035'
   FIRST_V2_LAUNCH: '27027321'
 
