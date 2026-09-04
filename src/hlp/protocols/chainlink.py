@@ -7,13 +7,34 @@ from decimal import Decimal
 
 from hlp.config import normalize_address
 from hlp.data.rpc import RpcClient
-from hlp.protocols.evm import data_words, function_selector, signed_word, word_address
+from hlp.data.types import RawLog
+from hlp.protocols.evm import (
+    data_words,
+    event_topic,
+    function_selector,
+    signed_word,
+    word_address,
+)
 
 
 DECIMALS_SELECTOR = function_selector("decimals()")
 DESCRIPTION_SELECTOR = function_selector("description()")
 LATEST_ROUND_DATA_SELECTOR = function_selector("latestRoundData()")
 AGGREGATOR_SELECTOR = function_selector("aggregator()")
+ANSWER_UPDATED_SIG = "AnswerUpdated(int256,uint256,uint256)"
+ANSWER_UPDATED_TOPIC = event_topic(ANSWER_UPDATED_SIG)
+
+
+@dataclass(frozen=True, slots=True)
+class ChainlinkAnswerUpdate:
+    aggregator: str
+    answer_raw: int
+    round_id: int
+    updated_at: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,3 +142,31 @@ def read_chainlink_aggregator(
     if len(words) != 1:
         raise ValueError("unexpected Chainlink aggregator() result length")
     return word_address(words[0])
+
+
+
+def decode_chainlink_answer_updated(log: RawLog) -> ChainlinkAnswerUpdate:
+    """Decode the standard Chainlink AnswerUpdated event.
+
+    event AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)
+    """
+    if not log.topics or log.topics[0] != ANSWER_UPDATED_TOPIC:
+        raise ValueError("not a Chainlink AnswerUpdated event")
+    if len(log.topics) != 3:
+        raise ValueError("unexpected AnswerUpdated topic count")
+    words = data_words(log.data)
+    if len(words) != 1:
+        raise ValueError("unexpected AnswerUpdated data length")
+    answer = signed_word(int(log.topics[1], 16))
+    if answer <= 0:
+        raise ValueError("Chainlink AnswerUpdated answer is not positive")
+    return ChainlinkAnswerUpdate(
+        aggregator=log.address,
+        answer_raw=answer,
+        round_id=int(log.topics[2], 16),
+        updated_at=words[0],
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
