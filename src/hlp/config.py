@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 ROBINHOOD_CHAIN_ID = 4663
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
+SOLIDRPC_PUBLIC_RPC_URL = "https://rpc.solidrpc.io/public/evm/4663"
+SOLIDRPC_AUTH_RPC_URL = "https://rpc.solidrpc.io/evm/4663"
 DEFAULT_SEQUENCER_WS_URL = "wss://feed.mainnet.chain.robinhood.com"
 NODEFLARE_PUBLIC_RPC_URL = "https://rpc.nodeflare.app/robinhood/public"
 
