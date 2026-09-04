@@ -22,6 +22,9 @@ from hlp.config import (
     PONS_V1_DEPLOYMENT_BLOCK,
     PONS_V2_DEPLOYMENT_BLOCK,
     PONS_V2_MEME_HOOK,
+    POOLS_TRADE_INSTANT_STRATEGIES,
+    POOLS_TRADE_LAUNCHER_CURRENT,
+    POOLS_TRADE_LAUNCHER_ORIGINAL,
     FLAP_PORTAL,
     TRENCH_MANAGER,
     UNISWAP_V4_POOL_MANAGER,
@@ -48,6 +51,11 @@ from hlp.data.flap_curve import (
 from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.oracles import reconstruct_chainlink_usd_tapes
+from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
+from hlp.data.pools_trade_v4 import (
+    build_pools_trade_v4_market_cap_points,
+    summarize_pools_trade_market_caps,
+)
 from hlp.data.pons_v1 import iter_enriched_v1_launches
 from hlp.data.pons_v2 import ZERO_ADDRESS, iter_enriched_v2_launches
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
@@ -82,6 +90,14 @@ from hlp.protocols.pons_state import (
     read_v1_launch_config_state,
     read_v2_launch_config_state,
     read_v2_pair_token_economics_state,
+)
+from hlp.protocols.pools_trade import (
+    TOKEN_CREATED_TOPIC as POOLS_TRADE_TOKEN_CREATED_TOPIC,
+    TOKEN_DISTRIBUTED_TOPIC as POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC,
+    TOKEN_LAUNCHED_TOPIC as POOLS_TRADE_TOKEN_LAUNCHED_TOPIC,
+    decode_pools_trade_token_created,
+    decode_pools_trade_token_distributed,
+    decode_pools_trade_token_launched,
 )
 from hlp.protocols.pons import (
     V1_LAUNCH_CONFIG_ADDED_TOPIC,
@@ -456,6 +472,285 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
     )
     return 0
 
+
+
+
+def cmd_rpc_pools_trade_registry_window(args: argparse.Namespace) -> int:
+    """Build pools.trade instant-launch registry from upstream event tapes."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+
+    launchers = [
+        POOLS_TRADE_LAUNCHER_CURRENT,
+        POOLS_TRADE_LAUNCHER_ORIGINAL,
+    ]
+    launcher_logs = list(
+        rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=launchers,
+            topics=[[
+                POOLS_TRADE_TOKEN_CREATED_TOPIC,
+                POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC,
+            ]],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    created = [
+        decode_pools_trade_token_created(row)
+        for row in launcher_logs
+        if row.topics[0] == POOLS_TRADE_TOKEN_CREATED_TOPIC
+    ]
+    distributed = [
+        decode_pools_trade_token_distributed(row)
+        for row in launcher_logs
+        if row.topics[0] == POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC
+    ]
+
+    strategy_logs = list(
+        rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=list(POOLS_TRADE_INSTANT_STRATEGIES),
+            topics=[POOLS_TRADE_TOKEN_LAUNCHED_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    launched = [
+        decode_pools_trade_token_launched(row)
+        for row in strategy_logs
+    ]
+    registry = build_pools_trade_instant_registry(
+        created,
+        distributed,
+        launched,
+    )
+    instant_tokens = {row["token"] for row in registry}
+    created_tokens = {row.token for row in created}
+    crowd_or_other = sorted(created_tokens - instant_tokens)
+
+    manifest = write_jsonl_snapshot(
+        registry,
+        output=Path(args.out),
+        provenance={
+            "source": "uniswap_liquidity_launcher_events",
+            "chain_id": 4663,
+            "venue": "pools.trade",
+            "launchers": [address.lower() for address in launchers],
+            "instant_strategies": [
+                address.lower() for address in POOLS_TRADE_INSTANT_STRATEGIES
+            ],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "token_created_topic": POOLS_TRADE_TOKEN_CREATED_TOPIC,
+            "token_distributed_topic": POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC,
+            "token_launched_topic": POOLS_TRADE_TOKEN_LAUNCHED_TOPIC,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "created_tokens": len(created_tokens),
+                "instant_launches": len(registry),
+                "non_instant_creations": len(crowd_or_other),
+                "non_instant_examples": crowd_or_other[:20],
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_pools_trade_v4_tape(args: argparse.Namespace) -> int:
+    """Acquire V4 Initialize + Swap tapes for pools.trade instant pools."""
+    registry = _load_jsonl(args.registry)
+    pool_ids = {row["pool_id"].lower() for row in registry}
+    if not pool_ids:
+        raise SystemExit("pools.trade registry contains no pool ids")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=UNISWAP_V4_POOL_MANAGER,
+        topics=[[V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC]],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    initializes = []
+    swaps = []
+    all_initialize = 0
+    all_swaps = 0
+    for log in raw:
+        if log.topics[0] == V4_INITIALIZE_TOPIC:
+            all_initialize += 1
+            row = decode_v4_pool_initialized(log)
+            if row.pool_id in pool_ids:
+                initializes.append(row)
+        elif log.topics[0] == V4_SWAP_TOPIC:
+            all_swaps += 1
+            row = decode_v4_swap(log)
+            if row.pool_id in pool_ids:
+                swaps.append(row)
+
+    init_manifest = write_jsonl_snapshot(
+        initializes,
+        output=Path(args.initialize_out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "venue": "pools.trade",
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "registry": Path(args.registry).name,
+            "registered_pool_ids": len(pool_ids),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_INITIALIZE_TOPIC,
+        },
+    )
+    swap_manifest = write_jsonl_snapshot(
+        swaps,
+        output=Path(args.swap_out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "venue": "pools.trade",
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "registry": Path(args.registry).name,
+            "registered_pool_ids": len(pool_ids),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_SWAP_TOPIC,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "initializes": init_manifest,
+                "swaps": swap_manifest,
+                "all_v4_initializes": all_initialize,
+                "all_v4_swaps": all_swaps,
+                "matched_pool_ids_initialized": len({
+                    row.pool_id for row in initializes
+                }),
+                "matched_pool_ids_swapped": len({
+                    row.pool_id for row in swaps
+                }),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
+    """Price pools.trade instant V4 launches and emit $100k eligibility."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    registry = _load_jsonl(args.registry)
+    initializes = _load_jsonl(args.initializes)
+    swaps = _load_jsonl(args.swaps)
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = list(
+        reconstruct_v3_price_points(
+            rpc,
+            token=ROBINHOOD_WETH,
+            quote_token=ROBINHOOD_USDG,
+            pool=args.usd_anchor_pool,
+            from_block=args.from_block,
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+
+    zero = "0x" + "00" * 20
+    quote_tokens = {row["quote_token"].lower() for row in registry}
+    quote_decimals = {zero: 18, ROBINHOOD_WETH.lower(): 18}
+    for quote in sorted(quote_tokens):
+        if quote in quote_decimals:
+            continue
+        quote_decimals[quote] = read_erc20_static(
+            rpc, quote, block=args.from_block - 1
+        ).decimals
+
+    points = build_pools_trade_v4_market_cap_points(
+        registry,
+        initializes,
+        swaps,
+        anchor_points,
+        initial_weth_usd=initial_weth_usd,
+        quote_decimals=quote_decimals,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=quote_usd_updates,
+    )
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_pools_trade_v4_initialize_and_swaps",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "initializes": Path(args.initializes).name,
+            "swaps": Path(args.swaps).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "market_cap_math": "raw_quote_per_raw_token * supply_raw / 10**quote_decimals",
+        },
+    )
+    summary = summarize_pools_trade_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_pools_trade_v4_market_cap_points",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once from V4 initialization onward",
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "market_cap_points": point_manifest,
+                "token_summary": summary_manifest,
+                "instant_launches": len(registry),
+                "tokens_with_price_points": len(summary),
+                "tokens_priced": sum(row["priced_points"] > 0 for row in summary),
+                "tokens_crossed_100k": sum(
+                    bool(row["crossed_100k"]) for row in summary
+                ),
+                "quote_decimals": quote_decimals,
+                "initial_weth_usd": str(initial_weth_usd),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
 
 
 def cmd_rpc_trench_tape(args: argparse.Namespace) -> int:
@@ -2083,6 +2378,43 @@ def build_parser() -> argparse.ArgumentParser:
     flap_registry.add_argument("--out", required=True)
     flap_registry.set_defaults(func=cmd_flap_registry)
 
+
+
+    pools_trade_registry = sub.add_parser("rpc-pools-trade-registry-window")
+    pools_trade_registry.add_argument("--from-block", type=int, required=True)
+    pools_trade_registry.add_argument("--to-block", type=int, required=True)
+    pools_trade_registry.add_argument("--chunk-size", type=int, default=100_000)
+    pools_trade_registry.add_argument("--min-chunk-size", type=int, default=1)
+    pools_trade_registry.add_argument("--out", required=True)
+    pools_trade_registry.set_defaults(func=cmd_rpc_pools_trade_registry_window)
+
+    pools_trade_v4 = sub.add_parser("rpc-pools-trade-v4-tape")
+    pools_trade_v4.add_argument("--registry", required=True)
+    pools_trade_v4.add_argument("--from-block", type=int, required=True)
+    pools_trade_v4.add_argument("--to-block", type=int, required=True)
+    pools_trade_v4.add_argument("--chunk-size", type=int, default=100_000)
+    pools_trade_v4.add_argument("--min-chunk-size", type=int, default=1)
+    pools_trade_v4.add_argument("--initialize-out", required=True)
+    pools_trade_v4.add_argument("--swap-out", required=True)
+    pools_trade_v4.set_defaults(func=cmd_rpc_pools_trade_v4_tape)
+
+    pools_trade_mcap = sub.add_parser("rpc-pools-trade-market-cap-window")
+    pools_trade_mcap.add_argument("--registry", required=True)
+    pools_trade_mcap.add_argument("--initializes", required=True)
+    pools_trade_mcap.add_argument("--swaps", required=True)
+    pools_trade_mcap.add_argument("--from-block", type=int, required=True)
+    pools_trade_mcap.add_argument("--to-block", type=int, required=True)
+    pools_trade_mcap.add_argument("--chunk-size", type=int, default=100_000)
+    pools_trade_mcap.add_argument("--min-chunk-size", type=int, default=1)
+    pools_trade_mcap.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    pools_trade_mcap.add_argument("--oracle-state")
+    pools_trade_mcap.add_argument("--oracle-events")
+    pools_trade_mcap.add_argument("--out", required=True)
+    pools_trade_mcap.add_argument("--summary-out", required=True)
+    pools_trade_mcap.set_defaults(func=cmd_rpc_pools_trade_market_cap_window)
 
     trench_tape = sub.add_parser("rpc-trench-tape")
     trench_tape.add_argument("--from-block", type=int, required=True)
