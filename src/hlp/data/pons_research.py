@@ -219,3 +219,163 @@ def annotate_pons_drawdowns_and_future_returns(
 
     output.sort(key=lambda row: (event_order(row), row["token"]))
     return output
+
+
+
+def extract_pons_drawdown_episodes(
+    annotated_points: Iterable[dict],
+) -> list[dict]:
+    """Partition Pons paths into threshold-free running-peak drawdown episodes.
+
+    An episode begins at the first priced point below the current running
+    peak. Its trough is the lowest point before the old peak is reclaimed.
+    The episode closes when price returns to or above that peak; otherwise it
+    remains open at the supplied history boundary.
+
+    No episode is called "major" here. Depth is preserved continuously for a
+    later empirical regime fit.
+    """
+    grouped: dict[str, list[dict]] = {}
+    for source in annotated_points:
+        token = source["token"].lower()
+        grouped.setdefault(token, []).append(dict(source))
+
+    episodes: list[dict] = []
+    for token, rows in grouped.items():
+        rows.sort(key=event_order)
+        if not rows:
+            continue
+
+        peak_row = rows[0]
+        peak_mcap = Decimal(peak_row["market_cap_proxy_usd"])
+        active: dict | None = None
+        episode_index = 0
+
+        for row in rows[1:]:
+            mcap = Decimal(row["market_cap_proxy_usd"])
+            if mcap >= peak_mcap:
+                if active is not None:
+                    trough = active["trough_row"]
+                    trough_mcap = Decimal(
+                        trough["market_cap_proxy_usd"]
+                    )
+                    future_multiple = trough.get("max_future_multiple")
+                    episodes.append(
+                        {
+                            "token": token,
+                            "pons_version": row["pons_version"],
+                            "episode_index": episode_index,
+                            "peak_block": peak_row["block_number"],
+                            "peak_transaction_index": peak_row.get(
+                                "transaction_index"
+                            ),
+                            "peak_log_index": peak_row["log_index"],
+                            "peak_phase": peak_row["phase"],
+                            "peak_market_cap_usd": str(peak_mcap),
+                            "drawdown_start_block": active[
+                                "start_row"
+                            ]["block_number"],
+                            "trough_block": trough["block_number"],
+                            "trough_transaction_index": trough.get(
+                                "transaction_index"
+                            ),
+                            "trough_log_index": trough["log_index"],
+                            "trough_phase": trough["phase"],
+                            "trough_market_cap_usd": str(trough_mcap),
+                            "drawdown_fraction": str(
+                                Decimal(1) - trough_mcap / peak_mcap
+                            ),
+                            "recovered_prior_peak": True,
+                            "recovery_block": row["block_number"],
+                            "recovery_transaction_index": row.get(
+                                "transaction_index"
+                            ),
+                            "recovery_log_index": row["log_index"],
+                            "recovery_phase": row["phase"],
+                            "recovery_market_cap_usd": str(mcap),
+                            "trough_to_recovery_multiple": str(
+                                mcap / trough_mcap
+                            ),
+                            "max_future_multiple_from_trough": (
+                                future_multiple
+                            ),
+                            "trough_reached_5x_later": bool(
+                                trough.get("reached_5x_later", False)
+                            ),
+                            "open_at_history_end": False,
+                        }
+                    )
+                    episode_index += 1
+                    active = None
+                peak_row = row
+                peak_mcap = mcap
+                continue
+
+            if active is None:
+                active = {
+                    "start_row": row,
+                    "trough_row": row,
+                }
+            else:
+                trough_mcap = Decimal(
+                    active["trough_row"]["market_cap_proxy_usd"]
+                )
+                if mcap < trough_mcap:
+                    active["trough_row"] = row
+
+        if active is not None:
+            trough = active["trough_row"]
+            trough_mcap = Decimal(trough["market_cap_proxy_usd"])
+            future_multiple = trough.get("max_future_multiple")
+            episodes.append(
+                {
+                    "token": token,
+                    "pons_version": trough["pons_version"],
+                    "episode_index": episode_index,
+                    "peak_block": peak_row["block_number"],
+                    "peak_transaction_index": peak_row.get(
+                        "transaction_index"
+                    ),
+                    "peak_log_index": peak_row["log_index"],
+                    "peak_phase": peak_row["phase"],
+                    "peak_market_cap_usd": str(peak_mcap),
+                    "drawdown_start_block": active["start_row"][
+                        "block_number"
+                    ],
+                    "trough_block": trough["block_number"],
+                    "trough_transaction_index": trough.get(
+                        "transaction_index"
+                    ),
+                    "trough_log_index": trough["log_index"],
+                    "trough_phase": trough["phase"],
+                    "trough_market_cap_usd": str(trough_mcap),
+                    "drawdown_fraction": str(
+                        Decimal(1) - trough_mcap / peak_mcap
+                    ),
+                    "recovered_prior_peak": False,
+                    "recovery_block": None,
+                    "recovery_transaction_index": None,
+                    "recovery_log_index": None,
+                    "recovery_phase": None,
+                    "recovery_market_cap_usd": None,
+                    "trough_to_recovery_multiple": None,
+                    "max_future_multiple_from_trough": future_multiple,
+                    "trough_reached_5x_later": bool(
+                        trough.get("reached_5x_later", False)
+                    ),
+                    "open_at_history_end": True,
+                }
+            )
+
+    episodes.sort(
+        key=lambda row: (
+            row["peak_block"],
+            -1
+            if row["peak_transaction_index"] is None
+            else row["peak_transaction_index"],
+            row["peak_log_index"],
+            row["token"],
+            row["episode_index"],
+        )
+    )
+    return episodes
