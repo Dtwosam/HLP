@@ -497,3 +497,16 @@ class PonsV2PoolRegistration:
     transaction_hash: str
     transaction_index: int | None
     log_index: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class Erc20Transfer:
+    token: str
+    from_address: str
+    to_address: str
+    value_raw: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
