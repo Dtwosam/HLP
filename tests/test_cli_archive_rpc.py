@@ -225,3 +225,17 @@ def test_v3_quote_route_selection_and_usd_tape_parse():
     ])
     assert tape.routes == "routes.jsonl"
     assert tape.state_out == "state.jsonl"
+
+
+
+def test_v3_quote_route_tape_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-v3-quote-route-tape",
+        "--routes", "routes.jsonl",
+        "--from-block", "100",
+        "--to-block", "200",
+        "--out", "v3.jsonl",
+    ])
+    assert args.routes == "routes.jsonl"
+    assert args.from_block == 100

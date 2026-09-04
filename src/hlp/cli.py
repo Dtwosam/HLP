@@ -3537,6 +3537,97 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
 
 
 
+def cmd_rpc_v3_quote_route_tape(args: argparse.Namespace) -> int:
+    """Acquire V3 price events only after each quote route becomes active."""
+    routes = _load_jsonl(args.routes)
+    activation_by_pool = {
+        row["pool"].lower(): int(row["activation_block"])
+        for row in routes
+    }
+    if not activation_by_pool:
+        manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance={
+                "source": "evm_json_rpc",
+                "chain_id": 4663,
+                "protocol": "uniswap_v3_quote_fallback_routes",
+                "routes": Path(args.routes).name,
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "empty_reason": "no selected V3 fallback routes",
+            },
+        )
+        print(json.dumps({**manifest, "requests_made": 0}, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=sorted(activation_by_pool),
+        topics=[[V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC]],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {
+        "pre_activation_events_skipped": 0,
+        "matched_initializes": 0,
+        "matched_swaps": 0,
+    }
+
+    def active_events():
+        for log in raw:
+            pool = log.address.lower()
+            activation = activation_by_pool.get(pool)
+            if activation is None:
+                raise ValueError(
+                    f"V3 route filter returned unknown pool {pool}"
+                )
+            if int(log.block_number) < activation:
+                counters["pre_activation_events_skipped"] += 1
+                continue
+            topic0 = log.topics[0] if log.topics else None
+            if topic0 == V3_INITIALIZE_TOPIC:
+                event = asdict(decode_v3_pool_initialized(log))
+                event["event_type"] = "v3_initialize"
+                counters["matched_initializes"] += 1
+            elif topic0 == V3_SWAP_TOPIC:
+                event = asdict(decode_v3_swap(log))
+                event["event_type"] = "v3_swap"
+                counters["matched_swaps"] += 1
+            else:
+                continue
+            yield event
+
+    manifest = write_jsonl_snapshot(
+        active_events(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v3_quote_fallback_routes",
+            "routes": Path(args.routes).name,
+            "route_pools": len(activation_by_pool),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0_or": [V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC],
+            "activation_semantics": (
+                "events before each route's first Pons use are skipped"
+            ),
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        **counters,
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
     """Price a shared V1 swap shard and emit per-token $100k eligibility."""
     if args.from_block <= 0:
@@ -4382,6 +4473,15 @@ def build_parser() -> argparse.ArgumentParser:
     tape.add_argument("--out", required=True)
     tape.set_defaults(func=cmd_rpc_v3_pons_tape)
 
+
+    quote_route_tape = sub.add_parser("rpc-v3-quote-route-tape")
+    quote_route_tape.add_argument("--routes", required=True)
+    quote_route_tape.add_argument("--from-block", type=int, required=True)
+    quote_route_tape.add_argument("--to-block", type=int, required=True)
+    quote_route_tape.add_argument("--chunk-size", type=int, default=100_000)
+    quote_route_tape.add_argument("--min-chunk-size", type=int, default=1)
+    quote_route_tape.add_argument("--out", required=True)
+    quote_route_tape.set_defaults(func=cmd_rpc_v3_quote_route_tape)
 
     market_caps = sub.add_parser("rpc-v1-market-cap-window")
     market_caps.add_argument("--registry", required=True)
