@@ -36,6 +36,33 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class PoolsTradeTokenCreated:
+    launcher: str
+    token: str
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class PoolsTradeTokenLaunched:
+    strategy: str
+    pool_id: str
+    token: str
+    final_position_recipient: str
+    currency0: str
+    currency1: str
+    fee: int
+    tick_spacing: int
+    hooks: str
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class TrenchTokenInfo:
     token: str
     curve: str
