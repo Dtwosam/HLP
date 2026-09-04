@@ -1,0 +1,118 @@
+"""Minimal dependency-light Ethereum JSON-RPC client.
+
+The client intentionally exposes raw primitives. Protocol-specific decoding
+belongs in adapters so source semantics stay testable and versioned.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from hlp.config import ROBINHOOD_CHAIN_ID
+from hlp.data.types import RawLog
+
+
+class RpcError(RuntimeError):
+    pass
+
+
+def _hex_quantity(value: int | str) -> str:
+    if isinstance(value, str):
+        if value in {"latest", "earliest", "pending", "safe", "finalized"}:
+            return value
+        if value.startswith("0x"):
+            return value
+        value = int(value)
+    if value < 0:
+        raise ValueError("RPC block quantities cannot be negative")
+    return hex(value)
+
+
+@dataclass(slots=True)
+class RpcClient:
+    url: str
+    timeout: float = 20.0
+    attempts: int = 3
+    backoff_seconds: float = 0.5
+    transport: Callable[[urllib.request.Request, float], bytes] | None = None
+
+    def _post(self, request: urllib.request.Request, timeout: float) -> bytes:
+        if self.transport is not None:
+            return self.transport(request, timeout)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+
+    def call(self, method: str, params: list[Any] | None = None) -> Any:
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []},
+            separators=(",", ":"),
+        ).encode()
+        request = urllib.request.Request(
+            self.url,
+            data=body,
+            headers={"content-type": "application/json", "user-agent": "hlp/0.1"},
+            method="POST",
+        )
+        last_error: Exception | None = None
+        for attempt in range(1, self.attempts + 1):
+            try:
+                payload = json.loads(self._post(request, self.timeout))
+                if "error" in payload:
+                    raise RpcError(f"{method}: {payload['error']}")
+                if "result" not in payload:
+                    raise RpcError(f"{method}: malformed JSON-RPC response")
+                return payload["result"]
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RpcError) as exc:
+                last_error = exc
+                if attempt == self.attempts:
+                    break
+                time.sleep(self.backoff_seconds * attempt)
+        raise RpcError(f"{method} failed after {self.attempts} attempts: {last_error}")
+
+    def chain_id(self) -> int:
+        return int(self.call("eth_chainId"), 16)
+
+    def assert_robinhood(self) -> None:
+        observed = self.chain_id()
+        if observed != ROBINHOOD_CHAIN_ID:
+            raise RpcError(
+                f"wrong chain: expected {ROBINHOOD_CHAIN_ID}, observed {observed}"
+            )
+
+    def block_number(self) -> int:
+        return int(self.call("eth_blockNumber"), 16)
+
+    def get_block(self, block: int | str = "latest", full_transactions: bool = False) -> dict[str, Any]:
+        result = self.call("eth_getBlockByNumber", [_hex_quantity(block), full_transactions])
+        if result is None:
+            raise RpcError(f"block not found: {block}")
+        return result
+
+    def get_code(self, address: str, block: int | str = "latest") -> str:
+        return self.call("eth_getCode", [address, _hex_quantity(block)])
+
+    def get_logs(
+        self,
+        from_block: int,
+        to_block: int,
+        *,
+        address: str | list[str] | None = None,
+        topics: list[Any] | None = None,
+    ) -> list[RawLog]:
+        if to_block < from_block:
+            raise ValueError("to_block must be >= from_block")
+        query: dict[str, Any] = {
+            "fromBlock": _hex_quantity(from_block),
+            "toBlock": _hex_quantity(to_block),
+        }
+        if address is not None:
+            query["address"] = address
+        if topics is not None:
+            query["topics"] = topics
+        result = self.call("eth_getLogs", [query])
+        return [RawLog.from_rpc(ROBINHOOD_CHAIN_ID, item) for item in result]
