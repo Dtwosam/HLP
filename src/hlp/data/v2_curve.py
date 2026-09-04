@@ -211,3 +211,96 @@ def summarize_v2_curve_market_caps(rows: Iterable[dict]) -> list[dict]:
         output.append(row)
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
     return output
+
+
+
+def merge_v2_lifecycle_market_cap_summaries(
+    registry_rows: Iterable[dict],
+    *,
+    curve_summary: Iterable[dict],
+    seed_summary: Iterable[dict] = (),
+    v4_summary: Iterable[dict] = (),
+) -> list[dict]:
+    """Merge summary-only V2 phases without materializing full priced paths.
+
+    The registry is authoritative for the token population. Curve replay must
+    cover every launch; seed/V4 summaries are optional because most tokens may
+    never graduate.
+    """
+    registry = {
+        row["token"].lower(): row
+        for row in registry_rows
+    }
+    curve = {row["token"].lower(): dict(row) for row in curve_summary}
+    seeds = {row["token"].lower(): dict(row) for row in seed_summary}
+    v4 = {row["token"].lower(): dict(row) for row in v4_summary}
+
+    if set(curve) != set(registry):
+        missing = sorted(set(registry) - set(curve))
+        extra = sorted(set(curve) - set(registry))
+        raise ValueError(
+            "V2 curve summary must cover the frozen registry exactly: "
+            f"missing={missing[:20]} extra={extra[:20]}"
+        )
+    if not set(seeds).issubset(registry):
+        raise ValueError("V2 seed summary contains token outside registry")
+    if not set(v4).issubset(registry):
+        raise ValueError("V2 V4 summary contains token outside registry")
+
+    output = []
+    for token, launch in sorted(
+        registry.items(),
+        key=lambda item: (
+            int(item[1]["block_number"]),
+            item[0],
+        ),
+    ):
+        phase_rows = [
+            ("curve", curve[token]),
+        ]
+        if token in seeds:
+            phase_rows.append(("v4_seed", seeds[token]))
+        if token in v4:
+            phase_rows.append(("v4", v4[token]))
+
+        statuses = set()
+        price_points = 0
+        priced_points = 0
+        crossed = False
+        max_value = None
+        max_block = None
+        max_phase = None
+
+        for phase, row in phase_rows:
+            statuses.update(row.get("pricing_statuses", []))
+            price_points += int(row.get("price_points", 0))
+            priced_points += int(row.get("priced_points", 0))
+            crossed = crossed or bool(row.get("crossed_100k"))
+            raw = row.get("max_market_cap_proxy_usd")
+            if raw is None:
+                continue
+            value = Decimal(raw)
+            if max_value is None or value > max_value:
+                max_value = value
+                max_block = row.get("max_market_cap_block")
+                max_phase = phase
+
+        output.append({
+            "token": token,
+            "curve": launch["curve"].lower(),
+            "quote_token": launch["pair_token"].lower(),
+            "launch_block": int(launch["block_number"]),
+            "pricing_statuses": sorted(statuses),
+            "price_points": price_points,
+            "priced_points": priced_points,
+            "max_market_cap_proxy_usd": (
+                None if max_value is None else str(max_value)
+            ),
+            "max_market_cap_block": max_block,
+            "max_market_cap_phase": max_phase,
+            "crossed_100k": crossed,
+            "graduated": token in seeds,
+            "has_v4_price_points": token in v4,
+        })
+
+    return output
