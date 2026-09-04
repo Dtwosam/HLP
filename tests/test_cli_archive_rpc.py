@@ -104,3 +104,17 @@ def test_v2_curve_eligibility_parses():
     ])
     assert args.snapshot_head == 100
     assert args.oracle_state is None
+
+
+def test_pons_stock_oracle_lifecycle_parses_shard():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-pons-stock-oracle-lifecycle",
+        "--quote-registry", "quotes.jsonl",
+        "--from-block", "100",
+        "--to-block", "200",
+        "--state-out", "state.jsonl",
+        "--out", "updates.jsonl",
+    ])
+    assert args.from_block == 100
+    assert args.to_block == 200
