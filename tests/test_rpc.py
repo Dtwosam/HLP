@@ -137,3 +137,33 @@ def test_extra_headers_are_attached_without_changing_url():
     assert rpc.chain_id() == 4663
     assert captured["url"] == "https://rpc.example.invalid/evm/4663"
     assert captured["key"] == "secret-value"
+
+
+def test_chunked_logs_fail_fast_before_range_shrink():
+    calls = []
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        query = payload["params"][0]
+        start = int(query["fromBlock"], 16)
+        end = int(query["toBlock"], 16)
+        calls.append((start, end))
+        width = end - start + 1
+        if width > 4:
+            return json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {"code": -32602, "message": "range too wide"},
+                }
+            ).encode()
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": []}).encode()
+
+    rpc = RpcClient(
+        "https://example.invalid",
+        attempts=5,
+        transport=transport,
+    )
+    list(rpc.iter_logs_chunked(0, 7, chunk_size=8, min_chunk_size=1))
+    # One failed width=8 request, then two successful width=4 pages.
+    assert calls == [(0, 7), (0, 3), (4, 7)]
