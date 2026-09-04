@@ -1,19 +1,7 @@
 name: phase1-v2-full-priced-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-v2-full-priced-smoke.yml'
-      - 'src/hlp/data/oracle_registry.py'
-      - 'src/hlp/data/oracles.py'
-      - 'src/hlp/data/quote_usd.py'
-      - 'src/hlp/data/v2_curve.py'
-      - 'src/hlp/data/v4.py'
-      - 'src/hlp/cli.py'
   workflow_dispatch:
-
 permissions:
   contents: read
 

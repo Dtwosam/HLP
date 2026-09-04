@@ -1,22 +1,7 @@
 name: phase1-v1-usd-path-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-v1-usd-path-smoke.yml'
-      - 'src/hlp/config.py'
-      - 'src/hlp/cli.py'
-      - 'src/hlp/data/reconstruct.py'
-      - 'src/hlp/data/types.py'
-      - 'src/hlp/protocols/pons.py'
-      - 'src/hlp/protocols/uniswap.py'
-      - 'src/hlp/protocols/state.py'
-      - 'src/hlp/protocols/erc20.py'
-      - 'src/hlp/price.py'
   workflow_dispatch:
-
 permissions:
   contents: read
 
