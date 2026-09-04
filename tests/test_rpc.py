@@ -284,3 +284,27 @@ def test_get_logs_preserves_positional_topic_or_filter():
         topics=[topic0, [pool1, pool2]],
     ) == []
 
+def test_get_logs_preserves_address_array_filter():
+    address1 = "0x" + "11" * 20
+    address2 = "0x" + "22" * 20
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        assert payload["method"] == "eth_getLogs"
+        query = payload["params"][0]
+        assert query["fromBlock"] == hex(10)
+        assert query["toBlock"] == hex(20)
+        assert query["address"] == [address1, address2]
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": [],
+        }).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    assert rpc.get_logs(
+        10,
+        20,
+        address=[address1, address2],
+    ) == []
+
