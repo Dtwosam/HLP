@@ -1,4 +1,5 @@
 name: phase1-pons-residual-sushiv3-route-audit-one-shot
+# Residual-only rerun with canonical anchor decimals.
 
 on:
   push:
