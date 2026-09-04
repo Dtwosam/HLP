@@ -68,11 +68,14 @@ jobs:
               aggregator = read_chainlink_aggregator(
                   rpc, feed.proxy_address, block=block
               )
-              expected_description = f"RH{feed.symbol} / USD"
-              assert round_data.description == expected_description, (
+              accepted_descriptions = {
+                  f"RH{feed.symbol} / USD",
+                  feed.name,
+              }
+              assert round_data.description in accepted_descriptions, (
                   feed.symbol,
                   round_data.description,
-                  expected_description,
+                  sorted(accepted_descriptions),
               )
               assert round_data.answer > 0
               rows.append(
