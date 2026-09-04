@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
 import hlp.data.quote_routes as routes
-from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+from hlp.config import (
+    ROBINHOOD_USDG,
+    ROBINHOOD_WETH,
+    SUSHISWAP_V3_FACTORY,
+)
 
 
 TOKEN = "0x" + "11" * 20
@@ -216,3 +220,40 @@ def test_merge_v3_quote_routes_adds_ready_delayed_routes():
     }]
     rows = routes.merge_v3_quote_routes(causal, delayed)
     assert [row["activation_block"] for row in rows] == [10, 20]
+
+
+
+def test_v3_route_audit_preserves_non_uniswap_factory(monkeypatch):
+    def get_pool(rpc, factory, *, token_a, token_b, fee, block):
+        assert factory == SUSHISWAP_V3_FACTORY.lower()
+        if token_b == ROBINHOOD_USDG.lower() and fee == 3000:
+            return POOL
+        return None
+
+    monkeypatch.setattr(routes, "read_v3_factory_pool", get_pool)
+    monkeypatch.setattr(
+        routes,
+        "read_v3_pool_static",
+        lambda rpc, pool, block: SimpleNamespace(
+            token0=TOKEN,
+            token1=ROBINHOOD_USDG.lower(),
+        ),
+    )
+    monkeypatch.setattr(
+        routes,
+        "read_v3_slot0",
+        lambda rpc, pool, block: SimpleNamespace(sqrt_price_x96=2**96),
+    )
+    monkeypatch.setattr(routes, "read_v3_liquidity", lambda rpc, pool, block: 100)
+
+    audit = routes.audit_unpriced_v3_quote_routes(
+        Rpc(),
+        quote_rows(),
+        factory=SUSHISWAP_V3_FACTORY,
+    )
+    selected = routes.select_v3_quote_routes(audit)
+
+    assert audit[0]["factory"] == SUSHISWAP_V3_FACTORY.lower()
+    assert audit[0]["venue"] == "sushiswap_v3"
+    assert selected[0]["factory"] == SUSHISWAP_V3_FACTORY.lower()
+    assert selected[0]["route_type"] == "sushiswap_v3_direct_usdg"

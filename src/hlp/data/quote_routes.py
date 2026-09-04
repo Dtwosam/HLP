@@ -8,6 +8,7 @@ from typing import Iterable
 from hlp.config import (
     ROBINHOOD_USDG,
     ROBINHOOD_WETH,
+    SUSHISWAP_V3_FACTORY,
     UNISWAP_V3_FACTORY,
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
 )
@@ -29,6 +30,15 @@ def _has_code(value: str) -> bool:
     return value not in {"0x", "0x0", ""}
 
 
+def _v3_venue(factory: str) -> str:
+    value = factory.lower()
+    if value == UNISWAP_V3_FACTORY.lower():
+        return "uniswap_v3"
+    if value == SUSHISWAP_V3_FACTORY.lower():
+        return "sushiswap_v3"
+    return "v3_factory"
+
+
 def audit_unpriced_v3_quote_routes(
     rpc,
     quote_rows: Iterable[dict],
@@ -38,6 +48,8 @@ def audit_unpriced_v3_quote_routes(
 ) -> list[dict]:
     """Find direct V3 routes and prove each existed before first Pons use."""
     rows = list(quote_rows)
+    factory = factory.lower()
+    venue = _v3_venue(factory)
     special_decimals = {
         row["quote_token"].lower(): int(row["quote_decimals"])
         for row in rows
@@ -95,6 +107,8 @@ def audit_unpriced_v3_quote_routes(
                     continue
 
                 candidate = {
+                    "factory": factory,
+                    "venue": venue,
                     "anchor_token": anchor,
                     "usd_semantics": usd_semantics,
                     "fee": fee,
@@ -186,6 +200,8 @@ def audit_unpriced_v3_quote_routes(
             "quote_token": token,
             "symbol": source.get("symbol"),
             "quote_decimals": token_decimals,
+            "factory": factory,
+            "venue": venue,
             "first_launch_block": first_use,
             "causal_state_block": prior,
             "launches": int(source["launches"]),
@@ -357,6 +373,11 @@ def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
         )[0]
         token = source["quote_token"].lower()
         anchor = best["anchor_token"].lower()
+        factory = best.get(
+            "factory",
+            source.get("factory", UNISWAP_V3_FACTORY),
+        ).lower()
+        venue = best.get("venue") or _v3_venue(factory)
         selected.append({
             "quote_token": token,
             "symbol": source.get("symbol"),
@@ -366,6 +387,8 @@ def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
             "launches": int(source["launches"]),
             "versions": source.get("versions", {}),
             "pool": best["pool"].lower(),
+            "factory": factory,
+            "venue": venue,
             "block_number": int(source["first_launch_block"]),
             "anchor_token": anchor,
             "anchor_decimals": (
@@ -373,9 +396,9 @@ def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
             ),
             "fee": int(best["fee"]),
             "route_type": (
-                "uniswap_v3_direct_usdg"
+                f"{venue}_direct_usdg"
                 if anchor == ROBINHOOD_USDG.lower()
-                else "uniswap_v3_direct_weth"
+                else f"{venue}_direct_weth"
             ),
             "activation_liquidity": int(best["active_liquidity"]),
             "initial_usd_price": str(best["token_price_usd"]),
