@@ -192,8 +192,19 @@ without increasing concurrent RPC pressure:
 
 Two reusable manual-only range recovery workflows split any exact failed curve
 or anchor interval into four smaller subshards and merge only that interval.
+On top of those primitives, manifest-driven gap recovery now reads every
+successful partial-run manifest, derives the exact uncovered block intervals,
+and creates only bounded retry jobs: at most 200k blocks for V2 curve gaps and
+150k blocks for anchor gaps. The final merge proves strict block continuity
+against the preserved prefix before publishing the canonical full tape.
 Successful historical shards are never re-fetched just because a later dense
 range timed out.
+
+The gap recovery workflows and the bounded V4 quote continuation expose both
+`workflow_dispatch` and `workflow_call`, but no push trigger. Temporary
+one-shot wrappers may invoke the tested reusable logic when direct workflow
+dispatch is unavailable; wrappers are sequenced one heavy recovery at a time
+and are removed after use.
 
 This keeps normal development/tests responsive while long archive shards run,
 and prevents accidental backfills from competing for GitHub-hosted runner
