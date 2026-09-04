@@ -16,6 +16,14 @@ SOLIDRPC_AUTH_RPC_URL = "https://rpc.solidrpc.io/evm/4663"
 DEFAULT_SEQUENCER_WS_URL = "wss://feed.mainnet.chain.robinhood.com"
 NODEFLARE_PUBLIC_RPC_URL = "https://rpc.nodeflare.app/robinhood/public"
 
+ROBINHOOD_WETH = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"
+ROBINHOOD_USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+
+# Provisional Phase-1 USD anchor discovered from the deepest current
+# Uniswap V3 WETH/USDG market and verified on-chain before use.
+# Final anchor-selection policy remains a Phase-1 acceptance item.
+UNISWAP_V3_WETH_USDG_ANCHOR_POOL = "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca"
+
 PONS_V1_FACTORY = "0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB"
 PONS_V2_FACTORY = "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
 PONS_V2_MEME_HOOK = "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044"
