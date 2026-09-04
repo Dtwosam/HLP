@@ -5,30 +5,19 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Iterable, Iterator
 
-from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.reconstruct import event_order
 from hlp.price import human_amount, v3_v4_quote_per_token
-
-
-ZERO_ADDRESS = "0x" + "00" * 20
-
-
-def _quote_usd(pair_token: str, active_weth_usd: Decimal):
-    pair = pair_token.lower()
-    if pair in {ZERO_ADDRESS, ROBINHOOD_WETH.lower()}:
-        return "priced_native_or_weth", active_weth_usd
-    if pair == ROBINHOOD_USDG.lower():
-        return "priced_usdg_nominal", Decimal(1)
-    return "unsupported_quote", None
 
 
 def _attach_usd(
     row: dict,
     launch: dict,
     quote_per_token: Decimal,
-    active_weth_usd: Decimal,
+    usd: QuoteUsdTimeline,
 ) -> dict:
-    status, quote_usd = _quote_usd(launch["pair_token"], active_weth_usd)
+    quote_usd = usd.price(launch["pair_token"])
+    status = usd.pricing_status(launch["pair_token"])
     out = dict(row)
     out.update(
         {
@@ -60,18 +49,21 @@ def build_v2_graduation_seed_points(
     weth_usd_anchor_points: Iterable[dict],
     *,
     initial_weth_usd: Decimal,
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
 ) -> Iterator[dict]:
     """Price the exact V4 seed ratio emitted by PoolGraduated."""
     registry = {row["token"].lower(): row for row in registry_rows}
-    anchors = iter(weth_usd_anchor_points)
-    next_anchor = next(anchors, None)
-    active_weth_usd = initial_weth_usd
+    usd = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
 
     for graduation in graduation_rows:
         order = event_order(graduation)
-        while next_anchor is not None and event_order(next_anchor) <= order:
-            active_weth_usd = Decimal(next_anchor["quote_per_token"])
-            next_anchor = next(anchors, None)
+        usd.advance_to(order)
 
         token = graduation["token"].lower()
         launch = registry.get(token)
@@ -91,7 +83,7 @@ def build_v2_graduation_seed_points(
         base = dict(graduation)
         base["phase"] = "v4_seed"
         base["event_type"] = "pool_graduated"
-        yield _attach_usd(base, launch, quote_per_token, active_weth_usd)
+        yield _attach_usd(base, launch, quote_per_token, usd)
 
 
 def build_v2_v4_market_cap_points(
@@ -101,19 +93,22 @@ def build_v2_v4_market_cap_points(
     weth_usd_anchor_points: Iterable[dict],
     *,
     initial_weth_usd: Decimal,
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
 ) -> Iterator[dict]:
     """Price post-graduation V4 swaps through the Pons pool-id registry."""
     registry = {row["token"].lower(): row for row in registry_rows}
     registrations = {row["pool_id"].lower(): row for row in registration_rows}
-    anchors = iter(weth_usd_anchor_points)
-    next_anchor = next(anchors, None)
-    active_weth_usd = initial_weth_usd
+    usd = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
 
     for swap in swap_rows:
         order = event_order(swap)
-        while next_anchor is not None and event_order(next_anchor) <= order:
-            active_weth_usd = Decimal(next_anchor["quote_per_token"])
-            next_anchor = next(anchors, None)
+        usd.advance_to(order)
 
         pool_id = swap["pool_id"].lower()
         registration = registrations.get(pool_id)
@@ -136,4 +131,4 @@ def build_v2_v4_market_cap_points(
         base = dict(swap)
         base["phase"] = "v4"
         base["event_type"] = "v4_swap"
-        yield _attach_usd(base, launch, quote_per_token, active_weth_usd)
+        yield _attach_usd(base, launch, quote_per_token, usd)
