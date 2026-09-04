@@ -10,7 +10,7 @@ import json
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from hlp.config import ROBINHOOD_CHAIN_ID
@@ -40,6 +40,7 @@ class RpcClient:
     attempts: int = 3
     backoff_seconds: float = 0.5
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
+    requests_made: int = field(default=0, init=False)
 
     def _post(self, request: urllib.request.Request, timeout: float) -> bytes:
         if self.transport is not None:
@@ -61,6 +62,7 @@ class RpcClient:
         last_error: Exception | None = None
         for attempt in range(1, self.attempts + 1):
             try:
+                self.requests_made += 1
                 payload = json.loads(self._post(request, self.timeout))
                 if "error" in payload:
                     raise RpcError(f"{method}: {payload['error']}")
@@ -123,6 +125,57 @@ class RpcClient:
             else:
                 low = mid + 1
         return low
+
+    def iter_logs_chunked(
+        self,
+        from_block: int,
+        to_block: int,
+        *,
+        address: str | list[str] | None = None,
+        topics: list[Any] | None = None,
+        chunk_size: int = 100_000,
+        min_chunk_size: int = 1,
+    ):
+        """Yield logs over an inclusive range with adaptive range shrinking.
+
+        Providers disagree sharply on eth_getLogs range limits. HLP starts
+        with the caller's preferred window, halves it after a terminal RPC
+        error, and cautiously grows back after successful windows.
+        """
+        if to_block < from_block:
+            raise ValueError("to_block must be >= from_block")
+        if chunk_size < 1 or min_chunk_size < 1 or min_chunk_size > chunk_size:
+            raise ValueError("invalid chunk sizes")
+
+        cursor = from_block
+        target_size = chunk_size
+        active_size = target_size
+        while cursor <= to_block:
+            end = min(to_block, cursor + active_size - 1)
+            try:
+                rows = self.get_logs(
+                    cursor,
+                    end,
+                    address=address,
+                    topics=topics,
+                )
+            except RpcError:
+                if active_size <= min_chunk_size:
+                    raise
+                active_size = max(min_chunk_size, active_size // 2)
+                continue
+
+            rows.sort(
+                key=lambda row: (
+                    row.block_number,
+                    -1 if row.transaction_index is None else row.transaction_index,
+                    row.log_index,
+                )
+            )
+            yield from rows
+            cursor = end + 1
+            if active_size < target_size:
+                active_size = min(target_size, active_size * 2)
 
     def get_logs(
         self,
