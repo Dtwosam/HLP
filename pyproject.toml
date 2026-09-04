@@ -9,6 +9,7 @@ description = "Robinhood Chain memecoin comeback research and signal system"
 requires-python = ">=3.12"
 dependencies = [
   "eth-utils>=5.1,<6",
+  "eth-hash[pycryptodome]>=0.8,<1",
 ]
 
 [project.optional-dependencies]
