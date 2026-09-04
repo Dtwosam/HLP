@@ -71,6 +71,9 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         if name == "phase1-pons-v2-curve-full.yml":
             assert "SHARD_COUNT: '64'" in content, name
             assert "timeout-minutes: 25" in content, name
+        elif name == "phase1-pons-weth-usdg-anchor-full.yml":
+            assert "SHARD_COUNT: '128'" in content, name
+            assert "timeout-minutes: 25" in content, name
         else:
             assert "SHARD_COUNT: '16'" in content, name
             assert "timeout-minutes: 35" in content, name
