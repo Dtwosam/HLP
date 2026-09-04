@@ -15,6 +15,7 @@ permissions:
 env:
   V2_REGISTRY_RUN_ID: '33912235341'
   SNAPSHOT_HEAD: '54486035'
+  # Missing official feeds are reported as data, never treated as a parser abort.
 
 jobs:
   audit:
