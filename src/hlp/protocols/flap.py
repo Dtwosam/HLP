@@ -18,6 +18,7 @@ TOKEN_SOLD_SIG = "TokenSold(uint256,address,address,uint256,uint256,uint256,uint
 PROGRESS_CHANGED_SIG = "FlapTokenProgressChanged(address,uint256)"
 SUPPLY_CHANGED_SIG = "FlapTokenCirculatingSupplyChanged(address,uint256)"
 LAUNCHED_TO_DEX_SIG = "LaunchedToDEX(address,address,uint256,uint256)"
+CURVE_SET_SIG = "TokenCurveSet(address,address,uint256)"
 CURVE_SET_V2_SIG = "TokenCurveSetV2(address,uint256,uint256,uint256)"
 DEX_SUPPLY_THRESH_SET_SIG = "TokenDexSupplyThreshSet(address,uint256)"
 QUOTE_SET_SIG = "TokenQuoteSet(address,address)"
@@ -31,6 +32,7 @@ TOKEN_SOLD_TOPIC = event_topic(TOKEN_SOLD_SIG)
 PROGRESS_CHANGED_TOPIC = event_topic(PROGRESS_CHANGED_SIG)
 SUPPLY_CHANGED_TOPIC = event_topic(SUPPLY_CHANGED_SIG)
 LAUNCHED_TO_DEX_TOPIC = event_topic(LAUNCHED_TO_DEX_SIG)
+CURVE_SET_TOPIC = event_topic(CURVE_SET_SIG)
 CURVE_SET_V2_TOPIC = event_topic(CURVE_SET_V2_SIG)
 DEX_SUPPLY_THRESH_SET_TOPIC = event_topic(DEX_SUPPLY_THRESH_SET_SIG)
 QUOTE_SET_TOPIC = event_topic(QUOTE_SET_SIG)
@@ -45,6 +47,7 @@ FLAP_RECONSTRUCTION_TOPICS = (
     PROGRESS_CHANGED_TOPIC,
     SUPPLY_CHANGED_TOPIC,
     LAUNCHED_TO_DEX_TOPIC,
+    CURVE_SET_TOPIC,
     CURVE_SET_V2_TOPIC,
     DEX_SUPPLY_THRESH_SET_TOPIC,
     QUOTE_SET_TOPIC,
@@ -133,6 +136,17 @@ def decode_flap_event(log: RawLog) -> FlapEvent:
             pool=word_address(words[1]),
             amount_raw=words[2],
             quote_amount_raw=words[3],
+        )
+
+    if topic0 == CURVE_SET_TOPIC:
+        if len(words) != 3:
+            raise ValueError("unexpected Flap TokenCurveSet data length")
+        return _base(
+            log,
+            "curve_set",
+            word_address(words[0]),
+            actor=word_address(words[1]),  # curve implementation
+            value_raw=words[2],  # legacy curve parameter
         )
 
     if topic0 == CURVE_SET_V2_TOPIC:
