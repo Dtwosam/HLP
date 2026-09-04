@@ -36,6 +36,27 @@ class RawLog:
 
 
 @dataclass(frozen=True, slots=True)
+class HoodFunEvent:
+    event_type: str
+    token: str
+    actor: str | None
+    is_buy: bool | None
+    quote_amount_raw: int | None
+    token_amount_raw: int | None
+    fee_raw: int | None
+    virtual_quote_raw: int | None
+    virtual_token_raw: int | None
+    curve_inventory_raw: int | None
+    name: str | None
+    symbol: str | None
+    metadata_uri: str | None
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class PoolsTradeTokenCreated:
     launcher: str
     token: str
