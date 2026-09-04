@@ -610,7 +610,7 @@ def cmd_rpc_pools_fun_v3_tape(args: argparse.Namespace) -> int:
             "registered_pools": len(pools),
             "from_block": args.from_block,
             "to_block": args.to_block,
-            "event_topic0": V3_SWAP_TOPIC,
+            "event_topic0_or": [V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC],
         },
     )
     print(json.dumps({
@@ -2772,29 +2772,40 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
         args.from_block,
         args.to_block,
         address=sorted(pool_launch_block),
-        topics=[V3_SWAP_TOPIC],
+        topics=[[V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC]],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
     )
 
-    counters = {"all_v3_swap_logs": 0, "matched_pons_swaps": 0}
+    counters = {
+        "matched_pons_initializes": 0,
+        "matched_pons_swaps": 0,
+    }
     matched_pools: set[str] = set()
 
     def matched():
         for raw in raw_tape:
-            counters["all_v3_swap_logs"] += 1
             pool = raw.address.lower()
             launch_block = pool_launch_block.get(pool)
             if launch_block is None:
                 continue
             if raw.block_number < launch_block:
                 raise RuntimeError(
-                    f"swap for Pons pool {pool} predates recorded launch block"
+                    f"price event for Pons pool {pool} predates recorded launch block"
                 )
-            swap = decode_v3_swap(raw)
-            counters["matched_pons_swaps"] += 1
+            topic0 = raw.topics[0] if raw.topics else None
+            if topic0 == V3_INITIALIZE_TOPIC:
+                event = asdict(decode_v3_pool_initialized(raw))
+                event["event_type"] = "v3_initialize"
+                counters["matched_pons_initializes"] += 1
+            elif topic0 == V3_SWAP_TOPIC:
+                event = asdict(decode_v3_swap(raw))
+                event["event_type"] = "v3_swap"
+                counters["matched_pons_swaps"] += 1
+            else:
+                continue
             matched_pools.add(pool)
-            yield swap
+            yield event
 
     manifest = write_jsonl_snapshot(
         matched(),
