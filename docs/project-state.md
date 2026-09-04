@@ -67,7 +67,8 @@ Phase 1 must prove at least one complete-enough historical path from a reachable
 - [x] required CI unit tests green during Phase 1 iterations
 - [ ] validate hoodexplorer sampler from a network that can reach it
 - [ ] benchmark Substreams/reusable Uniswap package path
-- [ ] build/validate Uniswap event adapter
+- [x] build/test Uniswap V3/V4 swap decoders and Pons V2 pool-registration bridge
+- [x] live-bytecode smoke for current Pons V2 meme hook and Uniswap V4 PoolManager
 - [ ] reconstruct representative Pons tokens end-to-end
 - [ ] measure full-history request/block/egress projection
 - [ ] Phase 1 PASS/BLOCK decision
