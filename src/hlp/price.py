@@ -81,3 +81,19 @@ def market_cap_proxy_usd(
         raise ValueError("prices cannot be negative")
     supply = human_amount(total_supply_raw, token_decimals)
     return token_price_in_quote * quote_usd * supply
+
+
+
+def constant_product_spot_quote_per_token(
+    *,
+    quote_reserve_raw: int,
+    token_reserve_raw: int,
+    quote_decimals: int,
+    token_decimals: int,
+) -> Decimal:
+    """Human quote units per human token from constant-product reserves."""
+    if quote_reserve_raw <= 0 or token_reserve_raw <= 0:
+        raise ValueError("curve reserves must be positive")
+    quote = human_amount(quote_reserve_raw, quote_decimals)
+    token = human_amount(token_reserve_raw, token_decimals)
+    return quote / token
