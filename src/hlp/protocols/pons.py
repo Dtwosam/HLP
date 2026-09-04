@@ -12,8 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hlp.config import PONS_V1_FACTORY, PONS_V2_FACTORY, normalize_address
-from hlp.data.types import CurveTrade, PonsLaunch, RawLog
-from hlp.protocols.evm import data_words, event_topic, topic_address, word_address
+from hlp.data.types import CurveTrade, PonsLaunch, PonsV1LaunchConfig, RawLog
+from hlp.protocols.evm import data_words, event_topic, signed_word, topic_address, word_address
 
 
 V1_TOKEN_DEPLOYED_SIG = (
@@ -21,6 +21,12 @@ V1_TOKEN_DEPLOYED_SIG = (
 )
 V1_TOKEN_LAUNCHED_SIG = (
     "TokenLaunched(address,address,address,address,address,uint256,uint256,uint256,uint256,uint256)"
+)
+V1_LAUNCH_CONFIG_ADDED_SIG = (
+    "LaunchConfigAdded(uint256,address,uint256,int24,uint256,uint16,uint16,uint32,uint24,bool,bool)"
+)
+V1_LAUNCH_CONFIG_UPDATED_SIG = (
+    "LaunchConfigUpdated(uint256,address,uint256,int24,uint256,uint16,uint16,uint32,uint24,bool,bool)"
 )
 V2_TOKEN_LAUNCHED_SIG = (
     "TokenLaunched(address,address,address,address,uint256,uint256)"
@@ -31,6 +37,8 @@ V2_CURVE_SELL_SIG = "CurveSell(address,address,uint256,uint256,uint256,uint256)"
 
 V1_TOKEN_DEPLOYED_TOPIC = event_topic(V1_TOKEN_DEPLOYED_SIG)
 V1_TOKEN_LAUNCHED_TOPIC = event_topic(V1_TOKEN_LAUNCHED_SIG)
+V1_LAUNCH_CONFIG_ADDED_TOPIC = event_topic(V1_LAUNCH_CONFIG_ADDED_SIG)
+V1_LAUNCH_CONFIG_UPDATED_TOPIC = event_topic(V1_LAUNCH_CONFIG_UPDATED_SIG)
 V2_TOKEN_LAUNCHED_TOPIC = event_topic(V2_TOKEN_LAUNCHED_SIG)
 V2_POOL_GRADUATED_TOPIC = event_topic(V2_POOL_GRADUATED_SIG)
 V2_CURVE_BUY_TOPIC = event_topic(V2_CURVE_BUY_SIG)
@@ -48,6 +56,44 @@ PONS_FACTORIES = (
     PonsFactory("v1", normalize_address(PONS_V1_FACTORY), V1_TOKEN_LAUNCHED_TOPIC),
     PonsFactory("v2", normalize_address(PONS_V2_FACTORY), V2_TOKEN_LAUNCHED_TOPIC),
 )
+
+
+
+def decode_v1_launch_config(log: RawLog) -> PonsV1LaunchConfig:
+    """Decode a V1 LaunchConfigAdded/LaunchConfigUpdated event."""
+    if log.address != normalize_address(PONS_V1_FACTORY):
+        raise ValueError("not a Pons V1 factory log")
+    if not log.topics:
+        raise ValueError("missing Pons V1 config topic")
+    if log.topics[0] == V1_LAUNCH_CONFIG_ADDED_TOPIC:
+        action = "added"
+    elif log.topics[0] == V1_LAUNCH_CONFIG_UPDATED_TOPIC:
+        action = "updated"
+    else:
+        raise ValueError("not a Pons V1 launch-config event")
+    if len(log.topics) != 2:
+        raise ValueError("unexpected Pons V1 launch-config topic count")
+    words = data_words(log.data)
+    if len(words) != 10:
+        raise ValueError("unexpected Pons V1 launch-config data length")
+    return PonsV1LaunchConfig(
+        action=action,
+        config_id=int(log.topics[1], 16),
+        pair_token=word_address(words[0]),
+        graduation_threshold=words[1],
+        initial_tick=signed_word(words[2], bits=24),
+        supply=words[3],
+        max_wallet_bps=words[4],
+        max_tx_bps=words[5],
+        restriction_blocks=words[6],
+        reserved_fee=words[7],
+        enabled=bool(words[8]),
+        router_requires_deadline=bool(words[9]),
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
 
 
 def decode_v2_launch(log: RawLog) -> PonsLaunch:
