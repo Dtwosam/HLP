@@ -146,6 +146,37 @@ class CurveTrade:
 
 
 @dataclass(frozen=True, slots=True)
+class V3PoolCreated:
+    factory: str
+    token0: str
+    token1: str
+    fee: int
+    tick_spacing: int
+    pool: str
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class V4PoolInitialized:
+    pool_manager: str
+    pool_id: str
+    currency0: str
+    currency1: str
+    fee: int
+    tick_spacing: int
+    hooks: str
+    sqrt_price_x96: int
+    tick: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class V3Swap:
     pool: str
     sender: str
