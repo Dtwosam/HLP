@@ -11,6 +11,7 @@ from pathlib import Path
 
 from hlp.config import (
     DEFAULT_RPC_URL,
+    SOLIDRPC_PUBLIC_RPC_URL,
     PONS_V1_FACTORY,
     PONS_V2_FACTORY,
     PONS_V2_MEME_HOOK,
@@ -34,6 +35,20 @@ def _rpc(args: argparse.Namespace) -> RpcClient:
         timeout=args.timeout,
         attempts=args.attempts,
         min_interval_seconds=args.min_interval,
+    )
+
+
+def _archive_rpc(args: argparse.Namespace) -> RpcClient:
+    """Build the historical RPC without exposing API keys in command lines."""
+    url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL)
+    key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+    headers = {"X-API-Key": key} if key else None
+    return RpcClient(
+        url,
+        timeout=args.timeout,
+        attempts=args.attempts,
+        min_interval_seconds=args.min_interval,
+        extra_headers=headers,
     )
 
 
@@ -257,7 +272,7 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 def cmd_rpc_pons_sample(args: argparse.Namespace) -> int:
-    rpc = _rpc(args)
+    rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     if args.version == "v1":
         address = PONS_V1_FACTORY
