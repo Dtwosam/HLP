@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  blockreq-archive:
+  nodeflare-public-history:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,15 +26,15 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e .
-      - name: Locate Pons V1 deployment on archive state
+      - name: Locate Pons V1 deployment using historical state
         run: |
           hlp \
-            --rpc-url https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public \
+            --rpc-url https://rpc.nodeflare.app/robinhood/public \
             --timeout 15 --attempts 3 \
             deployment-block 0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB
-      - name: Locate Pons V2 deployment on archive state
+      - name: Locate Pons V2 deployment using historical state
         run: |
           hlp \
-            --rpc-url https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public \
+            --rpc-url https://rpc.nodeflare.app/robinhood/public \
             --timeout 15 --attempts 3 \
             deployment-block 0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e
