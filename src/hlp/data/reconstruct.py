@@ -85,3 +85,79 @@ def reconstruct_v3_price_points(
             "quote_decimals": quote_state.decimals,
             "total_supply_raw": token_state.total_supply,
         }
+
+
+
+def v3_quote_price_at_block(
+    rpc: RpcClient,
+    *,
+    token: str,
+    quote_token: str,
+    pool: str,
+    block: int,
+) -> Decimal:
+    """Read a V3 token/quote price from state at the end of a known block."""
+    from hlp.protocols.state import read_v3_slot0
+
+    token = normalize_address(token)
+    quote_token = normalize_address(quote_token)
+    pool = normalize_address(pool)
+    pool_state = read_v3_pool_static(rpc, pool, block=block)
+    if {pool_state.token0, pool_state.token1} != {token, quote_token}:
+        raise ValueError("anchor pool assets do not match token/quote")
+    token_state = read_erc20_static(rpc, token, block=block)
+    quote_state = read_erc20_static(rpc, quote_token, block=block)
+    slot0 = read_v3_slot0(rpc, pool, block=block)
+    return v3_v4_quote_per_token(
+        slot0.sqrt_price_x96,
+        token_is_token0=pool_state.token0 == token,
+        token_decimals=token_state.decimals,
+        quote_decimals=quote_state.decimals,
+    )
+
+
+def event_order(row: dict) -> tuple[int, int, int]:
+    tx_index = row.get("transaction_index")
+    return (
+        int(row["block_number"]),
+        -1 if tx_index is None else int(tx_index),
+        int(row["log_index"]),
+    )
+
+
+def attach_quote_usd_anchor(
+    target_points,
+    anchor_points,
+    *,
+    initial_quote_usd: Decimal,
+):
+    """Attach the latest *already observable* quote/USD value to token points.
+
+    target_points contain token price in the target quote (e.g. WETH).
+    anchor_points contain USD-anchor units per target quote (e.g. USDG/WETH).
+
+    The initial value must come from the block immediately before the target
+    window, not from the target block's final state. Same-block anchor swaps
+    are applied only when their transaction/log order precedes the target
+    event.
+    """
+    if initial_quote_usd <= 0:
+        raise ValueError("initial_quote_usd must be positive")
+
+    anchors = iter(anchor_points)
+    next_anchor = next(anchors, None)
+    active = initial_quote_usd
+
+    for row in target_points:
+        target_order = event_order(row)
+        while next_anchor is not None and event_order(next_anchor) <= target_order:
+            active = Decimal(next_anchor["quote_per_token"])
+            next_anchor = next(anchors, None)
+
+        token_in_quote = Decimal(row["quote_per_token"])
+        supply_quote = Decimal(row["market_cap_quote"])
+        out = dict(row)
+        out["quote_usd"] = str(active)
+        out["token_price_usd"] = str(token_in_quote * active)
+        out["market_cap_proxy_usd"] = str(supply_quote * active)
+        yield out
