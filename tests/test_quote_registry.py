@@ -60,3 +60,22 @@ def test_quote_registry_classifies_special_stock_and_unknown():
     assert by_token[STOCK]["first_launch_block"] == 12
     assert by_token[STOCK]["versions"] == {"v1": 1, "v2": 1}
     assert by_token[UNKNOWN]["pricing_status"] == "unsupported_quote"
+
+
+def test_quote_registry_marks_missing_chainlink_feed():
+    def empty_directory(request, timeout):
+        return b"<html>no matching feed</html>"
+
+    rows = build_pons_quote_registry(
+        [{
+            "version": "v2",
+            "pair_token": STOCK,
+            "quote_decimals": 18,
+            "block_number": 12,
+        }],
+        assets_client=RobinhoodAssetsClient(transport=asset_transport),
+        directory_client=ChainlinkDirectoryClient(transport=empty_directory),
+    )
+    assert rows[0]["pricing_status"] == "missing_chainlink_feed"
+    assert rows[0]["symbol"] == "NVDA"
+    assert rows[0]["feed"] is None
