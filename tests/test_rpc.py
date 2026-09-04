@@ -167,3 +167,60 @@ def test_chunked_logs_fail_fast_before_range_shrink():
     list(rpc.iter_logs_chunked(0, 7, chunk_size=8, min_chunk_size=1))
     # One failed width=8 request, then two successful width=4 pages.
     assert calls == [(0, 7), (0, 3), (4, 7)]
+
+
+
+def test_batch_call_preserves_request_order():
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        assert isinstance(payload, list)
+        assert [item["method"] for item in payload] == [
+            "eth_getBlockByNumber",
+            "eth_getBlockByNumber",
+        ]
+        # Return deliberately reversed: JSON-RPC batch response order is not
+        # guaranteed.
+        return json.dumps(
+            [
+                {"jsonrpc": "2.0", "id": 2, "result": {"number": hex(11)}},
+                {"jsonrpc": "2.0", "id": 1, "result": {"number": hex(10)}},
+            ]
+        ).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    rows = rpc.get_blocks_batched([10, 11], batch_size=2)
+    assert [int(row["number"], 16) for row in rows] == [10, 11]
+    assert rpc.requests_made == 1
+
+
+def test_batched_blocks_fall_back_to_single_rpc_if_batch_unsupported():
+    calls = []
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        calls.append(payload)
+        if isinstance(payload, list):
+            return json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {"code": -32600, "message": "batch disabled"},
+                }
+            ).encode()
+        block = int(payload["params"][0], 16)
+        return json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"number": hex(block)},
+            }
+        ).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    rows = rpc.get_blocks_batched(
+        [10],
+        batch_size=1,
+        min_batch_size=1,
+    )
+    assert int(rows[0]["number"], 16) == 10
+    assert len(calls) == 2
