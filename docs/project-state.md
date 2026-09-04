@@ -177,6 +177,24 @@ not auto-launch archive matrices. Dependency run IDs are workflow-dispatch
 inputs rather than reasons to edit workflow YAML. Heavy jobs fail fast when a
 required artifact is unavailable; runner-side polling is forbidden.
 
+Measured recovery behavior on the keyless archive route showed that dense
+716k–864k block shards can hit the 30-minute GitHub job limit even though the
+RPC path is healthy. The full-history definitions were therefore resized
+without increasing concurrent RPC pressure:
+
+- V2 curve: 64 shards, about 432k blocks each, max-parallel 2, 25-minute cap;
+- WETH/USDG anchor: 128 shards, about 358k blocks each, max-parallel 2,
+  25-minute cap;
+- V1 global V3 tape: 128 shards, about 358k blocks each, max-parallel 2,
+  25-minute cap;
+- V2 global PoolManager V4 tape: 64 shards, about 432k blocks each,
+  max-parallel 2, 25-minute cap.
+
+Two reusable manual-only range recovery workflows split any exact failed curve
+or anchor interval into four smaller subshards and merge only that interval.
+Successful historical shards are never re-fetched just because a later dense
+range timed out.
+
 This keeps normal development/tests responsive while long archive shards run,
 and prevents accidental backfills from competing for GitHub-hosted runner
 capacity. Secondary network/integration smokes are manual-only; the fast
