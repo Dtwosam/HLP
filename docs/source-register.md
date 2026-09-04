@@ -141,3 +141,28 @@ historical acquisition candidate and independent verification.
 Constraint:
 GitHub-hosted runners could not reach the service during Phase 1 networking tests, so this source cannot be a required CI dependency unless that changes. Promote to canonical bulk source only after the sampler is exercised successfully from a reachable runtime and reconciled against independent evidence.
 
+
+## SRC-010 — NodeFlare Robinhood RPC
+URLs:
+https://nodeflare.app/chains/robinhood
+https://nodeflare.app/chains/robinhood/eth_getlogs
+
+Verified current offer:
+- public no-key Robinhood RPC;
+- free keyed tier with 2,000,000 CU/month and no credit card;
+- eth_getLogs is a keyed heavy method at 25 CU/call;
+- current docs describe historical state support.
+
+Phase-1 runtime caveat:
+GitHub-hosted shared runners hit HTTP 429 immediately on the public endpoint. Do not use GitHub-hosted CI as the historical acquisition worker.
+
+Allowed use:
+candidate free archive/state provider and keyed bulk-log source from a dedicated/reachable runtime.
+
+## SRC-011 — BlockReq Robinhood public RPC
+URL:
+https://blockreq.com/chains/robinhood
+
+Status: REJECTED for zero-key archive history.
+
+Live Phase-1 response from the published public endpoint stated that only the latest 1,024 blocks are served and registration is required for archive access. Keep only as evidence that provider landing-page claims must be validated against actual RPC behavior.
