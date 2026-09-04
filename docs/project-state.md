@@ -122,7 +122,10 @@ The complete registry contains 57 Pons quote assets. Direct official Chainlink
 coverage plus cbBTC's verified crypto/USD feed does not cover every Robinhood
 Stock Token used by Pons. The official Chainlink Robinhood directory inventory
 contained 54 total feed records at audit time and genuinely omitted 30 Pons
-Stock Token symbols; this is not treated as a parser failure.
+Stock Token symbols; this is not treated as a parser failure. The frozen quote
+audit proves all 30 missing-feed assets are used by **V2 only**; none appear in
+V1 launches. Therefore V1 eligibility does not depend on the V3/V4 quote
+fallback chain.
 
 A causal Uniswap V3 fallback audit at each quote's first Pons use proved:
 
@@ -186,9 +189,8 @@ The complete downstream eligibility paths are now explicitly staged as:
 - shared: full Pons registry -> quote audit -> Chainlink/cbBTC oracle +
   venue-specific V3/V4 quote fallbacks -> one disjoint generic quote/USD tape,
   plus the WETH/USDG anchor where lifecycle pricing requires it;
-- V1: full registry -> globally scanned/filter-local V3 tape -> Chainlink +
-  generic fallback USD replay -> summary-only lifecycle eligibility -> frozen
-  >=$100k V1 subset;
+- V1: full registry -> globally scanned/filter-local V3 tape -> Chainlink USD
+  replay -> summary-only lifecycle eligibility -> frozen >=$100k V1 subset;
 - V2: V2 registry -> curve/transition -> V4 tape -> Chainlink + generic
   fallback USD replay -> summary-only lifecycle eligibility -> frozen >=$100k
   V2 subset;
