@@ -1881,15 +1881,18 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
         provenance={
             "source": "evm_json_rpc",
             "chain_id": 4663,
-            "protocol": "pons_v2_v4_swaps",
+            "protocol": "pons_v2_v4_price_events",
             "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
             "registrations": Path(args.registrations).name,
             "registered_pool_ids": len(pool_ids),
             "from_block": args.from_block,
             "to_block": args.to_block,
-            "event_topic0": V4_SWAP_TOPIC,
+            "event_topic0_or": [V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC],
             "event_topic1_pool_ids": sorted(pool_ids),
-            "filter_semantics": "server-side topic1 OR over registered Pons V2 pool ids",
+            "filter_semantics": (
+                "server-side topic0 Initialize/Swap OR and topic1 OR over "
+                "registered Pons V2 pool ids"
+            ),
         },
     )
     print(
