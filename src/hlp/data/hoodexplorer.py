@@ -180,6 +180,55 @@ class HoodExplorerClient:
             )
         return result
 
+    def iter_logs(
+        self,
+        *,
+        address: str | None = None,
+        topic0: str | None = None,
+        from_block: int = 0,
+        to_block: int | str = "latest",
+        page_size: int = 1000,
+        max_records: int | None = None,
+        min_interval_seconds: float | None = None,
+    ):
+        """Yield indexed logs in stable ascending order.
+
+        Keyless hoodexplorer access is currently documented at 60 req/min.
+        The default cadence stays slightly below that limit. If an API key is
+        explicitly configured, callers may choose a smaller interval.
+        """
+        if max_records is not None and max_records <= 0:
+            return
+        if min_interval_seconds is None:
+            min_interval_seconds = 0.0 if self.api_key else 1.05
+        page = 1
+        emitted = 0
+        while True:
+            started = time.monotonic()
+            rows = self.get_logs_page(
+                address=address,
+                topic0=topic0,
+                from_block=from_block,
+                to_block=to_block,
+                page=page,
+                offset=page_size,
+                sort="asc",
+            )
+            if not rows:
+                return
+            for row in rows:
+                yield row
+                emitted += 1
+                if max_records is not None and emitted >= max_records:
+                    return
+            if len(rows) < page_size:
+                return
+            page += 1
+            elapsed = time.monotonic() - started
+            sleep_for = min_interval_seconds - elapsed
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+
     def token_info(self, token: str) -> dict[str, Any]:
         rows = self.call("token", "tokeninfo", contractaddress=normalize_address(token))
         if not rows:
