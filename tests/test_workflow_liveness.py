@@ -100,6 +100,8 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-v2-curve-recover-tail-one-shot.yml",
+    "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
 }
 
 
