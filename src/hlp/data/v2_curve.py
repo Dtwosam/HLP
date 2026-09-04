@@ -5,25 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Iterable, Iterator
 
-from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.reconstruct import event_order
 from hlp.price import constant_product_spot_quote_per_token, human_amount
-
-
-ZERO_ADDRESS = "0x" + "00" * 20
-
-
-def _launch_order(row: dict) -> tuple[int, int, int]:
-    return event_order(row)
-
-
-def _quote_usd_status(pair_token: str, active_weth_usd: Decimal):
-    pair = pair_token.lower()
-    if pair in {ZERO_ADDRESS, ROBINHOOD_WETH.lower()}:
-        return "priced_native_or_weth", active_weth_usd
-    if pair == ROBINHOOD_USDG.lower():
-        return "priced_usdg_nominal", Decimal(1)
-    return "unsupported_quote", None
 
 
 def build_v2_curve_market_cap_points(
@@ -32,6 +16,8 @@ def build_v2_curve_market_cap_points(
     weth_usd_anchor_points: Iterable[dict],
     *,
     initial_weth_usd: Decimal,
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
 ) -> Iterator[dict]:
     """Replay every V2 curve from launch using only observable event deltas.
 
@@ -49,18 +35,15 @@ def build_v2_curve_market_cap_points(
     registry_list = sorted(list(registry_rows), key=_launch_order)
     launches = iter(registry_list)
     events = iter(curve_event_rows)
-    anchors = iter(weth_usd_anchor_points)
     next_launch = next(launches, None)
     next_event = next(events, None)
-    next_anchor = next(anchors, None)
-    active_weth_usd = initial_weth_usd
+    usd = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
     states: dict[str, dict[str, int]] = {}
-
-    def advance_anchor(order):
-        nonlocal next_anchor, active_weth_usd
-        while next_anchor is not None and event_order(next_anchor) <= order:
-            active_weth_usd = Decimal(next_anchor["quote_per_token"])
-            next_anchor = next(anchors, None)
 
     def price_row(base: dict, launch: dict, *, event_type: str):
         curve_address = launch["curve"].lower()
@@ -71,10 +54,8 @@ def build_v2_curve_market_cap_points(
             quote_decimals=int(launch["quote_decimals"]),
             token_decimals=int(launch["token_decimals"]),
         )
-        pricing_status, quote_usd = _quote_usd_status(
-            launch["pair_token"],
-            active_weth_usd,
-        )
+        quote_usd = usd.price(launch["pair_token"])
+        pricing_status = usd.pricing_status(launch["pair_token"])
         out = dict(base)
         out.update(
             {
@@ -119,7 +100,7 @@ def build_v2_curve_market_cap_points(
         ):
             launch = next_launch
             order = launch_order
-            advance_anchor(order)
+            usd.advance_to(order)
             curve_address = launch["curve"].lower()
             if curve_address in states:
                 raise ValueError(f"duplicate V2 curve launch: {curve_address}")
@@ -139,7 +120,7 @@ def build_v2_curve_market_cap_points(
 
         event = next_event
         order = event_ord
-        advance_anchor(order)
+        usd.advance_to(order)
         curve_address = event["curve"].lower()
         launch = registry_by_curve.get(curve_address)
         state = states.get(curve_address)
