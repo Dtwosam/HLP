@@ -143,3 +143,59 @@ def test_v3_route_initial_state_matches_quote_timeline_shape():
         "activation_block": 100,
         "usd_price": "200",
     }]
+
+
+
+def test_delayed_route_updates_do_not_activate_before_first_swap():
+    from decimal import Decimal
+
+    delayed = {
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "activation_block": 100,
+        "activation_transaction_index": 3,
+        "activation_log_index": 5,
+        "pool": POOL,
+        "anchor_token": ROBINHOOD_USDG.lower(),
+        "anchor_decimals": 6,
+        "route_type": "uniswap_v3_direct_usdg_delayed",
+    }
+    events = [
+        {
+            "pool": POOL,
+            "sqrt_price_x96": 2**96,
+            "block_number": 100,
+            "transaction_hash": "0x" + "11" * 32,
+            "transaction_index": 2,
+            "log_index": 7,
+        },
+        {
+            "pool": POOL,
+            "sqrt_price_x96": 2**96,
+            "block_number": 100,
+            "transaction_hash": "0x" + "22" * 32,
+            "transaction_index": 3,
+            "log_index": 5,
+        },
+    ]
+    rows = list(routes.build_v3_route_usd_updates(
+        [delayed],
+        events,
+        [],
+        initial_weth_usd=Decimal("2000"),
+    ))
+    assert len(rows) == 1
+    assert rows[0]["transaction_hash"] == "0x" + "22" * 32
+
+
+def test_delayed_routes_have_no_pre_activation_state():
+    rows = routes.build_v3_route_initial_usd_states([{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "route_type": "uniswap_v3_direct_usdg_delayed",
+        "pool": POOL,
+        "activation_block": 100,
+        "causal_state_block": None,
+    }])
+    assert rows == []

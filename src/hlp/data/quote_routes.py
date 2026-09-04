@@ -11,7 +11,7 @@ from hlp.config import (
     UNISWAP_V3_FACTORY,
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
 )
-from hlp.data.reconstruct import v3_quote_price_at_block
+from hlp.data.reconstruct import event_order, v3_quote_price_at_block
 from hlp.price import v3_v4_quote_per_token
 from hlp.protocols.state import (
     read_v3_factory_pool,
@@ -19,6 +19,7 @@ from hlp.protocols.state import (
     read_v3_pool_static,
     read_v3_slot0,
 )
+from hlp.protocols.uniswap import V3_SWAP_TOPIC, decode_v3_swap
 
 
 V3_CANONICAL_FEES = (100, 500, 3000, 10000)
@@ -215,6 +216,112 @@ def audit_unpriced_v3_quote_routes(
 
 
 
+
+def discover_delayed_v3_usdg_routes(
+    rpc,
+    audit_rows: Iterable[dict],
+    *,
+    to_block: int,
+    max_forward_blocks: int = 100_000,
+    chunk_size: int = 2_000,
+    min_chunk_size: int = 25,
+) -> list[dict]:
+    """Activate unresolved direct USDG routes at their first later V3 swap."""
+    if max_forward_blocks <= 0:
+        raise ValueError("max_forward_blocks must be positive")
+    output = []
+    for source in audit_rows:
+        if bool(source.get("v3_causal_ready")):
+            continue
+        token = source["quote_token"].lower()
+        first_use = int(source["first_launch_block"])
+        end = min(int(to_block), first_use + int(max_forward_blocks))
+        candidates = {
+            row["pool"].lower(): row
+            for row in source.get("v3_candidates", [])
+            if row["anchor_token"].lower() == ROBINHOOD_USDG.lower()
+        }
+        result = {
+            "quote_token": token,
+            "symbol": source.get("symbol"),
+            "quote_decimals": int(source["quote_decimals"]),
+            "first_launch_block": first_use,
+            "launches": int(source["launches"]),
+            "versions": source.get("versions", {}),
+            "searched_to_block": end,
+            "candidate_pools": sorted(candidates),
+            "delayed_route_ready": False,
+            "route": None,
+        }
+        if not candidates or end < first_use:
+            output.append(result)
+            continue
+
+        raw_logs = rpc.iter_logs_chunked(
+            first_use,
+            end,
+            address=sorted(candidates),
+            topics=[V3_SWAP_TOPIC],
+            chunk_size=chunk_size,
+            min_chunk_size=min_chunk_size,
+        )
+        first_raw = next(iter(raw_logs), None)
+        if first_raw is None:
+            output.append(result)
+            continue
+
+        swap = decode_v3_swap(first_raw)
+        pool = swap.pool.lower()
+        candidate = candidates.get(pool)
+        if candidate is None:
+            raise KeyError(f"delayed V3 swap came from unknown pool {pool}")
+        if swap.liquidity <= 0:
+            raise ValueError("first delayed V3 swap has zero active liquidity")
+
+        state = read_v3_pool_static(rpc, pool, block=swap.block_number)
+        if {state.token0.lower(), state.token1.lower()} != {
+            token,
+            ROBINHOOD_USDG.lower(),
+        }:
+            raise ValueError("delayed V3 route pool assets mismatch")
+        token_is_token0 = state.token0.lower() == token
+        quote_per_token = v3_v4_quote_per_token(
+            swap.sqrt_price_x96,
+            token_is_token0=token_is_token0,
+            token_decimals=int(source["quote_decimals"]),
+            quote_decimals=6,
+        )
+        if quote_per_token <= 0:
+            raise ValueError("delayed V3 route price is not positive")
+
+        result["delayed_route_ready"] = True
+        result["route"] = {
+            "quote_token": token,
+            "symbol": source.get("symbol"),
+            "quote_decimals": int(source["quote_decimals"]),
+            "activation_block": int(swap.block_number),
+            "activation_transaction_index": swap.transaction_index,
+            "activation_log_index": int(swap.log_index),
+            "launches": int(source["launches"]),
+            "versions": source.get("versions", {}),
+            "pool": pool,
+            "block_number": int(swap.block_number),
+            "anchor_token": ROBINHOOD_USDG.lower(),
+            "anchor_decimals": 6,
+            "fee": int(candidate["fee"]),
+            "route_type": "uniswap_v3_direct_usdg_delayed",
+            "activation_liquidity": int(swap.liquidity),
+            "first_observed_quote_per_token": str(quote_per_token),
+            "first_observed_usd_price": str(quote_per_token),
+        }
+        output.append(result)
+
+    output.sort(
+        key=lambda row: (row["first_launch_block"], row["quote_token"])
+    )
+    return output
+
+
 def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
     """Select one deterministic causal V3 route for each covered quote asset."""
     selected = []
@@ -289,6 +396,8 @@ def build_v3_route_initial_usd_states(
     """Convert selected route activation states to generic quote/USD state."""
     rows = []
     for route in route_rows:
+        if route.get("causal_state_block") is None:
+            continue
         rows.append({
             "quote_token": route["quote_token"].lower(),
             "symbol": route.get("symbol"),
@@ -339,7 +448,14 @@ def build_v3_route_usd_updates(
             raise KeyError(
                 f"V3 fallback event pool is absent from route registry: {pool}"
             )
-        if int(event["block_number"]) < int(route["activation_block"]):
+        activation_order = (
+            int(route["activation_block"]),
+            -1 if route.get("activation_transaction_index") is None
+            else int(route["activation_transaction_index"]),
+            -1 if route.get("activation_log_index") is None
+            else int(route["activation_log_index"]),
+        )
+        if order < activation_order:
             continue
 
         usd.advance_to(order)
