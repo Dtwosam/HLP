@@ -69,12 +69,12 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
       SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: '8'
+      SHARD_COUNT: '16'
       GENERATION_START: '8600612'
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
       SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: '8'
+      SHARD_COUNT: '16'
       GENERATION_START: '26841846'
     steps:
       - uses: actions/checkout@v4
@@ -212,7 +212,7 @@ jobs:
               rows = []
               manifests = []
               files = sorted(Path(directory).glob(f"{prefix}-shard-*.jsonl"))
-              assert len(files) == 8, (directory, [x.name for x in files])
+              assert len(files) == 16, (directory, [x.name for x in files])
               previous_hi = None
               for path in files:
                   manifest_path = path.with_suffix(path.suffix + ".manifest.json")
