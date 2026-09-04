@@ -68,7 +68,10 @@ def test_archive_matrix_workflows_are_small_and_bounded():
     for name in MATRIX_WORKFLOWS:
         content = _workflow(name)
         assert "max-parallel: 2" in content, name
-        if name == "phase1-pons-v2-curve-full.yml":
+        if name in {
+            "phase1-pons-v2-curve-full.yml",
+            "phase1-pons-v2-v4-full.yml",
+        }:
             assert "SHARD_COUNT: '64'" in content, name
             assert "timeout-minutes: 25" in content, name
         elif name in {
