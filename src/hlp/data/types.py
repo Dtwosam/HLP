@@ -46,6 +46,18 @@ class PoolsTradeTokenCreated:
 
 
 @dataclass(frozen=True, slots=True)
+class PoolsTradeTokenDistributed:
+    launcher: str
+    token: str
+    strategy: str
+    amount_raw: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class PoolsTradeTokenLaunched:
     strategy: str
     pool_id: str
