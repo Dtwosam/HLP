@@ -83,6 +83,50 @@ Verified provider facts at 2026-09-04:
 
 Secrets are never committed. No archive key is currently configured in the GitHub runner, so the verified acquisition path is the keyless public archive route. HLP automatically switches to the authenticated Free endpoint if a key is later provided.
 
+## Measured Pons full-history backfill
+
+Frozen registry snapshot head: **54,486,035**.
+
+The first full-registry run proved that the launch population is much larger
+than the bounded smoke cohorts. Six completed V2 shards already contain
+**106,428 V2 launches** before shards 5 and 7 are counted:
+
+- V2 shard 0: 6,800 launches;
+- V2 shard 1: 4,007 launches;
+- V2 shard 2: 9,252 launches;
+- V2 shard 3: 8,708 launches;
+- V2 shard 4: 9,894 launches;
+- V2 shard 6: 67,767 launches.
+
+The original eight-way V1 geometry covered about 5.74M blocks/job and hit the
+35-minute GitHub Actions ceiling without a chain/data error. A same-head
+**16-way V1 recovery** is active; it reuses the successful original V2
+artifacts rather than crawling V2 twice. The recovered merge fails closed on
+block continuity, duplicate tokens, V1/V2 overlap, record counts and snapshot
+head mismatch.
+
+Measured V2 registry storage remains small relative to lifecycle tapes: the
+8,708-launch shard-3 artifact was about 1.06 MB compressed. Raw swaps and
+transfers, not launch metadata, are the expected storage driver.
+
+### Lifecycle boundary completeness
+
+- [x] V1 Uniswap V3 Initialize is retained as a price point rather than starting at first swap
+- [x] V1 smoke proved 166 launches -> 166 exact Initialize events plus 114,042 swaps
+- [x] V2 Uniswap V4 Initialize is retained separately from PoolGraduated and first V4 swap
+- [x] V2 smoke proved 1 registration -> 1 exact Initialize plus 788 swaps
+- [x] curve -> V4 Initialize -> PoolGraduated seed -> first V4 swap ordering is preserved explicitly
+- [x] refreshed 100k-block research cohort still has 5 eligible tokens (4 V1, 1 V2)
+- [x] refreshed cohort preserves continuous upside; all 5 eligible tokens have at least one later 5x point and the largest observed later multiple remains about 159.8x
+
+### Quote-asset completeness
+
+V2 already uses official Robinhood Stock Token identities plus historical
+Chainlink USD feeds. V1 is being moved onto the same causal quote timeline so
+non-WETH/USDG Pons pairs cannot be silently excluded from the $100k universe.
+Unknown quote assets remain explicit unsupported rows; they are never assigned
+a guessed USD price.
+
 ## Query-efficiency design
 
 Do not issue one historical API query per coin unless unavoidable.
@@ -91,8 +135,9 @@ Planned high-level scans:
 1. factory launch events -> token/curve/pool registry;
 2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
 3. Uniswap V4 swaps from the single PoolManager with registered Pons pool IDs pushed into indexed topic1 server-side filters;
-4. V3 swaps through a shared protocol tape or efficiently sharded Pons pool filters, avoiding one historical query per token;
-5. only after the $100k universe is known, fetch ERC-20 Transfer history for eligible tokens to reconstruct historical holder state.
+4. V3 Initialize/Swap through efficiently sharded Pons pool filters, avoiding one historical query per token;
+5. first-pass price/mcap reconstruction keeps eligibility evidence for the full launch population without doing holder/wallet backfills;
+6. only after the $100k universe is known, fetch complete market/transfer history for eligible tokens to reconstruct wallet and historical holder state.
 
 This sequencing prevents transfer/holder backfills for the overwhelming majority of coins that never become research-eligible.
 
