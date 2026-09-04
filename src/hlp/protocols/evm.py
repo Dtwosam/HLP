@@ -11,6 +11,10 @@ def event_topic(signature: str) -> str:
     return "0x" + keccak(text=signature).hex()
 
 
+def function_selector(signature: str) -> str:
+    return "0x" + keccak(text=signature)[:4].hex()
+
+
 def topic_address(topic: str) -> str:
     value = topic.removeprefix("0x")
     if len(value) != 64:
