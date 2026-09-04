@@ -257,3 +257,34 @@ def test_v3_route_audit_preserves_non_uniswap_factory(monkeypatch):
     assert audit[0]["venue"] == "sushiswap_v3"
     assert selected[0]["factory"] == SUSHISWAP_V3_FACTORY.lower()
     assert selected[0]["route_type"] == "sushiswap_v3_direct_usdg"
+
+
+
+def test_v3_route_audit_does_not_require_anchor_rows(monkeypatch):
+    residual = [quote_rows()[-1]]
+
+    def get_pool(rpc, factory, *, token_a, token_b, fee, block):
+        if token_b == ROBINHOOD_USDG.lower() and fee == 3000:
+            return POOL
+        return None
+
+    monkeypatch.setattr(routes, "read_v3_factory_pool", get_pool)
+    monkeypatch.setattr(
+        routes,
+        "read_v3_pool_static",
+        lambda rpc, pool, block: SimpleNamespace(
+            token0=TOKEN,
+            token1=ROBINHOOD_USDG.lower(),
+        ),
+    )
+    monkeypatch.setattr(
+        routes,
+        "read_v3_slot0",
+        lambda rpc, pool, block: SimpleNamespace(sqrt_price_x96=2**96),
+    )
+    monkeypatch.setattr(routes, "read_v3_liquidity", lambda rpc, pool, block: 100)
+
+    rows = routes.audit_unpriced_v3_quote_routes(Rpc(), residual)
+
+    assert rows[0]["v3_causal_ready"] is True
+    assert rows[0]["direct_usdg_ready"] is True

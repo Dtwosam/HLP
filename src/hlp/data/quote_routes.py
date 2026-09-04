@@ -51,10 +51,21 @@ def audit_unpriced_v3_quote_routes(
     factory = factory.lower()
     venue = _v3_venue(factory)
     special_decimals = {
-        row["quote_token"].lower(): int(row["quote_decimals"])
-        for row in rows
-        if row.get("quote_decimals") is not None
+        ROBINHOOD_USDG.lower(): 6,
+        ROBINHOOD_WETH.lower(): 18,
     }
+    for row in rows:
+        if row.get("quote_decimals") is None:
+            continue
+        token = row["quote_token"].lower()
+        observed = int(row["quote_decimals"])
+        expected = special_decimals.get(token)
+        if expected is not None and observed != expected:
+            raise ValueError(
+                f"canonical quote decimals disagree for {token}: "
+                f"expected={expected} observed={observed}"
+            )
+        special_decimals[token] = observed
     anchor_specs = (
         (ROBINHOOD_USDG.lower(), "usdg_nominal"),
         (ROBINHOOD_WETH.lower(), "weth_usdg"),
