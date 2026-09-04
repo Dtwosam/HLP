@@ -38,7 +38,10 @@ jobs:
           )
           from hlp.data.rpc import RpcClient
           from hlp.protocols.noxa import TOKEN_LAUNCHED_TOPIC, decode_noxa_launch
-          from hlp.protocols.noxa_state import read_noxa_launch_config
+          from hlp.protocols.noxa_state import (
+              read_noxa_launch_config,
+              read_noxa_launched_token,
+          )
           from hlp.protocols.uniswap import (
               V3_POOL_CREATED_TOPIC,
               decode_v3_pool_created,
@@ -90,6 +93,15 @@ jobs:
               )
               for config_id in config_ids
           }
+          first_launch_state = read_noxa_launched_token(
+              rpc,
+              launches[0].token,
+              block=launches[0].block_number,
+          )
+          assert first_launch_state.token == launches[0].token
+          assert first_launch_state.paired_token == launches[0].pair_token
+          assert first_launch_state.launch_config_id == launches[0].launch_config_id
+
           for config_id in config_ids:
               start = configs_start[config_id]
               end = configs_end[config_id]
@@ -98,6 +110,7 @@ jobs:
               assert start.dex_id == end.dex_id
               assert start.supply == 1_000_000_000 * 10**18
               assert start.pair_token == ROBINHOOD_WETH.lower()
+              assert first_launch_state.supply == start.supply
 
           pool_logs = list(
               rpc.iter_logs_chunked(
@@ -130,6 +143,10 @@ jobs:
               "noxa_pools": len(launch_pools),
               "all_v3_pools_in_window": len(pools),
               "missing_v3_pool_creations": len(missing),
+              "config_extension_words": {
+                  str(config_id): list(configs_start[config_id].extension_words)
+                  for config_id in config_ids
+              },
               "requests_made": rpc.requests_made,
           }, sort_keys=True))
           PY
