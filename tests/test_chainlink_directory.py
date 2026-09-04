@@ -56,3 +56,42 @@ def test_parse_hyphenated_robinhood_feed_name():
     assert row.symbol == "AMC"
     assert row.name == "Robinhood AMC-USD"
     assert row.proxy_address == proxy
+
+
+
+def test_parse_current_rh_prefixed_stock_feed_name():
+    proxy = "0x" + "66" * 20
+    page = (
+        '"heartbeat":[0,86400],'
+        '"history":[0,null],'
+        '"name":[0,"RHDELL / USD"],'
+        '"path":[0,"rhdell-usd-shared-svr"],'
+        f'"proxyAddress":[0,"{proxy}"],'
+        f'"secondaryProxyAddress":[0,"0x{"77" * 20}"],'
+        '"docs":[0,{"blockchainName":[0,"Robinhood"]}],'
+    )
+
+    row = ChainlinkDirectoryClient.parse_robinhood_feed(page, "dell")
+
+    assert row.name == "RHDELL / USD"
+    assert row.proxy_address == proxy
+
+
+def test_parse_robinhood_crypto_usd_feed():
+    proxy = "0x" + "88" * 20
+    page = (
+        '"heartbeat":[0,86400],'
+        '"history":[0,null],'
+        '"name":[0,"CBBTC / USD"],'
+        '"path":[0,"cbbtc-usd-shared-svr"],'
+        f'"proxyAddress":[0,"{proxy}"],'
+        f'"secondaryProxyAddress":[0,"0x{"99" * 20}"],'
+        '"docs":[0,{"blockchainName":[0,"Robinhood"]}],'
+    )
+
+    row = ChainlinkDirectoryClient.parse_robinhood_crypto_usd_feed(
+        page, "cbbtc"
+    )
+
+    assert row.name == "CBBTC / USD"
+    assert row.proxy_address == proxy

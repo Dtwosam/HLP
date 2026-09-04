@@ -94,12 +94,13 @@ class ChainlinkDirectoryClient:
         return int(match.group(1)) if match else None
 
     @staticmethod
-    def parse_robinhood_feed(page_text: str, symbol: str) -> RobinhoodFeedDirectoryEntry:
+    def _parse_robinhood_named_feed(
+        page_text: str,
+        *,
+        symbol: str,
+        accepted_names: set[str],
+    ) -> RobinhoodFeedDirectoryEntry:
         symbol = symbol.upper().strip()
-        accepted_names = {
-            f"Robinhood {symbol} / USD",
-            f"Robinhood {symbol}-USD",
-        }
         positions = []
         for accepted_name in sorted(accepted_names):
             marker = f'"name":[0,"{accepted_name}"]'
@@ -141,9 +142,14 @@ class ChainlinkDirectoryClient:
 
             if name not in accepted_names or blockchain != "Robinhood":
                 continue
-            if not path or not path.startswith(
-                f"robinhood-{symbol.lower()}-usd-"
-            ):
+            # Feed-directory paths have changed naming families over time.
+            # Identity is the exact official feed name + Robinhood chain +
+            # proxy address. Keep only a weak path sanity check rather than
+            # coupling discovery to one historical slug convention.
+            if not path:
+                continue
+            path_lower = path.lower()
+            if "usd" not in path_lower or symbol.lower() not in path_lower:
                 continue
             if not proxy or not re.fullmatch(_ADDRESS_RE, proxy):
                 continue
@@ -187,6 +193,40 @@ class ChainlinkDirectoryClient:
                 f"{sorted(unique)}"
             )
         return next(iter(unique.values()))
+
+    @staticmethod
+    def parse_robinhood_feed(
+        page_text: str,
+        symbol: str,
+    ) -> RobinhoodFeedDirectoryEntry:
+        """Resolve one Stock Token feed across old and current name families."""
+        symbol = symbol.upper().strip()
+        return ChainlinkDirectoryClient._parse_robinhood_named_feed(
+            page_text,
+            symbol=symbol,
+            accepted_names={
+                f"Robinhood {symbol} / USD",
+                f"Robinhood {symbol}-USD",
+                f"RH{symbol} / USD",
+                f"RH{symbol}-USD",
+            },
+        )
+
+    @staticmethod
+    def parse_robinhood_crypto_usd_feed(
+        page_text: str,
+        symbol: str,
+    ) -> RobinhoodFeedDirectoryEntry:
+        """Resolve a non-Stock-Token crypto/USD feed on Robinhood Chain."""
+        symbol = symbol.upper().strip()
+        return ChainlinkDirectoryClient._parse_robinhood_named_feed(
+            page_text,
+            symbol=symbol,
+            accepted_names={
+                f"{symbol} / USD",
+                f"{symbol}-USD",
+            },
+        )
 
     def robinhood_feeds(
         self,
