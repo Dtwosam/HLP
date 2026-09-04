@@ -24,6 +24,8 @@ def build_v1_market_cap_points(
     weth_usd_anchor_points: Iterable[dict],
     *,
     initial_weth_usd: Decimal,
+    weth_decimals: int,
+    usdg_decimals: int,
 ) -> Iterator[dict]:
     """Join shared Pons V1 swaps to supply/config and point-in-time USD.
 
@@ -75,11 +77,11 @@ def build_v1_market_cap_points(
         token_is_token0 = int(token, 16) < int(quote, 16)
 
         if quote == weth:
-            quote_decimals = 18
+            quote_decimals = weth_decimals
             quote_usd = active_weth_usd
             pricing_status = "priced_weth_usdg"
         elif quote == usdg:
-            quote_decimals = 18
+            quote_decimals = usdg_decimals
             quote_usd = Decimal(1)
             pricing_status = "priced_usdg_nominal"
         else:
