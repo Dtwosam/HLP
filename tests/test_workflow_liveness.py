@@ -92,6 +92,9 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v1-v3-full.yml",
     "phase1-pons-v1-lifecycle-eligibility.yml",
     "phase1-pons-eligible-universe-freeze.yml",
+    "phase1-pons-v3-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-fallback-full.yml",
+    "phase1-pons-quote-fallback-full.yml",
 }
 
 
