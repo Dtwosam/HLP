@@ -17,7 +17,8 @@ Acceptance:
 - Pons V1 factory has deployed code;
 - Pons V2 factory has deployed code;
 - bounded eth_getLogs works;
-- the client fails closed on wrong chain/malformed RPC.
+- the client fails closed on wrong chain/malformed RPC;
+- public RPC archive limitations are measured rather than assumed.
 
 Implementation:
 - src/hlp/data/rpc.py
@@ -32,7 +33,7 @@ Find exact first event/code blocks for:
 - Pons V2 factory;
 - relevant Uniswap V3/V4 deployments.
 
-Use binary search on eth_getCode and bounded event verification where practical.
+Use Blockscout creation metadata for old deployments because the official public RPC is pruned. Use archive RPC binary search only when an archive endpoint is explicitly configured.
 
 Record source and block/timestamp.
 
