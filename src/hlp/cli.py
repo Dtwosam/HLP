@@ -23,6 +23,7 @@ from hlp.config import (
     PONS_V2_DEPLOYMENT_BLOCK,
     PONS_V2_MEME_HOOK,
     FLAP_PORTAL,
+    TRENCH_MANAGER,
     UNISWAP_V4_POOL_MANAGER,
 )
 from hlp.protocols.uniswap import (
@@ -60,7 +61,12 @@ from hlp.data.reconstruct import (
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
 from hlp.data.transition import summarize_v2_transition_continuity
-from hlp.data.types import FlapEvent
+from hlp.data.trench_curve import (
+    build_trench_curve_market_cap_points,
+    summarize_trench_curve_market_caps,
+)
+from hlp.data.trench_registry import build_trench_launch_registry
+from hlp.data.types import FlapEvent, TrenchEvent
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
     summarize_v2_curve_market_caps,
@@ -71,6 +77,7 @@ from hlp.data.v4 import (
 )
 from hlp.protocols.erc20 import read_erc20_static
 from hlp.protocols.flap import FLAP_RECONSTRUCTION_TOPICS, decode_flap_event
+from hlp.protocols.trench import TRENCH_CURVE_TOPICS, decode_trench_event
 from hlp.protocols.pons_state import (
     read_v1_launch_config_state,
     read_v2_launch_config_state,
@@ -131,6 +138,7 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
         ("pons_v2", PONS_V2_FACTORY),
         ("uniswap_v3_factory", UNISWAP_V3_FACTORY),
         ("flap_portal", FLAP_PORTAL),
+        ("trench_manager", TRENCH_MANAGER),
         ("pons_v2_meme_hook", PONS_V2_MEME_HOOK),
         ("uniswap_v4_pool_manager", UNISWAP_V4_POOL_MANAGER),
     ):
@@ -442,6 +450,173 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
                 **manifest,
                 "tokens": len(rows),
                 "tokens_missing_quote_event": incomplete_quotes,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+
+def cmd_rpc_trench_tape(args: argparse.Namespace) -> int:
+    """Acquire one shared trench.today launch/bonding-curve tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=TRENCH_MANAGER,
+        topics=[list(TRENCH_CURVE_TOPICS)],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters: dict[str, int] = {}
+
+    def decoded():
+        for log in raw:
+            row = decode_trench_event(log)
+            counters[row.event_type] = counters.get(row.event_type, 0) + 1
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "trench_today_shared_curve_tape",
+            "manager": TRENCH_MANAGER.lower(),
+            "event_topic0_or": list(TRENCH_CURVE_TOPICS),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "event_counts": counters,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_trench_registry(args: argparse.Namespace) -> int:
+    """Build a persistent trench.today launch registry from a raw tape."""
+    events = [TrenchEvent(**row) for row in _load_jsonl(args.events)]
+    rows = build_trench_launch_registry(events)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_trench_today_token_create",
+            "chain_id": 4663,
+            "manager": TRENCH_MANAGER.lower(),
+            "events": Path(args.events).name,
+            "fixed_supply_raw": str(1_000_000_000 * 10**18),
+            "token_decimals": 18,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "tokens": len(rows),
+                "quote_tokens": sorted({row["quote_token"] for row in rows}),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
+    """Price trench.today Sync reserves and emit $100k eligibility."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    events = [TrenchEvent(**row) for row in _load_jsonl(args.events)]
+    registry = _load_jsonl(args.registry)
+    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = list(
+        reconstruct_v3_price_points(
+            rpc,
+            token=ROBINHOOD_WETH,
+            quote_token=ROBINHOOD_USDG,
+            pool=args.usd_anchor_pool,
+            from_block=args.from_block,
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    points = list(
+        build_trench_curve_market_cap_points(
+            events,
+            registry,
+            anchor_points,
+            initial_weth_usd=initial_weth_usd,
+            initial_quote_usd=initial_quote_usd,
+            quote_usd_updates=quote_usd_updates,
+        )
+    )
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_trench_today_sync_virtual_reserves",
+            "chain_id": 4663,
+            "manager": TRENCH_MANAGER.lower(),
+            "events": Path(args.events).name,
+            "registry": Path(args.registry).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "price_semantics": "virtualQuote / virtualToken from authoritative post-trade Sync",
+            "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
+        },
+    )
+    summary = summarize_trench_curve_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_trench_today_curve_market_cap_points",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once on trench.today bonding curve",
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "market_cap_points": point_manifest,
+                "token_summary": summary_manifest,
+                "tokens_with_syncs": len(summary),
+                "tokens_priced": sum(row["priced_points"] > 0 for row in summary),
+                "tokens_crossed_100k_on_curve": sum(
+                    bool(row["crossed_100k"]) for row in summary
+                ),
+                "initial_weth_usd": str(initial_weth_usd),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
         )
@@ -1907,6 +2082,37 @@ def build_parser() -> argparse.ArgumentParser:
     flap_registry.add_argument("--events", required=True)
     flap_registry.add_argument("--out", required=True)
     flap_registry.set_defaults(func=cmd_flap_registry)
+
+
+    trench_tape = sub.add_parser("rpc-trench-tape")
+    trench_tape.add_argument("--from-block", type=int, required=True)
+    trench_tape.add_argument("--to-block", type=int, required=True)
+    trench_tape.add_argument("--chunk-size", type=int, default=100_000)
+    trench_tape.add_argument("--min-chunk-size", type=int, default=1)
+    trench_tape.add_argument("--out", required=True)
+    trench_tape.set_defaults(func=cmd_rpc_trench_tape)
+
+    trench_registry = sub.add_parser("trench-registry")
+    trench_registry.add_argument("--events", required=True)
+    trench_registry.add_argument("--out", required=True)
+    trench_registry.set_defaults(func=cmd_trench_registry)
+
+    trench_mcap = sub.add_parser("rpc-trench-curve-market-cap-window")
+    trench_mcap.add_argument("--events", required=True)
+    trench_mcap.add_argument("--registry", required=True)
+    trench_mcap.add_argument("--from-block", type=int, required=True)
+    trench_mcap.add_argument("--to-block", type=int, required=True)
+    trench_mcap.add_argument("--chunk-size", type=int, default=100_000)
+    trench_mcap.add_argument("--min-chunk-size", type=int, default=1)
+    trench_mcap.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    trench_mcap.add_argument("--oracle-state")
+    trench_mcap.add_argument("--oracle-events")
+    trench_mcap.add_argument("--out", required=True)
+    trench_mcap.add_argument("--summary-out", required=True)
+    trench_mcap.set_defaults(func=cmd_rpc_trench_curve_market_cap_window)
 
     flap_tape = sub.add_parser("rpc-flap-tape")
     flap_tape.add_argument("--from-block", type=int, required=True)
