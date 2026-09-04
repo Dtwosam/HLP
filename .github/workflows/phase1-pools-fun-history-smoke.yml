@@ -36,8 +36,6 @@ jobs:
           from hlp.protocols.pools_fun import TOKEN_LAUNCHED_TOPIC,decode_pools_fun_launch
           from hlp.protocols.uniswap import V3_POOL_CREATED_TOPIC,decode_v3_pool_created
 
-          start=30_000_000
-          end=30_099_999
           rpc=RpcClient(
               os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL",SOLIDRPC_PUBLIC_RPC_URL),
               timeout=30,attempts=5,min_interval_seconds=0.6,
@@ -47,8 +45,16 @@ jobs:
               ),
           )
           rpc.assert_robinhood()
-          assert rpc.get_code(POOLS_FUN_FACTORY,start) not in {"0x","0x0",""}
-          assert rpc.get_code(SUSHISWAP_V3_FACTORY,start) not in {"0x","0x0",""}
+          head=rpc.block_number()
+          factory_first=rpc.find_first_code_block(
+              POOLS_FUN_FACTORY,low=0,high=head
+          )
+          sushi_first=rpc.find_first_code_block(
+              SUSHISWAP_V3_FACTORY,low=0,high=head
+          )
+          start=factory_first
+          end=min(head,start+99_999)
+          assert sushi_first<=start,(sushi_first,start)
 
           launch_logs=list(rpc.iter_logs_chunked(
               start,end,address=POOLS_FUN_FACTORY,topics=[TOKEN_LAUNCHED_TOPIC],
@@ -95,6 +101,8 @@ jobs:
 
           print(json.dumps({
               "from_block":start,"to_block":end,
+              "factory_first_code_block":factory_first,
+              "sushi_first_code_block":sushi_first,
               "launches":len(launches),
               "unique_tokens":len({x.token for x in launches}),
               "sushi_v3_pools_created":len(pools),
