@@ -118,12 +118,30 @@ V4 and anchor price events are expected to dominate Phase 1 storage.
 
 ### Quote-asset completeness
 
-V1 and V2 now target one all-Pons causal Stock Token/USD oracle tape derived
-from the complete 494,639-launch registry. The full registry exposed current
-Chainlink directory naming variants, so feed discovery accepts both official
-`Robinhood TICKER / USD` and `Robinhood TICKER-USD` forms while still
-requiring exact Robinhood-chain records. Unknown or genuinely feedless quote
-assets remain explicit blockers; they are never assigned a guessed USD price.
+The complete registry contains 57 Pons quote assets. Direct official Chainlink
+coverage plus cbBTC's verified crypto/USD feed does not cover every Robinhood
+Stock Token used by Pons. The official Chainlink Robinhood directory inventory
+contained 54 total feed records at audit time and genuinely omitted 30 Pons
+Stock Token symbols; this is not treated as a parser failure.
+
+A causal Uniswap V3 fallback audit at each quote's first Pons use proved:
+
+- 25 of those 30 feedless Stock Tokens already had direct USDG V3 liquidity;
+- those 25 routes cover **17,312 Pons launches**;
+- route discovery used current immutable V3 factory mappings, then required
+  pool code, initialized state and positive active liquidity at
+  first-Pons-use minus one before accepting a route;
+- only **5 quote assets / 3,999 launches** remain unresolved:
+  TTWO (3,589), RIVN (67), SKHY (129), FIG (126), BULL (88).
+
+The V3 fallback is staged as a full causal USD tape and is merged lazily with
+Chainlink state during V2 lifecycle replay. Final universe freeze remains
+fail-closed until the five residual quote assets are resolved or their
+unpriced intervals are otherwise proven irrelevant to eligibility.
+
+A separate causality fix now activates staggered quote-source state only at
+each asset's first Pons use. Future oracle availability is never active from
+the beginning of a historical replay.
 
 ## Backfill execution guardrail
 
