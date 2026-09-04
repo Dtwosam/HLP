@@ -40,6 +40,7 @@ class RpcClient:
     attempts: int = 3
     backoff_seconds: float = 0.5
     min_interval_seconds: float = 0.0
+    extra_headers: dict[str, str] | None = None
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
     requests_made: int = field(default=0, init=False)
     _last_request_at: float | None = field(default=None, init=False, repr=False)
@@ -77,10 +78,13 @@ class RpcClient:
             {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []},
             separators=(",", ":"),
         ).encode()
+        headers = {"content-type": "application/json", "user-agent": "hlp/0.1"}
+        if self.extra_headers:
+            headers.update(self.extra_headers)
         request = urllib.request.Request(
             self.url,
             data=body,
-            headers={"content-type": "application/json", "user-agent": "hlp/0.1"},
+            headers=headers,
             method="POST",
         )
         last_error: Exception | None = None
