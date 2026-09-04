@@ -13,7 +13,7 @@ from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.reconstruct import event_order
 
 
-Q192 = Decimal(2) ** 192
+Q192 = 1 << 192
 
 
 def _raw_quote_per_raw_token(
@@ -23,7 +23,7 @@ def _raw_quote_per_raw_token(
 ) -> Decimal:
     if sqrt_price_x96 <= 0:
         raise ValueError("sqrtPriceX96 must be positive")
-    ratio1_per_0 = Decimal(sqrt_price_x96) ** 2 / Q192
+    ratio1_per_0 = Decimal(sqrt_price_x96) ** 2 / Decimal(Q192)
     return ratio1_per_0 if token_is_currency0 else Decimal(1) / ratio1_per_0
 
 
