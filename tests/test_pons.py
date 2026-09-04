@@ -1,4 +1,4 @@
-from hlp.config import PONS_V1_FACTORY, PONS_V2_FACTORY
+from hlp.config import PONS_V1_FACTORY, PONS_V1_FACTORY_LEGACY, PONS_V2_FACTORY
 from hlp.data.types import RawLog
 from hlp.protocols.evm import event_topic
 from hlp.protocols.pons import (
@@ -232,3 +232,27 @@ def test_decode_v2_pool_graduation():
     assert row.position_id == 123
     assert row.token_amount == 456
     assert row.pair_token_amount == 789
+
+
+
+def test_decode_v1_launch_from_legacy_generation():
+    log = raw(
+        PONS_V1_FACTORY_LEGACY,
+        [
+            V1_TOKEN_LAUNCHED_TOPIC,
+            topic_addr(TOKEN),
+            topic_addr(DEPLOYER),
+            topic_addr("0x" + "88" * 20),
+        ],
+        "0x"
+        + addr_word(PAIR)
+        + addr_word(POOL)
+        + uint_word(3)
+        + uint_word(4)
+        + uint_word(5)
+        + uint_word(6)
+        + uint_word(7),
+    )
+    launch = decode_v1_launch(log)
+    assert launch.factory == PONS_V1_FACTORY_LEGACY.lower()
+    assert launch.token == TOKEN
