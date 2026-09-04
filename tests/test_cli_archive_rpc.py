@@ -173,3 +173,20 @@ def test_initial_quote_loader_does_not_materialize_oracle_tape(monkeypatch):
 
     assert calls == ["state.jsonl"]
     assert str(initial["0x" + "11" * 20]) == "200"
+
+
+
+def test_v1_lifecycle_eligibility_parses():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-v1-lifecycle-eligibility",
+        "--registry", "pons-full.jsonl",
+        "--v3-events", "v3.jsonl",
+        "--quote-registry", "quotes.jsonl",
+        "--anchor-events", "anchor.jsonl",
+        "--anchor-initial", "anchor.json",
+        "--snapshot-head", "100",
+        "--out", "summary.jsonl",
+    ])
+    assert args.snapshot_head == 100
+    assert args.oracle_state is None

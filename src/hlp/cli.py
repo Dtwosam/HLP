@@ -2181,6 +2181,102 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pons_v1_lifecycle_eligibility(args: argparse.Namespace) -> int:
+    """Replay the full V1 V3 tape and keep per-token eligibility maxima."""
+    registry = [
+        row
+        for row in _load_jsonl(args.registry)
+        if row.get("version") == "v1"
+    ]
+    if not registry:
+        raise SystemExit("registry contains no Pons V1 launches")
+
+    initial = json.loads(Path(args.anchor_initial).read_text())
+    initial_weth_usd = Decimal(initial["weth_usd"])
+    if initial_weth_usd <= 0:
+        raise SystemExit("anchor initial WETH/USD must be positive")
+
+    quote_rows = _load_jsonl(args.quote_registry)
+    quote_decimals_by_token = {
+        row["quote_token"].lower(): int(row["quote_decimals"])
+        for row in quote_rows
+        if row.get("quote_decimals") is not None
+    }
+    weth_decimals = quote_decimals_by_token.get(ROBINHOOD_WETH.lower())
+    usdg_decimals = quote_decimals_by_token.get(ROBINHOOD_USDG.lower())
+    if weth_decimals is None or usdg_decimals is None:
+        raise SystemExit("quote registry is missing WETH/USDG decimals")
+
+    initial_quote_usd = _load_initial_quote_usd(args)
+    quote_updates = (
+        _iter_jsonl(args.oracle_events)
+        if args.oracle_events else ()
+    )
+    points = build_v1_market_cap_points(
+        registry,
+        _iter_jsonl(args.v3_events),
+        _iter_jsonl(args.anchor_events),
+        initial_weth_usd=initial_weth_usd,
+        weth_decimals=weth_decimals,
+        usdg_decimals=usdg_decimals,
+        initial_quote_usd=initial_quote_usd,
+        quote_usd_updates=quote_updates,
+        quote_decimals_by_token=quote_decimals_by_token,
+    )
+    summary = summarize_v1_market_caps(points)
+
+    registry_tokens = {row["token"].lower() for row in registry}
+    summary_tokens = {row["token"].lower() for row in summary}
+    missing = sorted(registry_tokens - summary_tokens)
+    unexpected = sorted(summary_tokens - registry_tokens)
+    if missing or unexpected:
+        raise SystemExit(
+            "V1 lifecycle summary does not exactly cover the frozen registry: "
+            f"missing={len(missing)} unexpected={len(unexpected)} "
+            f"missing_sample={missing[:10]} unexpected_sample={unexpected[:10]}"
+        )
+
+    manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.out),
+        provenance={
+            "source": "streamed_full_v1_v3_replay_summary_only",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "v3_events": Path(args.v3_events).name,
+            "quote_registry": Path(args.quote_registry).name,
+            "anchor_events": Path(args.anchor_events).name,
+            "anchor_initial": Path(args.anchor_initial).name,
+            "oracle_state": (
+                None if not args.oracle_state
+                else Path(args.oracle_state).name
+            ),
+            "oracle_events": (
+                None if not args.oracle_events
+                else Path(args.oracle_events).name
+            ),
+            "snapshot_head_block": args.snapshot_head,
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": (
+                "reached >=$100k market-cap proxy at least once in the "
+                "complete observed Pons V1 V3 lifecycle"
+            ),
+        },
+    )
+    unpriced = [row for row in summary if int(row["priced_points"]) == 0]
+    print(json.dumps({
+        **manifest,
+        "registry_tokens": len(registry),
+        "tokens_priced": len(summary) - len(unpriced),
+        "tokens_without_priced_points": len(unpriced),
+        "tokens_crossed_100k": sum(
+            bool(row["crossed_100k"]) for row in summary
+        ),
+        "unpriced_sample": [row["token"] for row in unpriced[:20]],
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
     """Replay the full V2 curve tape and keep only per-token eligibility maxima."""
     registry = _load_jsonl(args.registry)
@@ -4036,6 +4132,22 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4_mcap.add_argument("--transition-out", required=True)
     v2_v4_mcap.add_argument("--summary-out", required=True)
     v2_v4_mcap.set_defaults(func=cmd_rpc_v2_v4_market_cap_window)
+
+    v1_eligibility = sub.add_parser("pons-v1-lifecycle-eligibility")
+    v1_eligibility.add_argument("--registry", required=True)
+    v1_eligibility.add_argument("--v3-events", required=True)
+    v1_eligibility.add_argument("--quote-registry", required=True)
+    v1_eligibility.add_argument("--anchor-events", required=True)
+    v1_eligibility.add_argument("--anchor-initial", required=True)
+    v1_eligibility.add_argument("--oracle-state")
+    v1_eligibility.add_argument("--oracle-events")
+    v1_eligibility.add_argument(
+        "--snapshot-head", type=int, required=True
+    )
+    v1_eligibility.add_argument("--out", required=True)
+    v1_eligibility.set_defaults(
+        func=cmd_pons_v1_lifecycle_eligibility
+    )
 
     v2_eligibility = sub.add_parser("pons-v2-curve-eligibility")
     v2_eligibility.add_argument("--registry", required=True)
