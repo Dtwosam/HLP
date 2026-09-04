@@ -9,7 +9,13 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from hlp.config import DEFAULT_RPC_URL, PONS_V1_FACTORY, PONS_V2_FACTORY
+from hlp.config import (
+    DEFAULT_RPC_URL,
+    PONS_V1_FACTORY,
+    PONS_V2_FACTORY,
+    PONS_V2_MEME_HOOK,
+    UNISWAP_V4_POOL_MANAGER,
+)
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.rpc import RpcClient
@@ -36,7 +42,12 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
     head = rpc.block_number()
     block = rpc.get_block(head)
     factories = {}
-    for name, address in (("pons_v1", PONS_V1_FACTORY), ("pons_v2", PONS_V2_FACTORY)):
+    for name, address in (
+        ("pons_v1", PONS_V1_FACTORY),
+        ("pons_v2", PONS_V2_FACTORY),
+        ("pons_v2_meme_hook", PONS_V2_MEME_HOOK),
+        ("uniswap_v4_pool_manager", UNISWAP_V4_POOL_MANAGER),
+    ):
         code = rpc.get_code(address, head)
         factories[name] = {
             "address": address.lower(),
