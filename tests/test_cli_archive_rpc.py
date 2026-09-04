@@ -326,3 +326,33 @@ def test_unpriced_quote_v4_route_probe_parses():
     ])
     assert args.snapshot_head == 1000
     assert args.lookaround_blocks == 100
+
+
+
+def test_v4_quote_route_pipeline_parses():
+    parser = build_parser()
+
+    select_args = parser.parse_args([
+        "pons-select-v4-quote-routes",
+        "--probe", "probe.jsonl",
+        "--out", "routes.jsonl",
+    ])
+    assert select_args.probe == "probe.jsonl"
+
+    tape_args = parser.parse_args([
+        "rpc-v4-quote-route-tape",
+        "--routes", "routes.jsonl",
+        "--from-block", "100",
+        "--to-block", "200",
+        "--out", "events.jsonl",
+    ])
+    assert tape_args.from_block == 100
+
+    usd_args = parser.parse_args([
+        "pons-v4-quote-usd-tape",
+        "--routes", "routes.jsonl",
+        "--v4-events", "events.jsonl",
+        "--state-out", "state.jsonl",
+        "--out", "updates.jsonl",
+    ])
+    assert usd_args.v4_events == "events.jsonl"

@@ -77,7 +77,12 @@ from hlp.data.quote_routes import (
 )
 from hlp.data.quote_usd import prepare_quote_usd_inputs
 from hlp.data.quote_causality import audit_pons_quote_causality
-from hlp.data.quote_v4_routes import probe_v4_usdg_routes
+from hlp.data.quote_v4_routes import (
+    build_v4_route_initial_usd_states,
+    build_v4_route_usd_updates,
+    probe_v4_usdg_routes,
+    select_v4_quote_routes,
+)
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
     reconstruct_staggered_chainlink_usd_tapes,
@@ -1517,6 +1522,170 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
         ],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pons_select_v4_quote_routes(args: argparse.Namespace) -> int:
+    """Freeze one deterministic V4 fallback route per covered quote asset."""
+    probe = _load_jsonl(args.probe)
+    routes = select_v4_quote_routes(probe)
+    manifest = write_jsonl_snapshot(
+        routes,
+        output=Path(args.out),
+        provenance={
+            "source": "deterministic_selection_from_v4_quote_route_probe",
+            "chain_id": 4663,
+            "probe": Path(args.probe).name,
+            "selection_policy": (
+                "prefer latest positive-liquidity pre-use swap; otherwise "
+                "first positive-liquidity post-use swap"
+            ),
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "selected_routes": len(routes),
+        "covered_launches": sum(int(row["launches"]) for row in routes),
+        "causal_routes": sum(
+            row["route_type"] == "uniswap_v4_direct_usdg"
+            for row in routes
+        ),
+        "delayed_routes": sum(
+            row["route_type"] == "uniswap_v4_direct_usdg_delayed"
+            for row in routes
+        ),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_v4_quote_route_tape(args: argparse.Namespace) -> int:
+    """Acquire V4 swaps only for selected quote-route pool ids."""
+    routes = _load_jsonl(args.routes)
+    activation_by_pool = {
+        row["pool_id"].lower(): (
+            int(row["activation_block"]),
+            -1 if row.get("activation_transaction_index") is None
+            else int(row["activation_transaction_index"]),
+            -1 if row.get("activation_log_index") is None
+            else int(row["activation_log_index"]),
+        )
+        for row in routes
+    }
+    if not activation_by_pool:
+        manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance={
+                "source": "evm_json_rpc",
+                "chain_id": 4663,
+                "protocol": "uniswap_v4_quote_fallback_routes",
+                "routes": Path(args.routes).name,
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "empty_reason": "no selected V4 fallback routes",
+            },
+        )
+        print(json.dumps({**manifest, "requests_made": 0}, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=UNISWAP_V4_POOL_MANAGER,
+        topics=[V4_SWAP_TOPIC, sorted(activation_by_pool)],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {
+        "pre_activation_events_skipped": 0,
+        "matched_swaps": 0,
+    }
+
+    def active_events():
+        for log in raw:
+            event = asdict(decode_v4_swap(log))
+            event["event_type"] = "v4_swap"
+            pool_id = event["pool_id"].lower()
+            activation = activation_by_pool.get(pool_id)
+            if activation is None:
+                raise ValueError(
+                    f"V4 route filter returned unknown pool id {pool_id}"
+                )
+            order = (
+                int(event["block_number"]),
+                -1 if event.get("transaction_index") is None
+                else int(event["transaction_index"]),
+                int(event["log_index"]),
+            )
+            if order < activation:
+                counters["pre_activation_events_skipped"] += 1
+                continue
+            counters["matched_swaps"] += 1
+            yield event
+
+    manifest = write_jsonl_snapshot(
+        active_events(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v4_quote_fallback_routes",
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "routes": Path(args.routes).name,
+            "route_pool_ids": len(activation_by_pool),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_SWAP_TOPIC,
+            "event_topic1_pool_ids": sorted(activation_by_pool),
+            "activation_semantics": (
+                "swaps before each route's causal/delayed activation are skipped"
+            ),
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        **counters,
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pons_v4_quote_usd_tape(args: argparse.Namespace) -> int:
+    """Convert selected V4 fallback routes to generic causal USD state/tape."""
+    routes = _load_jsonl(args.routes)
+    states = build_v4_route_initial_usd_states(routes)
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "selected_v4_route_state_before_first_pons_use",
+            "chain_id": 4663,
+            "routes": Path(args.routes).name,
+        },
+    )
+    updates = build_v4_route_usd_updates(
+        routes,
+        _iter_jsonl(args.v4_events),
+    )
+    update_manifest = write_jsonl_snapshot(
+        updates,
+        output=Path(args.out),
+        provenance={
+            "source": "selected_v4_route_swap_close_usd_tape",
+            "chain_id": 4663,
+            "routes": Path(args.routes).name,
+            "v4_events": Path(args.v4_events).name,
+        },
+    )
+    print(json.dumps({
+        "initial_states": state_manifest,
+        "updates": update_manifest,
+        "selected_routes": len(routes),
     }, sort_keys=True))
     return 0
 
@@ -4443,6 +4612,27 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    select_quote_v4 = sub.add_parser("pons-select-v4-quote-routes")
+    select_quote_v4.add_argument("--probe", required=True)
+    select_quote_v4.add_argument("--out", required=True)
+    select_quote_v4.set_defaults(func=cmd_pons_select_v4_quote_routes)
+
+    quote_v4_tape = sub.add_parser("rpc-v4-quote-route-tape")
+    quote_v4_tape.add_argument("--routes", required=True)
+    quote_v4_tape.add_argument("--from-block", type=int, required=True)
+    quote_v4_tape.add_argument("--to-block", type=int, required=True)
+    quote_v4_tape.add_argument("--chunk-size", type=int, default=100_000)
+    quote_v4_tape.add_argument("--min-chunk-size", type=int, default=1)
+    quote_v4_tape.add_argument("--out", required=True)
+    quote_v4_tape.set_defaults(func=cmd_rpc_v4_quote_route_tape)
+
+    quote_v4_usd = sub.add_parser("pons-v4-quote-usd-tape")
+    quote_v4_usd.add_argument("--routes", required=True)
+    quote_v4_usd.add_argument("--v4-events", required=True)
+    quote_v4_usd.add_argument("--state-out", required=True)
+    quote_v4_usd.add_argument("--out", required=True)
+    quote_v4_usd.set_defaults(func=cmd_pons_v4_quote_usd_tape)
 
     quote_v4_routes = sub.add_parser(
         "rpc-pons-unpriced-quote-v4-routes"
