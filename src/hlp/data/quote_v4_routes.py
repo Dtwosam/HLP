@@ -399,3 +399,151 @@ def build_v4_route_usd_updates(
             "anchor_usd": "1",
             "usd_price": str(quote_per_token),
         }
+
+
+
+def extend_v4_usdg_routes(
+    rpc,
+    probe_rows: Iterable[dict],
+    *,
+    snapshot_head: int,
+    forward_blocks: int = 500_000,
+    chunk_size: int = 2_000,
+    min_chunk_size: int = 25,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> list[dict]:
+    """Continue only unresolved V4 route searches after prior search bounds."""
+    if forward_blocks <= 0:
+        raise ValueError("forward_blocks must be positive")
+
+    usdg = ROBINHOOD_USDG.lower()
+    output = []
+    for raw_source in probe_rows:
+        source = dict(raw_source)
+        if source.get("causal_route_ready") or source.get("delayed_route_ready"):
+            output.append(source)
+            continue
+
+        token = source["quote_token"].lower()
+        start = int(source["search_to_block"]) + 1
+        end = min(int(snapshot_head), start + int(forward_blocks) - 1)
+        source["continuation_from_block"] = start
+        source["continuation_to_block"] = end
+        if start > end:
+            output.append(source)
+            continue
+
+        currency0, currency1 = sorted(
+            (token, usdg),
+            key=lambda value: int(value, 16),
+        )
+        init_logs = rpc.iter_logs_chunked(
+            start,
+            end,
+            address=pool_manager,
+            topics=[
+                V4_INITIALIZE_TOPIC,
+                None,
+                _address_topic(currency0),
+                _address_topic(currency1),
+            ],
+            chunk_size=chunk_size,
+            min_chunk_size=min_chunk_size,
+        )
+        new_initializes = []
+        for raw in init_logs:
+            event = decode_v4_pool_initialized(raw)
+            if {
+                event.currency0.lower(),
+                event.currency1.lower(),
+            } != {token, usdg}:
+                raise ValueError("continued V4 Initialize currency mismatch")
+            new_initializes.append(asdict(event))
+
+        candidates = [dict(row) for row in source.get("v4_candidates", [])]
+        known_ids = {row["pool_id"].lower() for row in candidates}
+        for initialized in new_initializes:
+            pool_id = initialized["pool_id"].lower()
+            if pool_id in known_ids:
+                continue
+            known_ids.add(pool_id)
+            candidates.append({
+                "pool_id": pool_id,
+                "initialize": initialized,
+                "latest_pre_use_swap": None,
+                "first_post_use_swap": None,
+                "swap_count_in_window": 0,
+            })
+
+        first_use = int(source["first_launch_block"])
+        for candidate in candidates:
+            if candidate.get("first_post_use_swap") is not None:
+                continue
+            initialized = candidate["initialize"]
+            scan_from = max(start, int(initialized["block_number"]))
+            if scan_from > end:
+                continue
+            swap_logs = rpc.iter_logs_chunked(
+                scan_from,
+                end,
+                address=pool_manager,
+                topics=[V4_SWAP_TOPIC, candidate["pool_id"]],
+                chunk_size=chunk_size,
+                min_chunk_size=min_chunk_size,
+            )
+            first_post = None
+            extra_swaps = 0
+            token_is_token0 = initialized["currency0"].lower() == token
+            for raw in swap_logs:
+                swap = decode_v4_swap(raw)
+                if swap.sqrt_price_x96 <= 0 or swap.liquidity <= 0:
+                    continue
+                extra_swaps += 1
+                if int(swap.block_number) < first_use:
+                    continue
+                quote_per_token = v3_v4_quote_per_token(
+                    swap.sqrt_price_x96,
+                    token_is_token0=token_is_token0,
+                    token_decimals=int(source["quote_decimals"]),
+                    quote_decimals=6,
+                )
+                if quote_per_token <= 0:
+                    raise ValueError("continued V4 fallback price is not positive")
+                first_post = asdict(swap)
+                first_post.update({
+                    "quote_per_token": str(quote_per_token),
+                    "usd_price": str(quote_per_token),
+                })
+                break
+            candidate["swap_count_in_window"] = (
+                int(candidate.get("swap_count_in_window", 0)) + extra_swaps
+            )
+            if first_post is not None:
+                candidate["first_post_use_swap"] = first_post
+
+        delayed = [
+            row for row in candidates
+            if row.get("first_post_use_swap") is not None
+        ]
+        best_delayed = (
+            min(
+                delayed,
+                key=lambda row: (
+                    event_order(row["first_post_use_swap"]),
+                    -int(row["first_post_use_swap"]["liquidity"]),
+                    row["pool_id"],
+                ),
+            )
+            if delayed else None
+        )
+        source["v4_candidates"] = candidates
+        source["initialize_events"] = len(candidates)
+        source["search_to_block"] = end
+        source["delayed_route_ready"] = best_delayed is not None
+        source["selected_delayed_candidate"] = best_delayed
+        output.append(source)
+
+    output.sort(
+        key=lambda row: (row["first_launch_block"], row["quote_token"])
+    )
+    return output

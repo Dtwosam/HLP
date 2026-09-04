@@ -5,6 +5,7 @@ from hlp.data.quote_v4_routes import (
     _address_topic,
     build_v4_route_initial_usd_states,
     build_v4_route_usd_updates,
+    extend_v4_usdg_routes,
     probe_v4_usdg_routes,
     select_v4_quote_routes,
 )
@@ -188,3 +189,116 @@ def test_delayed_v4_route_has_no_initial_state_and_activates_on_swap():
     updates = list(build_v4_route_usd_updates([route], events))
     assert len(updates) == 1
     assert updates[0]["transaction_hash"] == "0x" + "32" * 32
+
+
+
+def test_extend_v4_routes_starts_after_prior_search_end():
+    calls = []
+
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            calls.append((start, end, kwargs["topics"]))
+            return iter(())
+
+    prior = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "first_launch_block": 1000,
+        "launches": 3,
+        "versions": {"v2": 3},
+        "search_from_block": 900,
+        "search_to_block": 1100,
+        "initialize_events": 0,
+        "v4_candidates": [],
+        "causal_route_ready": False,
+        "delayed_route_ready": False,
+        "selected_causal_candidate": None,
+        "selected_delayed_candidate": None,
+    }]
+    rows = extend_v4_usdg_routes(
+        Rpc(),
+        prior,
+        snapshot_head=2000,
+        forward_blocks=500,
+    )
+    assert rows[0]["continuation_from_block"] == 1101
+    assert rows[0]["continuation_to_block"] == 1600
+    assert calls[0][0:2] == (1101, 1600)
+
+
+def test_extend_v4_known_pool_can_find_first_later_swap(monkeypatch):
+    pool_manager = "0x" + "55" * 20
+    initialized = {
+        "pool_manager": pool_manager,
+        "pool_id": POOL_ID,
+        "currency0": TOKEN,
+        "currency1": ROBINHOOD_USDG.lower(),
+        "fee": 500,
+        "tick_spacing": 10,
+        "hooks": "0x" + "00" * 20,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 1050,
+        "transaction_hash": "0x" + "10" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }
+    swap = SimpleNamespace(
+        pool_manager=pool_manager,
+        pool_id=POOL_ID,
+        sender="0x" + "66" * 20,
+        amount0=1,
+        amount1=-1,
+        sqrt_price_x96=2**96,
+        liquidity=100,
+        tick=0,
+        fee=500,
+        block_number=1200,
+        transaction_hash="0x" + "20" * 32,
+        transaction_index=1,
+        log_index=0,
+    )
+    monkeypatch.setattr(
+        "hlp.data.quote_v4_routes.decode_v4_swap",
+        lambda raw: swap,
+    )
+
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            if kwargs["topics"][0] == V4_INITIALIZE_TOPIC:
+                return iter(())
+            return iter([object()])
+
+    prior = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "first_launch_block": 1000,
+        "launches": 3,
+        "versions": {"v2": 3},
+        "search_from_block": 900,
+        "search_to_block": 1100,
+        "initialize_events": 1,
+        "v4_candidates": [{
+            "pool_id": POOL_ID,
+            "initialize": initialized,
+            "latest_pre_use_swap": None,
+            "first_post_use_swap": None,
+            "swap_count_in_window": 0,
+        }],
+        "causal_route_ready": False,
+        "delayed_route_ready": False,
+        "selected_causal_candidate": None,
+        "selected_delayed_candidate": None,
+    }]
+    row = extend_v4_usdg_routes(
+        Rpc(),
+        prior,
+        snapshot_head=2000,
+        forward_blocks=500,
+    )[0]
+    assert row["delayed_route_ready"] is True
+    assert row["selected_delayed_candidate"]["first_post_use_swap"][
+        "block_number"
+    ] == 1200
