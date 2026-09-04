@@ -16,6 +16,7 @@ from hlp.config import (
     ROBINHOOD_USDG,
     ROBINHOOD_WETH,
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    UNISWAP_V3_FACTORY,
     PONS_V1_FACTORY,
     PONS_V2_FACTORY,
     PONS_V1_DEPLOYMENT_BLOCK,
@@ -116,6 +117,7 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
     for name, address in (
         ("pons_v1", PONS_V1_FACTORY),
         ("pons_v2", PONS_V2_FACTORY),
+        ("uniswap_v3_factory", UNISWAP_V3_FACTORY),
         ("pons_v2_meme_hook", PONS_V2_MEME_HOOK),
         ("uniswap_v4_pool_manager", UNISWAP_V4_POOL_MANAGER),
     ):
