@@ -7,7 +7,6 @@ on:
     paths:
       - '.github/workflows/phase1-pons-research-smoke.yml'
       - 'src/hlp/data/pons_research.py'
-      - 'src/hlp/cli.py'
   workflow_dispatch:
 
 permissions:
