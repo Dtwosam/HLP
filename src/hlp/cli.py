@@ -201,6 +201,72 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_pons_sample(args: argparse.Namespace) -> int:
+    rpc = _rpc(args)
+    rpc.assert_robinhood()
+    if args.version == "v1":
+        address = PONS_V1_FACTORY
+        topic = V1_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v1_launch
+    else:
+        address = PONS_V2_FACTORY
+        topic = V2_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v2_launch
+
+    started = time.monotonic()
+    from_block = args.from_block
+    if from_block is None:
+        from_block = rpc.find_first_code_block(address)
+    to_block = args.to_block if args.to_block is not None else rpc.block_number()
+
+    raw_logs = rpc.iter_logs_chunked(
+        from_block,
+        to_block,
+        address=address,
+        topics=[topic],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+
+    def limited():
+        count = 0
+        for log in raw_logs:
+            yield decoder(log)
+            count += 1
+            if args.limit is not None and count >= args.limit:
+                return
+
+    output = Path(args.out)
+    manifest = write_jsonl_snapshot(
+        limited(),
+        output=output,
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons",
+            "protocol_version": args.version,
+            "factory": address.lower(),
+            "event_topic0": topic,
+            "from_block": from_block,
+            "to_block": to_block,
+            "requested_limit": args.limit,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_pons_scan(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -253,6 +319,16 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--page-size", type=int, default=1000)
     sample.add_argument("--out", required=True)
     sample.set_defaults(func=cmd_hood_pons_sample)
+
+    rpc_sample = sub.add_parser("rpc-pons-sample")
+    rpc_sample.add_argument("--version", choices=("v1", "v2"), required=True)
+    rpc_sample.add_argument("--from-block", type=int)
+    rpc_sample.add_argument("--to-block", type=int)
+    rpc_sample.add_argument("--limit", type=int, default=100)
+    rpc_sample.add_argument("--chunk-size", type=int, default=100000)
+    rpc_sample.add_argument("--min-chunk-size", type=int, default=1)
+    rpc_sample.add_argument("--out", required=True)
+    rpc_sample.set_defaults(func=cmd_rpc_pons_sample)
 
     scan = sub.add_parser("pons-scan")
     scan.add_argument("--version", choices=("v1", "v2"), required=True)
