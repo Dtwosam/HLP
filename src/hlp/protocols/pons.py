@@ -117,6 +117,25 @@ def decode_v1_launch_config(log: RawLog) -> PonsV1LaunchConfig:
 
 
 
+
+def decode_v2_launch_config_event_id(log: RawLog) -> tuple[str, int]:
+    if log.address != normalize_address(PONS_V2_FACTORY):
+        raise ValueError("not a Pons V2 factory log")
+    if not log.topics:
+        raise ValueError("missing V2 launch-config topic")
+    if log.topics[0] == V2_LAUNCH_CONFIG_ADDED_TOPIC:
+        action = "added"
+    elif log.topics[0] == V2_LAUNCH_CONFIG_UPDATED_TOPIC:
+        action = "updated"
+    else:
+        raise ValueError("not a V2 launch-config id event")
+    if len(log.topics) != 2:
+        raise ValueError("unexpected V2 launch-config topic count")
+    if data_words(log.data):
+        raise ValueError("unexpected V2 launch-config event data")
+    return action, int(log.topics[1], 16)
+
+
 def decode_v2_pair_token_economics(log: RawLog) -> PonsV2PairEconomics:
     if log.address != normalize_address(PONS_V2_FACTORY):
         raise ValueError("not a Pons V2 factory log")
