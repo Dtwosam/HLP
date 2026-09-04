@@ -1850,6 +1850,99 @@ def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_v2_transition_tape(args: argparse.Namespace) -> int:
+    """Acquire V2 graduation and V4 registration control events in one scan."""
+    registry = _load_jsonl(args.registry)
+    tokens = {row["token"].lower() for row in registry}
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=[PONS_V2_FACTORY, PONS_V2_MEME_HOOK],
+        topics=[[V2_POOL_GRADUATED_TOPIC, PONS_V2_POOL_REGISTERED_TOPIC]],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+
+    graduations = []
+    registrations = []
+    unmatched = {"graduations": 0, "registrations": 0}
+    for log in raw:
+        topic0 = log.topics[0] if log.topics else None
+        if topic0 == V2_POOL_GRADUATED_TOPIC:
+            row = asdict(decode_v2_pool_graduation(log))
+            if row["token"].lower() in tokens:
+                graduations.append(row)
+            else:
+                unmatched["graduations"] += 1
+        elif topic0 == PONS_V2_POOL_REGISTERED_TOPIC:
+            row = asdict(decode_pons_v2_pool_registered(log))
+            if row["token"].lower() in tokens:
+                registrations.append(row)
+            else:
+                unmatched["registrations"] += 1
+        else:
+            raise ValueError(
+                f"transition tape returned unexpected topic0 {topic0}"
+            )
+
+    graduations.sort(key=event_order)
+    registrations.sort(key=event_order)
+    graduation_manifest = write_jsonl_snapshot(
+        graduations,
+        output=Path(args.graduations_out),
+        provenance={
+            "source": "shared_v2_transition_raw_rpc_scan",
+            "chain_id": 4663,
+            "protocol": "pons_v2_graduations",
+            "registry": Path(args.registry).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "addresses": [
+                PONS_V2_FACTORY.lower(),
+                PONS_V2_MEME_HOOK.lower(),
+            ],
+            "topic0_or": [
+                V2_POOL_GRADUATED_TOPIC,
+                PONS_V2_POOL_REGISTERED_TOPIC,
+            ],
+        },
+    )
+    registration_manifest = write_jsonl_snapshot(
+        registrations,
+        output=Path(args.registrations_out),
+        provenance={
+            "source": "shared_v2_transition_raw_rpc_scan",
+            "chain_id": 4663,
+            "protocol": "pons_v2_v4_pool_registrations",
+            "registry": Path(args.registry).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "addresses": [
+                PONS_V2_FACTORY.lower(),
+                PONS_V2_MEME_HOOK.lower(),
+            ],
+            "topic0_or": [
+                V2_POOL_GRADUATED_TOPIC,
+                PONS_V2_POOL_REGISTERED_TOPIC,
+            ],
+        },
+    )
+    print(json.dumps({
+        "graduations": graduation_manifest,
+        "registrations": registration_manifest,
+        "matched_graduations": len(graduations),
+        "matched_registrations": len(registrations),
+        "unmatched": unmatched,
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v2_graduation_tape(args: argparse.Namespace) -> int:
     registry = _load_jsonl(args.registry)
     tokens = {row["token"].lower() for row in registry}
@@ -3450,6 +3543,16 @@ def build_parser() -> argparse.ArgumentParser:
     v2_tape.add_argument("--out", required=True)
     v2_tape.set_defaults(func=cmd_rpc_v2_curve_tape)
 
+
+    v2_transition_tape = sub.add_parser("rpc-v2-transition-tape")
+    v2_transition_tape.add_argument("--registry", required=True)
+    v2_transition_tape.add_argument("--from-block", type=int, required=True)
+    v2_transition_tape.add_argument("--to-block", type=int, required=True)
+    v2_transition_tape.add_argument("--chunk-size", type=int, default=100_000)
+    v2_transition_tape.add_argument("--min-chunk-size", type=int, default=1)
+    v2_transition_tape.add_argument("--graduations-out", required=True)
+    v2_transition_tape.add_argument("--registrations-out", required=True)
+    v2_transition_tape.set_defaults(func=cmd_rpc_v2_transition_tape)
 
     v2_graduations = sub.add_parser("rpc-v2-graduation-tape")
     v2_graduations.add_argument("--registry", required=True)
