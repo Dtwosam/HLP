@@ -6,9 +6,11 @@ PAIR = "0x" + "11" * 20
 TOKEN = "0x" + "22" * 20
 DEPLOYER = "0x" + "33" * 20
 POOL = "0x" + "44" * 20
+PRIMARY_FACTORY = "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb"
+LEGACY_FACTORY = "0x0c37a24f5d23a486fa692d1500881d698b1f77a4"
 
 
-def config(*, supply, block, tx=0, log=0, action="added"):
+def config(*, supply, block, tx=0, log=0, action="added", factory=None):
     return PonsV1LaunchConfig(
         action=action,
         config_id=7,
@@ -26,10 +28,11 @@ def config(*, supply, block, tx=0, log=0, action="added"):
         transaction_hash="0x" + f"{block:064x}",
         transaction_index=tx,
         log_index=log,
+        factory=factory,
     )
 
 
-def launch(*, block, tx=0, log=0):
+def launch(*, block, tx=0, log=0, factory=None):
     return PonsLaunch(
         version="v1",
         token=TOKEN,
@@ -41,6 +44,7 @@ def launch(*, block, tx=0, log=0):
         log_index=log,
         pool=POOL,
         launch_config_id=7,
+        factory=factory,
     )
 
 
@@ -134,3 +138,19 @@ def test_stream_registry_applies_config_before_same_block_launch(monkeypatch):
     assert len(rows) == 1
     assert rows[0]["supply_raw"] == 1_000_000_000 * 10**18
     assert rows[0]["dex_factory"] == "0x" + "55" * 20
+
+
+
+def test_timeline_scopes_same_config_id_by_factory():
+    timeline = PonsV1ConfigTimeline(
+        [
+            config(supply=1_000, block=10, factory=PRIMARY_FACTORY),
+            config(supply=9_000, block=10, factory=LEGACY_FACTORY),
+        ]
+    )
+    assert timeline.at_launch(
+        launch(block=20, factory=PRIMARY_FACTORY)
+    ).supply == 1_000
+    assert timeline.at_launch(
+        launch(block=20, factory=LEGACY_FACTORY)
+    ).supply == 9_000
