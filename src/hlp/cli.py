@@ -79,6 +79,7 @@ from hlp.data.pons_research import (
     annotate_pons_drawdowns_and_future_returns,
     build_pons_market_path,
     eligible_pons_tokens,
+    extract_pons_drawdown_episodes,
     summarize_pons_eligibility,
 )
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
@@ -2346,6 +2347,7 @@ def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
         points,
         eligible_tokens=eligible,
     )
+    episodes = extract_pons_drawdown_episodes(annotated)
 
     path_manifest = write_jsonl_snapshot(
         points,
@@ -2398,6 +2400,21 @@ def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
         },
     )
 
+    episode_manifest = write_jsonl_snapshot(
+        episodes,
+        output=Path(args.episodes_out),
+        provenance={
+            "source": "threshold_free_pons_running_peak_drawdowns",
+            "market_path_sha256": path_manifest["sha256"],
+            "outcomes_sha256": annotated_manifest["sha256"],
+            "major_dump_threshold": None,
+            "episode_semantics": (
+                "peak-to-trough episode closes only when prior peak is "
+                "reclaimed; no depth cutoff is imposed"
+            ),
+        },
+    )
+
     version_counts = {}
     eligible_version_counts = {}
     by_token = {row["token"]: row for row in summary}
@@ -2422,6 +2439,7 @@ def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
                 "market_path": path_manifest,
                 "universe": summary_manifest,
                 "outcomes": annotated_manifest,
+                "drawdown_episodes": episode_manifest,
                 "pons_tokens_with_priced_paths": len(by_token),
                 "pons_tokens_reached_100k": len(eligible),
                 "tokens_by_version": version_counts,
@@ -2430,6 +2448,7 @@ def cmd_pons_research_dataset(args: argparse.Namespace) -> int:
                     tokens_with_a_5x_later_point
                 ),
                 "annotated_eligible_price_points": len(annotated),
+                "drawdown_episodes_count": len(episodes),
             },
             sort_keys=True,
         )
@@ -2897,6 +2916,7 @@ def build_parser() -> argparse.ArgumentParser:
     pons_research.add_argument("--path-out", required=True)
     pons_research.add_argument("--universe-out", required=True)
     pons_research.add_argument("--outcomes-out", required=True)
+    pons_research.add_argument("--episodes-out", required=True)
     pons_research.set_defaults(func=cmd_pons_research_dataset)
 
     v2_registry = sub.add_parser("rpc-v2-registry-window")
