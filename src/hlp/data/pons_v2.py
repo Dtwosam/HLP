@@ -126,3 +126,51 @@ def iter_enriched_v2_launches(
             }
         )
         yield out
+
+
+
+def filter_v2_registry_to_graduated(
+    registry_rows: Iterable[dict],
+    graduation_rows: Iterable[dict],
+) -> list[dict]:
+    """Return exact V2 launch records for every graduated Pons token."""
+    registry = {}
+    for row in registry_rows:
+        token = normalize_address(row["token"])
+        if token in registry:
+            raise ValueError(f"duplicate Pons V2 registry token: {token}")
+        registry[token] = dict(row)
+
+    graduated: dict[str, dict] = {}
+    for row in graduation_rows:
+        token = normalize_address(row["token"])
+        if token in graduated:
+            raise ValueError(f"duplicate Pons V2 graduation: {token}")
+        graduated[token] = dict(row)
+
+    missing = sorted(set(graduated) - set(registry))
+    if missing:
+        raise KeyError(
+            f"{len(missing)} graduated Pons V2 tokens missing from registry: "
+            f"{missing[:5]}"
+        )
+
+    output = []
+    for token, graduation in graduated.items():
+        row = dict(registry[token])
+        row["graduation_block"] = int(graduation["block_number"])
+        row["graduation_transaction_hash"] = graduation["transaction_hash"]
+        row["graduation_transaction_index"] = graduation.get("transaction_index")
+        row["graduation_log_index"] = int(graduation["log_index"])
+        output.append(row)
+
+    output.sort(
+        key=lambda row: (
+            row["graduation_block"],
+            row["graduation_transaction_index"]
+            if row["graduation_transaction_index"] is not None else -1,
+            row["graduation_log_index"],
+            row["token"],
+        )
+    )
+    return output
