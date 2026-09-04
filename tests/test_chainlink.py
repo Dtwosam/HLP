@@ -1,10 +1,15 @@
+from hlp.data.types import RawLog
+from hlp.protocols.evm import event_topic
 from decimal import Decimal
 
 from hlp.protocols.chainlink import (
     DECIMALS_SELECTOR,
     DESCRIPTION_SELECTOR,
     AGGREGATOR_SELECTOR,
+    ANSWER_UPDATED_SIG,
+    ANSWER_UPDATED_TOPIC,
     LATEST_ROUND_DATA_SELECTOR,
+    decode_chainlink_answer_updated,
     read_chainlink_aggregator,
     read_chainlink_latest_round,
 )
@@ -57,3 +62,30 @@ def test_read_chainlink_latest_round():
 
 def test_read_chainlink_aggregator():
     assert read_chainlink_aggregator(FakeRpc(), FEED, block=123) == "0x" + "22" * 20
+
+
+
+def test_answer_updated_topic_and_decoder():
+    assert ANSWER_UPDATED_TOPIC == event_topic(ANSWER_UPDATED_SIG)
+    log = RawLog(
+        chain_id=4663,
+        block_number=200,
+        block_hash=None,
+        transaction_hash="0x" + "aa" * 32,
+        transaction_index=2,
+        log_index=5,
+        address="0x" + "22" * 20,
+        topics=(
+            ANSWER_UPDATED_TOPIC,
+            "0x" + word(219_90960000),
+            "0x" + word(694),
+        ),
+        data="0x" + word(1786090584),
+        removed=False,
+    )
+    row = decode_chainlink_answer_updated(log)
+    assert row.answer_raw == 219_90960000
+    assert row.round_id == 694
+    assert row.updated_at == 1786090584
+    assert row.transaction_index == 2
+    assert row.log_index == 5
