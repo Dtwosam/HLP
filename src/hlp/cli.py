@@ -32,6 +32,8 @@ from hlp.data.reconstruct import (
     v3_quote_price_at_block,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
+from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
+from hlp.protocols.erc20 import read_erc20_static
 from hlp.protocols.pons_state import read_v1_launch_config_state
 from hlp.protocols.pons import (
     V1_LAUNCH_CONFIG_ADDED_TOPIC,
@@ -365,14 +367,16 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_jsonl(path: str) -> list[dict]:
-    rows = []
+def _iter_jsonl(path: str):
     with Path(path).open(encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if line:
-                rows.append(json.loads(line))
-    return rows
+                yield json.loads(line)
+
+
+def _load_jsonl(path: str) -> list[dict]:
+    return list(_iter_jsonl(path))
 
 
 def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
@@ -438,6 +442,97 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 **counters,
                 "matched_pools": len(matched_pools),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+
+def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
+    """Price a shared V1 swap shard and emit per-token $100k eligibility."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0 for point-in-time USD anchoring")
+
+    registry = _load_jsonl(args.registry)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+
+    state_block = args.from_block - 1
+    weth_state = read_erc20_static(rpc, ROBINHOOD_WETH, block=state_block)
+    usdg_state = read_erc20_static(rpc, ROBINHOOD_USDG, block=state_block)
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=state_block,
+    )
+    anchor_points = reconstruct_v3_price_points(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    points = build_v1_market_cap_points(
+        registry,
+        _iter_jsonl(args.swaps),
+        anchor_points,
+        initial_weth_usd=initial_weth_usd,
+        weth_decimals=weth_state.decimals,
+        usdg_decimals=usdg_state.decimals,
+    )
+
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_shared_tapes",
+            "chain_id": 4663,
+            "protocol": "pons_v1_uniswap_v3",
+            "registry": Path(args.registry).name,
+            "swaps": Path(args.swaps).name,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_semantics": "USDG nominal USD 1; WETH/USDG latest already-observable V3 price",
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "weth_decimals": weth_state.decimals,
+            "usdg_decimals": usdg_state.decimals,
+        },
+    )
+
+    summary = summarize_v1_market_caps(_iter_jsonl(args.out))
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_market_cap_points",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once in this observed swap window",
+        },
+    )
+    priced = sum(row["priced_points"] > 0 for row in summary)
+    crossed = sum(bool(row["crossed_100k"]) for row in summary)
+    print(
+        json.dumps(
+            {
+                "market_cap_points": point_manifest,
+                "token_summary": summary_manifest,
+                "tokens_with_swaps": len(summary),
+                "tokens_priced": priced,
+                "tokens_crossed_100k_in_window": crossed,
+                "initial_weth_usd": str(initial_weth_usd),
+                "weth_decimals": weth_state.decimals,
+                "usdg_decimals": usdg_state.decimals,
                 "requests_made": rpc.requests_made,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
@@ -711,6 +806,22 @@ def build_parser() -> argparse.ArgumentParser:
     tape.add_argument("--min-chunk-size", type=int, default=1)
     tape.add_argument("--out", required=True)
     tape.set_defaults(func=cmd_rpc_v3_pons_tape)
+
+
+    market_caps = sub.add_parser("rpc-v1-market-cap-window")
+    market_caps.add_argument("--registry", required=True)
+    market_caps.add_argument("--swaps", required=True)
+    market_caps.add_argument("--from-block", type=int, required=True)
+    market_caps.add_argument("--to-block", type=int, required=True)
+    market_caps.add_argument("--chunk-size", type=int, default=100_000)
+    market_caps.add_argument("--min-chunk-size", type=int, default=1)
+    market_caps.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    market_caps.add_argument("--out", required=True)
+    market_caps.add_argument("--summary-out", required=True)
+    market_caps.set_defaults(func=cmd_rpc_v1_market_cap_window)
 
     usd_path = sub.add_parser("rpc-v1-usd-path")
     usd_path.add_argument("--token", required=True)
