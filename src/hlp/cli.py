@@ -12,6 +12,9 @@ from pathlib import Path
 from hlp.config import (
     DEFAULT_RPC_URL,
     SOLIDRPC_PUBLIC_RPC_URL,
+    ROBINHOOD_USDG,
+    ROBINHOOD_WETH,
+    UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     PONS_V1_FACTORY,
     PONS_V2_FACTORY,
     PONS_V2_MEME_HOOK,
@@ -20,7 +23,11 @@ from hlp.config import (
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.rpc import RpcClient
-from hlp.data.reconstruct import reconstruct_v3_price_points
+from hlp.data.reconstruct import (
+    attach_quote_usd_anchor,
+    reconstruct_v3_price_points,
+    v3_quote_price_at_block,
+)
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.protocols.pons import (
     V1_TOKEN_LAUNCHED_TOPIC,
@@ -272,6 +279,79 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_v1_usd_path(args: argparse.Namespace) -> int:
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0 for a point-in-time anchor")
+
+    started = time.monotonic()
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = reconstruct_v3_price_points(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    target_points = reconstruct_v3_price_points(
+        rpc,
+        token=args.token,
+        quote_token=args.quote_token,
+        pool=args.pool,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    rows = attach_quote_usd_anchor(
+        target_points,
+        anchor_points,
+        initial_quote_usd=initial_weth_usd,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "uniswap_v3",
+            "token": args.token.lower(),
+            "quote_token": args.quote_token.lower(),
+            "pool": args.pool.lower(),
+            "usd_anchor_token": ROBINHOOD_WETH.lower(),
+            "usd_anchor_quote": ROBINHOOD_USDG.lower(),
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_semantics": "USDG nominal USD 1; WETH/USDG latest prior observable V3 price",
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "initial_weth_usd": str(initial_weth_usd),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v1_price_path(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
@@ -445,6 +525,21 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--page-size", type=int, default=1000)
     sample.add_argument("--out", required=True)
     sample.set_defaults(func=cmd_hood_pons_sample)
+
+    usd_path = sub.add_parser("rpc-v1-usd-path")
+    usd_path.add_argument("--token", required=True)
+    usd_path.add_argument("--quote-token", default=ROBINHOOD_WETH)
+    usd_path.add_argument("--pool", required=True)
+    usd_path.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    usd_path.add_argument("--from-block", type=int, required=True)
+    usd_path.add_argument("--to-block", type=int, required=True)
+    usd_path.add_argument("--chunk-size", type=int, default=100_000)
+    usd_path.add_argument("--min-chunk-size", type=int, default=1)
+    usd_path.add_argument("--out", required=True)
+    usd_path.set_defaults(func=cmd_rpc_v1_usd_path)
 
     price_path = sub.add_parser("rpc-v1-price-path")
     price_path.add_argument("--token", required=True)
