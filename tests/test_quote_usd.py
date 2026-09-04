@@ -216,3 +216,72 @@ def test_timeline_marks_v3_and_v4_fallback_sources():
     timeline.advance_to((11, 1, 0))
     assert timeline.pricing_status(v3) == "priced_v3_quote_fallback"
     assert timeline.pricing_status(v4) == "priced_v4_quote_fallback"
+
+
+
+def test_merge_quote_usd_tapes_merges_disjoint_sources():
+    from hlp.data.quote_usd import merge_quote_usd_tapes
+
+    v3 = "0x" + "22" * 20
+    v4 = "0x" + "33" * 20
+    states, updates = merge_quote_usd_tapes([
+        (
+            [{
+                "quote_token": v3,
+                "activation_block": 10,
+                "block_number": 9,
+                "usd_price": "200",
+            }],
+            [{
+                "quote_token": v3,
+                "block_number": 20,
+                "transaction_index": 1,
+                "log_index": 0,
+                "usd_price": "201",
+            }],
+        ),
+        (
+            [],
+            [{
+                "quote_token": v4,
+                "block_number": 15,
+                "transaction_index": 1,
+                "log_index": 0,
+                "usd_price": "300",
+            }],
+        ),
+    ])
+    assert [row["quote_token"] for row in states] == [v3]
+    assert [row["quote_token"] for row in updates] == [v4, v3]
+
+
+def test_merge_quote_usd_tapes_rejects_source_overlap():
+    from hlp.data.quote_usd import merge_quote_usd_tapes
+
+    try:
+        _, updates = merge_quote_usd_tapes([
+            (
+                [{
+                    "quote_token": STOCK,
+                    "activation_block": 10,
+                    "block_number": 9,
+                    "usd_price": "200",
+                }],
+                [],
+            ),
+            (
+                [],
+                [{
+                    "quote_token": STOCK,
+                    "block_number": 20,
+                    "transaction_index": 1,
+                    "log_index": 0,
+                    "usd_price": "201",
+                }],
+            ),
+        ])
+        list(updates)
+    except ValueError as exc:
+        assert "multiple sources" in str(exc)
+    else:
+        raise AssertionError("overlapping quote/USD sources must fail closed")

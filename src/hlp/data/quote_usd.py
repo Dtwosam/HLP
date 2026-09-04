@@ -209,3 +209,89 @@ def prepare_quote_usd_inputs(
         key=lambda row: (event_order(row), row["quote_token"]),
     )
     return initial, merged
+
+
+
+def merge_quote_usd_tapes(
+    source_pairs: Iterable[
+        tuple[Iterable[dict], Iterable[dict]]
+    ],
+) -> tuple[list[dict], Iterator[dict]]:
+    """Merge disjoint generic quote/USD sources without losing provenance."""
+    pairs = list(source_pairs)
+    owners: dict[str, int] = {}
+    state_seen: set[str] = set()
+    states: list[dict] = []
+    update_groups = []
+
+    for source_index, (state_rows, update_rows) in enumerate(pairs):
+        for raw in state_rows:
+            row = dict(raw)
+            token = row["quote_token"].lower()
+            if token in state_seen:
+                raise ValueError(
+                    f"duplicate quote/USD state across sources for {token}"
+                )
+            state_seen.add(token)
+            owner = owners.get(token)
+            if owner is not None and owner != source_index:
+                raise ValueError(
+                    f"quote/USD token has multiple source owners: {token}"
+                )
+            owners[token] = source_index
+            row["quote_token"] = token
+            states.append(row)
+
+        def checked_updates(
+            rows: Iterable[dict],
+            *,
+            index: int = source_index,
+        ) -> Iterator[dict]:
+            previous = None
+            for raw_update in rows:
+                row = dict(raw_update)
+                token = row["quote_token"].lower()
+                row["quote_token"] = token
+                key = (event_order(row), token)
+                if previous is not None and key < previous:
+                    raise ValueError(
+                        f"quote/USD source {index} is not chronological"
+                    )
+                previous = key
+
+                owner = owners.get(token)
+                if owner is None:
+                    owners[token] = index
+                elif owner != index:
+                    raise ValueError(
+                        f"quote/USD token appears in multiple sources: {token}"
+                    )
+                yield row
+
+        update_groups.append(checked_updates(update_rows))
+
+    states.sort(
+        key=lambda row: (
+            int(row.get("activation_block", row["block_number"])),
+            row["quote_token"],
+        )
+    )
+
+    merged = merge(
+        *update_groups,
+        key=lambda row: (event_order(row), row["quote_token"]),
+    )
+
+    def unique_updates() -> Iterator[dict]:
+        previous = None
+        for row in merged:
+            key = (event_order(row), row["quote_token"])
+            if previous == key:
+                raise ValueError(
+                    "duplicate quote/USD update order across sources: "
+                    f"{key}"
+                )
+            previous = key
+            yield row
+
+    return states, unique_updates()

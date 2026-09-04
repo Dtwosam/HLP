@@ -356,3 +356,19 @@ def test_v4_quote_route_pipeline_parses():
         "--out", "updates.jsonl",
     ])
     assert usd_args.v4_events == "events.jsonl"
+
+
+
+def test_quote_usd_merge_parser_accepts_repeated_source_pairs():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-merge-quote-usd-tapes",
+        "--state", "v3-state.jsonl",
+        "--events", "v3-events.jsonl",
+        "--state", "v4-state.jsonl",
+        "--events", "v4-events.jsonl",
+        "--state-out", "fallback-state.jsonl",
+        "--out", "fallback-events.jsonl",
+    ])
+    assert args.state == ["v3-state.jsonl", "v4-state.jsonl"]
+    assert args.events == ["v3-events.jsonl", "v4-events.jsonl"]

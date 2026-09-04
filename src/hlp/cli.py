@@ -75,7 +75,10 @@ from hlp.data.quote_routes import (
     merge_v3_quote_routes,
     select_v3_quote_routes,
 )
-from hlp.data.quote_usd import prepare_quote_usd_inputs
+from hlp.data.quote_usd import (
+    merge_quote_usd_tapes,
+    prepare_quote_usd_inputs,
+)
 from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.quote_v4_routes import (
     build_v4_route_initial_usd_states,
@@ -1859,6 +1862,46 @@ def cmd_rpc_pons_delayed_v3_usdg_routes(
         "routes": [row["route"] for row in ready],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pons_merge_quote_usd_tapes(args: argparse.Namespace) -> int:
+    """Merge disjoint generic quote/USD state and update artifacts."""
+    if len(args.state) != len(args.events):
+        raise SystemExit(
+            "--state and --events must be supplied the same number of times"
+        )
+    if not args.state:
+        raise SystemExit("at least one --state/--events source pair is required")
+
+    pairs = [
+        (_load_jsonl(state), _iter_jsonl(events))
+        for state, events in zip(args.state, args.events)
+    ]
+    states, updates = merge_quote_usd_tapes(pairs)
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "merged_disjoint_quote_usd_states",
+            "chain_id": 4663,
+            "state_sources": [Path(path).name for path in args.state],
+        },
+    )
+    update_manifest = write_jsonl_snapshot(
+        updates,
+        output=Path(args.out),
+        provenance={
+            "source": "stream_merged_disjoint_quote_usd_updates",
+            "chain_id": 4663,
+            "event_sources": [Path(path).name for path in args.events],
+        },
+    )
+    print(json.dumps({
+        "initial_states": state_manifest,
+        "updates": update_manifest,
+        "source_pairs": len(pairs),
     }, sort_keys=True))
     return 0
 
@@ -4677,6 +4720,13 @@ def build_parser() -> argparse.ArgumentParser:
     delayed_quote_v3.set_defaults(
         func=cmd_rpc_pons_delayed_v3_usdg_routes
     )
+
+    merge_quote_usd = sub.add_parser("pons-merge-quote-usd-tapes")
+    merge_quote_usd.add_argument("--state", action="append", default=[])
+    merge_quote_usd.add_argument("--events", action="append", default=[])
+    merge_quote_usd.add_argument("--state-out", required=True)
+    merge_quote_usd.add_argument("--out", required=True)
+    merge_quote_usd.set_defaults(func=cmd_pons_merge_quote_usd_tapes)
 
     select_quote_v3 = sub.add_parser("pons-select-v3-quote-routes")
     select_quote_v3.add_argument("--audit", required=True)
