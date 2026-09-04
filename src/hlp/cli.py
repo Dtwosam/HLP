@@ -64,6 +64,7 @@ from hlp.data.flap_curve import (
 from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.quote_registry import build_pons_quote_registry
+from hlp.data.quote_causality import audit_pons_quote_causality
 from hlp.data.oracles import reconstruct_chainlink_usd_tapes
 from hlp.data.pools_fun_registry import build_pools_fun_registry
 from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
@@ -1469,6 +1470,37 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
+    """Check Stock Token USD feed state immediately before first Pons use."""
+    quote_rows = _load_jsonl(args.quote_registry)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = audit_pons_quote_causality(rpc, quote_rows)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "archive_chainlink_state_before_first_pons_quote_use",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+        },
+    )
+    ready = sum(bool(row["causal_ready"]) for row in rows)
+    print(json.dumps({
+        **manifest,
+        "stock_quote_assets": len(rows),
+        "causal_ready": ready,
+        "blocked": len(rows) - ready,
+        "blocked_tokens": [
+            row["quote_token"] for row in rows if not row["causal_ready"]
+        ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
     return 0
 
 
@@ -3571,6 +3603,11 @@ def build_parser() -> argparse.ArgumentParser:
     quote_audit.add_argument("--registry", required=True)
     quote_audit.add_argument("--out", required=True)
     quote_audit.set_defaults(func=cmd_pons_quote_audit)
+
+    quote_causality = sub.add_parser("rpc-pons-quote-causality")
+    quote_causality.add_argument("--quote-registry", required=True)
+    quote_causality.add_argument("--out", required=True)
+    quote_causality.set_defaults(func=cmd_rpc_pons_quote_causality)
 
     v2_stock_oracle = sub.add_parser("rpc-v2-stock-oracle-window")
     v2_stock_oracle.add_argument("--registry", required=True)
