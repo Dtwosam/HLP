@@ -309,6 +309,87 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
+    """Replay V2 curve spot prices and emit $100k eligibility evidence."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+
+    registry = _load_jsonl(args.registry)
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd = v3_quote_price_at_block(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        block=args.from_block - 1,
+    )
+    anchor_points = reconstruct_v3_price_points(
+        rpc,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=args.usd_anchor_pool,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    points = build_v2_curve_market_cap_points(
+        registry,
+        _iter_jsonl(args.curve_events),
+        anchor_points,
+        initial_weth_usd=initial_weth_usd,
+    )
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "derived_shared_tapes",
+            "chain_id": 4663,
+            "protocol": "pons_v2_curve",
+            "registry": Path(args.registry).name,
+            "curve_events": Path(args.curve_events).name,
+            "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+        },
+    )
+    summary = summarize_v2_curve_market_caps(_iter_jsonl(args.out))
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "derived_v2_curve_market_cap_points",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+            "threshold_semantics": "reached at least once on reconstructed curve path",
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "market_cap_points": point_manifest,
+                "token_summary": summary_manifest,
+                "tokens": len(summary),
+                "tokens_priced": sum(row["priced_points"] > 0 for row in summary),
+                "tokens_crossed_100k_on_curve": sum(
+                    bool(row["crossed_100k"]) for row in summary
+                ),
+                "unsupported_quote_tokens": sum(
+                    row["priced_points"] == 0 for row in summary
+                ),
+                "initial_weth_usd": str(initial_weth_usd),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
     """Acquire one shared Pons V2 reserve-changing event tape."""
     registry = _load_jsonl(args.registry)
