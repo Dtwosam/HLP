@@ -1,0 +1,299 @@
+name: phase1-pons-full-registry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-full-registry.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      head: ${{ steps.head.outputs.block }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: head
+        name: Freeze snapshot head
+        run: |
+          python - <<'PY'
+          import os
+          from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"block={head}\n")
+          print({
+              "snapshot_head_block": head,
+              "archive_route": "authenticated_free" if key else "keyless_public",
+              "requests_made": rpc.requests_made,
+          })
+          PY
+
+  v1:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '8'
+      GENERATION_START: '8600612'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact V1 shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"generation": "v1", "shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire enriched V1 launch registry shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v1-registry-window \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v1-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-registry-v1-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  v2:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '8'
+      GENERATION_START: '26841846'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact V2 shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"generation": "v2", "shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire enriched V2 launch registry shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-registry-window \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v2-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-registry-v2-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, v1, v2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-registry-v1-*
+          path: downloads/v1
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-registry-v2-*
+          path: downloads/v2
+          merge-multiple: true
+      - name: Merge, validate continuity, and freeze registry
+        env:
+          SNAPSHOT_HEAD: ${{ needs.plan.outputs.head }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_shards(directory, prefix):
+              rows = []
+              manifests = []
+              files = sorted(Path(directory).glob(f"{prefix}-shard-*.jsonl"))
+              assert len(files) == 8, (directory, [x.name for x in files])
+              previous_hi = None
+              for path in files:
+                  manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+                  manifest = json.loads(manifest_path.read_text())
+                  prov = manifest["provenance"]
+                  lo = int(prov["from_block"])
+                  hi = int(prov["to_block"])
+                  if previous_hi is not None:
+                      assert lo == previous_hi + 1, (previous_hi, lo, path.name)
+                  previous_hi = hi
+                  shard_rows = [
+                      json.loads(line)
+                      for line in path.read_text().splitlines()
+                      if line.strip()
+                  ]
+                  assert len(shard_rows) == int(manifest["records"])
+                  rows.extend(shard_rows)
+                  manifests.append({
+                      "path": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": manifest["records"],
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              return rows, manifests
+
+          def event_order(row):
+              return (
+                  int(row["block_number"]),
+                  -1 if row.get("transaction_index") is None else int(row["transaction_index"]),
+                  int(row["log_index"]),
+                  row["token"].lower(),
+              )
+
+          v1, v1_manifests = read_shards("downloads/v1", "v1")
+          v2, v2_manifests = read_shards("downloads/v2", "v2")
+          assert v1_manifests[0]["from_block"] == 8_600_612
+          assert v2_manifests[0]["from_block"] == 26_841_846
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          assert v1_manifests[-1]["to_block"] == head
+          assert v2_manifests[-1]["to_block"] == head
+
+          assert all(row["version"] == "v1" for row in v1)
+          assert all(row["version"] == "v2" for row in v2)
+          assert len({row["token"].lower() for row in v1}) == len(v1)
+          assert len({row["token"].lower() for row in v2}) == len(v2)
+          assert not (
+              {row["token"].lower() for row in v1}
+              & {row["token"].lower() for row in v2}
+          )
+
+          rows = [*v1, *v2]
+          rows.sort(key=event_order)
+          manifest = write_jsonl_snapshot(
+              rows,
+              output=Path("artifacts/pons-full-launch-registry.jsonl"),
+              provenance={
+                  "source": "merged_raw_rpc_registry_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": head,
+                  "pons_protocol_generations": ["v1", "v2"],
+                  "v1_shards": v1_manifests,
+                  "v2_shards": v2_manifests,
+              },
+          )
+
+          factory_counts = Counter(row["factory"].lower() for row in v1)
+          pair_counts = Counter(row["pair_token"].lower() for row in rows)
+          summary = {
+              "snapshot_head_block": head,
+              "all_pons_launches": len(rows),
+              "v1_launches": len(v1),
+              "v2_launches": len(v2),
+              "v1_launches_by_factory": dict(sorted(factory_counts.items())),
+              "pair_token_counts": dict(sorted(pair_counts.items())),
+              "first_launch": rows[0] if rows else None,
+              "last_launch": rows[-1] if rows else None,
+              "registry_sha256": manifest["sha256"],
+              "registry_records": manifest["records"],
+          }
+          Path("artifacts/pons-full-registry-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-full-registry
+          path: artifacts/
+          if-no-files-found: error
