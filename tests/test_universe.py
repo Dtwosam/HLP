@@ -50,6 +50,8 @@ def test_shared_market_cap_join_respects_anchor_order():
             swaps,
             anchors,
             initial_weth_usd=Decimal("2000"),
+            weth_decimals=18,
+            usdg_decimals=18,
         )
     )
     assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("2000000000")
@@ -83,6 +85,8 @@ def test_usdg_quote_is_direct_nominal_usd():
             swaps,
             [],
             initial_weth_usd=Decimal("2000"),
+            weth_decimals=18,
+            usdg_decimals=18,
         )
     )
     assert rows[0]["pricing_status"] == "priced_usdg_nominal"
