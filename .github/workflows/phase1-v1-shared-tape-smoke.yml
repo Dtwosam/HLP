@@ -32,6 +32,19 @@ jobs:
       - name: Acquire one shared V3 swap tape
         run: |
           hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-v3-pons-tape             --registry artifacts/v1-registry.jsonl             --from-block 30000000             --to-block 30099999             --chunk-size 2000             --min-chunk-size 25             --out artifacts/v1-pons-v3-swaps.jsonl
+      - name: Derive USD market caps and $100k eligibility
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-market-cap-window \
+            --registry artifacts/v1-registry.jsonl \
+            --swaps artifacts/v1-pons-v3-swaps.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v1-market-cap-points.jsonl \
+            --summary-out artifacts/v1-token-summary.jsonl
       - name: Validate join
         run: |
           python - <<'PY'
@@ -58,10 +71,18 @@ jobs:
               for row in swaps
           ]
           assert orders == sorted(orders)
+          summary = [
+              json.loads(line)
+              for line in Path("artifacts/v1-token-summary.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert summary, "no per-token market-cap summaries"
           print(json.dumps({
               "launches": len(registry),
               "matched_swaps": len(swaps),
               "pools_with_swaps": len({row["pool"] for row in swaps}),
+              "tokens_summarized": len(summary),
+              "tokens_crossed_100k": sum(bool(row["crossed_100k"]) for row in summary),
               "first_swap": orders[0],
               "last_swap": orders[-1],
           }, sort_keys=True))
