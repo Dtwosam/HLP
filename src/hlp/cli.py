@@ -31,9 +31,13 @@ from hlp.protocols.uniswap import (
     decode_v4_swap,
 )
 from hlp.data.blockscout import BlockscoutClient
+from hlp.data.chainlink_directory import ChainlinkDirectoryClient
 from hlp.data.hoodexplorer import HoodExplorerClient
+from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
+from hlp.data.oracles import reconstruct_chainlink_usd_tapes
 from hlp.data.pons_v1 import iter_enriched_v1_launches
 from hlp.data.pons_v2 import ZERO_ADDRESS, iter_enriched_v2_launches
+from hlp.data.robinhood_assets import RobinhoodAssetsClient
 from hlp.data.rpc import RpcClient
 from hlp.data.reconstruct import (
     attach_quote_usd_anchor,
@@ -325,6 +329,91 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+
+
+def cmd_rpc_v2_stock_oracle_window(args: argparse.Namespace) -> int:
+    """Build official Stock Token/USD initial states and shared update tape."""
+    registry = _load_jsonl(args.registry)
+    assets = RobinhoodAssetsClient(timeout=args.timeout, attempts=args.attempts)
+    directory = ChainlinkDirectoryClient(
+        timeout=args.timeout,
+        attempts=args.attempts,
+    )
+    started = time.monotonic()
+    specs = resolve_stock_quote_feed_specs(
+        registry,
+        assets_client=assets,
+        directory_client=directory,
+    )
+
+    feed_manifest = write_jsonl_snapshot(
+        specs,
+        output=Path(args.feed_out),
+        provenance={
+            "source": "robinhood_rhj_assets_plus_chainlink_directory",
+            "chain_id": 4663,
+            "robinhood_assets_url": assets.url,
+            "chainlink_directory_url": directory.url,
+            "chainlink_directory_sha256": directory.last_sha256,
+            "robinhood_asset_requests": assets.requests_made,
+            "chainlink_directory_requests": directory.requests_made,
+        },
+    )
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    states, updates = reconstruct_chainlink_usd_tapes(
+        rpc,
+        feeds=specs,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "chainlink_aggregator_v3_historical_state",
+            "chain_id": 4663,
+            "feed_registry_sha256": feed_manifest["sha256"],
+            "state_block": args.from_block - 1,
+        },
+    )
+    update_manifest = write_jsonl_snapshot(
+        updates,
+        output=Path(args.out),
+        provenance={
+            "source": "chainlink_answer_updated_shared_tape",
+            "chain_id": 4663,
+            "feed_registry_sha256": feed_manifest["sha256"],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "feed_registry": feed_manifest,
+                "initial_states": state_manifest,
+                "updates": update_manifest,
+                "stock_quote_assets": len(specs),
+                "symbols": [row["symbol"] for row in specs],
+                "rhj_requests": assets.requests_made,
+                "rhj_bytes": assets.bytes_received,
+                "chainlink_directory_requests": directory.requests_made,
+                "chainlink_directory_bytes": directory.bytes_received,
+                "archive_rpc_requests": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
 
 
 def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
@@ -1514,6 +1603,18 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4.add_argument("--out", required=True)
     v2_v4.set_defaults(func=cmd_rpc_v2_v4_tape)
 
+
+
+    v2_stock_oracle = sub.add_parser("rpc-v2-stock-oracle-window")
+    v2_stock_oracle.add_argument("--registry", required=True)
+    v2_stock_oracle.add_argument("--from-block", type=int, required=True)
+    v2_stock_oracle.add_argument("--to-block", type=int, required=True)
+    v2_stock_oracle.add_argument("--chunk-size", type=int, default=100_000)
+    v2_stock_oracle.add_argument("--min-chunk-size", type=int, default=1)
+    v2_stock_oracle.add_argument("--feed-out", required=True)
+    v2_stock_oracle.add_argument("--state-out", required=True)
+    v2_stock_oracle.add_argument("--out", required=True)
+    v2_stock_oracle.set_defaults(func=cmd_rpc_v2_stock_oracle_window)
 
     v2_v4_mcap = sub.add_parser("rpc-v2-v4-market-cap-window")
     v2_v4_mcap.add_argument("--registry", required=True)
