@@ -63,3 +63,46 @@ class CurveTrade:
     block_number: int
     transaction_hash: str
     log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class V3Swap:
+    pool: str
+    sender: str
+    recipient: str
+    amount0: int
+    amount1: int
+    sqrt_price_x96: int
+    liquidity: int
+    tick: int
+    block_number: int
+    transaction_hash: str
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class V4Swap:
+    pool_manager: str
+    pool_id: str
+    sender: str
+    amount0: int
+    amount1: int
+    sqrt_price_x96: int
+    liquidity: int
+    tick: int
+    fee: int
+    block_number: int
+    transaction_hash: str
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class PonsV2PoolRegistration:
+    hook: str
+    pool_id: str
+    token: str
+    quote_token: str
+    creator: str
+    block_number: int
+    transaction_hash: str
+    log_index: int
