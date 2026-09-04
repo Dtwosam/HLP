@@ -151,6 +151,60 @@ def cmd_deployment_block(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_blockscout_pons_sample(args: argparse.Namespace) -> int:
+    client = BlockscoutClient(timeout=args.timeout, attempts=args.attempts)
+    if args.version == "v1":
+        address = PONS_V1_FACTORY
+        topic = V1_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v1_launch
+    else:
+        address = PONS_V2_FACTORY
+        topic = V2_TOKEN_LAUNCHED_TOPIC
+        decoder = decode_v2_launch
+
+    started = time.monotonic()
+    deployment = client.contract_deployment(address)
+    head = client.block_number()
+    raw_logs = client.iter_indexed_logs_bisect(
+        deployment["block_number"],
+        head,
+        address=address,
+        topic0=topic,
+        max_records=args.limit,
+    )
+    launches = (decoder(log) for log in raw_logs)
+    output = Path(args.out)
+    manifest = write_jsonl_snapshot(
+        launches,
+        output=output,
+        provenance={
+            "source": "robinhood_blockscout_indexed_logs",
+            "source_url": client.base_url,
+            "chain_id": 4663,
+            "protocol": "pons",
+            "protocol_version": args.version,
+            "factory": address.lower(),
+            "event_topic0": topic,
+            "deployment_block": deployment["block_number"],
+            "head_block": head,
+            "requested_limit": args.limit,
+            "documented_result_cap": 1000,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "requests_made": client.requests_made,
+                "bytes_received": client.bytes_received,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
     hood = HoodExplorerClient(timeout=args.timeout)
     if args.version == "v1":
@@ -312,6 +366,12 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--low", type=int, default=0)
     deploy.add_argument("--high", type=int)
     deploy.set_defaults(func=cmd_deployment_block)
+
+    blockscout_sample = sub.add_parser("blockscout-pons-sample")
+    blockscout_sample.add_argument("--version", choices=("v1", "v2"), required=True)
+    blockscout_sample.add_argument("--limit", type=int, default=100)
+    blockscout_sample.add_argument("--out", required=True)
+    blockscout_sample.set_defaults(func=cmd_blockscout_pons_sample)
 
     sample = sub.add_parser("hood-pons-sample")
     sample.add_argument("--version", choices=("v1", "v2"), required=True)
