@@ -1,0 +1,131 @@
+name: phase1-pons-v2-registry-freeze
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v2-registry-freeze.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN_ID: '33907180308'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-registry-v2-*
+          path: downloads/v2
+          merge-multiple: true
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Merge and freeze V2 registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          files = sorted(Path("downloads/v2").glob("v2-shard-*.jsonl"))
+          assert len(files) == 8, [path.name for path in files]
+          rows = []
+          manifests = []
+          previous_hi = None
+          for path in files:
+              manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+              manifest = json.loads(manifest_path.read_text())
+              prov = manifest["provenance"]
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              if previous_hi is None:
+                  assert lo == 26_841_846, lo
+              else:
+                  assert lo == previous_hi + 1, (previous_hi, lo, path.name)
+              previous_hi = hi
+              shard_rows = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+              assert len(shard_rows) == int(manifest["records"])
+              rows.extend(shard_rows)
+              manifests.append({
+                  "path": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          assert previous_hi == head, (previous_hi, head)
+          assert all(row["version"] == "v2" for row in rows)
+          tokens = [row["token"].lower() for row in rows]
+          curves = [row["curve"].lower() for row in rows]
+          assert len(set(tokens)) == len(tokens), "duplicate V2 token"
+          assert len(set(curves)) == len(curves), "duplicate V2 curve"
+
+          rows.sort(key=lambda row: (
+              int(row["block_number"]),
+              -1 if row.get("transaction_index") is None
+              else int(row["transaction_index"]),
+              int(row["log_index"]),
+              row["token"].lower(),
+          ))
+          frozen = write_jsonl_snapshot(
+              rows,
+              output=Path("artifacts/pons-v2-full-registry.jsonl"),
+              provenance={
+                  "source": "merged_original_v2_raw_rpc_registry_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": head,
+                  "source_run_id": int(os.environ["SOURCE_RUN_ID"]),
+                  "shards": manifests,
+              },
+          )
+
+          pair_counts = Counter(row["pair_token"].lower() for row in rows)
+          summary = {
+              "snapshot_head_block": head,
+              "v2_launches": len(rows),
+              "unique_tokens": len(set(tokens)),
+              "unique_curves": len(set(curves)),
+              "unique_pair_tokens": len(pair_counts),
+              "pair_token_counts": dict(sorted(pair_counts.items())),
+              "first_launch": rows[0] if rows else None,
+              "last_launch": rows[-1] if rows else None,
+              "registry_sha256": frozen["sha256"],
+              "registry_records": int(frozen["records"]),
+              "source_run_id": int(os.environ["SOURCE_RUN_ID"]),
+              "source_rpc_requests": 14643,
+          }
+          assert summary["v2_launches"] == 225_951, summary["v2_launches"]
+          Path("artifacts/pons-v2-registry-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: artifacts/
+          if-no-files-found: error
