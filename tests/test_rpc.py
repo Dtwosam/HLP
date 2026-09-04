@@ -224,3 +224,37 @@ def test_batched_blocks_fall_back_to_single_rpc_if_batch_unsupported():
     )
     assert int(rows[0]["number"], 16) == 10
     assert len(calls) == 2
+
+
+
+def test_batched_transactions_preserve_hash_order():
+    hashes = ["0x" + "11" * 32, "0x" + "22" * 32]
+
+    def transport(request, timeout):
+        payload = json.loads(request.data)
+        assert isinstance(payload, list)
+        return json.dumps(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "hash": hashes[1],
+                        "from": "0x" + "bb" * 20,
+                    },
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "hash": hashes[0],
+                        "from": "0x" + "aa" * 20,
+                    },
+                },
+            ]
+        ).encode()
+
+    rpc = RpcClient("https://example.invalid", transport=transport)
+    rows = rpc.get_transactions_batched(hashes, batch_size=2)
+    assert [row["hash"] for row in rows] == hashes
+    assert rpc.requests_made == 1
