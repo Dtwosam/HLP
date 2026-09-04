@@ -1513,6 +1513,27 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4.add_argument("--out", required=True)
     v2_v4.set_defaults(func=cmd_rpc_v2_v4_tape)
 
+
+    v2_v4_mcap = sub.add_parser("rpc-v2-v4-market-cap-window")
+    v2_v4_mcap.add_argument("--registry", required=True)
+    v2_v4_mcap.add_argument("--curve-points", required=True)
+    v2_v4_mcap.add_argument("--graduations", required=True)
+    v2_v4_mcap.add_argument("--registrations", required=True)
+    v2_v4_mcap.add_argument("--v4-swaps", required=True)
+    v2_v4_mcap.add_argument("--from-block", type=int, required=True)
+    v2_v4_mcap.add_argument("--to-block", type=int, required=True)
+    v2_v4_mcap.add_argument("--chunk-size", type=int, default=100_000)
+    v2_v4_mcap.add_argument("--min-chunk-size", type=int, default=1)
+    v2_v4_mcap.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    v2_v4_mcap.add_argument("--seed-out", required=True)
+    v2_v4_mcap.add_argument("--out", required=True)
+    v2_v4_mcap.add_argument("--transition-out", required=True)
+    v2_v4_mcap.add_argument("--summary-out", required=True)
+    v2_v4_mcap.set_defaults(func=cmd_rpc_v2_v4_market_cap_window)
+
     v2_mcap = sub.add_parser("rpc-v2-curve-market-cap-window")
     v2_mcap.add_argument("--registry", required=True)
     v2_mcap.add_argument("--curve-events", required=True)
