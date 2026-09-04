@@ -64,23 +64,31 @@ jobs:
           v2_tokens = {row["token"].lower() for row in v2}
           assert not (v1_tokens & v2_tokens), "V1/V2 token overlap"
 
-          unpriced_v1 = [row for row in v1 if int(row["priced_points"]) == 0]
-          unpriced_v2 = [row for row in v2 if int(row["priced_points"]) == 0]
-          if unpriced_v1 or unpriced_v2:
+          unknown_v1 = [
+              row for row in v1
+              if row.get("eligibility_status") == "unknown"
+          ]
+          unknown_v2 = [
+              row for row in v2
+              if row.get("eligibility_status") == "unknown"
+          ]
+          if unknown_v1 or unknown_v2:
               raise SystemExit(
-                  "cannot freeze complete $100k universe while lifecycle "
-                  f"pricing is incomplete: v1={len(unpriced_v1)} "
-                  f"v2={len(unpriced_v2)}"
+                  "cannot freeze complete $100k universe while eligibility "
+                  f"remains unknown: v1={len(unknown_v1)} "
+                  f"v2={len(unknown_v2)} "
+                  f"v1_sample={[r['token'] for r in unknown_v1[:10]]} "
+                  f"v2_sample={[r['token'] for r in unknown_v2[:10]]}"
               )
 
           eligible = [
               {**row, "version": "v1"}
               for row in v1
-              if bool(row["crossed_100k"])
+              if row.get("eligibility_status") == "eligible"
           ] + [
               {**row, "version": "v2"}
               for row in v2
-              if bool(row["crossed_100k"])
+              if row.get("eligibility_status") == "eligible"
           ]
           eligible.sort(
               key=lambda row: (
@@ -121,7 +129,11 @@ jobs:
                   0 if not (v1 or v2)
                   else len(eligible) / (len(v1) + len(v2))
               ),
-              "unpriced_tokens": 0,
+              "unknown_tokens": 0,
+              "partial_but_proven_eligible": sum(
+                  int(row.get("unpriced_points", 0)) > 0
+                  for row in eligible
+              ),
               "universe_sha256": manifest["sha256"],
           }
           Path("artifacts/pons-eligible-universe-summary.json").write_text(

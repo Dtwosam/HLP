@@ -139,7 +139,14 @@ jobs:
               for line in source.read_text().splitlines()
               if line.strip()
           ]
-          eligible = [row for row in rows if bool(row["crossed_100k"])]
+          eligible = [
+              row for row in rows
+              if row.get("eligibility_status") == "eligible"
+          ]
+          unknown = [
+              row for row in rows
+              if row.get("eligibility_status") == "unknown"
+          ]
           eligible.sort(key=lambda row: (row["launch_block"], row["token"]))
 
           snapshot = write_jsonl_snapshot(
@@ -172,6 +179,11 @@ jobs:
               "tokens_without_priced_points": sum(
                   int(row["priced_points"]) == 0 for row in rows
               ),
+              "tokens_with_partial_pricing": sum(
+                  int(row.get("unpriced_points", 0)) > 0 for row in rows
+              ),
+              "eligibility_unknown_tokens": len(unknown),
+              "unknown_sample": [row["token"] for row in unknown[:20]],
               "eligible_sha256": snapshot["sha256"],
           }
           Path("artifacts/pons-v2-eligibility-summary.json").write_text(
