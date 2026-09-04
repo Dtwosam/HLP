@@ -189,3 +189,54 @@ def test_stock_quote_uses_causal_oracle_price():
     assert rows[0]["pricing_status"] == "priced_chainlink_stock_token"
     assert Decimal(rows[0]["quote_usd"]) == Decimal("200")
     assert Decimal(rows[1]["quote_usd"]) == Decimal("210")
+
+
+
+def test_merge_lifecycle_summary_keeps_post_graduation_max():
+    from hlp.data.v2_curve import merge_v2_lifecycle_market_cap_summaries
+
+    registry = [{
+        "token": TOKEN,
+        "curve": CURVE,
+        "pair_token": ROBINHOOD_WETH.lower(),
+        "block_number": 10,
+    }]
+    curve = [{
+        "token": TOKEN,
+        "pricing_statuses": ["priced_weth_usdg"],
+        "price_points": 3,
+        "priced_points": 3,
+        "max_market_cap_proxy_usd": "90000",
+        "max_market_cap_block": 20,
+        "crossed_100k": False,
+    }]
+    seed = [{
+        "token": TOKEN,
+        "pricing_statuses": ["priced_weth_usdg"],
+        "price_points": 1,
+        "priced_points": 1,
+        "max_market_cap_proxy_usd": "120000",
+        "max_market_cap_block": 30,
+        "crossed_100k": True,
+    }]
+    v4 = [{
+        "token": TOKEN,
+        "pricing_statuses": ["priced_weth_usdg"],
+        "price_points": 4,
+        "priced_points": 4,
+        "max_market_cap_proxy_usd": "800000",
+        "max_market_cap_block": 40,
+        "crossed_100k": True,
+    }]
+    row = merge_v2_lifecycle_market_cap_summaries(
+        registry,
+        curve_summary=curve,
+        seed_summary=seed,
+        v4_summary=v4,
+    )[0]
+    assert row["crossed_100k"] is True
+    assert row["max_market_cap_proxy_usd"] == "800000"
+    assert row["max_market_cap_phase"] == "v4"
+    assert row["price_points"] == 8
+    assert row["graduated"] is True
+    assert row["has_v4_price_points"] is True
