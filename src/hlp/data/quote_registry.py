@@ -24,8 +24,10 @@ def build_pons_quote_registry(
     for launch in registry_rows:
         token = launch["pair_token"].lower()
         current = stats.get(token)
-        block = int(launch["block_number"])
-        version = str(launch["version"])
+        raw_block = launch.get("block_number")
+        block = None if raw_block is None else int(raw_block)
+        raw_version = launch.get("version")
+        version = None if raw_version is None else str(raw_version)
         raw_decimals = launch.get("quote_decimals")
         decimals = None if raw_decimals is None else int(raw_decimals)
         if current is None:
@@ -39,9 +41,17 @@ def build_pons_quote_registry(
             }
             stats[token] = current
         current["launches"] += 1
-        current["first_launch_block"] = min(current["first_launch_block"], block)
-        current["last_launch_block"] = max(current["last_launch_block"], block)
-        current["versions"][version] += 1
+        if block is not None:
+            first = current["first_launch_block"]
+            last = current["last_launch_block"]
+            current["first_launch_block"] = (
+                block if first is None else min(first, block)
+            )
+            current["last_launch_block"] = (
+                block if last is None else max(last, block)
+            )
+        if version is not None:
+            current["versions"][version] += 1
         if decimals is not None:
             current["observed_decimals"].add(decimals)
 
@@ -80,8 +90,16 @@ def build_pons_quote_registry(
         base = {
             "quote_token": token,
             "launches": int(current["launches"]),
-            "first_launch_block": int(current["first_launch_block"]),
-            "last_launch_block": int(current["last_launch_block"]),
+            "first_launch_block": (
+                None
+                if current["first_launch_block"] is None
+                else int(current["first_launch_block"])
+            ),
+            "last_launch_block": (
+                None
+                if current["last_launch_block"] is None
+                else int(current["last_launch_block"])
+            ),
             "versions": dict(sorted(current["versions"].items())),
             "observed_quote_decimals": observed[0] if observed else None,
             "pricing_status": None,
