@@ -70,6 +70,31 @@ def cmd_network_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deployment_block(args: argparse.Namespace) -> int:
+    rpc = _rpc(args)
+    rpc.assert_robinhood()
+    first = rpc.find_first_code_block(args.address, low=args.low, high=args.high)
+    before_code = "0x" if first == 0 else rpc.get_code(args.address, first - 1)
+    at_code = rpc.get_code(args.address, first)
+    block = rpc.get_block(first)
+    if first > 0 and before_code not in {"0x", "0x0", ""}:
+        raise SystemExit("deployment boundary verification failed: code exists before first block")
+    if at_code in {"0x", "0x0", ""}:
+        raise SystemExit("deployment boundary verification failed: no code at first block")
+    print(
+        json.dumps(
+            {
+                "address": args.address.lower(),
+                "first_code_block": first,
+                "timestamp": int(block["timestamp"], 16),
+                "code_bytes": len(at_code.removeprefix("0x")) // 2,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_pons_scan(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -102,6 +127,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     smoke = sub.add_parser("network-smoke")
     smoke.set_defaults(func=cmd_network_smoke)
+
+    deploy = sub.add_parser("deployment-block")
+    deploy.add_argument("address")
+    deploy.add_argument("--low", type=int, default=0)
+    deploy.add_argument("--high", type=int)
+    deploy.set_defaults(func=cmd_deployment_block)
 
     scan = sub.add_parser("pons-scan")
     scan.add_argument("--version", choices=("v1", "v2"), required=True)
