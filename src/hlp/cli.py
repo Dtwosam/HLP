@@ -323,6 +323,187 @@ def cmd_hood_pons_sample(args: argparse.Namespace) -> int:
 
 
 
+
+def cmd_rpc_v2_graduation_tape(args: argparse.Namespace) -> int:
+    registry = _load_jsonl(args.registry)
+    tokens = {row["token"].lower() for row in registry}
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=PONS_V2_FACTORY,
+        topics=[V2_POOL_GRADUATED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {"all_graduations": 0, "matched_graduations": 0}
+
+    def decoded():
+        for log in raw:
+            counters["all_graduations"] += 1
+            row = decode_v2_pool_graduation(log)
+            if row.token not in tokens:
+                continue
+            counters["matched_graduations"] += 1
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v2_graduations",
+            "registry": Path(args.registry).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V2_POOL_GRADUATED_TOPIC,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                **counters,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_v2_registration_tape(args: argparse.Namespace) -> int:
+    registry = _load_jsonl(args.registry)
+    tokens = {row["token"].lower() for row in registry}
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=PONS_V2_MEME_HOOK,
+        topics=[PONS_V2_POOL_REGISTERED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {"all_registrations": 0, "matched_registrations": 0}
+
+    def decoded():
+        for log in raw:
+            counters["all_registrations"] += 1
+            row = decode_pons_v2_pool_registered(log)
+            if row.token not in tokens:
+                continue
+            counters["matched_registrations"] += 1
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v2_v4_pool_registrations",
+            "hook": PONS_V2_MEME_HOOK.lower(),
+            "registry": Path(args.registry).name,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": PONS_V2_POOL_REGISTERED_TOPIC,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                **counters,
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
+    registrations = _load_jsonl(args.registrations)
+    pool_ids = {row["pool_id"].lower() for row in registrations}
+    if not pool_ids:
+        # A valid window can contain no graduations/registrations.
+        write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance={
+                "source": "evm_json_rpc",
+                "chain_id": 4663,
+                "protocol": "pons_v2_v4_swaps",
+                "registrations": Path(args.registrations).name,
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "empty_reason": "no registered Pons V2 pool ids",
+            },
+        )
+        print(json.dumps({"records": 0, "requests_made": 0}, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=UNISWAP_V4_POOL_MANAGER,
+        topics=[V4_SWAP_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    counters = {"all_v4_swaps": 0, "matched_pons_v4_swaps": 0}
+    matched_ids: set[str] = set()
+
+    def decoded():
+        for log in raw:
+            counters["all_v4_swaps"] += 1
+            row = decode_v4_swap(log)
+            if row.pool_id not in pool_ids:
+                continue
+            counters["matched_pons_v4_swaps"] += 1
+            matched_ids.add(row.pool_id)
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        decoded(),
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "pons_v2_v4_swaps",
+            "pool_manager": UNISWAP_V4_POOL_MANAGER.lower(),
+            "registrations": Path(args.registrations).name,
+            "registered_pool_ids": len(pool_ids),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_SWAP_TOPIC,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                **counters,
+                "matched_pool_ids": len(matched_ids),
+                "requests_made": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
     """Replay V2 curve spot prices and emit $100k eligibility evidence."""
     if args.from_block <= 0:
