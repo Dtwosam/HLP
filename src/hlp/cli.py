@@ -2762,7 +2762,7 @@ def _load_quote_oracle_inputs(args: argparse.Namespace):
 
 
 def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
-    """Acquire one shared V3 Swap tape and keep only registered Pons pools."""
+    """Acquire the shared V3 Initialize/Swap price tape for Pons V1 pools."""
     registry = _load_jsonl(args.registry)
     pool_launch_block = {
         row["pool"].lower(): int(row["block_number"])
@@ -2820,8 +2820,8 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
         provenance={
             "source": "evm_json_rpc",
             "chain_id": 4663,
-            "protocol": "uniswap_v3_shared_swap_tape",
-            "event_topic0": V3_SWAP_TOPIC,
+            "protocol": "uniswap_v3_shared_price_tape",
+            "event_topic0_or": [V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC],
             "registry": str(Path(args.registry).name),
             "registry_pools": len(pool_launch_block),
             "server_side_pool_address_filter": True,
