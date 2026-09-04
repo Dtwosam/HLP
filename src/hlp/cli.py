@@ -2085,15 +2085,21 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
     # V4 Initialize and Swap both index poolId in topic1. Keep the exact
     # initialized price as part of the lifecycle instead of assuming the
     # PoolGraduated seed ratio is identical to the initialized pool price.
+    global_pool_scan = bool(getattr(args, "global_pool_scan", False))
+    topics = [[V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC]]
+    if not global_pool_scan:
+        topics.append(sorted(pool_ids))
     raw = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
         address=UNISWAP_V4_POOL_MANAGER,
-        topics=[[V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC], sorted(pool_ids)],
+        topics=topics,
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
     )
     counters = {
+        "poolmanager_price_events_scanned": 0,
+        "unmatched_pool_ids": 0,
         "matched_pons_v4_initializes": 0,
         "matched_pons_v4_swaps": 0,
     }
@@ -2101,23 +2107,32 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
 
     def decoded():
         for log in raw:
+            counters["poolmanager_price_events_scanned"] += 1
             topic0 = log.topics[0] if log.topics else None
             if topic0 == V4_INITIALIZE_TOPIC:
                 event = asdict(decode_v4_pool_initialized(log))
                 event["event_type"] = "v4_initialize"
-                counters["matched_pons_v4_initializes"] += 1
             elif topic0 == V4_SWAP_TOPIC:
                 event = asdict(decode_v4_swap(log))
                 event["event_type"] = "v4_swap"
-                counters["matched_pons_v4_swaps"] += 1
             else:
                 continue
-            if event["pool_id"] not in pool_ids:
-                raise ValueError(
-                    "V4 server-side pool filter returned unknown id "
-                    f"{event['pool_id']}"
-                )
-            matched_ids.add(event["pool_id"])
+
+            pool_id = event["pool_id"]
+            if pool_id not in pool_ids:
+                if not global_pool_scan:
+                    raise ValueError(
+                        "V4 server-side pool filter returned unknown id "
+                        f"{pool_id}"
+                    )
+                counters["unmatched_pool_ids"] += 1
+                continue
+
+            if topic0 == V4_INITIALIZE_TOPIC:
+                counters["matched_pons_v4_initializes"] += 1
+            else:
+                counters["matched_pons_v4_swaps"] += 1
+            matched_ids.add(pool_id)
             yield event
 
     manifest = write_jsonl_snapshot(
@@ -2133,10 +2148,20 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "event_topic0_or": [V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC],
-            "event_topic1_pool_ids": sorted(pool_ids),
+            "event_topic1_pool_ids": (
+                None if global_pool_scan else sorted(pool_ids)
+            ),
+            "pool_filter_mode": (
+                "global_poolmanager_topic_then_registry"
+                if global_pool_scan
+                else "server_side_topic1_registered_pool_ids"
+            ),
             "filter_semantics": (
-                "server-side topic0 Initialize/Swap OR and topic1 OR over "
-                "registered Pons V2 pool ids"
+                "single PoolManager + Initialize/Swap topic scan, then "
+                "client-side frozen Pons registration membership"
+                if global_pool_scan
+                else "server-side topic0 Initialize/Swap OR and topic1 OR "
+                "over registered Pons V2 pool ids"
             ),
         },
     )
@@ -3649,6 +3674,14 @@ def build_parser() -> argparse.ArgumentParser:
     v2_v4.add_argument("--to-block", type=int, required=True)
     v2_v4.add_argument("--chunk-size", type=int, default=100_000)
     v2_v4.add_argument("--min-chunk-size", type=int, default=1)
+    v2_v4.add_argument(
+        "--global-pool-scan",
+        action="store_true",
+        help=(
+            "scan PoolManager Initialize/Swap events without a topic1 pool-id "
+            "list and filter against frozen Pons registrations client-side"
+        ),
+    )
     v2_v4.add_argument("--out", required=True)
     v2_v4.set_defaults(func=cmd_rpc_v2_v4_tape)
 
