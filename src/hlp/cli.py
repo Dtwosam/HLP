@@ -1563,10 +1563,17 @@ def cmd_pons_quote_audit(args: argparse.Namespace) -> int:
 def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
     """Build one shared Stock Token USD tape from each quote's first Pons use."""
     quote_rows = _load_jsonl(args.quote_registry)
-    specs = [
-        row for row in quote_rows
-        if row["pricing_status"] == "priced_chainlink_stock_token"
-    ]
+    specs = []
+    for source in quote_rows:
+        if source["pricing_status"] != "priced_chainlink_stock_token":
+            continue
+        actual_first = int(source["first_launch_block"])
+        if actual_first > args.to_block:
+            continue
+        row = dict(source)
+        if args.from_block is not None:
+            row["first_launch_block"] = max(actual_first, args.from_block)
+        specs.append(row)
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
@@ -1584,6 +1591,7 @@ def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
             "source": "chainlink_state_before_each_quote_first_pons_use",
             "chain_id": 4663,
             "quote_registry": Path(args.quote_registry).name,
+            "from_block": args.from_block,
             "to_block": args.to_block,
         },
     )
@@ -1594,6 +1602,7 @@ def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
             "source": "shared_staggered_chainlink_answer_updated_tape",
             "chain_id": 4663,
             "quote_registry": Path(args.quote_registry).name,
+            "from_block": args.from_block,
             "to_block": args.to_block,
             "event_topic0": "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
             "initial_chunk_size": args.chunk_size,
@@ -1604,6 +1613,7 @@ def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
         "initial_states": state_manifest,
         "updates": update_manifest,
         "stock_quote_assets": len(specs),
+        "from_block": args.from_block,
         "first_activation_block": (
             min((int(row["first_launch_block"]) for row in specs), default=None)
         ),
@@ -3833,6 +3843,7 @@ def build_parser() -> argparse.ArgumentParser:
         "rpc-pons-stock-oracle-lifecycle"
     )
     pons_oracle_lifecycle.add_argument("--quote-registry", required=True)
+    pons_oracle_lifecycle.add_argument("--from-block", type=int)
     pons_oracle_lifecycle.add_argument("--to-block", type=int, required=True)
     pons_oracle_lifecycle.add_argument("--chunk-size", type=int, default=100_000)
     pons_oracle_lifecycle.add_argument("--min-chunk-size", type=int, default=1)
