@@ -1,5 +1,5 @@
 name: phase1-pons-representative-call-probe
-# target: market-paths
+# target: transfers
 
 on:
   push:
@@ -15,12 +15,8 @@ permissions:
 jobs:
   probe:
     if: ${{ contains(github.event.head_commit.message, 'never launch representative call probe') }}
-    uses: ./.github/workflows/phase1-pons-representative-market-paths.yml
+    uses: ./.github/workflows/phase1-pons-representative-transfers-full.yml
     with:
       sample_run_id: "33982556591"
-      registry_run_id: "33911022718"
-      v1_v3_run_id: "33982556591"
-      v2_curve_run_id: "33936232604"
-      transition_run_id: "33912452330"
-      v2_v4_run_id: "33982556591"
+      prior_run_id: ""
     secrets: inherit
