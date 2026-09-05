@@ -1674,3 +1674,18 @@ def test_viability_accepts_only_approved_evidence_workflow_paths():
         assert "phase1/data-acquisition-spike" in content
     assert "evidence handoff workflow path is not allowed" in guard
     assert "viability ledger evidence workflow path is not allowed" in finalizer
+
+
+def test_readiness_state_change_watcher_is_artifact_only_and_scoped():
+    content = _workflow("phase1-pons-readiness-on-state-change.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "phase1-pons-readiness-audit.yml" in content
+    assert 'source_eligibility_run_id: "33982556591"' in content
+    assert "cancel-in-progress: true" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
