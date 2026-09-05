@@ -184,6 +184,24 @@ jobs:
               raise SystemExit(
                   "viability ledger evidence run is not successful"
               )
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  f"viability ledger evidence workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if evidence.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "viability ledger evidence branch changed"
+              )
 
           evidence_artifacts = artifact_names(evidence_run_id)
           required_evidence = {
