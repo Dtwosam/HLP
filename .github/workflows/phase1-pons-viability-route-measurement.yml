@@ -1,0 +1,303 @@
+name: phase1-pons-viability-route-measurement
+
+on:
+  workflow_dispatch:
+    inputs:
+      route:
+        description: "Frozen Phase 1 acquisition route to measure"
+        required: true
+        type: choice
+        options:
+          - pons_registry
+          - pons_v1_v3
+          - pons_v2_curve
+          - pons_v2_transition
+          - pons_v2_v4
+          - weth_usdg_anchor
+          - stock_oracle
+          - quote_v3_fallback
+          - quote_v4_fallback
+      from_block:
+        description: "Inclusive measurement start; keep the span <=50k blocks"
+        required: true
+        default: "54436036"
+        type: string
+      to_block:
+        description: "Inclusive measurement end; keep the span <=50k blocks"
+        required: true
+        default: "54486035"
+        type: string
+      eligibility_run_id:
+        description: "Completed eligibility parent run; required for quote fallback route files"
+        required: false
+        default: ""
+        type: string
+      registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        description: "Frozen Pons V2 registry run"
+        required: true
+        default: "33912235341"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+  workflow_call:
+    inputs:
+      route:
+        required: true
+        type: string
+      from_block:
+        required: false
+        default: "54436036"
+        type: string
+      to_block:
+        required: false
+        default: "54486035"
+        type: string
+      eligibility_run_id:
+        required: false
+        default: ""
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        required: false
+        default: "33912235341"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-route-measurement-${{ inputs.route }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+  ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate bounded measurement contract
+        env:
+          ROUTE: ${{ inputs.route }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          routes = {
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          }
+          route = os.environ["ROUTE"]
+          if route not in routes:
+              raise SystemExit(f"unsupported Phase 1 viability route: {route}")
+          lo = int(os.environ["FROM_BLOCK"])
+          hi = int(os.environ["TO_BLOCK"])
+          if lo < 0 or hi < lo:
+              raise SystemExit("invalid viability measurement block range")
+          span = hi - lo + 1
+          if span > 50_000:
+              raise SystemExit(
+                  f"viability measurement exceeds 50000-block ceiling: {span}"
+              )
+          if route in {"quote_v3_fallback", "quote_v4_fallback"}:
+              value = os.environ.get("ELIGIBILITY_RUN_ID", "").strip()
+              if not value or int(value) <= 0:
+                  raise SystemExit(
+                      "quote fallback measurement requires eligibility_run_id"
+                  )
+          Path("artifacts").mkdir()
+          Path("artifacts/phase1-route-measurement.json").write_text(
+              json.dumps(
+                  {
+                      "route": route,
+                      "from_block": lo,
+                      "to_block": hi,
+                      "processed_block_span": span,
+                      "snapshot_head_block": 54_486_035,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'pons_v1_v3' }}
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'pons_v2_curve' || inputs.route == 'pons_v2_transition' }}
+        with:
+          name: phase1-pons-v2-full-registry
+          path: v2-registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'pons_v2_v4' }}
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'stock_oracle' }}
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'quote_v3_fallback' }}
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.route == 'quote_v4_fallback' }}
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: canonical-v4
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Run exact canonical bounded route scan
+        env:
+          ROUTE: ${{ inputs.route }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+        run: |
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          case "$ROUTE" in
+            pons_registry)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v1-registry-window                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/pons-registry-v1-measurement.jsonl
+              ;;
+            pons_v1_v3)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v3-pons-tape                 --registry registry/pons-full-launch-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-topic-scan                 --out artifacts/pons-v1-v3-measurement.jsonl
+              ;;
+            pons_v2_curve)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-curve-tape                 --registry v2-registry/pons-v2-full-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-topic-scan                 --out artifacts/pons-v2-curve-measurement.jsonl
+              ;;
+            pons_v2_transition)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-transition-tape                 --registry v2-registry/pons-v2-full-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --graduations-out artifacts/pons-v2-graduations-measurement.jsonl                 --registrations-out artifacts/pons-v2-registrations-measurement.jsonl
+              ;;
+            pons_v2_v4)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-v4-tape                 --registrations transition/pons-v2-registrations-full.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-pool-scan                 --out artifacts/pons-v2-v4-measurement.jsonl
+              ;;
+            weth_usdg_anchor)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v1-price-path                 --token "$WETH"                 --quote-token "$USDG"                 --pool "$ANCHOR_POOL"                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/weth-usdg-anchor-measurement.jsonl
+              ;;
+            stock_oracle)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-pons-stock-oracle-lifecycle                 --quote-registry quotes/pons-quote-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --state-out artifacts/stock-oracle-state-measurement.jsonl                 --out artifacts/stock-oracle-updates-measurement.jsonl
+              ;;
+            quote_v3_fallback)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v3-quote-route-tape                 --routes canonical-v3/pons-v3-quote-routes.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/quote-v3-fallback-measurement.jsonl
+              ;;
+            quote_v4_fallback)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v4-quote-route-tape                 --routes canonical-v4/pons-v4-quote-routes.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/quote-v4-fallback-measurement.jsonl
+              ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+
+  registry_v2:
+    if: ${{ inputs.route == 'pons_registry' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate bounded registry measurement range
+        env:
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+        run: |
+          python - <<'PY'
+          import os
+          lo = int(os.environ["FROM_BLOCK"])
+          hi = int(os.environ["TO_BLOCK"])
+          if lo < 26_841_846:
+              raise SystemExit(
+                  "pons_registry shared measurement range must postdate V2 deployment"
+              )
+          if hi < lo or hi - lo + 1 > 50_000:
+              raise SystemExit("invalid pons_registry V2 measurement range")
+          PY
+      - name: Measure V2 launch-registry scan separately
+        env:
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v2-registry-window             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --out artifacts/pons-registry-v2-measurement.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
