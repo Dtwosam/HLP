@@ -1252,3 +1252,31 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "phase1-pons-v1-v3-recover-gaps.yml" in content
     assert "phase1-pons-v2-v4-recover-gaps.yml" in content
     assert "time.sleep(" not in content
+
+
+def test_eligible_universe_promotion_is_artifact_only_and_reusable():
+    content = _workflow("phase1-pons-eligible-universe-promote.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-eligible-universe-freeze.yml" in content
+    assert content.count(
+        "inputs.source_eligibility_run_id"
+    ) == 2
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_eligible_universe_promotion_launcher_is_pinned_and_guarded():
+    content = _workflow(
+        "phase1-pons-eligible-universe-promote-one-shot.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch eligible universe promotion" in content
+    assert 'source_eligibility_run_id: "33982556591"' in content
+    assert "phase1-pons-eligible-universe-promote.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
