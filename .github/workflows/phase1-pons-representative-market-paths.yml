@@ -175,6 +175,83 @@ jobs:
                   "representative market-path registry snapshot changed"
               )
 
+          def require_manifest(path, *, source):
+              manifest = json.loads(Path(path).read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative market-path source chain changed: {path}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != SNAPSHOT_HEAD:
+                  raise SystemExit(
+                      f"representative market-path source snapshot changed: "
+                      f"{path}"
+                  )
+              if provenance.get("source") != source:
+                  raise SystemExit(
+                      f"representative market-path source provenance changed: "
+                      f"{path}"
+                  )
+              return manifest, provenance
+
+          _, v1_v3_provenance = require_manifest(
+              "v1v3/pons-v1-v3-full.jsonl.manifest.json",
+              source="stream_merged_global_v3_topic_shards",
+          )
+          if int(
+              v1_v3_provenance.get("source_registry_run_id", -1)
+          ) != int("${{ inputs.registry_run_id }}"):
+              raise SystemExit(
+                  "representative V1 V3 tape used a different registry run"
+              )
+
+          _, v2_curve_provenance = require_manifest(
+              "v2curve/pons-v2-curve-full.jsonl.manifest.json",
+              source="stream_merged_pons_specific_curve_shards",
+          )
+          expected_v2_registry_sha = (
+              "06dc7d373f79dd43aa3bb4070187b5a8"
+              "ee426f0690f3f4f7f8d5cfce3cd3d48f"
+          )
+          if (
+              v2_curve_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+          ):
+              raise SystemExit(
+                  "representative V2 curve tape registry identity changed"
+              )
+
+          _, graduation_provenance = require_manifest(
+              "transition/pons-v2-graduations-full.jsonl.manifest.json",
+              source="merged_shared_v2_transition_shards",
+          )
+          _, registration_provenance = require_manifest(
+              "transition/pons-v2-registrations-full.jsonl.manifest.json",
+              source="merged_shared_v2_transition_shards",
+          )
+          if (
+              graduation_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+              or registration_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+          ):
+              raise SystemExit(
+                  "representative V2 transition registry identity changed"
+              )
+
+          _, v2_v4_provenance = require_manifest(
+              "v2v4/pons-v2-v4-full.jsonl.manifest.json",
+              source="stream_merged_global_poolmanager_v4_shards",
+          )
+          if int(
+              v2_v4_provenance.get("transition_run_id", -1)
+          ) != int("${{ inputs.transition_run_id }}"):
+              raise SystemExit(
+                  "representative V2 V4 tape used a different transition run"
+              )
+
           rows = build_representative_market_path_rows(
               sample,
               read_jsonl(
