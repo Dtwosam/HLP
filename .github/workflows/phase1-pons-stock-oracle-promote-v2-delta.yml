@@ -39,9 +39,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FIRST_PONS_LAUNCH: '8621658'
   SNAPSHOT_HEAD: '54486035'
-  SHARD_COUNT: '8'
+  MAX_DELTA_BLOCKS: '500000'
 
 jobs:
   plan:
@@ -49,6 +48,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       delta_count: ${{ steps.plan.outputs.delta_count }}
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,6 +76,8 @@ jobs:
           import json
           import os
           from pathlib import Path
+
+          from hlp.data.ranges import split_range
 
           quotes = [
               json.loads(line)
@@ -131,8 +133,31 @@ jobs:
                       + "\n"
                   )
 
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_DELTA_BLOCKS"])
+          delta_start = min(
+              int(row["first_launch_block"]) for row in missing_rows
+          )
+          ranges = split_range(
+              delta_start,
+              head,
+              max_blocks=max_blocks,
+          )
+          if len(ranges) > 240:
+              raise SystemExit(
+                  "oracle delta plan exceeds 240 matrix jobs"
+              )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(ranges)
+          ]
+
           report = {
-              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "snapshot_head_block": head,
               "full_stock_quote_assets": len(expected_rows),
               "v2_oracle_stock_quote_assets": len(existing_tokens),
               "delta_stock_quote_assets": len(missing_rows),
@@ -141,6 +166,13 @@ jobs:
               "delta_first_launch_blocks": [
                   int(row["first_launch_block"]) for row in missing_rows
               ],
+              "max_delta_blocks": max_blocks,
+              "delta_range_jobs": include,
+              "delta_range_job_count": len(include),
+              "delta_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
               "full_quote_audit_run_id": int(
                   "${{ inputs.full_quote_audit_run_id }}"
               ),
@@ -151,6 +183,14 @@ jobs:
           )
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"delta_count={len(missing_rows)}\n")
+              handle.write(
+                  "matrix="
+                  + json.dumps(
+                      {"include": include},
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
@@ -167,11 +207,9 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 2
-      matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
-      SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -183,41 +221,24 @@ jobs:
         with:
           name: phase1-pons-stock-oracle-delta-plan
           path: plan
-      - id: bounds
-        name: Compute bounded delta-oracle shard
-        run: |
-          python - <<'PY'
-          import os
-
-          start = int(os.environ["FIRST_PONS_LAUNCH"])
-          head = int(os.environ["SNAPSHOT_HEAD"])
-          i = int(os.environ["SHARD_INDEX"])
-          n = int(os.environ["SHARD_COUNT"])
-          span = head - start + 1
-          lo = start + (span * i) // n
-          hi = start + (span * (i + 1)) // n - 1
-          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
-              handle.write(f"lo={lo}\nhi={hi}\n")
-          print({"shard": i, "from_block": lo, "to_block": hi})
-          PY
       - name: Acquire only missing Chainlink stock feed
         env:
-          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
-          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          RANGE_ID: ${{ matrix.id }}
         run: |
           mkdir -p artifacts
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
-          printf -v SHARD "%02d" "$SHARD_INDEX"
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             rpc-pons-stock-oracle-lifecycle \
             --quote-registry plan/pons-stock-oracle-delta-quotes.jsonl \
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
-            --state-out "artifacts/delta-oracle-state-shard-${SHARD}.jsonl" \
-            --out "artifacts/delta-oracle-updates-shard-${SHARD}.jsonl"
+            --state-out "artifacts/delta-oracle-state-${RANGE_ID}.jsonl" \
+            --out "artifacts/delta-oracle-updates-${RANGE_ID}.jsonl"
       - uses: actions/upload-artifact@v4
         with:
-          name: phase1-pons-stock-oracle-delta-${{ matrix.shard }}
+          name: phase1-pons-stock-oracle-delta-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
 
@@ -288,7 +309,7 @@ jobs:
           ]
           delta_states = []
           for path in sorted(
-              Path("delta").glob("delta-oracle-state-shard-*.jsonl")
+              Path("delta").glob("delta-oracle-state-*.jsonl")
           ):
               with path.open() as handle:
                   for line in handle:
@@ -348,7 +369,7 @@ jobs:
                   if line.strip():
                       updates.append(json.loads(line))
           for path in sorted(
-              Path("delta").glob("delta-oracle-updates-shard-*.jsonl")
+              Path("delta").glob("delta-oracle-updates-*.jsonl")
           ):
               with path.open() as handle:
                   for line in handle:
