@@ -1704,3 +1704,22 @@ def test_readiness_state_change_watcher_is_artifact_only_and_scoped():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "time.sleep(" not in content
+
+
+def test_post_eligibility_handoffs_validate_bundle_before_viability():
+    normal = _workflow("phase1-pons-post-eligibility-evidence-chain.yml")
+    recovered = _workflow("phase1-pons-recovered-completion-chain.yml")
+    for content in (normal, recovered):
+        assert "validate_post_eligibility_evidence_bundle" in content
+        assert "pons-eligible-universe-summary.json" in content
+        assert "pons-eligible-100k-universe.jsonl.manifest.json" in content
+        assert "pons-representative-validation-summary.json" in content
+        assert "pons-representative-validation.jsonl.manifest.json" in content
+        assert '"eligible_universe_sha256"' not in content or "**validation" in content
+        assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "expected_lifecycle_run_id=source_run_id" in normal
+    assert "expected_v1_v3_run_id=source_run_id" in normal
+    assert "expected_v2_v4_run_id=source_run_id" in normal
+    assert "expected_lifecycle_run_id=pricing_run_id" in recovered
+    assert "expected_v1_v3_run_id=v1_v3_run_id" in recovered
+    assert "expected_v2_v4_run_id=v2_v4_run_id" in recovered
