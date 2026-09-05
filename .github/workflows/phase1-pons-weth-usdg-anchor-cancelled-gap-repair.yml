@@ -1,0 +1,38 @@
+name: phase1-pons-weth-usdg-anchor-cancelled-gap-repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_repair:
+        description: "Confirm repair of cancelled anchor gaps 018 and 025"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-weth-usdg-anchor-cancelled-gap-repair-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair-018:
+    if: ${{ inputs.confirm_repair == true }}
+    uses: ./.github/workflows/phase1-pons-weth-usdg-anchor-recover-range.yml
+    with:
+      from_block: "52169619"
+      to_block: "52319618"
+      artifact_suffix: "gap-018"
+    secrets: inherit
+
+  repair-025:
+    needs: repair-018
+    if: ${{ inputs.confirm_repair == true && needs.repair-018.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-weth-usdg-anchor-recover-range.yml
+    with:
+      from_block: "53219619"
+      to_block: "53369618"
+      artifact_suffix: "gap-025"
+    secrets: inherit
