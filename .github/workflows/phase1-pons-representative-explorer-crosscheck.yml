@@ -1,0 +1,254 @@
+name: phase1-pons-representative-explorer-crosscheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful representative sample freeze run"
+        required: true
+        type: string
+      market_path_run_id:
+        description: "Successful representative market-path freeze run"
+        required: true
+        type: string
+      priced_path_run_id:
+        description: "Successful representative priced-path replay run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      market_path_run_id:
+        required: true
+        type: string
+      priced_path_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-explorer-crosscheck-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify representative transactions against Blockscout
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.blockscout import BlockscoutClient
+          from hlp.data.pons_explorer_crosscheck import (
+              build_representative_explorer_targets,
+              build_representative_explorer_token_summaries,
+              reconcile_blockscout_transaction,
+              summarize_representative_explorer_crosscheck,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          HEAD = 54_486_035
+          SAMPLE_RUN = int("${{ inputs.sample_run_id }}")
+          MARKET_PATH_RUN = int("${{ inputs.market_path_run_id }}")
+          PRICED_PATH_RUN = int("${{ inputs.priced_path_run_id }}")
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          def manifest(path):
+              row = json.loads(Path(path).read_text())
+              prov = row.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative explorer source chain mismatch: {path}"
+                  )
+              if int(prov.get("snapshot_head_block", -1)) != HEAD:
+                  raise SystemExit(
+                      f"representative explorer source snapshot mismatch: {path}"
+                  )
+              return row, prov
+
+          sample = read_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative explorer cross-check requires exactly 10 "
+                  f"tokens, got {len(sample)}"
+              )
+
+          market_manifest, market_prov = manifest(
+              "market-paths/"
+              "pons-representative-market-paths.jsonl.manifest.json"
+          )
+          priced_manifest, priced_prov = manifest(
+              "priced-paths/"
+              "pons-representative-priced-paths.jsonl.manifest.json"
+          )
+          if int(market_prov.get("sample_run_id", -1)) != SAMPLE_RUN:
+              raise SystemExit(
+                  "representative explorer market-path sample run mismatch"
+              )
+          if int(priced_prov.get("sample_run_id", -1)) != SAMPLE_RUN:
+              raise SystemExit(
+                  "representative explorer priced-path sample run mismatch"
+              )
+          if int(
+              priced_prov.get("market_path_run_id", -1)
+          ) != MARKET_PATH_RUN:
+              raise SystemExit(
+                  "representative explorer priced-path source run mismatch"
+              )
+
+          market_paths = read_jsonl(
+              "market-paths/pons-representative-market-paths.jsonl"
+          )
+          priced_paths = read_jsonl(
+              "priced-paths/pons-representative-priced-paths.jsonl"
+          )
+          targets = build_representative_explorer_targets(
+              sample,
+              market_paths,
+              priced_paths,
+          )
+          if not 10 <= len(targets) <= 40:
+              raise SystemExit(
+                  "representative explorer target count outside 10..40"
+              )
+
+          client = BlockscoutClient()
+          transaction_cache = {}
+          rows = []
+          for target in targets:
+              tx_hash = target["transaction_hash"]
+              external = transaction_cache.get(tx_hash)
+              if external is None:
+                  external = client.transaction(tx_hash)
+                  transaction_cache[tx_hash] = external
+              row = reconcile_blockscout_transaction(target, external)
+              if row["external_match"] is not True:
+                  raise SystemExit(
+                      "Blockscout representative transaction mismatch: "
+                      f"{tx_hash} {row['mismatches']}"
+                  )
+              rows.append(row)
+
+          token_summaries = (
+              build_representative_explorer_token_summaries(
+                  rows,
+                  sample,
+              )
+          )
+          summary = summarize_representative_explorer_crosscheck(
+              rows,
+              sample,
+          )
+          if len(token_summaries) != 10:
+              raise SystemExit(
+                  "representative explorer token summary is not exactly 10"
+              )
+
+          provenance = {
+              "source": "robinhood_blockscout_public_api",
+              "purpose": (
+                  "independent representative launch and DEX-checkpoint "
+                  "transaction identity/mined-block verification; raw chain "
+                  "remains canonical"
+              ),
+              "verification_scope": "transaction_identity_and_block",
+              "chain_id": 4663,
+              "snapshot_head_block": HEAD,
+              "sample_run_id": SAMPLE_RUN,
+              "market_path_run_id": MARKET_PATH_RUN,
+              "priced_path_run_id": PRICED_PATH_RUN,
+              "market_path_sha256": market_manifest["sha256"],
+              "priced_path_sha256": priced_manifest["sha256"],
+          }
+          transaction_snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-explorer-crosscheck.jsonl"
+              ),
+              provenance=provenance,
+          )
+          token_snapshot = write_jsonl_snapshot(
+              token_summaries,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-explorer-token-summary.jsonl"
+              ),
+              provenance={
+                  **provenance,
+                  "source": (
+                      "pons-representative-explorer-crosscheck.jsonl"
+                  ),
+                  "explorer_crosscheck_sha256": (
+                      transaction_snapshot["sha256"]
+                  ),
+              },
+          )
+          summary.update(
+              {
+                  "unique_blockscout_transactions": len(
+                      transaction_cache
+                  ),
+                  "blockscout_requests": client.requests_made,
+                  "blockscout_response_bytes": client.bytes_received,
+                  "crosscheck_sha256": transaction_snapshot["sha256"],
+                  "token_summary_sha256": token_snapshot["sha256"],
+                  "sample_run_id": SAMPLE_RUN,
+                  "market_path_run_id": MARKET_PATH_RUN,
+                  "priced_path_run_id": PRICED_PATH_RUN,
+              }
+          )
+          Path(
+              "artifacts/"
+              "pons-representative-explorer-crosscheck-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: artifacts/
+          if-no-files-found: error
