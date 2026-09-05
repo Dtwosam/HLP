@@ -1005,18 +1005,44 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "\n  push:" not in trigger_block
     assert "prior_run_id" in content
     assert "plan_missing_subranges" in content
-    assert 'default: "200000"' in content
+    assert 'default: "100000"' in content
     call_block = content.split("  workflow_call:", 1)[1].split(
         "\npermissions:", 1
     )[0]
     assert "max_blocks:" in call_block
-    assert 'default: "200000"' in call_block
+    assert 'default: "100000"' in call_block
     assert "required: false" in call_block
     assert "max_blocks must be between 1 and 200000" in content
-    assert "representative transfer plan exceeds 240 matrix jobs" in content
-    assert "max-parallel: 2" in content
+    assert "representative transfer plan exceeds four serialized " in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
+    for index in range(1, 5):
+        assert (
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
+            in content
+        )
+        assert (
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, acquire_1]" in content
+    assert "needs: [plan, acquire_2]" in content
+    assert "needs: [plan, acquire_3]" in content
+    assert (
+        "needs: [plan, acquire_1, acquire_2, acquire_3, acquire_4]"
+        in content
+    )
     assert "time.sleep(" not in content
-
 
 def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     content = _workflow("phase1-pons-acceptance-gate.yml")
