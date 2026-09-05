@@ -1,0 +1,514 @@
+name: phase1-pons-representative-transfers-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful phase1-pons-representative-sample-freeze run"
+        required: true
+        type: string
+      prior_run_id:
+        description: "Optional earlier representative-transfer run whose successful shards must be reused"
+        required: false
+        default: ""
+        type: string
+      max_blocks:
+        description: "Maximum blocks per transfer shard"
+        required: true
+        default: "200000"
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      prior_run_id:
+        required: false
+        default: ""
+        type: string
+      max_blocks:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-transfers-full-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_run_id != '' }}
+        with:
+          pattern: phase1-pons-representative-transfer-*
+          path: prior
+          merge-multiple: true
+          run-id: ${{ inputs.prior_run_id }}
+          github-token: ${{ github.token }}
+      - id: plan
+        name: Plan only missing representative transfer ranges
+        env:
+          MAX_BLOCKS: ${{ inputs.max_blocks }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import plan_missing_subranges
+
+          sample = [
+              json.loads(line)
+              for line in Path(
+                  "sample/pons-representative-sample.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if len(sample) != 10:
+              raise SystemExit(
+                  f"representative transfer sample must contain 10 tokens, "
+                  f"got {len(sample)}"
+              )
+          tokens = {row["token"].lower() for row in sample}
+          if len(tokens) != 10:
+              raise SystemExit(
+                  "representative transfer sample contains duplicate tokens"
+              )
+
+          start = min(int(row["launch_block"]) for row in sample)
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_BLOCKS"])
+          if not 1 <= max_blocks <= 200_000:
+              raise SystemExit(
+                  "max_blocks must be between 1 and 200000"
+              )
+
+          covered = []
+          sources = []
+          for path in sorted(
+              Path("prior").glob(
+                  "representative-transfers-*.jsonl.manifest.json"
+              )
+          ):
+              manifest = json.loads(path.read_text())
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"prior transfer shard chain mismatch: {path}"
+                  )
+              if int(prov.get("token_count", -1)) != 10:
+                  raise SystemExit(
+                      f"prior transfer shard token count mismatch: {path}"
+                  )
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "source": path.parent.name,
+                  "manifest": path.name,
+                  "from_block": lo,
+                  "to_block": hi,
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+              })
+
+          gaps = plan_missing_subranges(
+              start,
+              head,
+              covered,
+              max_blocks=max_blocks,
+          )
+          if len(gaps) > 240:
+              raise SystemExit(
+                  "representative transfer plan exceeds 240 matrix jobs; "
+                  "increase max_blocks within the 200000 ceiling"
+              )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(gaps)
+          ]
+          report = {
+              "sample_run_id": int("${{ inputs.sample_run_id }}"),
+              "prior_run_id": (
+                  int("${{ inputs.prior_run_id }}")
+                  if "${{ inputs.prior_run_id }}"
+                  else None
+              ),
+              "snapshot_head_block": head,
+              "sample_tokens": sorted(tokens),
+              "sample_start_block": start,
+              "max_blocks": max_blocks,
+              "reused_sources": sources,
+              "gap_jobs": include,
+              "gap_job_count": len(include),
+              "gap_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
+          }
+          Path(
+              "artifacts/pons-representative-transfer-plan.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "matrix="
+                  + json.dumps({"include": include}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(f"gap_count={len(include)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  acquire:
+    needs: plan
+    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact representative transfer interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          RANGE_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-transfer-tape \
+            --tokens sample/pons-representative-sample.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, acquire]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire.result == 'success' || needs.acquire.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_run_id != '' }}
+        with:
+          pattern: phase1-pons-representative-transfer-*
+          path: prior
+          merge-multiple: true
+          run-id: ${{ inputs.prior_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.gap_count != '0' }}
+        with:
+          pattern: phase1-pons-representative-transfer-*
+          path: current
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: plan
+      - name: Merge complete representative transfer tape
+        run: |
+          mkdir -p artifacts
+          cp sample/pons-representative-sample.jsonl artifacts/
+          cp sample/pons-representative-sample.jsonl.manifest.json artifacts/
+          cp plan/pons-representative-transfer-plan.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.pons_holders import ZERO_ADDRESS
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          sample = [
+              json.loads(line)
+              for line in Path(
+                  "sample/pons-representative-sample.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          launch_by_token = {
+              row["token"].lower(): int(row["launch_block"])
+              for row in sample
+          }
+          START = min(launch_by_token.values())
+
+          files = (
+              list(
+                  Path("prior").glob(
+                      "representative-transfers-*.jsonl"
+                  )
+              )
+              + list(
+                  Path("current").glob(
+                      "representative-transfers-*.jsonl"
+                  )
+              )
+          )
+          if not files:
+              raise SystemExit(
+                  "no representative transfer shards available for merge"
+              )
+
+          entries = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative transfer shard chain mismatch: {path}"
+                  )
+              if int(prov.get("token_count", -1)) != 10:
+                  raise SystemExit(
+                      f"representative transfer shard token mismatch: {path}"
+                  )
+              entries.append((
+                  int(prov["from_block"]),
+                  int(prov["to_block"]),
+                  path,
+                  manifest,
+              ))
+          entries.sort(key=lambda item: item[0])
+
+          previous_hi = None
+          expected_records = 0
+          manifests = []
+          for lo, hi, path, manifest in entries:
+              if previous_hi is None:
+                  assert lo == START, (lo, START, path.name)
+              else:
+                  assert lo == previous_hi + 1, (
+                      previous_hi, lo, path.name
+                  )
+              previous_hi = hi
+              expected_records += int(manifest["records"])
+              manifests.append({
+                  "source": path.parent.name,
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == HEAD, (previous_hi, HEAD)
+
+          first_by_token = {}
+          state = {"records": 0, "prior_order": None}
+
+          def rows():
+              for _, _, path, manifest in entries:
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          token = row["token"].lower()
+                          if token not in launch_by_token:
+                              raise AssertionError(
+                                  f"unexpected representative token {token}"
+                              )
+                          order = event_order(row)
+                          prior = state["prior_order"]
+                          if prior is not None:
+                              assert prior < order, (
+                                  prior, order, path.name
+                              )
+                          state["prior_order"] = order
+                          first_by_token.setdefault(token, row)
+                          state["records"] += 1
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path(
+                  "artifacts/pons-representative-transfers-full.jsonl"
+              ),
+              provenance={
+                  "source": "manifest_gap_aware_representative_transfers",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "prior_run_id": (
+                      int("${{ inputs.prior_run_id }}")
+                      if "${{ inputs.prior_run_id }}"
+                      else None
+                  ),
+                  "sample_tokens": sorted(launch_by_token),
+                  "shards": manifests,
+              },
+          )
+          assert state["records"] == expected_records
+
+          missing = sorted(set(launch_by_token) - set(first_by_token))
+          if missing:
+              raise SystemExit(
+                  "sample token has no Transfer history: "
+                  f"{missing}"
+              )
+          bad_first = []
+          for token, row in first_by_token.items():
+              if row["from_address"].lower() != ZERO_ADDRESS:
+                  bad_first.append({
+                      "token": token,
+                      "reason": "first transfer is not a mint",
+                      "first_transfer": row,
+                  })
+              elif int(row["block_number"]) > launch_by_token[token]:
+                  bad_first.append({
+                      "token": token,
+                      "reason": "first mint occurs after Pons launch block",
+                      "launch_block": launch_by_token[token],
+                      "first_transfer": row,
+                  })
+          if bad_first:
+              raise SystemExit(
+                  "representative transfer history is incomplete at launch: "
+                  + json.dumps(bad_first[:10], sort_keys=True)
+              )
+
+          report = {
+              "snapshot_head_block": HEAD,
+              "sample_tokens": len(launch_by_token),
+              "records": state["records"],
+              "source_files": len(entries),
+              "transfer_tape_sha256": snapshot["sha256"],
+              "first_transfer_mint_tokens": len(first_by_token),
+          }
+          Path(
+              "artifacts/pons-representative-transfers-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Replay exact representative holder histories
+        run: |
+          hlp pons-holder-state \
+            --transfers artifacts/pons-representative-transfers-full.jsonl \
+            --out artifacts/pons-representative-holder-states.jsonl \
+            --summary-out artifacts/pons-representative-holder-summary.jsonl
+      - name: Validate final holder coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-representative-holder-summary.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if len(rows) != 10:
+              raise SystemExit(
+                  "representative holder replay must cover exactly 10 tokens: "
+                  f"got {len(rows)}"
+              )
+          if any(int(row["transfers"]) <= 0 for row in rows):
+              raise SystemExit(
+                  "representative holder replay contains a token with no "
+                  "transfer history"
+              )
+          report = {
+              "tokens": len(rows),
+              "transfers": sum(int(row["transfers"]) for row in rows),
+              "final_holders": sum(
+                  int(row["holder_count"]) for row in rows
+              ),
+              "total_accounted_supply_raw": sum(
+                  int(row["accounted_supply_raw"]) for row in rows
+              ),
+          }
+          Path(
+              "artifacts/pons-representative-holder-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfers-full
+          path: artifacts/
+          if-no-files-found: error
