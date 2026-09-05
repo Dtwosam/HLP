@@ -568,7 +568,17 @@ The final Phase 1 viability path is also staged fail-closed:
   it executes V1 and V2 registry scans as two separate jobs over the same
   bounded range so accounting preserves the frozen overlapping-generation
   work geometry instead of deduplicating it. Quote-fallback measurements reuse
-  only the canonical V3/V4 route files from a completed eligibility run.
+  only canonical V3/V4 route files. The post-eligibility evidence-ready artifact
+  now explicitly carries `lifecycle_run_id`, `v1_v3_run_id` and
+  `v2_v4_run_id`: normal evidence points all three at source parent
+  **33982556591**, while recovered evidence names the actual recovered
+  pricing/lifecycle and venue runs. Before any viability RPC, the guarded route
+  downloads that handoff, verifies its source/evidence IDs and recovery mode,
+  validates the lifecycle workflow path/branch plus all three fallback
+  artifacts, and routes quote_v3/quote_v4 measurements through that
+  `lifecycle_run_id`. This prevents a recovered Phase 1 from trying to fetch
+  quote-route artifacts from a failed frozen parent. Inert guarded-route graph
+  run **33995956614** skipped cleanly after this routing change.
   Current branch orchestration keeps those nine measurements as **nine
   individually guarded workflow runs**, not one matrix/caller run: a shared
   `.github/phase1-pons-viability-ready.json` must first name a successful
