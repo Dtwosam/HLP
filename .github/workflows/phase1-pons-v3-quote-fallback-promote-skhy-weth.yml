@@ -1,0 +1,244 @@
+name: phase1-pons-v3-quote-fallback-promote-skhy-weth
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_v3_run_id:
+        description: "Successful 25-route phase1-pons-v3-quote-fallback-full run"
+        required: true
+        type: string
+      skhy_weth_run_id:
+        description: "Successful phase1-pons-skhy-v3-weth-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      base_v3_run_id:
+        required: true
+        type: string
+      skhy_weth_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v3-quote-fallback-promote-skhy-weth-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: base
+          run-id: ${{ inputs.base_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-skhy-v3-weth-full
+          path: skhy
+          run-id: ${{ inputs.skhy_weth_run_id }}
+          github-token: ${{ github.token }}
+      - name: Promote SKHY into the frozen V3 route registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.quote_routes import merge_v3_quote_routes
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          base = read_jsonl("base/pons-v3-quote-routes.jsonl")
+          if len(base) != 25:
+              raise SystemExit(
+                  f"base V3 fallback must contain 25 routes, got {len(base)}"
+              )
+          if any(
+              row["anchor_token"].lower() != os.environ["USDG"].lower()
+              for row in base
+          ):
+              raise SystemExit(
+                  "base V3 fallback unexpectedly contains non-USDG route"
+              )
+
+          supplemental = read_jsonl(
+              "skhy/pons-skhy-v3-weth-route.jsonl"
+          )
+          if len(supplemental) != 1:
+              raise SystemExit(
+                  "SKHY/WETH full artifact must contain one route"
+              )
+          skhy = supplemental[0]
+          if skhy["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
+              raise SystemExit("supplemental V3 route is not SKHY")
+          if skhy["anchor_token"].lower() != os.environ["WETH"].lower():
+              raise SystemExit("supplemental SKHY route is not WETH anchored")
+          if skhy["route_type"] != "uniswap_v3_direct_weth_delayed":
+              raise SystemExit("supplemental SKHY route type changed")
+
+          merged = merge_v3_quote_routes(
+              base,
+              [{"delayed_route_ready": True, "route": skhy}],
+          )
+          tokens = {row["quote_token"].lower() for row in merged}
+          if len(merged) != 26 or len(tokens) != 26:
+              raise SystemExit(
+                  "promoted V3 fallback must contain 26 unique quote assets"
+              )
+          if os.environ["SKHY_TOKEN"].lower() not in tokens:
+              raise SystemExit("promoted V3 fallback lost SKHY")
+
+          snapshot = write_jsonl_snapshot(
+              merged,
+              output=Path("artifacts/pons-v3-quote-routes.jsonl"),
+              provenance={
+                  "source": "base_v3_plus_skhy_weth_promotion",
+                  "chain_id": 4663,
+                  "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+                  "base_v3_run_id": int("${{ inputs.base_v3_run_id }}"),
+                  "skhy_weth_run_id": int(
+                      "${{ inputs.skhy_weth_run_id }}"
+                  ),
+                  "base_routes": 25,
+                  "supplemental_routes": 1,
+                  "routes": 26,
+              },
+          )
+          report = {
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "base_routes": 25,
+              "supplemental_routes": 1,
+              "selected_routes": 26,
+              "direct_usdg_routes": sum(
+                  row["anchor_token"].lower() == os.environ["USDG"].lower()
+                  for row in merged
+              ),
+              "direct_weth_routes": sum(
+                  row["anchor_token"].lower() == os.environ["WETH"].lower()
+                  for row in merged
+              ),
+              "skhy_route_type": skhy["route_type"],
+              "routes_sha256": snapshot["sha256"],
+              "base_v3_run_id": int("${{ inputs.base_v3_run_id }}"),
+              "skhy_weth_run_id": int("${{ inputs.skhy_weth_run_id }}"),
+          }
+          if (
+              report["direct_usdg_routes"] != 25
+              or report["direct_weth_routes"] != 1
+          ):
+              raise SystemExit(
+                  "promoted V3 route ownership must be 25 USDG + 1 WETH"
+              )
+          Path(
+              "artifacts/pons-v3-quote-route-selection-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Merge base and SKHY V3 quote USD tapes
+        run: |
+          hlp pons-merge-quote-usd-tapes \
+            --state base/pons-v3-quote-fallback-initial.jsonl \
+            --events base/pons-v3-quote-fallback-updates.jsonl \
+            --state skhy/pons-skhy-v3-weth-quote-initial.jsonl \
+            --events skhy/pons-skhy-v3-weth-quote-updates.jsonl \
+            --state-out artifacts/pons-v3-quote-fallback-initial.jsonl \
+            --out artifacts/pons-v3-quote-fallback-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD"
+      - name: Verify promoted V3 quote ownership
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def rows(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          states = rows(
+              "artifacts/pons-v3-quote-fallback-initial.jsonl"
+          )
+          updates = rows(
+              "artifacts/pons-v3-quote-fallback-updates.jsonl"
+          )
+          tokens = {
+              row["quote_token"].lower()
+              for row in [*states, *updates]
+          }
+          if len(tokens) != 26:
+              raise SystemExit(
+                  f"promoted V3 quote USD tape covers {len(tokens)} assets, "
+                  "expected 26"
+              )
+          skhy = os.environ["SKHY_TOKEN"].lower()
+          skhy_updates = [
+              row for row in updates
+              if row["quote_token"].lower() == skhy
+          ]
+          if not skhy_updates:
+              raise SystemExit(
+                  "promoted V3 quote USD tape has no SKHY updates"
+              )
+          if any(
+              row.get("pricing_source")
+              != "uniswap_v3_direct_weth_delayed"
+              for row in skhy_updates
+          ):
+              raise SystemExit("promoted SKHY pricing source changed")
+          report = {
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "covered_quote_assets": len(tokens),
+              "skhy_updates": len(skhy_updates),
+              "first_skhy_update_block": int(
+                  skhy_updates[0]["block_number"]
+              ),
+              "last_skhy_update_block": int(
+                  skhy_updates[-1]["block_number"]
+              ),
+              "base_v3_run_id": int("${{ inputs.base_v3_run_id }}"),
+              "skhy_weth_run_id": int("${{ inputs.skhy_weth_run_id }}"),
+          }
+          Path(
+              "artifacts/pons-v3-quote-fallback-promoted-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-promoted
+          path: artifacts/
+          if-no-files-found: error
