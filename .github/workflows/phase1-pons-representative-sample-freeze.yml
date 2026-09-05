@@ -159,6 +159,12 @@ jobs:
               "runner_smoke_run_id": int(
                   "${{ inputs.runner_smoke_run_id }}"
               ),
+              "runner_smoke_universe_sha256": expected[
+                  "pons-universe.jsonl.manifest.json"
+              ]["sha256"],
+              "runner_smoke_outcomes_sha256": expected[
+                  "pons-outcomes.jsonl.manifest.json"
+              ]["sha256"],
               "runner_tokens": sorted(runner_tokens),
               "runner_versions": dict(sorted(versions.items())),
               "runner_max_future_multiple": {
@@ -233,6 +239,29 @@ jobs:
           ]
           groups = Counter(row["sample_group"] for row in rows)
           versions = Counter(row["pons_version"] for row in rows)
+          runner_evidence = json.loads(
+              Path("artifacts/pons-runner-evidence.json").read_text()
+          )
+          expected_runner_tokens = {
+              token.lower()
+              for token in runner_evidence["runner_tokens"]
+          }
+          sample_runner_tokens = {
+              row["token"].lower()
+              for row in rows
+              if row["sample_group"] == "runner"
+          }
+          if sample_runner_tokens != expected_runner_tokens:
+              raise SystemExit(
+                  "representative runner cohort drifted from frozen smoke "
+                  f"evidence: expected={sorted(expected_runner_tokens)} "
+                  f"actual={sorted(sample_runner_tokens)}"
+              )
+          failure_tokens = sorted(
+              row["token"].lower()
+              for row in rows
+              if row["sample_group"] == "failure"
+          )
           if len(rows) != 10 or groups != {"runner": 5, "failure": 5}:
               raise SystemExit(
                   "representative sample must freeze exactly five runners "
@@ -247,6 +276,14 @@ jobs:
               "tokens": len(rows),
               "groups": dict(sorted(groups.items())),
               "versions": dict(sorted(versions.items())),
+              "runner_tokens": sorted(sample_runner_tokens),
+              "failure_tokens": failure_tokens,
+              "runner_smoke_universe_sha256": runner_evidence[
+                  "runner_smoke_universe_sha256"
+              ],
+              "runner_smoke_outcomes_sha256": runner_evidence[
+                  "runner_smoke_outcomes_sha256"
+              ],
               "earliest_launch_block": min(
                   int(row["launch_block"]) for row in rows
               ),
