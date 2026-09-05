@@ -83,6 +83,15 @@ def test_anchor_promotion_rejects_conflicting_exact_range():
         ])
 
 
+def test_anchor_promotion_rejects_duplicate_record_count_drift():
+    with pytest.raises(ValueError, match="conflicting anchor record count"):
+        _select([
+            _source(10, 19, records=1),
+            _source(10, 19, records=2),
+            _source(20, 29, sha_char="b"),
+        ])
+
+
 def test_anchor_promotion_rejects_gap():
     with pytest.raises(ValueError, match="promotion gap"):
         _select([
