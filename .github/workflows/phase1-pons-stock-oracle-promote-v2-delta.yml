@@ -1,0 +1,438 @@
+name: phase1-pons-stock-oracle-promote-v2-delta
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_quote_audit_run_id:
+        description: "Run containing the frozen full-Pons quote audit"
+        required: true
+        default: "33923299711"
+        type: string
+      full_quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      v2_oracle_run_id:
+        description: "Successful phase1-pons-v2-stock-oracle-full run"
+        required: true
+        default: "33912985322"
+        type: string
+  workflow_call:
+    inputs:
+      full_quote_audit_run_id:
+        required: true
+        type: string
+      full_quote_audit_artifact_name:
+        required: true
+        type: string
+      v2_oracle_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-stock-oracle-promote-v2-delta-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FIRST_PONS_LAUNCH: '8621658'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '8'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      delta_count: ${{ steps.plan.outputs.delta_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.full_quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.full_quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-stock-oracle-full
+          path: v2-oracle
+          run-id: ${{ inputs.v2_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - id: plan
+        name: Prove and freeze only missing full-Pons stock feeds
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          expected_rows = {
+              row["quote_token"].lower(): row
+              for row in quotes
+              if row["pricing_status"] == "priced_chainlink_stock_token"
+          }
+          if not expected_rows:
+              raise SystemExit("full quote registry has no Chainlink stock feeds")
+
+          existing = [
+              json.loads(line)
+              for line in Path(
+                  "v2-oracle/pons-v2-stock-oracle-initial.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          existing_tokens = {
+              row["quote_token"].lower() for row in existing
+          }
+          unexpected = sorted(existing_tokens - set(expected_rows))
+          if unexpected:
+              raise SystemExit(
+                  "V2 oracle contains stock quotes absent from the frozen "
+                  f"full quote registry: {unexpected}"
+              )
+
+          missing_tokens = sorted(set(expected_rows) - existing_tokens)
+          missing_rows = [expected_rows[token] for token in missing_tokens]
+          if len(expected_rows) != 23 or len(existing_tokens) != 22:
+              raise SystemExit(
+                  "frozen oracle coverage changed from measured Phase 1 "
+                  f"baseline: expected_full={len(expected_rows)} "
+                  f"existing_v2={len(existing_tokens)}"
+              )
+          if len(missing_rows) != 1:
+              raise SystemExit(
+                  "expected exactly one full-Pons stock-feed delta, got "
+                  f"{len(missing_rows)}: {missing_tokens}"
+              )
+
+          delta_path = Path("artifacts/pons-stock-oracle-delta-quotes.jsonl")
+          with delta_path.open("w") as handle:
+              for row in missing_rows:
+                  handle.write(
+                      json.dumps(row, sort_keys=True, separators=(",", ":"))
+                      + "\n"
+                  )
+
+          report = {
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "full_stock_quote_assets": len(expected_rows),
+              "v2_oracle_stock_quote_assets": len(existing_tokens),
+              "delta_stock_quote_assets": len(missing_rows),
+              "delta_quote_tokens": missing_tokens,
+              "delta_symbols": [row["symbol"] for row in missing_rows],
+              "delta_first_launch_blocks": [
+                  int(row["first_launch_block"]) for row in missing_rows
+              ],
+              "full_quote_audit_run_id": int(
+                  "${{ inputs.full_quote_audit_run_id }}"
+              ),
+              "v2_oracle_run_id": int("${{ inputs.v2_oracle_run_id }}"),
+          }
+          Path("artifacts/pons-stock-oracle-delta-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"delta_count={len(missing_rows)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-delta-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  delta:
+    needs: plan
+    if: ${{ needs.plan.outputs.delta_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-delta-plan
+          path: plan
+      - id: bounds
+        name: Compute bounded delta-oracle shard
+        run: |
+          python - <<'PY'
+          import os
+
+          start = int(os.environ["FIRST_PONS_LAUNCH"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire only missing Chainlink stock feed
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-stock-oracle-lifecycle \
+            --quote-registry plan/pons-stock-oracle-delta-quotes.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --state-out "artifacts/delta-oracle-state-shard-${SHARD}.jsonl" \
+            --out "artifacts/delta-oracle-updates-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-delta-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, delta]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.delta.result == 'success' || needs.delta.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.full_quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.full_quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-stock-oracle-full
+          path: v2-oracle
+          run-id: ${{ inputs.v2_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-delta-plan
+          path: plan
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.delta_count != '0' }}
+        with:
+          pattern: phase1-pons-stock-oracle-delta-*
+          path: delta
+          merge-multiple: true
+      - name: Promote V2 oracle tape and merge exact full-Pons delta
+        run: |
+          mkdir -p artifacts
+          cp plan/pons-stock-oracle-delta-plan.json artifacts/
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          expected_tokens = {
+              row["quote_token"].lower()
+              for row in quotes
+              if row["pricing_status"] == "priced_chainlink_stock_token"
+          }
+
+          existing_states = [
+              json.loads(line)
+              for line in Path(
+                  "v2-oracle/pons-v2-stock-oracle-initial.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          delta_states = []
+          for path in sorted(
+              Path("delta").glob("delta-oracle-state-shard-*.jsonl")
+          ):
+              with path.open() as handle:
+                  for line in handle:
+                      if line.strip():
+                          delta_states.append(json.loads(line))
+
+          all_states = [*existing_states, *delta_states]
+          all_states.sort(
+              key=lambda row: (
+                  int(row["activation_block"]),
+                  row["quote_token"].lower(),
+              )
+          )
+          initial_by_token = {}
+          identity_by_token = {}
+          for row in all_states:
+              token = row["quote_token"].lower()
+              assert int(row["block_number"]) == (
+                  int(row["activation_block"]) - 1
+              ), row
+              identity = (
+                  row["feed"].lower(),
+                  row["aggregator"].lower(),
+                  int(row["decimals"]),
+                  row["description"],
+                  row.get("pricing_status"),
+                  row.get("quote_decimals"),
+              )
+              prior = identity_by_token.setdefault(token, identity)
+              assert prior == identity, (
+                  "oracle identity changed across promoted shards",
+                  token,
+                  prior,
+                  identity,
+              )
+              initial_by_token.setdefault(token, row)
+
+          merged_tokens = set(initial_by_token)
+          assert merged_tokens == expected_tokens, (
+              "promoted oracle does not exactly cover full-Pons stock feeds",
+              sorted(expected_tokens - merged_tokens),
+              sorted(merged_tokens - expected_tokens),
+          )
+          initial_states = sorted(
+              initial_by_token.values(),
+              key=lambda row: (
+                  int(row["activation_block"]),
+                  row["quote_token"].lower(),
+              ),
+          )
+
+          updates = []
+          with Path(
+              "v2-oracle/pons-v2-stock-oracle-updates.jsonl"
+          ).open() as handle:
+              for line in handle:
+                  if line.strip():
+                      updates.append(json.loads(line))
+          for path in sorted(
+              Path("delta").glob("delta-oracle-updates-shard-*.jsonl")
+          ):
+              with path.open() as handle:
+                  for line in handle:
+                      if line.strip():
+                          updates.append(json.loads(line))
+          updates.sort(key=event_order)
+
+          prior = None
+          seen = set()
+          for row in updates:
+              order = event_order(row)
+              if prior is not None:
+                  assert prior < order, (prior, order)
+              prior = order
+              key = (
+                  row["transaction_hash"].lower(),
+                  int(row["log_index"]),
+              )
+              assert key not in seen, ("duplicate oracle update", key)
+              seen.add(key)
+              assert row["quote_token"].lower() in expected_tokens
+
+          state_snapshot = write_jsonl_snapshot(
+              initial_states,
+              output=Path("artifacts/pons-stock-oracle-initial.jsonl"),
+              provenance={
+                  "source": "promoted_v2_oracle_plus_full_pons_delta",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "full_quote_audit_run_id": int(
+                      "${{ inputs.full_quote_audit_run_id }}"
+                  ),
+                  "v2_oracle_run_id": int(
+                      "${{ inputs.v2_oracle_run_id }}"
+                  ),
+              },
+          )
+          update_snapshot = write_jsonl_snapshot(
+              updates,
+              output=Path("artifacts/pons-stock-oracle-updates.jsonl"),
+              provenance={
+                  "source": "promoted_v2_oracle_plus_full_pons_delta",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "full_quote_audit_run_id": int(
+                      "${{ inputs.full_quote_audit_run_id }}"
+                  ),
+                  "v2_oracle_run_id": int(
+                      "${{ inputs.v2_oracle_run_id }}"
+                  ),
+              },
+          )
+
+          plan = json.loads(
+              Path(
+                  "plan/pons-stock-oracle-delta-plan.json"
+              ).read_text()
+          )
+          summary = {
+              "snapshot_head_block": 54_486_035,
+              "stock_quote_assets": len(initial_states),
+              "promoted_v2_stock_quote_assets": len(existing_states),
+              "delta_stock_quote_assets": int(
+                  plan["delta_stock_quote_assets"]
+              ),
+              "delta_quote_tokens": plan["delta_quote_tokens"],
+              "delta_symbols": plan["delta_symbols"],
+              "oracle_updates": len(updates),
+              "initial_sha256": state_snapshot["sha256"],
+              "updates_sha256": update_snapshot["sha256"],
+              "full_quote_audit_run_id": int(
+                  "${{ inputs.full_quote_audit_run_id }}"
+              ),
+              "v2_oracle_run_id": int(
+                  "${{ inputs.v2_oracle_run_id }}"
+              ),
+          }
+          Path("artifacts/pons-stock-oracle-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: artifacts/
+          if-no-files-found: error
