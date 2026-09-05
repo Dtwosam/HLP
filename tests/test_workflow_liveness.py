@@ -217,12 +217,41 @@ def test_anchor_range_recovery_is_manual_small_and_bounded():
     assert "workflow_dispatch:" in trigger_block
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
+    assert "artifact_suffix" in content
+    assert "phase1-pons-anchor-range-${{ inputs.artifact_suffix }}-" in content
+    assert (
+        "phase1-pons-anchor-recovered-range-${{ inputs.artifact_suffix }}"
+        in content
+    )
     assert "max-parallel: 2" in content
     assert "SHARD_COUNT: '4'" in content
     assert "recovery range exceeds 200000-block ceiling" in content
     assert "timeout-minutes: 20" in content
     assert "time.sleep(" not in content
 
+
+
+def test_cancelled_anchor_gap_repair_is_manual_sequential_and_exact():
+    content = _workflow(
+        "phase1-pons-weth-usdg-anchor-cancelled-gap-repair.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "confirm_repair" in content
+    assert 'from_block: "52169619"' in content
+    assert 'to_block: "52319618"' in content
+    assert 'artifact_suffix: "gap-018"' in content
+    assert 'from_block: "53219619"' in content
+    assert 'to_block: "53369618"' in content
+    assert 'artifact_suffix: "gap-025"' in content
+    assert "needs: repair_018" in content
+    assert "needs.repair_018.result == 'success'" in content
+    assert (
+        "./.github/workflows/"
+        "phase1-pons-weth-usdg-anchor-recover-range.yml"
+        in content
+    )
 
 
 def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
