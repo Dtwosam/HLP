@@ -1529,7 +1529,10 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
     assert "viability route evidence changed since launch" in content
     assert "viability route ledger evidence changed since launch" in content
     assert "viability route launch slot was not empty" in content
+    assert "require_ancestor" in content
+    assert "head is not an ancestor of finalizer HEAD" in content
     assert '"route_launch_evidence_bound": True' in content
+    assert '"evidence_and_routes_are_ancestors": True' in content
     assert "phase1-pons-viability-measurement-pons_registry-primary" in content
     assert "phase1-pons-viability-measurement-pons_registry-secondary" in content
     assert "artifact_names(run_id)" in content
