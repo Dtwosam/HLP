@@ -444,7 +444,11 @@ research threshold or starting another archive crawl:
   history; the client supports pool identity and bounded OHLCV reads. Every
   actual HTTP attempt is now rate-paced, transient 429/5xx responses alone are
   retried, `Retry-After` is honored, permanent HTTP errors fail immediately,
-  and the request counter includes retry attempts rather than only successes;
+  and the request counter includes retry attempts rather than only successes.
+  Rechecked against the live GeckoTerminal API documentation on **2026-09-05**:
+  API version `20230203` remains current, the public limit remains approximately
+  **10 calls/minute**, and Robinhood network pool pages are currently indexed.
+  The client freezes that contract at a 6.1-second minimum request interval;
 - a separate bounded Blockscout cross-check can verify exact transaction
   identity and mined block for representative launches plus each distinct
   first/max/last DEX price checkpoint, but it is **supplementary only** while
