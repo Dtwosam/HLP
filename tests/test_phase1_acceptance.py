@@ -40,6 +40,8 @@ def _fixtures():
             "snapshot_head_block": 54_486_035,
             "v1_eligibility_run_id": 101,
             "v2_eligibility_run_id": 202,
+            "v1_eligibility_sha256": "a" * 64,
+            "v2_eligibility_sha256": "b" * 64,
             "sample_run_id": 404,
             "transfer_run_id": 405,
             "market_path_run_id": 406,
@@ -51,7 +53,7 @@ def _fixtures():
             "quote_audit_run_id": 33_923_299_711,
             "anchor_run_id": 33_972_109_927,
             "oracle_run_id": 33_974_681_334,
-            "fallback_run_id": 409,
+            "fallback_run_id": 101,
             "source_coverage_sha256": "c" * 64,
         },
     }
@@ -172,7 +174,7 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         "market_path_run_id": 406,
         "priced_path_run_id": 407,
         "dex_crosscheck_run_id": 408,
-        "fallback_run_id": 409,
+        "fallback_run_id": 101,
     }
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
@@ -389,4 +391,20 @@ def test_phase1_acceptance_rejects_invalid_v2_lifecycle_hash():
     fixtures[1]["provenance"]["v2_eligibility_sha256"] = "not-a-sha"
 
     with pytest.raises(ValueError, match="v2_eligibility_sha256"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_representative_lifecycle_hash_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["v1_eligibility_sha256"] = "d" * 64
+
+    with pytest.raises(ValueError, match="V1 lifecycle artifact SHA disagree"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_representative_fallback_run_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["fallback_run_id"] = 999
+
+    with pytest.raises(ValueError, match="fallback run does not match"):
         build_phase1_acceptance_report(*fixtures)
