@@ -78,7 +78,7 @@ def _fixtures():
         {
             "route": route,
             "all_observed_rpc_routes_free": True,
-            "required_blocks": 1_000_000,
+            "required_blocks": REQUIRED_PHASE1_ROUTE_BLOCKS[route],
             "evidence_processed_blocks": 100_000,
             "evidence_run_ids": [1000 + index],
         }
@@ -170,6 +170,14 @@ def test_phase1_acceptance_rejects_required_route_block_drift():
     fixtures[4]["required_work_blocks"] -= 1
 
     with pytest.raises(ValueError, match="route-block contract changed"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_route_detail_block_drift():
+    fixtures = list(_fixtures())
+    fixtures[4]["route_projections"][0]["required_blocks"] -= 1
+
+    with pytest.raises(ValueError, match="required-block detail changed"):
         build_phase1_acceptance_report(*fixtures)
 
 
