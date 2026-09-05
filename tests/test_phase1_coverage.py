@@ -109,6 +109,11 @@ def _coverage_report(sample_start=1000):
                 "last_block": PHASE1_SNAPSHOT_HEAD,
                 "shards": 2,
                 "continuous": True,
+                "required_start_block": (
+                    sample_start
+                    if label == "representative_transfers"
+                    else 500
+                ),
                 "snapshot_head_block": PHASE1_SNAPSHOT_HEAD,
             }
         )
