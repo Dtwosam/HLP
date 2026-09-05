@@ -735,16 +735,14 @@ def test_representative_evidence_one_shot_is_guarded_and_pinned():
     assert "workflow_dispatch:" not in content
 
 
-def test_viability_measurement_one_shot_is_guarded_and_pinned():
+def test_viability_pons_registry_launcher_is_guarded_and_pinned():
     content = _workflow(
-        "phase1-pons-viability-route-measurement-one-shot.yml"
+        "phase1-pons-viability-pons-registry-one-shot.yml"
     )
-    assert "phase1-pons-viability-route-measurement.yml" in content
-    assert "launch viability route measurement" in content
+    assert "phase1-pons-viability-guarded-route.yml" in content
+    assert "launch viability pons_registry" in content
     assert 'route: "pons_registry"' in content
-    assert 'from_block: "54436036"' in content
-    assert 'to_block: "54486035"' in content
-    assert 'eligibility_run_id: "33982556591"' in content
+    assert "sequence_id: ${{ github.sha }}" in content
     assert "workflow_dispatch:" not in content
 
 def test_full_eligibility_one_shot_is_guarded_and_pinned():
@@ -1309,62 +1307,77 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert 'source_eligibility_run_id: "33982556591"' in launcher
 
 
-def test_viability_batch_route_is_evidence_gated_before_rpc():
-    content = _workflow("phase1-pons-viability-batch-route.yml")
+
+def test_viability_guarded_route_is_evidence_gated_before_rpc():
+    content = _workflow("phase1-pons-viability-guarded-route.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
     assert "workflow_call:" in trigger_block
     assert "workflow_dispatch:" not in trigger_block
     assert "\n  push:" not in trigger_block
-    assert ".github/phase1-pons-viability-batch.json" in content
-    assert "viability batch generation is not armed" in content
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert "viability evidence readiness is not armed" in content
     assert "33_982_556_591" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-pons-representative-validation" in content
     assert "phase1-pons-viability-route-measurement.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
 
 
-def test_viability_batch_has_nine_distinct_serialized_workflows():
+def test_viability_has_nine_individual_guarded_launchers():
     wrappers = {
-        "pons_registry": "phase1-pons-viability-batch-pons-registry.yml",
-        "pons_v1_v3": "phase1-pons-viability-batch-pons-v1-v3.yml",
-        "pons_v2_curve": "phase1-pons-viability-batch-pons-v2-curve.yml",
-        "pons_v2_transition": "phase1-pons-viability-batch-pons-v2-transition.yml",
-        "pons_v2_v4": "phase1-pons-viability-batch-pons-v2-v4.yml",
-        "weth_usdg_anchor": "phase1-pons-viability-batch-weth-usdg-anchor.yml",
-        "stock_oracle": "phase1-pons-viability-batch-stock-oracle.yml",
-        "quote_v3_fallback": "phase1-pons-viability-batch-quote-v3-fallback.yml",
-        "quote_v4_fallback": "phase1-pons-viability-batch-quote-v4-fallback.yml",
+        "pons_registry": "phase1-pons-viability-pons-registry-one-shot.yml",
+        "pons_v1_v3": "phase1-pons-viability-pons-v1-v3-one-shot.yml",
+        "pons_v2_curve": "phase1-pons-viability-pons-v2-curve-one-shot.yml",
+        "pons_v2_transition": (
+            "phase1-pons-viability-pons-v2-transition-one-shot.yml"
+        ),
+        "pons_v2_v4": "phase1-pons-viability-pons-v2-v4-one-shot.yml",
+        "weth_usdg_anchor": (
+            "phase1-pons-viability-weth-usdg-anchor-one-shot.yml"
+        ),
+        "stock_oracle": "phase1-pons-viability-stock-oracle-one-shot.yml",
+        "quote_v3_fallback": (
+            "phase1-pons-viability-quote-v3-fallback-one-shot.yml"
+        ),
+        "quote_v4_fallback": (
+            "phase1-pons-viability-quote-v4-fallback-one-shot.yml"
+        ),
     }
     assert len(wrappers) == 9
     for route, workflow in wrappers.items():
         content = _workflow(workflow)
-        assert ".github/phase1-pons-viability-batch.json" in content
-        assert "launch Phase 1 viability batch" in content
-        assert "group: phase1-pons-viability-batch-${{ github.ref }}" in content
-        assert "cancel-in-progress: false" in content
-        assert "phase1-pons-viability-batch-route.yml" in content
+        assert f"launch viability {route}" in content
+        assert "phase1-pons-viability-guarded-route.yml" in content
         assert f'route: "{route}"' in content
         assert "sequence_id: ${{ github.sha }}" in content
+        assert "cancel-in-progress: false" in content
+        assert "workflow_dispatch:" not in content
 
 
-def test_viability_batch_finalizer_maps_nine_runs_into_acceptance():
-    content = _workflow("phase1-pons-viability-batch-finalize.yml")
-    trigger_block = content.split("\npermissions:", 1)[0]
-    assert "workflow_dispatch:" in trigger_block
-    assert "workflow_call:" in trigger_block
-    assert "\n  push:" not in trigger_block
-    assert content.count("phase1-pons-viability-batch-") >= 9
-    assert "expected exactly one" in content
-    assert "nine distinct run IDs" in content
-    assert "phase1-pons-post-eligibility-evidence-ready" in content
-    assert "phase1-pons-final-acceptance-chain.yml" in content
-    assert "time.sleep(" not in content
-
-    launcher = _workflow(
-        "phase1-pons-viability-batch-finalize-one-shot.yml"
+def test_viability_ledger_finalizer_validates_nine_distinct_runs():
+    content = _workflow(
+        "phase1-pons-viability-ledger-finalize-one-shot.yml"
     )
-    assert ".github/phase1-pons-viability-finalize.json" in launcher
-    assert "launch Phase 1 final acceptance" in launcher
-    assert "finalizer generation is not armed" in launcher
-    assert "phase1-pons-viability-batch-finalize.yml" in launcher
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "launch Phase 1 final acceptance" in content
+    assert "viability run ledger is not armed" in content
+    assert "nine distinct route run IDs" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    for workflow_name in (
+        "phase1-pons-viability-pons-registry-one-shot",
+        "phase1-pons-viability-pons-v1-v3-one-shot",
+        "phase1-pons-viability-pons-v2-curve-one-shot",
+        "phase1-pons-viability-pons-v2-transition-one-shot",
+        "phase1-pons-viability-pons-v2-v4-one-shot",
+        "phase1-pons-viability-weth-usdg-anchor-one-shot",
+        "phase1-pons-viability-stock-oracle-one-shot",
+        "phase1-pons-viability-quote-v3-fallback-one-shot",
+        "phase1-pons-viability-quote-v4-fallback-one-shot",
+    ):
+        assert workflow_name in content
+    assert "phase1-pons-final-acceptance-chain.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
