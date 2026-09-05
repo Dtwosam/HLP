@@ -18,6 +18,7 @@ WORKFLOWS = [
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-continuation.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -113,6 +114,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-continuation.yml",
     "phase1-pons-v2-curve-recover-tail-one-shot.yml",
     "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
     "phase1-pons-v2-transition-recover-gaps.yml",
@@ -440,6 +442,24 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "cannot freeze complete $100k universe while eligibility" in content
+
+
+def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
+    content = _workflow("phase1-pons-skhy-v4-known-pool-continuation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33926428274"' in content
+    assert 'default: "2000000"' in content
+    assert "forward_blocks must be between 1 and 2000000" in content
+    assert "0x84cab63bc87912e71ad199ff14a0ba45de68fef8" in content
+    assert "0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601" in content
+    assert "EXPECTED_PRIOR_SEARCH_END: '52863525'" in content
+    assert "--known-pool-only" in content
+    assert 'row.get("continuation_mode") != "known_pool_only"' in content
+    assert "timeout-minutes: 20" in content
+    assert "time.sleep(" not in content
 
 
 def test_v4_quote_continuation_is_reusable_without_push_trigger():
