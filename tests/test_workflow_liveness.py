@@ -73,16 +73,16 @@ def test_archive_matrix_workflows_are_small_and_bounded():
     for name in MATRIX_WORKFLOWS:
         content = _workflow(name)
         assert "max-parallel: 2" in content, name
-        if name in {
-            "phase1-pons-v2-curve-full.yml",
-            "phase1-pons-v2-v4-full.yml",
-        }:
+        if name == "phase1-pons-v2-v4-full.yml":
+            assert "SHARD_COUNT: '192'" in content, name
+            assert "timeout-minutes: 30" in content, name
+        elif name == "phase1-pons-v1-v3-full.yml":
+            assert "SHARD_COUNT: '240'" in content, name
+            assert "timeout-minutes: 40" in content, name
+        elif name == "phase1-pons-v2-curve-full.yml":
             assert "SHARD_COUNT: '64'" in content, name
             assert "timeout-minutes: 25" in content, name
-        elif name in {
-            "phase1-pons-weth-usdg-anchor-full.yml",
-            "phase1-pons-v1-v3-full.yml",
-        }:
+        elif name == "phase1-pons-weth-usdg-anchor-full.yml":
             assert "SHARD_COUNT: '128'" in content, name
             assert "timeout-minutes: 25" in content, name
         else:
@@ -533,7 +533,8 @@ def test_v1_v3_full_is_reusable_with_frozen_registry():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert 'default: "33911022718"' in content
-    assert "SHARD_COUNT: '128'" in content
+    assert "SHARD_COUNT: '240'" in content
+    assert "timeout-minutes: 40" in content
     assert "max-parallel: 2" in content
 
 
@@ -564,7 +565,8 @@ def test_v2_v4_full_is_reusable_with_frozen_transition():
     assert "\n  push:" not in trigger_block
     assert 'default: "33912452330"' in content
     assert "max-parallel: 2" in content
-    assert "SHARD_COUNT: '64'" in content
+    assert "SHARD_COUNT: '192'" in content
+    assert "timeout-minutes: 30" in content
 
 
 def test_quote_fallback_merge_is_reusable_without_network_trigger():

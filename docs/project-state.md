@@ -287,10 +287,16 @@ without increasing concurrent RPC pressure:
 - V2 curve: 64 shards, about 432k blocks each, max-parallel 2, 25-minute cap;
 - WETH/USDG anchor: 128 shards, about 358k blocks each, max-parallel 2,
   25-minute cap;
-- V1 global V3 tape: 128 shards, about 358k blocks each, max-parallel 2,
-  25-minute cap;
-- V2 global PoolManager V4 tape: 64 shards, about 432k blocks each,
-  max-parallel 2, 25-minute cap.
+- V1 global V3 tape: **240 shards**, about **191k blocks each**,
+  max-parallel 2, **40-minute** cap;
+- V2 global PoolManager V4 tape: **192 shards**, about **144k blocks each**,
+  max-parallel 2, **30-minute** cap.
+
+The V1/V3 and V2/V4 full tapes had not yet been executed when the DELL oracle
+recovery supplied a stronger keyless timing sample: successful 100k-block DELL
+jobs took about **11m40s** end-to-end. The old 358k/432k venue shards were
+therefore resized before first execution. This changes only partitioning and
+runner headroom; the frozen full-history processed-block floors are unchanged.
 
 Two reusable manual-only range recovery workflows split a bounded exact
 failed curve or anchor interval into four smaller subshards and merge only that
