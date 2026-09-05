@@ -11,5 +11,6 @@
     "stock_oracle": 0,
     "quote_v3_fallback": 0,
     "quote_v4_fallback": 0
-  }
+  },
+  "validation_generation": 1
 }
