@@ -31,6 +31,10 @@ on:
         description: "Successful representative DEX cross-check run"
         required: true
         type: string
+      explorer_crosscheck_run_id:
+        description: "Successful representative Blockscout cross-check run"
+        required: true
+        type: string
   workflow_call:
     inputs:
       sample_run_id:
@@ -52,6 +56,9 @@ on:
         required: true
         type: string
       dex_crosscheck_run_id:
+        required: true
+        type: string
+      explorer_crosscheck_run_id:
         required: true
         type: string
 
@@ -116,6 +123,12 @@ jobs:
           path: dex
           run-id: ${{ inputs.dex_crosscheck_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: explorer
+          run-id: ${{ inputs.explorer_crosscheck_run_id }}
+          github-token: ${{ github.token }}
       - name: Validate representative evidence provenance
         run: |
           python - <<'PY'
@@ -174,12 +187,17 @@ jobs:
               "pons-representative-dex-crosscheck.jsonl.manifest.json",
               snapshot=False,
           )
+          explorer = provenance(
+              "explorer/"
+              "pons-representative-explorer-crosscheck.jsonl.manifest.json"
+          )
 
           for label, prov in [
               ("transfer", transfer),
               ("market_path", market),
               ("priced_path", priced),
               ("dex", dex),
+              ("explorer", explorer),
           ]:
               if int(prov.get("sample_run_id", -1)) != sample_run:
                   raise SystemExit(
@@ -206,6 +224,18 @@ jobs:
               raise SystemExit(
                   "representative DEX priced-path run mismatch"
               )
+          if int(
+              explorer.get("market_path_run_id", -1)
+          ) != market_path_run:
+              raise SystemExit(
+                  "representative explorer market-path run mismatch"
+              )
+          if int(
+              explorer.get("priced_path_run_id", -1)
+          ) != int("${{ inputs.priced_path_run_id }}"):
+              raise SystemExit(
+                  "representative explorer priced-path run mismatch"
+              )
 
           print(json.dumps({
               "sample_run_id": sample_run,
@@ -218,6 +248,9 @@ jobs:
               ),
               "dex_crosscheck_run_id": int(
                   "${{ inputs.dex_crosscheck_run_id }}"
+              ),
+              "explorer_crosscheck_run_id": int(
+                  "${{ inputs.explorer_crosscheck_run_id }}"
               ),
               "provenance_consistent": True,
           }, sort_keys=True))
@@ -279,6 +312,10 @@ jobs:
               dex_crosscheck_rows=read_jsonl(
                   "dex/pons-representative-dex-crosscheck.jsonl"
               ),
+              explorer_summary_rows=read_jsonl(
+                  "explorer/"
+                  "pons-representative-explorer-token-summary.jsonl"
+              ),
               market_path_summary_rows=read_jsonl(
                   "market-paths/"
                   "pons-representative-market-path-summary.jsonl"
@@ -322,6 +359,9 @@ jobs:
                   ),
                   "dex_crosscheck_run_id": int(
                       "${{ inputs.dex_crosscheck_run_id }}"
+                  ),
+                  "explorer_crosscheck_run_id": int(
+                      "${{ inputs.explorer_crosscheck_run_id }}"
                   ),
               },
           )
