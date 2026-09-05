@@ -129,6 +129,19 @@ for graduations and
 `8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`
 for registrations.
 
+The canonical WETH/USDG anchor tape is now complete through the frozen
+snapshot head in recovered-promotion run **33972109927**. The promotion reused
+only successful artifacts from the original prefix run, the preserved tail
+shard, the manifest-gap recovery and the two exact cancelled-gap repairs. It
+proved exact continuous block coverage from **8,621,658** through
+**54,486,035** with **49** selected source ranges and no unexplained gaps. The
+frozen tape contains **21,794,636** price events and SHA-256
+`1258f2c85e01f3f62587eeed37c28a30aecb537411b103f451090541a5f225a1`.
+Its causal initial WETH/USD value at block **8,621,657** is
+`1781.9239264124660124056136394685358486212055749832181614111330385520256580023364`.
+The final event lands exactly at snapshot head **54,486,035**. The promotion
+made only **8** archive state RPC requests beyond the reused event artifacts.
+
 ### Lifecycle boundary completeness
 
 - [x] V1 Uniswap V3 Initialize is retained as a price point rather than starting at first swap
@@ -297,13 +310,13 @@ in **1,093.740 seconds** with **1,418** requests. Later gaps **018**
 before artifact upload, proving that 150k is not uniformly safe. The lower 50k
 recovery ceiling is therefore the fail-safe default for future anchor gaps.
 
-A manual-only cancelled-gap repair wrapper is prepared but intentionally
-**not triggered while run 33957294304 is still active**. It repairs gap 018
-first and gap 025 only after 018 succeeds, using the reusable four-way exact
-range helper with distinct artifact suffixes. Each 150k hole is split into four
-~37.5k subshards with internal max-parallel 2, so the repair stays below the
-50k per-worker bound and cannot collide artifact names. The stabilized adaptive
-log scanner is shared by this path too.
+Cancelled anchor gaps **018** and **025** were repaired successfully in run
+**33970898635** with the reusable four-way exact range helper. Each 150k hole
+was split into four ~37.5k subshards with internal max-parallel 2, staying below
+the 50k per-worker recovery bound. Recovered-promotion run **33972109927** then
+folded those ranges into the canonical anchor artifact and proved end-to-end
+continuity, so no further anchor rescanning is required for the frozen Phase 1
+snapshot.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
