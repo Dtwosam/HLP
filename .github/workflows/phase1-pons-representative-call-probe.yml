@@ -1,5 +1,5 @@
 name: phase1-pons-representative-call-probe
-# target: sample
+# target: market-paths
 
 on:
   push:
@@ -15,9 +15,12 @@ permissions:
 jobs:
   probe:
     if: ${{ contains(github.event.head_commit.message, 'never launch representative call probe') }}
-    uses: ./.github/workflows/phase1-pons-representative-sample-freeze.yml
+    uses: ./.github/workflows/phase1-pons-representative-market-paths.yml
     with:
-      v1_eligibility_run_id: "33982556591"
-      v2_eligibility_run_id: "33982556591"
-      runner_smoke_run_id: "33920762592"
+      sample_run_id: "33982556591"
+      registry_run_id: "33911022718"
+      v1_v3_run_id: "33982556591"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      v2_v4_run_id: "33982556591"
     secrets: inherit
