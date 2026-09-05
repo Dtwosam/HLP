@@ -1211,3 +1211,19 @@ def test_live_acquisition_checkpoint_launcher_is_pinned_and_artifact_only():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "time.sleep(" not in content
+
+
+def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
+    content = _workflow("phase1-pons-live-venue-rescue-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch V1 V3 rescue" in content
+    assert "launch V2 V4 rescue" in content
+    assert content.count('partial_run_id: "33982556591"') == 2
+    assert 'source_registry_run_id: "33911022718"' in content
+    assert 'transition_run_id: "33912452330"' in content
+    assert content.count('max_gap_blocks: "100000"') == 2
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "time.sleep(" not in content
