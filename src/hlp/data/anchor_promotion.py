@@ -74,6 +74,11 @@ def select_anchor_source_ranges(
                     "conflicting anchor evidence for exact range "
                     f"{lo}..{hi}: {prior['sha256']} != {sha}"
                 )
+            if int(prior["records"]) != records:
+                raise ValueError(
+                    "conflicting anchor record count for exact range "
+                    f"{lo}..{hi}: {prior['records']} != {records}"
+                )
             prior_ref = (
                 str(prior.get("source_run_id") or ""),
                 str(prior.get("source_artifact") or ""),
