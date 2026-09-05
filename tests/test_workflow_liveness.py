@@ -606,6 +606,8 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "phase1-pons-v1-lifecycle-eligibility" in content
     assert "phase1-pons-v2-lifecycle-eligibility" in content
     assert "phase1-pons-representative-transfers-full" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "market_path_run_id" in content
     assert "phase1-pons-representative-dex-crosscheck" in content
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
