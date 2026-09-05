@@ -5,7 +5,7 @@ from hlp.data.phase1_readiness import (
     FINAL_ACCEPTANCE_ARTIFACT,
     SOURCE_ELIGIBILITY_RUN_ID,
     SOURCE_REQUIRED_ARTIFACTS,
-    VIABILITY_ROUTE_WORKFLOWS,
+    VIABILITY_ROUTE_WORKFLOW_PATHS,
     build_phase1_readiness_report,
 )
 
@@ -18,10 +18,12 @@ def _run(
     conclusion="success",
     artifacts=(),
     job_counts=None,
+    path=None,
 ):
     return {
         "id": run_id,
         "name": name,
+        "path": path,
         "status": status,
         "conclusion": conclusion,
         "artifacts": list(artifacts),
@@ -48,9 +50,13 @@ def _evidence(run_id=400):
 
 def _route_runs(start=1000):
     return {
-        route: _run(start + index, name=workflow)
-        for index, (route, workflow) in enumerate(
-            VIABILITY_ROUTE_WORKFLOWS.items()
+        route: _run(
+            start + index,
+            name=f"phase1 viability {route} custom-run-name",
+            path=workflow_path,
+        )
+        for index, (route, workflow_path) in enumerate(
+            VIABILITY_ROUTE_WORKFLOW_PATHS.items()
         )
     }
 
@@ -58,7 +64,7 @@ def _route_runs(start=1000):
 def _ledger_ids(start=1000):
     return {
         route: start + index
-        for index, route in enumerate(VIABILITY_ROUTE_WORKFLOWS)
+        for index, route in enumerate(VIABILITY_ROUTE_WORKFLOW_PATHS)
     }
 
 
@@ -77,14 +83,14 @@ def _report(
         source_run=source_run or _source(),
         evidence_run=evidence_run,
         viability_runs=viability_runs
-        or {route: None for route in VIABILITY_ROUTE_WORKFLOWS},
+        or {route: None for route in VIABILITY_ROUTE_WORKFLOW_PATHS},
         finalizer_runs=finalizer_runs,
         configured_source_run_id=SOURCE_ELIGIBILITY_RUN_ID,
         configured_evidence_run_id=evidence_run_id,
         ledger_generation=ledger_generation,
         ledger_evidence_run_id=ledger_evidence_run_id,
         ledger_route_run_ids=ledger_route_run_ids
-        or {route: 0 for route in VIABILITY_ROUTE_WORKFLOWS},
+        or {route: 0 for route in VIABILITY_ROUTE_WORKFLOW_PATHS},
     )
 
 
@@ -142,7 +148,7 @@ def test_readiness_requires_viability_ledger_to_be_armed():
     assert report["stage"] == "viability_measurements"
     assert report["next_action"] == "arm_viability_run_ledger"
     assert report["pending_viability_routes"] == list(
-        VIABILITY_ROUTE_WORKFLOWS
+        VIABILITY_ROUTE_WORKFLOW_PATHS
     )
 
 
@@ -169,7 +175,7 @@ def test_readiness_names_next_missing_viability_route():
 
 def test_readiness_flags_invalid_viability_run_identity():
     runs = _route_runs()
-    runs["stock_oracle"]["name"] = "wrong-workflow"
+    runs["stock_oracle"]["path"] = ".github/workflows/wrong-workflow.yml"
 
     report = _report(
         evidence_run=_evidence(),
@@ -185,9 +191,9 @@ def test_readiness_flags_invalid_viability_run_identity():
     assert report["invalid_viability_routes"] == [
         {
             "route": "stock_oracle",
-            "reason": "workflow_mismatch",
-            "expected": VIABILITY_ROUTE_WORKFLOWS["stock_oracle"],
-            "observed": "wrong-workflow",
+            "reason": "workflow_path_mismatch",
+            "expected": VIABILITY_ROUTE_WORKFLOW_PATHS["stock_oracle"],
+            "observed": ".github/workflows/wrong-workflow.yml",
         }
     ]
 
