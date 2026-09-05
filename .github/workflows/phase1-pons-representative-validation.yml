@@ -200,6 +200,12 @@ jobs:
               raise SystemExit(
                   "representative DEX V2 lifecycle run mismatch"
               )
+          if int(
+              dex.get("priced_path_run_id", -1)
+          ) != int("${{ inputs.priced_path_run_id }}"):
+              raise SystemExit(
+                  "representative DEX priced-path run mismatch"
+              )
 
           print(json.dumps({
               "sample_run_id": sample_run,
