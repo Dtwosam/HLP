@@ -195,6 +195,31 @@ def test_delayed_v4_route_has_no_initial_state_and_activates_on_swap():
 
 
 
+def test_extend_v4_ready_row_is_chain_safe_noop():
+    class Rpc:
+        def iter_logs_chunked(self, *args, **kwargs):
+            raise AssertionError("resolved continuation must not issue RPC")
+
+    prior = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "search_to_block": 1600,
+        "causal_route_ready": False,
+        "delayed_route_ready": True,
+        "selected_delayed_candidate": {"pool_id": POOL_ID},
+    }]
+
+    rows = extend_v4_usdg_routes(
+        Rpc(),
+        prior,
+        snapshot_head=2000,
+        forward_blocks=500,
+        known_pool_only=True,
+    )
+
+    assert rows == prior
+
+
 def test_extend_v4_routes_starts_after_prior_search_end():
     calls = []
 
