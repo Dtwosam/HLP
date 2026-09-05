@@ -40,7 +40,7 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
-  MAX_DELTA_BLOCKS: '500000'
+  MAX_DELTA_BLOCKS: '100000'
 
 jobs:
   plan:

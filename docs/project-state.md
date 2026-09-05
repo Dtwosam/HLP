@@ -240,11 +240,12 @@ from block **52,263,453**. Its Chainlink feed
 `0xd6ed4e7d4aba1111eb42a349899b5c72ee1c9fef` and is causally ready at block
 **52,263,452**. The reusable
 `phase1-pons-stock-oracle-promote-v2-delta` workflow therefore promotes the
-22-asset V2 oracle tape and scans only DELL's missing tail, split into
-**<=500k-block** jobs, before emitting the canonical
-`phase1-pons-stock-oracle-full` artifact. It fails closed unless the frozen
-23-vs-22 coverage relationship and exact merged stock-feed ownership still
-hold.
+22-asset V2 oracle tape and scans only DELL's missing tail. Live run
+**33972806063** proved that the first two **500k-block** DELL shards both hit
+the **20-minute** GitHub job ceiling before artifact upload, with no provider
+error. The canonical delta ceiling is therefore **100k blocks** per job,
+retaining max-parallel 2 and the same fail-closed 23-vs-22 ownership check
+before emitting the canonical `phase1-pons-stock-oracle-full` artifact.
 
 A separate causality fix activates staggered quote-source state only at each
 asset's first Pons use. Future oracle availability is never active from the
