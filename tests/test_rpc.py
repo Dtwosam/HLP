@@ -80,10 +80,28 @@ def test_chunked_logs_adapts_to_provider_range_limit():
 
     rpc = Limited("https://example.invalid")
     assert list(rpc.iter_logs_chunked(0, 9, chunk_size=8)) == []
-    assert calls[0] == (0, 7)
-    assert calls[1] == (0, 3)
-    assert (4, 9) in calls
-    assert calls[-1] == (8, 9)
+    assert calls == [(0, 7), (0, 3), (4, 7), (8, 9)]
+
+
+def test_chunked_logs_do_not_oscillate_after_every_success():
+    calls = []
+
+    class Limited(RpcClient):
+        def get_logs(self, from_block, to_block, **kwargs):
+            calls.append((from_block, to_block))
+            if to_block - from_block + 1 > 4:
+                raise __import__("hlp.data.rpc", fromlist=["RpcError"]).RpcError("range too wide")
+            return []
+
+    rpc = Limited("https://example.invalid")
+    assert list(rpc.iter_logs_chunked(0, 39, chunk_size=8)) == []
+
+    oversized = [
+        (start, end)
+        for start, end in calls
+        if end - start + 1 > 4
+    ]
+    assert oversized == [(0, 7), (32, 39)]
 
 
 def test_rpc_counts_transport_attempts():
