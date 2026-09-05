@@ -1203,6 +1203,13 @@ def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
     assert "targeted_swap_price_checkpoints" in content
     assert "representative DEX cross-check requires exactly 10" in content
     assert "independent DEX pool reconciliation failed" in content
+    assert "timeout-minutes: 30" in content
+    assert "logical_gecko_requests > 40" in content
+    assert "max_gecko_attempts = logical_gecko_requests * client.attempts" in content
+    assert "representative DEX logical request budget exceeded" in content
+    assert "representative DEX HTTP attempt budget exceeded" in content
+    assert "geckoterminal_logical_request_budget" in content
+    assert "geckoterminal_http_attempt_budget" in content
     assert 'default: "33911022718"' in content
     assert 'default: "33912452330"' in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
