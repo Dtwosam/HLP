@@ -101,6 +101,7 @@ def test_summary_keeps_threshold_and_full_maximum():
             "quote_token": ROBINHOOD_WETH.lower(),
             "launch_block": 1,
             "block_number": 2,
+            "event_type": "v3_swap",
             "pricing_status": "priced_weth_usdg",
             "market_cap_proxy_usd": "90000",
         },
@@ -110,6 +111,7 @@ def test_summary_keeps_threshold_and_full_maximum():
             "quote_token": ROBINHOOD_WETH.lower(),
             "launch_block": 1,
             "block_number": 3,
+            "event_type": "v3_initialize",
             "pricing_status": "priced_weth_usdg",
             "market_cap_proxy_usd": "750000",
         },
@@ -118,6 +120,10 @@ def test_summary_keeps_threshold_and_full_maximum():
     assert summary[0]["crossed_100k"] is True
     assert Decimal(summary[0]["max_market_cap_proxy_usd"]) == Decimal("750000")
     assert summary[0]["max_market_cap_block"] == 3
+    assert Decimal(
+        summary[0]["v3_swap_max_market_cap_proxy_usd"]
+    ) == Decimal("90000")
+    assert summary[0]["v3_swap_max_market_cap_block"] == 2
 
 
 def test_stock_quote_uses_causal_oracle_timeline():
