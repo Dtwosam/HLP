@@ -21,23 +21,37 @@ EVIDENCE_REQUIRED_ARTIFACTS = (
     "phase1-pons-representative-validation",
 )
 
-VIABILITY_ROUTE_WORKFLOWS = {
-    "pons_registry": "phase1-pons-viability-pons-registry-one-shot",
-    "pons_v1_v3": "phase1-pons-viability-pons-v1-v3-one-shot",
-    "pons_v2_curve": "phase1-pons-viability-pons-v2-curve-one-shot",
+VIABILITY_ROUTE_WORKFLOW_PATHS = {
+    "pons_registry": (
+        ".github/workflows/phase1-pons-viability-pons-registry-one-shot.yml"
+    ),
+    "pons_v1_v3": (
+        ".github/workflows/phase1-pons-viability-pons-v1-v3-one-shot.yml"
+    ),
+    "pons_v2_curve": (
+        ".github/workflows/phase1-pons-viability-pons-v2-curve-one-shot.yml"
+    ),
     "pons_v2_transition": (
-        "phase1-pons-viability-pons-v2-transition-one-shot"
+        ".github/workflows/"
+        "phase1-pons-viability-pons-v2-transition-one-shot.yml"
     ),
-    "pons_v2_v4": "phase1-pons-viability-pons-v2-v4-one-shot",
+    "pons_v2_v4": (
+        ".github/workflows/phase1-pons-viability-pons-v2-v4-one-shot.yml"
+    ),
     "weth_usdg_anchor": (
-        "phase1-pons-viability-weth-usdg-anchor-one-shot"
+        ".github/workflows/"
+        "phase1-pons-viability-weth-usdg-anchor-one-shot.yml"
     ),
-    "stock_oracle": "phase1-pons-viability-stock-oracle-one-shot",
+    "stock_oracle": (
+        ".github/workflows/phase1-pons-viability-stock-oracle-one-shot.yml"
+    ),
     "quote_v3_fallback": (
-        "phase1-pons-viability-quote-v3-fallback-one-shot"
+        ".github/workflows/"
+        "phase1-pons-viability-quote-v3-fallback-one-shot.yml"
     ),
     "quote_v4_fallback": (
-        "phase1-pons-viability-quote-v4-fallback-one-shot"
+        ".github/workflows/"
+        "phase1-pons-viability-quote-v4-fallback-one-shot.yml"
     ),
 }
 
@@ -88,7 +102,7 @@ def build_phase1_readiness_report(
     if _run_id(source_run) != SOURCE_ELIGIBILITY_RUN_ID:
         raise ValueError("source run payload does not match frozen run ID")
 
-    route_names = list(VIABILITY_ROUTE_WORKFLOWS)
+    route_names = list(VIABILITY_ROUTE_WORKFLOW_PATHS)
     if set(viability_runs) != set(route_names):
         raise ValueError("readiness viability route set changed")
     if set(ledger_route_run_ids) != set(route_names):
@@ -227,13 +241,14 @@ def build_phase1_readiness_report(
                 }
             )
             continue
-        if run.get("name") != VIABILITY_ROUTE_WORKFLOWS[route]:
+        observed_path = str(run.get("path") or "").split("@", 1)[0]
+        if observed_path != VIABILITY_ROUTE_WORKFLOW_PATHS[route]:
             invalid.append(
                 {
                     "route": route,
-                    "reason": "workflow_mismatch",
-                    "expected": VIABILITY_ROUTE_WORKFLOWS[route],
-                    "observed": run.get("name"),
+                    "reason": "workflow_path_mismatch",
+                    "expected": VIABILITY_ROUTE_WORKFLOW_PATHS[route],
+                    "observed": observed_path,
                 }
             )
             continue
