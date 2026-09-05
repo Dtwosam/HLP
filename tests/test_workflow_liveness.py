@@ -1518,7 +1518,17 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "phase1-pons-v1-v3-full" in content
     assert "phase1-pons-v2-v4-full" in content
     assert "inputs.v2_v4_run_id == ''" in content
+    assert "pricing_run_id:" in content
+    assert "reused pricing requires an explicit V2/V4 run ID" in content
+    assert "reused pricing run is missing lifecycle/fallback" in content
+    assert "inputs.pricing_run_id == ''" in content
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
+    assert "phase1-pons-eligible-universe-promote.yml" in content
+    assert "promote_reused_universe" in content
+    assert (
+        "inputs.pricing_run_id != '' && inputs.pricing_run_id || "
+        "format('{0}', github.run_id)"
+    ) in content
     assert "phase1-pons-representative-evidence-chain.yml" in content
     assert "v1_v3_run_id: ${{ inputs.v1_v3_run_id }}" in content
     assert (
@@ -1542,6 +1552,8 @@ def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
     assert "recovered completion config is not armed" in content
     assert "source_id != 33_982_556_591" in content
     assert "v1_id <= 0" in content
+    assert "pricing_run_id" in content
+    assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "phase1-pons-recovered-completion-chain.yml" in content
 
 
