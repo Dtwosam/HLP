@@ -219,9 +219,14 @@ jobs:
           import os
           from pathlib import Path
 
+          source_run_id = int(os.environ["SOURCE_RUN_ID"])
           report = {
               "status": "ready",
-              "source_eligibility_run_id": int(os.environ["SOURCE_RUN_ID"]),
+              "recovery_mode": False,
+              "source_eligibility_run_id": source_run_id,
+              "lifecycle_run_id": source_run_id,
+              "v1_v3_run_id": source_run_id,
+              "v2_v4_run_id": source_run_id,
               "evidence_run_id": int(os.environ["GITHUB_RUN_ID"]),
               "eligible_universe_artifact": "phase1-pons-eligible-universe",
               "representative_artifact": "phase1-pons-representative-validation",
