@@ -258,3 +258,13 @@ def test_request_rejects_invalid_client_limits(field, value, message):
 
     with pytest.raises(ValueError, match=message):
         client._request("/probe")
+
+
+def test_public_rate_defaults_stay_within_frozen_api_contract():
+    client = GeckoTerminalClient()
+
+    assert geckoterminal.GECKOTERMINAL_API_VERSION == "20230203"
+    assert geckoterminal.GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE == 10
+    assert client.min_interval_seconds >= (
+        60 / geckoterminal.GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE
+    )
