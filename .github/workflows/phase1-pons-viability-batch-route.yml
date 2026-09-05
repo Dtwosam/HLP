@@ -1,0 +1,129 @@
+name: phase1-pons-viability-batch-route
+
+on:
+  workflow_call:
+    inputs:
+      route:
+        required: true
+        type: string
+      sequence_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source_eligibility_run_id: ${{ steps.check.outputs.source_eligibility_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        name: Verify completed evidence handoff before any route RPC
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          config = json.loads(
+              Path(".github/phase1-pons-viability-batch.json").read_text()
+          )
+          generation = int(config.get("generation", 0))
+          evidence_run_id = int(config.get("evidence_run_id", 0))
+          source_run_id = int(config.get("source_eligibility_run_id", 0))
+          if generation <= 0:
+              raise SystemExit("viability batch generation is not armed")
+          if evidence_run_id <= 0 or source_run_id <= 0:
+              raise SystemExit("viability batch run IDs must be positive")
+          if source_run_id != 33_982_556_591:
+              raise SystemExit("viability batch source eligibility run changed")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          run = get(f"/repos/{repo}/actions/runs/{evidence_run_id}")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit(
+                  "evidence handoff run is not completed successfully: "
+                  f"status={run.get('status')} conclusion={run.get('conclusion')}"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              names.update(
+                  str(artifact.get("name"))
+                  for artifact in artifacts
+                  if not artifact.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit("evidence artifact pagination exceeded 1000")
+
+          required = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  f"evidence handoff is missing required artifacts: {missing}"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"source_eligibility_run_id={source_run_id}\n"
+              )
+          print(json.dumps({
+              "generation": generation,
+              "evidence_run_id": evidence_run_id,
+              "source_eligibility_run_id": source_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  measure:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-viability-route-measurement.yml
+    with:
+      route: ${{ inputs.route }}
+      from_block: "54436036"
+      to_block: "54486035"
+      eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}
+      sequence_id: ${{ inputs.sequence_id }}
+      registry_run_id: "33911022718"
+      v2_registry_run_id: "33912235341"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+    secrets: inherit
