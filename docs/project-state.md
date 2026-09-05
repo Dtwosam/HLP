@@ -321,8 +321,10 @@ initially tested at 150k, but live gap 018 (52,169,619-52,319,618) hit the
 20-minute runner cap before artifact upload. Future anchor manifest-gap jobs
 are therefore capped at **50k blocks**, and the four-way exact anchor range
 helper now rejects ranges above 200k so each subshard is at most 50k.
-Transition and V4 gap workflows remain at the separately bounded **150k**
-ceiling.
+Transition and quote-fallback gap workflows remain at the separately bounded
+**150k** ceiling. The unrun full-venue V1/V3 and V2/V4 recoveries instead use
+**100k-block** retry jobs with **30-minute** ceilings, matching the stronger DELL
+timing evidence while retaining max-parallel 2.
 
 The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed

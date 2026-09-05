@@ -370,11 +370,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v4-events-gap" in content
     assert "manifest_gap_aware_v4_recovery" in content
-    assert 'default: "150000"' in content
-    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds 240 matrix jobs" in content
     assert "max-parallel: 2" in content
-    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 30" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
 
@@ -523,12 +523,12 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v1-v3-events-gap" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
-    assert 'default: "150000"' in content
-    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V1 V3 gap plan exceeds 240 matrix jobs" in content
     assert "Pons V1 pools missing V3 Initialize" in content
     assert "max-parallel: 2" in content
-    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 30" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
 
@@ -681,6 +681,7 @@ def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     assert "needs.v2_v4.result == 'failure'" in content
     assert "needs.v2_v4_recovery.result == 'success'" in content
     assert content.count('partial_run_id: ${{ format(\'{0}\', github.run_id) }}') == 2
+    assert content.count('max_gap_blocks: "100000"') == 2
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
     assert content.count("format('{0}', github.run_id)") == 4
     assert "cancel-in-progress: false" in content
