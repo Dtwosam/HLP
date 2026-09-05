@@ -386,7 +386,7 @@ def test_phase1_acceptance_rejects_v1_lifecycle_hash_drift():
 
 def test_phase1_acceptance_rejects_invalid_v2_lifecycle_hash():
     fixtures = list(_fixtures())
-    fixtures[3]["provenance"]["v2_eligibility_sha256"] = "not-a-sha"
+    fixtures[1]["provenance"]["v2_eligibility_sha256"] = "not-a-sha"
 
     with pytest.raises(ValueError, match="v2_eligibility_sha256"):
         build_phase1_acceptance_report(*fixtures)
