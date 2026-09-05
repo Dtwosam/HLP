@@ -326,8 +326,8 @@ jobs:
                   "source": "geckoterminal_public_api",
                   "purpose": (
                       "independent representative pool identity and "
-                      "historical swap-price cross-check; not canonical "
-                      "historical truth"
+                      "historical swap-price cross-check; "
+                      "not canonical historical truth"
                   ),
                   "geckoterminal_api_version": (
                       GECKOTERMINAL_API_VERSION
