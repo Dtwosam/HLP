@@ -523,6 +523,8 @@ def build_phase1_acceptance_report(
         "representative_no_unexplained_block_gaps": True,
         "representative_source_coverage_sha256": coverage_sha,
         "required_acquisition_routes": required_routes,
+        "required_route_blocks": expected_route_blocks,
+        "required_work_blocks": sum(expected_route_blocks.values()),
         "projected_requests": int(projected_requests),
         "projected_response_bytes": int(projected_response_bytes),
         "projected_artifact_bytes": int(projected_artifact_bytes),
