@@ -79,6 +79,24 @@ def _full_runs(run_ids, *, exclude=()):
     return rows
 
 
+def test_required_phase1_route_blocks_match_frozen_workflow_geometry():
+    head = 54_486_035
+    assert REQUIRED_PHASE1_ROUTE_BLOCKS == {
+        "pons_registry": (
+            head - 8_600_612 + 1
+            + head - 26_841_846 + 1
+        ),
+        "pons_v1_v3": head - 8_621_658 + 1,
+        "pons_v2_curve": head - 26_841_846 + 1,
+        "pons_v2_transition": head - 26_841_846 + 1,
+        "pons_v2_v4": head - 26_841_846 + 1,
+        "weth_usdg_anchor": head - 8_621_658 + 1,
+        "stock_oracle": head - 8_621_658 + 1,
+        "quote_v3_fallback": head - 35_992_329 + 1,
+        "quote_v4_fallback": head - 36_023_158 + 1,
+    }
+
+
 def test_route_projection_uses_worst_observed_per_block_rates():
     rows = [
         _run(
