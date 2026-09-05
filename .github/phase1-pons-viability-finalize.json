@@ -1,5 +1,6 @@
 {
   "generation": 0,
   "batch_head_sha": "",
-  "evidence_run_id": 0
+  "evidence_run_id": 0,
+  "validation_generation": 1
 }
