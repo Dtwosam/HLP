@@ -1398,6 +1398,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "phase1-pons-readiness-audit" in content
     assert "build_phase1_readiness_report" in content
     assert '"path": run.get("path")' in content
+    assert "VIABILITY_ROUTE_WORKFLOW_PATHS" in content
+    assert "VIABILITY_ROUTE_WORKFLOWS" not in content
     assert "job_counts(run_id)" in content
     assert "33982556591" in content
     assert '"&per_page=100&page=1"' in content
