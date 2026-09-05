@@ -14,6 +14,8 @@ from typing import Any
 
 DEFAULT_GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 GECKOTERMINAL_API_VERSION = "20230203"
+GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE = 10
+DEFAULT_GECKOTERMINAL_MIN_INTERVAL_SECONDS = 6.1
 ROBINHOOD_GECKOTERMINAL_NETWORK = "robinhood"
 
 
@@ -41,7 +43,7 @@ class GeckoTerminalClient:
     base_url: str = DEFAULT_GECKOTERMINAL_API
     timeout: float = 30.0
     attempts: int = 3
-    min_interval_seconds: float = 6.1
+    min_interval_seconds: float = DEFAULT_GECKOTERMINAL_MIN_INTERVAL_SECONDS
     requests_made: int = field(default=0, init=False)
     bytes_received: int = field(default=0, init=False)
     _last_request_at: float | None = field(default=None, init=False)
