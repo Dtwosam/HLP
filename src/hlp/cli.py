@@ -86,6 +86,7 @@ from hlp.data.quote_v4_routes import (
     extend_v4_usdg_routes,
     probe_v4_usdg_routes,
     select_v4_quote_routes,
+    validate_v4_usdg_pool_candidate,
 )
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
@@ -1524,6 +1525,58 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
         "blocked_tokens": [
             row["quote_token"] for row in rows if not row["causal_ready"]
         ],
+        "requests_made": rpc.requests_made,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_validate_v4_quote_pool(
+    args: argparse.Namespace,
+) -> int:
+    """Validate one known PoolManager pool id against one quote/USDG pair."""
+    quote_token = args.quote_token.lower()
+    matches = [
+        row
+        for row in _load_jsonl(args.quote_registry)
+        if str(row.get("quote_token", "")).lower() == quote_token
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            "quote registry must contain exactly one requested quote token: "
+            f"token={quote_token} found={len(matches)}"
+        )
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    row = validate_v4_usdg_pool_candidate(
+        rpc,
+        matches[0],
+        pool_id=args.pool_id,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    manifest = write_jsonl_snapshot(
+        [row],
+        output=Path(args.out),
+        provenance={
+            "source": "known_pool_id_v4_usdg_candidate_validation",
+            "chain_id": 4663,
+            "quote_registry": Path(args.quote_registry).name,
+            "quote_token": quote_token,
+            "pool_id": args.pool_id.lower(),
+            "validation_from_block": args.from_block,
+            "validation_to_block": args.to_block,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "quote_token": quote_token,
+        "pool_id": row["pool_id"],
+        "initialize_block": row["initialize"]["block_number"],
         "requests_made": rpc.requests_made,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
@@ -4780,6 +4833,21 @@ def build_parser() -> argparse.ArgumentParser:
     dex_census.add_argument("--v3-out", required=True)
     dex_census.add_argument("--v4-out", required=True)
     dex_census.set_defaults(func=cmd_rpc_dex_pool_window)
+
+    validate_quote_v4 = sub.add_parser(
+        "rpc-pons-validate-v4-quote-pool"
+    )
+    validate_quote_v4.add_argument("--quote-registry", required=True)
+    validate_quote_v4.add_argument("--quote-token", required=True)
+    validate_quote_v4.add_argument("--pool-id", required=True)
+    validate_quote_v4.add_argument("--from-block", type=int, required=True)
+    validate_quote_v4.add_argument("--to-block", type=int, required=True)
+    validate_quote_v4.add_argument("--chunk-size", type=int, default=2_000)
+    validate_quote_v4.add_argument("--min-chunk-size", type=int, default=25)
+    validate_quote_v4.add_argument("--out", required=True)
+    validate_quote_v4.set_defaults(
+        func=cmd_rpc_pons_validate_v4_quote_pool
+    )
 
     extend_quote_v4 = sub.add_parser(
         "rpc-pons-extend-v4-quote-routes"
