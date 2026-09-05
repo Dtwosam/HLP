@@ -86,6 +86,30 @@ def _ledger_ids(start=1000):
     }
 
 
+_AUTO_HANDOFF = object()
+
+
+def _handoff(run_id, *, recovered=False):
+    routing_run_id = run_id if recovered else SOURCE_ELIGIBILITY_RUN_ID
+    return {
+        "status": "ready",
+        "recovery_mode": recovered,
+        "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "lifecycle_run_id": routing_run_id,
+        "v1_v3_run_id": routing_run_id,
+        "v2_v4_run_id": routing_run_id,
+        "evidence_run_id": run_id,
+        "snapshot_head_block": 54_486_035,
+        "all_pons_launches": 494_639,
+        "eligible_tokens": 1,
+        "representative_tokens": 10,
+        "eligible_universe_sha256": "a" * 64,
+        "representative_validation_sha256": "b" * 64,
+        "v1_eligibility_sha256": "c" * 64,
+        "v2_eligibility_sha256": "d" * 64,
+    }
+
+
 def _report(
     *,
     source_run=None,
@@ -96,7 +120,20 @@ def _report(
     ledger_route_run_ids=None,
     viability_runs=None,
     finalizer_runs=(),
+    evidence_handoff=_AUTO_HANDOFF,
 ):
+    if evidence_handoff is _AUTO_HANDOFF:
+        recovered = bool(
+            evidence_run
+            and str(evidence_run.get("path") or "").endswith(
+                "phase1-pons-recovered-completion-one-shot.yml"
+            )
+        )
+        evidence_handoff = (
+            _handoff(evidence_run_id, recovered=recovered)
+            if evidence_run_id > 0
+            else None
+        )
     return build_phase1_readiness_report(
         source_run=source_run or _source(),
         evidence_run=evidence_run,
@@ -109,6 +146,7 @@ def _report(
         ledger_evidence_run_id=ledger_evidence_run_id,
         ledger_route_run_ids=ledger_route_run_ids
         or {route: 0 for route in VIABILITY_ROUTE_WORKFLOW_PATHS},
+        evidence_handoff=evidence_handoff,
     )
 
 
@@ -479,3 +517,37 @@ def test_readiness_rejects_route_launched_with_nonempty_ledger_slot():
             "observed": 1234,
         }
     ]
+
+
+def test_readiness_rejects_malformed_evidence_handoff_fingerprint():
+    handoff = _handoff(400)
+    handoff["representative_validation_sha256"] = "bad"
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["stage"] == "post_eligibility_evidence"
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
+    assert report["evidence_handoff_errors"] == [
+        "evidence handoff hash is invalid: "
+        "representative_validation_sha256"
+    ]
+
+
+def test_readiness_rejects_normal_handoff_marked_recovered():
+    handoff = _handoff(400)
+    handoff["recovery_mode"] = True
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["stage"] == "post_eligibility_evidence"
+    assert "normal evidence handoff is marked recovered" in (
+        report["evidence_handoff_errors"]
+    )
