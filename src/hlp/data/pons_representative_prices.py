@@ -205,3 +205,105 @@ def summarize_representative_priced_paths(
         )
     )
     return output
+
+def select_representative_dex_price_checkpoints(
+    rows: Iterable[dict],
+    sample_rows: Iterable[dict],
+) -> dict[str, list[dict]]:
+    """Select first/max/last priced DEX swaps for each representative token."""
+    sample = _sample_index(sample_rows)
+    grouped: dict[str, list[dict]] = {token: [] for token in sample}
+
+    for source in rows:
+        row = dict(source)
+        token = str(row["token"]).lower()
+        if token not in sample:
+            raise ValueError(
+                f"priced path contains token outside representative sample: {token}"
+            )
+        version = sample[token]["pons_version"]
+        phase = str(row.get("price_path_phase"))
+        event_type = str(row.get("event_type"))
+        is_dex_swap = (
+            version == "v1"
+            and phase == "v1_v3"
+            and event_type == "v3_swap"
+        ) or (
+            version == "v2"
+            and phase == "v2_v4"
+            and event_type == "v4_swap"
+        )
+        if not is_dex_swap or row.get("token_price_usd") is None:
+            continue
+        price = Decimal(str(row["token_price_usd"]))
+        if price <= 0:
+            raise ValueError(
+                f"representative DEX swap has non-positive USD price: {token}"
+            )
+        row["token"] = token
+        row["pons_version"] = version
+        grouped[token].append(row)
+
+    role_order = {"first": 0, "max": 1, "last": 2}
+    output: dict[str, list[dict]] = {}
+    for token, values in grouped.items():
+        values.sort(
+            key=lambda row: (
+                int(row["block_number"]),
+                -1
+                if row.get("transaction_index") is None
+                else int(row["transaction_index"]),
+                int(row["log_index"]),
+            )
+        )
+        if not values:
+            output[token] = []
+            continue
+
+        maximum = max(
+            values,
+            key=lambda row: (
+                Decimal(str(row["token_price_usd"])),
+                int(row["block_number"]),
+                -1
+                if row.get("transaction_index") is None
+                else int(row["transaction_index"]),
+                int(row["log_index"]),
+            ),
+        )
+        selected: dict[tuple[int, int, int], dict] = {}
+        for role, row in (
+            ("first", values[0]),
+            ("max", maximum),
+            ("last", values[-1]),
+        ):
+            key = (
+                int(row["block_number"]),
+                -1
+                if row.get("transaction_index") is None
+                else int(row["transaction_index"]),
+                int(row["log_index"]),
+            )
+            current = selected.get(key)
+            if current is None:
+                current = dict(row)
+                current["checkpoint_roles"] = []
+                selected[key] = current
+            current["checkpoint_roles"].append(role)
+
+        checkpoints = list(selected.values())
+        for row in checkpoints:
+            row["checkpoint_roles"].sort(key=role_order.__getitem__)
+        checkpoints.sort(
+            key=lambda row: (
+                int(row["block_number"]),
+                -1
+                if row.get("transaction_index") is None
+                else int(row["transaction_index"]),
+                int(row["log_index"]),
+            )
+        )
+        output[token] = checkpoints
+
+    return output
+
