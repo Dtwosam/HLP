@@ -1,0 +1,528 @@
+name: phase1-pons-completion-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_eligibility_run_id:
+        description: "Completed full eligibility acquisition parent"
+        required: true
+        default: "33982556591"
+        type: string
+      prior_completion_run_id:
+        description: "Optional earlier completion-chain run whose successful viability child runs should be reused"
+        required: false
+        default: ""
+        type: string
+      prior_transfer_run_id:
+        description: "Optional earlier representative-chain run whose Transfer shards should be reused"
+        required: false
+        default: ""
+        type: string
+      measurement_from_block:
+        description: "Inclusive bounded viability measurement start"
+        required: false
+        default: "54436036"
+        type: string
+      measurement_to_block:
+        description: "Inclusive bounded viability measurement end"
+        required: false
+        default: "54486035"
+        type: string
+      oracle_run_id:
+        required: true
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: true
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        required: true
+        default: "33912235341"
+        type: string
+      v2_curve_run_id:
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: true
+        default: "33972109927"
+        type: string
+  workflow_call:
+    inputs:
+      source_eligibility_run_id:
+        required: true
+        type: string
+      prior_completion_run_id:
+        required: false
+        default: ""
+        type: string
+      prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      measurement_from_block:
+        required: false
+        default: "54436036"
+        type: string
+      measurement_to_block:
+        required: false
+        default: "54486035"
+        type: string
+      oracle_run_id:
+        required: false
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: false
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        required: false
+        default: "33912235341"
+        type: string
+      v2_curve_run_id:
+        required: false
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: false
+        default: "33972109927"
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: phase1-pons-completion-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify completed source eligibility parent and required artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["SOURCE_RUN_ID"])
+          if run_id <= 0:
+              raise SystemExit("source eligibility run ID must be positive")
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit(
+                  "source eligibility parent is not completed successfully: "
+                  f"status={run.get('status')} conclusion={run.get('conclusion')}"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              names.update(
+                  str(artifact.get("name"))
+                  for artifact in artifacts
+                  if not artifact.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit("source artifact pagination exceeded 2000 items")
+
+          required = {
+              "phase1-pons-v1-v3-full",
+              "phase1-pons-v2-v4-full",
+              "phase1-pons-v1-lifecycle-eligibility",
+              "phase1-pons-v2-lifecycle-eligibility",
+              "phase1-pons-v3-quote-fallback-full",
+              "phase1-pons-v4-quote-fallback-full",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  f"source eligibility parent is missing canonical artifacts: {missing}"
+              )
+          print(json.dumps({
+              "source_eligibility_run_id": run_id,
+              "required_artifacts": sorted(required),
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  promote_universe:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-eligible-universe-promote.yml
+    with:
+      source_eligibility_run_id: ${{ inputs.source_eligibility_run_id }}
+    secrets: inherit
+
+  representative:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
+    with:
+      eligibility_run_id: ${{ inputs.source_eligibility_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      prior_transfer_run_id: ${{ inputs.prior_transfer_run_id }}
+      runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      quote_audit_artifact_name: ${{ inputs.quote_audit_artifact_name }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+    secrets: inherit
+
+  viability_sequence:
+    needs:
+      - promote_universe
+      - representative
+    if: ${{ needs.promote_universe.result == 'success' && needs.representative.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      pons_registry_run_id: ${{ steps.sequence.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ steps.sequence.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ steps.sequence.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ steps.sequence.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ steps.sequence.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ steps.sequence.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ steps.sequence.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ steps.sequence.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ steps.sequence.outputs.quote_v4_fallback_run_id }}
+    steps:
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_completion_run_id != '' }}
+        with:
+          name: phase1-pons-viability-route-sequence-state
+          path: prior-state
+          run-id: ${{ inputs.prior_completion_run_id }}
+          github-token: ${{ github.token }}
+      - id: sequence
+        name: Dispatch nine distinct bounded viability route runs serially
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ github.ref_name }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          FROM_BLOCK: ${{ inputs.measurement_from_block }}
+          TO_BLOCK: ${{ inputs.measurement_to_block }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          V2_REGISTRY_RUN_ID: ${{ inputs.v2_registry_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          QUOTE_AUDIT_ARTIFACT_NAME: ${{ inputs.quote_audit_artifact_name }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          ROUTES = [
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          ]
+          WORKFLOW_FILE = "phase1-pons-viability-route-measurement.yml"
+          STATE_PATH = Path("artifacts/phase1-route-sequence-state.json")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          ref = os.environ["TARGET_REF"]
+          run_id = int(os.environ["GITHUB_RUN_ID"])
+          run_attempt = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+
+          def request(method, path, payload=None):
+              data = None
+              headers = {
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              }
+              if payload is not None:
+                  data = json.dumps(payload).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(
+                  api + path,
+                  data=data,
+                  headers=headers,
+                  method=method,
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read()
+                      return json.loads(body) if body else None
+              except urllib.error.HTTPError as exc:
+                  detail = exc.read().decode(errors="replace")
+                  raise RuntimeError(
+                      f"GitHub API {method} {path} failed: "
+                      f"{exc.code} {detail}"
+                  ) from exc
+
+          def get_run(child_run_id):
+              return request(
+                  "GET",
+                  f"/repos/{repo}/actions/runs/{int(child_run_id)}",
+              )
+
+          prior_path = Path("prior-state/phase1-route-sequence-state.json")
+          prior = {}
+          if prior_path.exists():
+              prior_payload = json.loads(prior_path.read_text())
+              prior = dict(prior_payload.get("routes") or {})
+
+          state = {
+              "completion_run_id": run_id,
+              "completion_run_attempt": run_attempt,
+              "source_eligibility_run_id": int(
+                  os.environ["SOURCE_ELIGIBILITY_RUN_ID"]
+              ),
+              "measurement_from_block": int(os.environ["FROM_BLOCK"]),
+              "measurement_to_block": int(os.environ["TO_BLOCK"]),
+              "routes": {},
+          }
+
+          def write_state():
+              STATE_PATH.write_text(
+                  json.dumps(state, indent=2, sort_keys=True) + "\n"
+              )
+
+          def valid_prior(route, entry):
+              child_id = int((entry or {}).get("run_id") or 0)
+              if child_id <= 0:
+                  return None
+              child = get_run(child_id)
+              if (
+                  child.get("status") != "completed"
+                  or child.get("conclusion") != "success"
+              ):
+                  return None
+              if str(child.get("path") or "").split("@", 1)[0] != (
+                  ".github/workflows/" + WORKFLOW_FILE
+              ):
+                  return None
+              if route not in str(child.get("display_title") or ""):
+                  return None
+              return child_id
+
+          for index, route in enumerate(ROUTES):
+              reused = valid_prior(route, prior.get(route))
+              if reused is not None:
+                  state["routes"][route] = {
+                      "run_id": reused,
+                      "conclusion": "success",
+                      "source": "prior_completion",
+                  }
+                  write_state()
+                  print(f"reusing {route} viability run {reused}")
+                  continue
+
+              sequence_id = (
+                  f"{run_id}-{run_attempt}-{index:02d}-{route}"
+              )
+              inputs = {
+                  "route": route,
+                  "from_block": os.environ["FROM_BLOCK"],
+                  "to_block": os.environ["TO_BLOCK"],
+                  "eligibility_run_id": os.environ[
+                      "SOURCE_ELIGIBILITY_RUN_ID"
+                  ],
+                  "sequence_id": sequence_id,
+                  "registry_run_id": os.environ["REGISTRY_RUN_ID"],
+                  "v2_registry_run_id": os.environ["V2_REGISTRY_RUN_ID"],
+                  "transition_run_id": os.environ["TRANSITION_RUN_ID"],
+                  "quote_audit_run_id": os.environ["QUOTE_AUDIT_RUN_ID"],
+                  "quote_audit_artifact_name": os.environ[
+                      "QUOTE_AUDIT_ARTIFACT_NAME"
+                  ],
+              }
+              request(
+                  "POST",
+                  f"/repos/{repo}/actions/workflows/"
+                  f"{urllib.parse.quote(WORKFLOW_FILE)}/dispatches",
+                  {"ref": ref, "inputs": inputs},
+              )
+
+              title = f"phase1 route {route} sequence={sequence_id}"
+              child_id = None
+              for _ in range(36):
+                  payload = request(
+                      "GET",
+                      f"/repos/{repo}/actions/workflows/"
+                      f"{urllib.parse.quote(WORKFLOW_FILE)}/runs"
+                      f"?branch={urllib.parse.quote(ref)}"
+                      "&event=workflow_dispatch&per_page=100",
+                  )
+                  matches = [
+                      row
+                      for row in list(payload.get("workflow_runs") or [])
+                      if row.get("display_title") == title
+                  ]
+                  if matches:
+                      child_id = int(matches[0]["id"])
+                      break
+                  time.sleep(5)
+              if child_id is None:
+                  state["routes"][route] = {
+                      "run_id": None,
+                      "conclusion": "not_found",
+                      "source": "dispatched",
+                  }
+                  write_state()
+                  raise SystemExit(
+                      f"could not discover dispatched viability run for {route}"
+                  )
+
+              state["routes"][route] = {
+                  "run_id": child_id,
+                  "conclusion": "in_progress",
+                  "source": "dispatched",
+              }
+              write_state()
+              print(f"dispatched {route} as run {child_id}")
+
+              child = None
+              for _ in range(180):
+                  child = get_run(child_id)
+                  if child.get("status") == "completed":
+                      break
+                  time.sleep(15)
+              if not child or child.get("status") != "completed":
+                  state["routes"][route]["conclusion"] = "timeout"
+                  write_state()
+                  raise SystemExit(
+                      f"viability route did not complete in 45 minutes: "
+                      f"{route} run={child_id}"
+                  )
+              conclusion = str(child.get("conclusion") or "")
+              state["routes"][route]["conclusion"] = conclusion
+              write_state()
+              if conclusion != "success":
+                  raise SystemExit(
+                      f"viability route failed: {route} run={child_id} "
+                      f"conclusion={conclusion}"
+                  )
+
+          run_ids = [
+              int(state["routes"][route]["run_id"])
+              for route in ROUTES
+          ]
+          if len(run_ids) != 9 or len(set(run_ids)) != 9:
+              raise SystemExit(
+                  "completion chain requires nine distinct viability run IDs"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for route in ROUTES:
+                  output.write(
+                      f"{route}_run_id="
+                      f"{int(state['routes'][route]['run_id'])}\n"
+                  )
+          write_state()
+          print(json.dumps({
+              "routes": ROUTES,
+              "run_ids": run_ids,
+              "distinct_run_ids": len(set(run_ids)),
+              "source_eligibility_run_id": state[
+                  "source_eligibility_run_id"
+              ],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: phase1-pons-viability-route-sequence-state
+          path: artifacts/
+          if-no-files-found: error
+
+  acceptance:
+    needs: viability_sequence
+    if: ${{ needs.viability_sequence.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-final-acceptance-chain.yml
+    with:
+      eligibility_run_id: ${{ format('{0}', github.run_id) }}
+      representative_run_id: ${{ format('{0}', github.run_id) }}
+      pons_registry_run_id: ${{ needs.viability_sequence.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ needs.viability_sequence.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ needs.viability_sequence.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ needs.viability_sequence.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ needs.viability_sequence.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ needs.viability_sequence.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ needs.viability_sequence.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ needs.viability_sequence.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ needs.viability_sequence.outputs.quote_v4_fallback_run_id }}
+    secrets: inherit
