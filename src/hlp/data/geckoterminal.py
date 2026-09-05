@@ -49,11 +49,10 @@ class GeckoTerminalClient:
     def _request(self, path: str, params: dict[str, Any] | None = None) -> dict:
         if self.min_interval_seconds < 0:
             raise ValueError("min_interval_seconds cannot be negative")
-        if self._last_request_at is not None:
-            elapsed = time.monotonic() - self._last_request_at
-            wait = self.min_interval_seconds - elapsed
-            if wait > 0:
-                time.sleep(wait)
+        if self.attempts <= 0:
+            raise ValueError("attempts must be positive")
+        if self.timeout <= 0:
+            raise ValueError("timeout must be positive")
 
         query = ""
         if params:
@@ -69,17 +68,37 @@ class GeckoTerminalClient:
                 "user-agent": "hlp/0.1",
             },
         )
+
+        def pace() -> None:
+            if self._last_request_at is None:
+                return
+            elapsed = time.monotonic() - self._last_request_at
+            wait = self.min_interval_seconds - elapsed
+            if wait > 0:
+                time.sleep(wait)
+
+        def retry_after_seconds(exc: urllib.error.HTTPError) -> float:
+            value = exc.headers.get("Retry-After") if exc.headers else None
+            if value is None:
+                return 0.0
+            try:
+                return max(float(value), 0.0)
+            except ValueError:
+                return 0.0
+
+        retryable_http = {429, 500, 502, 503, 504}
         last_error: Exception | None = None
         for attempt in range(1, self.attempts + 1):
+            pace()
+            self._last_request_at = time.monotonic()
+            self.requests_made += 1
             try:
                 with urllib.request.urlopen(
                     request,
                     timeout=self.timeout,
                 ) as response:
                     raw = response.read()
-                self.requests_made += 1
                 self.bytes_received += len(raw)
-                self._last_request_at = time.monotonic()
                 payload = json.loads(raw)
                 if not isinstance(payload, dict):
                     raise GeckoTerminalError(
@@ -90,13 +109,22 @@ class GeckoTerminalClient:
                         f"GeckoTerminal API error: {payload['errors']}"
                     )
                 return payload
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code not in retryable_http or attempt == self.attempts:
+                    break
+                time.sleep(
+                    max(
+                        retry_after_seconds(exc),
+                        min(2.0 * attempt, 5.0),
+                    )
+                )
             except (
                 urllib.error.URLError,
                 TimeoutError,
                 json.JSONDecodeError,
             ) as exc:
                 last_error = exc
-                self._last_request_at = time.monotonic()
                 if attempt == self.attempts:
                     break
                 time.sleep(min(2.0 * attempt, 5.0))
