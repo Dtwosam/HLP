@@ -123,6 +123,10 @@ jobs:
           from pathlib import Path
 
           from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+          from hlp.data.phase1_coverage import (
+              summarize_sharded_manifest_coverage,
+              summarize_snapshot_manifest_coverage,
+          )
           from hlp.data.pons_representative_prices import (
               summarize_representative_priced_paths,
               validate_representative_priced_path_rows,
@@ -197,20 +201,60 @@ jobs:
               raise SystemExit(
                   "representative priced path quote registry changed"
               )
-          require_manifest(
+          anchor_manifest = require_manifest(
               "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
           )
-          require_manifest(
+          oracle_initial_manifest = require_manifest(
               "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
           )
-          require_manifest(
+          oracle_updates_manifest = require_manifest(
               "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
           )
-          require_manifest(
+          fallback_initial_manifest = require_manifest(
               "fallback/pons-quote-fallback-initial.jsonl.manifest.json"
           )
-          require_manifest(
+          fallback_updates_manifest = require_manifest(
               "fallback/pons-quote-fallback-updates.jsonl.manifest.json"
+          )
+
+          sample_start = min(int(row["launch_block"]) for row in sample)
+          pricing_source_coverage = [
+              summarize_sharded_manifest_coverage(
+                  anchor_manifest,
+                  label="weth_usdg_anchor",
+                  required_start=sample_start,
+              ),
+              summarize_snapshot_manifest_coverage(
+                  oracle_initial_manifest,
+                  label="stock_oracle_initial",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  oracle_updates_manifest,
+                  label="stock_oracle_updates",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  fallback_initial_manifest,
+                  label="quote_fallback_initial",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  fallback_updates_manifest,
+                  label="quote_fallback_updates",
+              ),
+          ]
+          Path(
+              "artifacts/"
+              "pons-representative-pricing-source-coverage.json"
+          ).write_text(
+              json.dumps(
+                  {
+                      "snapshot_head_block": HEAD,
+                      "sample_start_block": sample_start,
+                      "sources": pricing_source_coverage,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
           )
 
           path_rows = load_jsonl(
@@ -467,6 +511,7 @@ jobs:
               "pricing_complete_tokens": sum(
                   row["pricing_complete"] for row in summary_rows
               ),
+              "pricing_source_coverage": len(pricing_source_coverage),
               "priced_paths_sha256": snapshot["sha256"],
               "summary_sha256": summary_snapshot["sha256"],
               **source_runs,
