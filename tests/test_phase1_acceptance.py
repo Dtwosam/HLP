@@ -43,7 +43,13 @@ def _fixtures():
         "complete_tokens": 10,
         "sample_groups": {"failure": 5, "runner": 5},
         "pons_versions": {"v1": 5, "v2": 5},
+        "price_points": 1100,
         "priced_points": 1000,
+        "unpriced_points": 100,
+        "detailed_price_points": 1100,
+        "detailed_priced_points": 1000,
+        "detailed_unpriced_points": 100,
+        "detailed_price_path_complete_tokens": 7,
         "market_path_rows": 5000,
         "transfers": 2500,
         "dex_targeted": 9,
@@ -97,6 +103,11 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["snapshot_head_block"] == 54_486_035
     assert report["all_pons_launches"] == 494_639
     assert report["representative_tokens"] == 10
+    assert report["representative_price_points"] == 1100
+    assert report["representative_detailed_price_points"] == 1100
+    assert report[
+        "representative_detailed_price_path_complete_tokens"
+    ] == 7
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
@@ -127,6 +138,17 @@ def test_phase1_acceptance_rejects_non_free_route_evidence():
     fixtures[4]["zero_cost_route_evidence"] = False
 
     with pytest.raises(ValueError, match="zero-cost route proof"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_detailed_price_path_drift():
+    fixtures = list(_fixtures())
+    fixtures[2]["detailed_price_points"] -= 1
+
+    with pytest.raises(
+        ValueError,
+        match="detailed and lifecycle price paths disagree",
+    ):
         build_phase1_acceptance_report(*fixtures)
 
 
