@@ -322,6 +322,38 @@ def build_phase1_acceptance_report(
             "representative explorer transaction accounting is invalid"
         )
 
+    coverage_sources = _int(
+        representative.get("coverage_sources"),
+        field="representative.coverage_sources",
+    )
+    continuous_sources = _int(
+        representative.get("continuous_sharded_sources"),
+        field="representative.continuous_sharded_sources",
+    )
+    snapshot_sources = _int(
+        representative.get("snapshot_pinned_sources"),
+        field="representative.snapshot_pinned_sources",
+    )
+    if coverage_sources != 11 or continuous_sources != 7 or snapshot_sources != 4:
+        raise ValueError(
+            "representative source coverage contract is incomplete"
+        )
+    if representative.get("no_unexplained_block_gaps") is not True:
+        raise ValueError(
+            "representative validation has unexplained source block gaps"
+        )
+    coverage_start = _int(
+        representative.get("coverage_sample_start_block"),
+        field="representative.coverage_sample_start_block",
+    )
+    if coverage_start <= 0:
+        raise ValueError("representative coverage sample start is invalid")
+    coverage_sha = str(
+        representative.get("source_coverage_sha256") or ""
+    )
+    if len(coverage_sha) != 64:
+        raise ValueError("representative source coverage SHA is invalid")
+
     representative_provenance = _manifest_provenance(
         representative_manifest,
         label="representative validation",
@@ -331,6 +363,11 @@ def build_phase1_acceptance_report(
     ):
         raise ValueError(
             "representative validation summary SHA disagrees with manifest"
+        )
+    if representative_provenance.get("source_coverage_sha256") != coverage_sha:
+        raise ValueError(
+            "representative source coverage SHA disagrees with validation "
+            "provenance"
         )
     if _int(
         representative_provenance.get("v1_eligibility_run_id"),
@@ -466,6 +503,9 @@ def build_phase1_acceptance_report(
         "representative_explorer_verified_dex_swap_transactions": (
             explorer_dex_transactions
         ),
+        "representative_coverage_sources": coverage_sources,
+        "representative_no_unexplained_block_gaps": True,
+        "representative_source_coverage_sha256": coverage_sha,
         "required_acquisition_routes": required_routes,
         "projected_requests": int(projected_requests),
         "projected_response_bytes": int(projected_response_bytes),
