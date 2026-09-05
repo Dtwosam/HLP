@@ -673,12 +673,16 @@ def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     assert "needs: preflight" in content
     assert "needs.preflight.result == 'success'" in content
     assert "phase1-pons-v1-v3-full.yml" in content
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
     assert "phase1-pons-v2-v4-full.yml" in content
-    assert "needs: v1_v3" in content
-    assert "needs.v1_v3.result == 'success'" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "needs.v1_v3.result == 'failure'" in content
+    assert "needs.v1_v3_recovery.result == 'success'" in content
+    assert "needs.v2_v4.result == 'failure'" in content
+    assert "needs.v2_v4_recovery.result == 'success'" in content
+    assert content.count('partial_run_id: ${{ format(\'{0}\', github.run_id) }}') == 2
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
-    assert "needs: v2_v4" in content
-    assert content.count("format('{0}', github.run_id)") == 2
+    assert content.count("format('{0}', github.run_id)") == 4
     assert "cancel-in-progress: false" in content
 
 

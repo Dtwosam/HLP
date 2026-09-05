@@ -189,17 +189,43 @@ jobs:
       source_registry_run_id: ${{ inputs.source_registry_run_id }}
     secrets: inherit
 
-  v2_v4:
+  v1_v3_recovery:
     needs: v1_v3
-    if: ${{ needs.v1_v3.result == 'success' }}
+    if: ${{ always() && (needs.v1_v3.result == 'failure' || needs.v1_v3.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
+    with:
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "150000"
+    secrets: inherit
+
+  v2_v4:
+    needs:
+      - v1_v3
+      - v1_v3_recovery
+    if: ${{ always() && (needs.v1_v3.result == 'success' || needs.v1_v3_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
     with:
       transition_run_id: ${{ inputs.transition_run_id }}
     secrets: inherit
 
-  pricing_eligibility:
+  v2_v4_recovery:
     needs: v2_v4
-    if: ${{ needs.v2_v4.result == 'success' }}
+    if: ${{ always() && (needs.v2_v4.result == 'failure' || needs.v2_v4.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "150000"
+    secrets: inherit
+
+  pricing_eligibility:
+    needs:
+      - v2_v4
+      - v2_v4_recovery
+    if: ${{ always() && (needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
     with:
       oracle_run_id: ${{ inputs.oracle_run_id }}

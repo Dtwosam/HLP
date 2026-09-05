@@ -491,7 +491,11 @@ full venue tapes remain upstream acquisition blockers alongside the unfinished
 pricing inputs. A manual-only
 `phase1-pons-full-eligibility-acquisition-chain` now serializes V1 V3 first,
 V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain.
-Within pricing, SKHY V3 runs before the optional SKHY V4 continuation. The
+If either full venue matrix fails after preserving successful shard artifacts,
+the same run invokes its manifest-gap recovery workflow and retries only missing
+intervals before continuing. A systemic failure with no reusable artifacts still
+stops fail-closed. Within pricing, SKHY V3 runs before the optional SKHY V4
+continuation. The
 64-shard V3 quote fallback does not start until V3 has resolved SKHY or an
 exhaustive V3 miss has been followed by a route-ready V4 result. If neither
 venue resolves SKHY, the chain stops before the full fallback scans.
