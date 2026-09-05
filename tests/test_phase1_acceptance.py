@@ -4,6 +4,7 @@ from hlp.data.phase1_acceptance import (
     REQUIRED_PHASE1_ACQUISITION_ROUTES,
     build_phase1_acceptance_report,
 )
+from hlp.data.phase1_viability import REQUIRED_PHASE1_ROUTE_BLOCKS
 
 
 def _fixtures():
@@ -87,6 +88,8 @@ def _fixtures():
         "routes": len(REQUIRED_PHASE1_ACQUISITION_ROUTES),
         "route_names": list(REQUIRED_PHASE1_ACQUISITION_ROUTES),
         "route_projections": route_projections,
+        "required_route_blocks": dict(REQUIRED_PHASE1_ROUTE_BLOCKS),
+        "required_work_blocks": sum(REQUIRED_PHASE1_ROUTE_BLOCKS.values()),
         "all_routes_instrumented": True,
         "all_observed_rpc_routes_free": True,
         "zero_cost_route_evidence": True,
@@ -157,6 +160,16 @@ def test_phase1_acceptance_rejects_missing_required_route():
     viability["route_projections"] = viability["route_projections"][:-1]
 
     with pytest.raises(ValueError, match="route coverage mismatch"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_required_route_block_drift():
+    fixtures = list(_fixtures())
+    first_route = next(iter(REQUIRED_PHASE1_ROUTE_BLOCKS))
+    fixtures[4]["required_route_blocks"][first_route] -= 1
+    fixtures[4]["required_work_blocks"] -= 1
+
+    with pytest.raises(ValueError, match="route-block contract changed"):
         build_phase1_acceptance_report(*fixtures)
 
 
