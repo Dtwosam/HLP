@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.phase1_viability import (
     REQUIRED_PHASE1_ROUTE_BLOCKS,
+    build_phase1_route_plan,
     project_phase1_acquisition_plan,
     project_route_requirements,
 )
@@ -95,6 +96,48 @@ def test_required_phase1_route_blocks_match_frozen_workflow_geometry():
         "quote_v3_fallback": head - 35_992_329 + 1,
         "quote_v4_fallback": head - 36_023_158 + 1,
     }
+
+
+def test_build_phase1_route_plan_fills_frozen_work_geometry():
+    mapping = {
+        route: [100 + index]
+        for index, route in enumerate(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    }
+
+    plan = build_phase1_route_plan(mapping)
+
+    assert [row["route"] for row in plan] == list(
+        REQUIRED_PHASE1_ROUTE_BLOCKS
+    )
+    assert {
+        row["route"]: row["required_blocks"] for row in plan
+    } == REQUIRED_PHASE1_ROUTE_BLOCKS
+    assert {
+        row["route"]: row["run_ids"] for row in plan
+    } == mapping
+
+
+def test_build_phase1_route_plan_rejects_missing_route():
+    mapping = {
+        route: [100 + index]
+        for index, route in enumerate(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    }
+    mapping.pop(next(iter(REQUIRED_PHASE1_ROUTE_BLOCKS)))
+
+    with pytest.raises(ValueError, match="mapping contract mismatch"):
+        build_phase1_route_plan(mapping)
+
+
+def test_build_phase1_route_plan_rejects_cross_route_run_reuse():
+    mapping = {
+        route: [100 + index]
+        for index, route in enumerate(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    }
+    routes = list(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    mapping[routes[1]] = mapping[routes[0]]
+
+    with pytest.raises(ValueError, match="reused across routes"):
+        build_phase1_route_plan(mapping)
 
 
 def test_route_projection_uses_worst_observed_per_block_rates():
