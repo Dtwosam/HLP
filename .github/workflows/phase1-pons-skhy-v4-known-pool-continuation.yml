@@ -55,6 +55,16 @@ on:
         required: true
         default: "phase1-pons-skhy-v4-known-pool-continuation"
         type: string
+    outputs:
+      search_to_block:
+        description: "Inclusive end of the completed SKHY V4 segment"
+        value: ${{ jobs.continue_known_pool.outputs.search_to_block }}
+      route_ready:
+        description: "Whether the frozen SKHY V4 route resolved"
+        value: ${{ jobs.continue_known_pool.outputs.route_ready }}
+      continue_needed:
+        description: "Whether another bounded V4 segment is required"
+        value: ${{ jobs.continue_known_pool.outputs.continue_needed }}
 
 permissions:
   contents: read
@@ -69,9 +79,13 @@ env:
   SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
   SKHY_POOL_ID: '0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601'
 jobs:
-  continue-known-pool:
+  continue_known_pool:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      search_to_block: ${{ steps.result.outputs.search_to_block }}
+      route_ready: ${{ steps.result.outputs.route_ready }}
+      continue_needed: ${{ steps.result.outputs.continue_needed }}
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       FORWARD_BLOCKS: ${{ inputs.forward_blocks }}
@@ -183,7 +197,8 @@ jobs:
             --known-pool-only \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out artifacts/pons-skhy-v4-known-pool-continuation.jsonl
-      - name: Summarize SKHY continuation result
+      - id: result
+        name: Summarize SKHY continuation result
         run: |
           python - <<'PY'
           import json
@@ -245,6 +260,22 @@ jobs:
           Path("artifacts/pons-skhy-v4-known-pool-summary.json").write_text(
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
+          continue_needed = (
+              not ready
+              and int(row["search_to_block"])
+              < int(os.environ["SNAPSHOT_HEAD"])
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"search_to_block={int(row['search_to_block'])}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(
+                  "continue_needed="
+                  f"{'true' if continue_needed else 'false'}\n"
+              )
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
