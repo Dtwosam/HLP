@@ -627,6 +627,9 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert "--v3-events-dir v3-shards" in content
     assert "--v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json" in content
     assert "V1 lifecycle manifest snapshot mismatch" in content
+    assert "Bind V1 lifecycle source run provenance" in content
+    assert '"v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"])' in content
+    assert '"source_registry_run_id": int(' in content
     assert "frozen V1 lifecycle SHA changed" in content
     assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
     assert "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc" in content
@@ -679,6 +682,9 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "--v4-events-dir v4-shards" in content
     assert "--v4-events-manifest v4/pons-v2-v4-full.jsonl.manifest.json" in content
     assert "lifecycle manifest snapshot mismatch" in content
+    assert "Bind V2 lifecycle source run provenance" in content
+    assert '"v4_run_id": int(os.environ["V4_RUN_ID"])' in content
+    assert '"fallback_run_id": int(os.environ["FALLBACK_RUN_ID"])' in content
     assert "frozen lifecycle SHA changed" in content
     assert "validated_manifest_count" in content
     assert "771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b" in content
@@ -696,6 +702,12 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "eligibility manifest record mismatch" in content
     assert '"v1_eligibility_sha256": v1_manifest["sha256"]' in content
     assert '"v2_eligibility_sha256": v2_manifest["sha256"]' in content
+    assert '"v1_v3_run_id": v1_v3_run_id' in content
+    assert '"v2_v4_run_id": v2_v4_run_id' in content
+    assert "eligibility lifecycle venue provenance missing" in content
+    assert "lifecycle_run_id != 33_982_556_591" in content
+    assert '"validated_v1_v3_run_id": v1_v3_run_id' in content
+    assert '"validated_v2_v4_run_id": v2_v4_run_id' in content
     assert "268_688" in content
     assert "225_951" in content
     assert "eligibility artifact has invalid status values" in content
@@ -1218,6 +1230,9 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "source_coverage_sha256" in content
     assert "representative market path V1 venue run mismatch" in content
     assert "representative market path V2 venue run mismatch" in content
+    assert "representative V1 lifecycle/market venue run mismatch" in content
+    assert "representative V2 lifecycle/market venue run mismatch" in content
+    assert "representative lifecycle venue provenance missing" in content
     assert "v1_v3_run_id:" in content
     assert "v2_v4_run_id:" in content
     assert 'v1_v3_run = int("${{ inputs.v1_v3_run_id }}")' in content
