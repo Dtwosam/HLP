@@ -261,6 +261,42 @@ def build_phase1_acceptance_report(
             "representative DEX price evidence does not account for all tokens"
         )
 
+    checkpoint_targeted = _int(
+        representative.get("dex_price_checkpoints_targeted"),
+        field="representative.dex_price_checkpoints_targeted",
+    )
+    checkpoint_matched = _int(
+        representative.get("dex_price_checkpoints_matched"),
+        field="representative.dex_price_checkpoints_matched",
+    )
+    multi_checkpoint_tokens = _int(
+        representative.get("dex_price_multi_checkpoint_tokens"),
+        field="representative.dex_price_multi_checkpoint_tokens",
+    )
+    if price_targeted > 0:
+        if checkpoint_targeted < price_targeted:
+            raise ValueError(
+                "representative DEX checkpoint coverage is below targeted "
+                "token coverage"
+            )
+        if checkpoint_targeted > 3 * price_targeted:
+            raise ValueError(
+                "representative DEX checkpoint coverage exceeds first/max/last "
+                "contract"
+            )
+    elif checkpoint_targeted != 0:
+        raise ValueError(
+            "representative DEX checkpoints exist without targeted tokens"
+        )
+    if checkpoint_matched != checkpoint_targeted:
+        raise ValueError(
+            "representative DEX checkpoint evidence has mismatches"
+        )
+    if not 0 <= multi_checkpoint_tokens <= price_targeted:
+        raise ValueError(
+            "representative multi-checkpoint token count is invalid"
+        )
+
     representative_provenance = _manifest_provenance(
         representative_manifest,
         label="representative validation",
@@ -390,6 +426,12 @@ def build_phase1_acceptance_report(
         ),
         "representative_dex_targeted": dex_targeted,
         "representative_dex_matched": dex_matched,
+        "representative_dex_price_tokens_targeted": price_targeted,
+        "representative_dex_price_checkpoints_targeted": checkpoint_targeted,
+        "representative_dex_price_checkpoints_matched": checkpoint_matched,
+        "representative_dex_multi_checkpoint_tokens": (
+            multi_checkpoint_tokens
+        ),
         "required_acquisition_routes": required_routes,
         "projected_requests": int(projected_requests),
         "projected_response_bytes": int(projected_response_bytes),
