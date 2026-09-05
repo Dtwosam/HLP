@@ -343,12 +343,72 @@ jobs:
       source_eligibility_run_id: ${{ inputs.pricing_run_id }}
     secrets: inherit
 
+  verify_reused_pricing:
+    needs: promote_reused_universe
+    if: ${{ needs.promote_reused_universe.result == 'success' && inputs.pricing_run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+      - name: Verify reused pricing venue provenance before representative RPC
+        env:
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(
+              Path(
+                  "eligible/pons-eligible-universe-summary.json"
+              ).read_text()
+          )
+          expected_v1 = int(os.environ["V1_V3_RUN_ID"])
+          expected_v2 = int(os.environ["V2_V4_RUN_ID"])
+          observed_v1 = int(
+              summary.get("validated_v1_v3_run_id", 0)
+          )
+          observed_v2 = int(
+              summary.get("validated_v2_v4_run_id", 0)
+          )
+          if observed_v1 != expected_v1:
+              raise SystemExit(
+                  "reused pricing V1/V3 provenance mismatch: "
+                  f"pricing_run={os.environ['PRICING_RUN_ID']} "
+                  f"expected={expected_v1} observed={observed_v1}"
+              )
+          if observed_v2 != expected_v2:
+              raise SystemExit(
+                  "reused pricing V2/V4 provenance mismatch: "
+                  f"pricing_run={os.environ['PRICING_RUN_ID']} "
+                  f"expected={expected_v2} observed={observed_v2}"
+              )
+          if int(summary.get("unknown_tokens", -1)) != 0:
+              raise SystemExit(
+                  "reused pricing eligible universe remains incomplete"
+              )
+          print(json.dumps({
+              "pricing_run_id": int(os.environ["PRICING_RUN_ID"]),
+              "v1_v3_run_id": observed_v1,
+              "v2_v4_run_id": observed_v2,
+              "unknown_tokens": 0,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
   representative:
     needs:
       - preflight
       - pricing
       - promote_reused_universe
-    if: ${{ always() && needs.preflight.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success')) }}
+      - verify_reused_pricing
+    if: ${{ always() && needs.preflight.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
     uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
     with:
       eligibility_run_id: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}
@@ -369,8 +429,9 @@ jobs:
     needs:
       - pricing
       - promote_reused_universe
+      - verify_reused_pricing
       - representative
-    if: ${{ always() && needs.representative.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success')) }}
+    if: ${{ always() && needs.representative.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
