@@ -5,6 +5,7 @@ from hlp.data.phase1_readiness import (
     FINAL_ACCEPTANCE_ARTIFACT,
     SOURCE_ELIGIBILITY_RUN_ID,
     SOURCE_REQUIRED_ARTIFACTS,
+    VIABILITY_ROUTE_REQUIRED_ARTIFACTS,
     VIABILITY_ROUTE_WORKFLOW_PATHS,
     build_phase1_readiness_report,
 )
@@ -54,6 +55,7 @@ def _route_runs(start=1000):
             start + index,
             name=f"phase1 viability {route} custom-run-name",
             path=workflow_path,
+            artifacts=VIABILITY_ROUTE_REQUIRED_ARTIFACTS[route],
         )
         for index, (route, workflow_path) in enumerate(
             VIABILITY_ROUTE_WORKFLOW_PATHS.items()
@@ -306,3 +308,55 @@ def test_readiness_switches_to_recovery_on_failed_source_job():
     assert report["next_action"] == "recover_full_eligibility_acquisition"
     assert report["source_failed_jobs"] == 1
     assert report["source_job_counts"]["in_progress"] == 2
+
+
+def test_readiness_rejects_missing_viability_measurement_artifact():
+    runs = _route_runs()
+    runs["pons_v2_v4"]["artifacts"] = []
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=runs,
+    )
+
+    assert report["next_action"] == "repair_invalid_viability_routes"
+    assert report["invalid_viability_routes"] == [
+        {
+            "route": "pons_v2_v4",
+            "reason": "measurement_artifacts_missing",
+            "missing_artifacts": [
+                "phase1-pons-viability-measurement-pons_v2_v4-primary"
+            ],
+        }
+    ]
+
+
+def test_readiness_requires_registry_primary_and_secondary_artifacts():
+    runs = _route_runs()
+    runs["pons_registry"]["artifacts"] = [
+        "phase1-pons-viability-measurement-pons_registry-primary"
+    ]
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=runs,
+    )
+
+    assert report["next_action"] == "repair_invalid_viability_routes"
+    assert report["invalid_viability_routes"] == [
+        {
+            "route": "pons_registry",
+            "reason": "measurement_artifacts_missing",
+            "missing_artifacts": [
+                "phase1-pons-viability-measurement-pons_registry-secondary"
+            ],
+        }
+    ]
