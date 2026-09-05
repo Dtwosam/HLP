@@ -196,7 +196,7 @@ def test_anchor_range_recovery_is_manual_small_and_bounded():
     assert "\n  push:" not in trigger_block
     assert "max-parallel: 2" in content
     assert "SHARD_COUNT: '4'" in content
-    assert "recovery range exceeds 600000-block ceiling" in content
+    assert "recovery range exceeds 200000-block ceiling" in content
     assert "timeout-minutes: 20" in content
     assert "time.sleep(" not in content
 
@@ -232,8 +232,8 @@ def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert 'Path("prior-gaps").glob("anchor-gap-*.jsonl")' in content
     assert '"source": path.parent.name' in content
-    assert 'default: "150000"' in content
-    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 50000" in content
     assert "anchor gap plan exceeds 240 matrix jobs" in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
