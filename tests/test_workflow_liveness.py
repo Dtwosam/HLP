@@ -1488,7 +1488,8 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
         in content
     )
     assert (
-        "eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}"
+        "\n      eligibility_run_id: "
+        "${{ needs.preflight.outputs.source_eligibility_run_id }}"
         not in content
     )
     assert "phase1-pons-representative-validation" in content
