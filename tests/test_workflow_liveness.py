@@ -116,6 +116,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v2-curve-recover-tail-one-shot.yml",
     "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
     "phase1-pons-v2-transition-recover-gaps.yml",
+    "phase1-pons-v2-v4-recover-gaps.yml",
 }
 
 
@@ -240,6 +241,25 @@ def test_transition_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "manifest_gap_aware_transition_recovery" in content
     assert 'default: "150000"' in content
     assert "max_gap_blocks must be between 1 and 150000" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v2-v4-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v4-events-gap" in content
+    assert "manifest_gap_aware_v4_recovery" in content
+    assert 'default: "150000"' in content
+    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert "V4 gap plan exceeds 240 matrix jobs" in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
