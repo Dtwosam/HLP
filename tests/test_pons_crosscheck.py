@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 
 from hlp.data.pons_crosscheck import (
+    build_canonical_dex_price_checkpoint,
     build_representative_pool_targets,
     reconcile_external_pool,
     reconcile_price_against_ohlcv,
@@ -16,18 +17,24 @@ def _registry():
             "token": "0x" + "11" * 20,
             "pair_token": "0x" + "aa" * 20,
             "pool": "0x" + "33" * 20,
+            "supply_raw": 1_000_000 * 10**18,
+            "token_decimals": 18,
         },
         {
             "version": "v2",
             "token": "0x" + "22" * 20,
             "pair_token": "0x" + "bb" * 20,
             "pool": None,
+            "supply_raw": 1_000_000 * 10**18,
+            "token_decimals": 18,
         },
         {
             "version": "v2",
             "token": "0x" + "44" * 20,
             "pair_token": "0x" + "cc" * 20,
             "pool": None,
+            "supply_raw": 1_000_000 * 10**18,
+            "token_decimals": 18,
         },
     ]
 
@@ -152,3 +159,41 @@ def test_representative_target_rejects_registration_quote_mismatch():
                 }
             ],
         )
+
+def test_canonical_v1_dex_price_checkpoint_uses_swap_maximum():
+    target = build_representative_pool_targets(
+        [{"token": "0x" + "11" * 20, "pons_version": "v1"}],
+        _registry(),
+        [],
+    )[0]
+    checkpoint = build_canonical_dex_price_checkpoint(
+        target,
+        {
+            "token": target["token"],
+            "v3_swap_max_market_cap_proxy_usd": "2500000",
+            "v3_swap_max_market_cap_block": 12345,
+        },
+    )
+    assert checkpoint["price_crosscheck_scope"] == "canonical_dex_swap"
+    assert checkpoint["canonical_price_phase"] == "v3_swap"
+    assert checkpoint["canonical_block_number"] == 12345
+    assert Decimal(checkpoint["canonical_price_usd"]) == Decimal("2.5")
+
+
+def test_canonical_v2_dex_price_checkpoint_marks_missing_swap_explicitly():
+    target = build_representative_pool_targets(
+        [{"token": "0x" + "22" * 20, "pons_version": "v2"}],
+        _registry(),
+        [{
+            "token": "0x" + "22" * 20,
+            "quote_token": "0x" + "bb" * 20,
+            "pool_id": "0x" + "55" * 32,
+        }],
+    )[0]
+    checkpoint = build_canonical_dex_price_checkpoint(
+        target,
+        {"token": target["token"]},
+    )
+    assert checkpoint["price_crosscheck_scope"] == "no_swap_checkpoint"
+    assert checkpoint["canonical_price_usd"] is None
+
