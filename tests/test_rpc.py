@@ -117,6 +117,67 @@ def test_rpc_counts_transport_attempts():
     assert rpc.response_bytes_received == len(expected)
 
 
+def test_rpc_retries_incomplete_http_body():
+    import http.client
+
+    calls = 0
+
+    def transport(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise http.client.IncompleteRead(b"partial", 10)
+        return json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "result": hex(4663)}
+        ).encode()
+
+    rpc = RpcClient(
+        "https://example.invalid",
+        attempts=2,
+        backoff_seconds=0,
+        transport=transport,
+    )
+
+    assert rpc.chain_id() == 4663
+    assert rpc.requests_made == 2
+    assert calls == 2
+
+
+def test_batch_rpc_retries_incomplete_http_body():
+    import http.client
+
+    calls = 0
+
+    def transport(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise http.client.IncompleteRead(b"partial", 10)
+        payload = json.loads(request.data)
+        return json.dumps(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": item["id"],
+                    "result": {"number": item["params"][0]},
+                }
+                for item in payload
+            ]
+        ).encode()
+
+    rpc = RpcClient(
+        "https://example.invalid",
+        attempts=2,
+        backoff_seconds=0,
+        transport=transport,
+    )
+    rows = rpc.get_blocks_batched([10, 11], batch_size=2)
+
+    assert [int(row["number"], 16) for row in rows] == [10, 11]
+    assert rpc.requests_made == 2
+    assert calls == 2
+
+
 def test_retry_after_header_is_parsed_for_429():
     import urllib.error
 
