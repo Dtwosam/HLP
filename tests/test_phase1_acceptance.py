@@ -36,6 +36,18 @@ def _fixtures():
             "snapshot_head_block": 54_486_035,
             "v1_eligibility_run_id": 101,
             "v2_eligibility_run_id": 202,
+            "sample_run_id": 404,
+            "transfer_run_id": 405,
+            "market_path_run_id": 406,
+            "priced_path_run_id": 407,
+            "dex_crosscheck_run_id": 408,
+            "registry_run_id": 33_911_022_718,
+            "v2_curve_run_id": 33_936_232_604,
+            "transition_run_id": 33_912_452_330,
+            "quote_audit_run_id": 33_923_299_711,
+            "anchor_run_id": 33_972_109_927,
+            "oracle_run_id": 33_974_681_334,
+            "fallback_run_id": 409,
             "source_coverage_sha256": "c" * 64,
         },
     }
@@ -142,6 +154,20 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["representative_coverage_sources"] == 11
     assert report["representative_no_unexplained_block_gaps"] is True
     assert report["representative_source_coverage_sha256"] == "c" * 64
+    assert report["representative_source_run_ids"] == {
+        "registry_run_id": 33_911_022_718,
+        "v2_curve_run_id": 33_936_232_604,
+        "transition_run_id": 33_912_452_330,
+        "quote_audit_run_id": 33_923_299_711,
+        "anchor_run_id": 33_972_109_927,
+        "oracle_run_id": 33_974_681_334,
+        "sample_run_id": 404,
+        "transfer_run_id": 405,
+        "market_path_run_id": 406,
+        "priced_path_run_id": 407,
+        "dex_crosscheck_run_id": 408,
+        "fallback_run_id": 409,
+    }
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
@@ -325,4 +351,20 @@ def test_phase1_acceptance_rejects_evidence_run_count_drift():
     fixtures[4]["route_projections"][0]["evidence_runs"] = 2
 
     with pytest.raises(ValueError, match="evidence-run count disagrees"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_representative_canonical_source_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["oracle_run_id"] += 1
+
+    with pytest.raises(ValueError, match="canonical source run changed"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_invalid_representative_upstream_run():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["market_path_run_id"] = 0
+
+    with pytest.raises(ValueError, match="upstream run provenance is invalid"):
         build_phase1_acceptance_report(*fixtures)
