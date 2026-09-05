@@ -1,0 +1,187 @@
+name: phase1-pons-representative-evidence-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_run_id:
+        description: "Successful full eligibility acquisition-chain run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Successful canonical phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+      prior_transfer_run_id:
+        description: "Optional earlier representative chain/transfer run whose successful Transfer shards should be reused"
+        required: false
+        default: ""
+        type: string
+      runner_smoke_run_id:
+        description: "Frozen five-runner research-smoke evidence"
+        required: true
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        description: "Canonical recovered Pons V2 curve run"
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        description: "Canonical recovered WETH/USDG anchor run"
+        required: true
+        default: "33972109927"
+        type: string
+  workflow_call:
+    inputs:
+      eligibility_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      runner_smoke_run_id:
+        required: false
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: false
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: false
+        default: "33972109927"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-evidence-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sample:
+    uses: ./.github/workflows/phase1-pons-representative-sample-freeze.yml
+    with:
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
+    secrets: inherit
+
+  market_paths:
+    needs: sample
+    if: ${{ needs.sample.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-market-paths.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v1_v3_run_id: ${{ inputs.eligibility_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      v2_v4_run_id: ${{ inputs.eligibility_run_id }}
+    secrets: inherit
+
+  transfers:
+    needs: sample
+    if: ${{ needs.sample.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-transfers-full.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      prior_run_id: ${{ inputs.prior_transfer_run_id }}
+    secrets: inherit
+
+  transfers_retry:
+    needs: transfers
+    if: ${{ always() && (needs.transfers.result == 'failure' || needs.transfers.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-representative-transfers-full.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      prior_run_id: ${{ format('{0}', github.run_id) }}
+    secrets: inherit
+
+  priced_paths:
+    needs: market_paths
+    if: ${{ needs.market_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-priced-paths.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      quote_audit_artifact_name: ${{ inputs.quote_audit_artifact_name }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      fallback_run_id: ${{ inputs.eligibility_run_id }}
+    secrets: inherit
+
+  dex_crosscheck:
+    needs: priced_paths
+    if: ${{ needs.priced_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-dex-crosscheck.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  validate:
+    needs:
+      - market_paths
+      - priced_paths
+      - dex_crosscheck
+      - transfers
+      - transfers_retry
+    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && (needs.transfers.result == 'success' || needs.transfers_retry.result == 'success') }}
+    uses: ./.github/workflows/phase1-pons-representative-validation.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      transfer_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      dex_crosscheck_run_id: ${{ format('{0}', github.run_id) }}
+    secrets: inherit
