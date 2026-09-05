@@ -156,6 +156,7 @@ NETWORK_SMOKE_WORKFLOWS = {
     "phase1-pons-v1-multigen-smoke.yml",
     "phase1-v1-shared-tape-smoke.yml",
     "phase1-pons-representative-dex-crosscheck.yml",
+    "phase1-blockscout-transaction-smoke.yml",
 }
 
 
@@ -168,6 +169,22 @@ def test_secondary_network_smokes_are_manual_only():
             f"{name} must not consume RPC runners on ordinary pushes"
         )
 
+
+
+def test_blockscout_transaction_smoke_is_bounded_and_identity_checked():
+    content = _workflow("phase1-blockscout-transaction-smoke.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "MAX_BLOCK_LOOKBACK = 20" in content
+    assert "/api/v2/transactions/" in content
+    assert "blockscout_reachable" in content
+    assert "transaction_identity_match" in content
+    assert "Blockscout transaction hash does not match Robinhood RPC" in content
+    assert "Blockscout transaction block does not match Robinhood RPC" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
 
 
 def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
