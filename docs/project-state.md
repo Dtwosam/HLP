@@ -543,7 +543,18 @@ research threshold or starting another archive crawl:
   handoff: it fail-closes on source parent **33982556591**, runs the current-code
   eligible-universe promotion and representative evidence chain under one caller
   run ID, then publishes
-  `phase1-pons-post-eligibility-evidence-ready`. Its guarded one-shot watches
+  `phase1-pons-post-eligibility-evidence-ready`. Before that handoff can become
+  ready, both normal and recovered paths now run the shared artifact-only
+  `validate_post_eligibility_evidence_bundle` contract. It requires the exact
+  **494,639-launch** universe, zero unknowns, a positive eligible cohort, the
+  complete **5 runner + 5 failure** representative cohort, identical lifecycle
+  and recovered venue run IDs across universe/representative manifests, exact
+  V1/V2 lifecycle SHA256 agreement, and fallback routing to the same lifecycle
+  evidence run. The ready artifact publishes the universe SHA, representative
+  SHA and both lifecycle SHAs; the viability guard requires that full
+  fingerprint plus snapshot **54,486,035** before any route RPC can start. This
+  moves cheap evidence-consistency failures ahead of the nine measured runs
+  rather than discovering them only at final acceptance. Its guarded one-shot watches
   `.github/phase1-pons-evidence-launch.txt`; inert validation run
   **33988716778** skipped cleanly while compiling the nested graph.
 
