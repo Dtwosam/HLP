@@ -813,7 +813,12 @@ timeout, audit run **33994147766** again passed and still returned
 now explicitly reporting **1 cancelled job** alongside the running matrix.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
-approved recovered-completion evidence run. The audit's
+approved recovered-completion evidence run. A terminal parent that reports
+success but is missing any required Phase 1 artifact is also treated as
+incomplete rather than crashing the audit or being mistaken for PASS. The
+venue-rescue and recovered-completion guards allow that narrow incomplete-
+success case while still rejecting unnecessary recovery when the requested
+source artifacts are already complete. The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
 runs.
