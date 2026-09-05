@@ -63,9 +63,10 @@ def _fixtures():
         "dex_price_checkpoints_matched": 20,
         "dex_price_multi_checkpoint_tokens": 6,
         "dex_price_no_swap_checkpoint": 1,
-        "explorer_verified_transactions": 30,
-        "explorer_verified_launch_transactions": 10,
-        "explorer_verified_dex_swap_transactions": 20,
+        "explorer_verified_tokens": 0,
+        "explorer_verified_transactions": 0,
+        "explorer_verified_launch_transactions": 0,
+        "explorer_verified_dex_swap_transactions": 0,
         "coverage_sources": 11,
         "continuous_sharded_sources": 7,
         "snapshot_pinned_sources": 4,
@@ -128,13 +129,15 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["representative_dex_price_checkpoints_targeted"] == 20
     assert report["representative_dex_price_checkpoints_matched"] == 20
     assert report["representative_dex_multi_checkpoint_tokens"] == 6
-    assert report["representative_explorer_verified_transactions"] == 30
+    assert report["representative_explorer_evidence_status"] == "not_required"
+    assert report["representative_explorer_verified_tokens"] == 0
+    assert report["representative_explorer_verified_transactions"] == 0
     assert report[
         "representative_explorer_verified_launch_transactions"
-    ] == 10
+    ] == 0
     assert report[
         "representative_explorer_verified_dex_swap_transactions"
-    ] == 20
+    ] == 0
     assert report["representative_coverage_sources"] == 11
     assert report["representative_no_unexplained_block_gaps"] is True
     assert report["representative_source_coverage_sha256"] == "c" * 64
@@ -221,19 +224,49 @@ def test_phase1_acceptance_rejects_incomplete_checkpoint_coverage():
         build_phase1_acceptance_report(*fixtures)
 
 
-def test_phase1_acceptance_rejects_missing_explorer_launch():
+def test_phase1_acceptance_accepts_complete_supplementary_explorer():
     fixtures = list(_fixtures())
-    fixtures[2]["explorer_verified_launch_transactions"] = 9
-    fixtures[2]["explorer_verified_transactions"] = 29
+    fixtures[2].update(
+        {
+            "explorer_verified_tokens": 10,
+            "explorer_verified_launch_transactions": 10,
+            "explorer_verified_dex_swap_transactions": 20,
+            "explorer_verified_transactions": 30,
+        }
+    )
 
-    with pytest.raises(ValueError, match="all 10 launches"):
+    report = build_phase1_acceptance_report(*fixtures)
+
+    assert report["representative_explorer_evidence_status"] == "verified"
+    assert report["representative_explorer_verified_tokens"] == 10
+    assert report["representative_explorer_verified_transactions"] == 30
+
+
+def test_phase1_acceptance_rejects_partial_supplementary_explorer():
+    fixtures = list(_fixtures())
+    fixtures[2].update(
+        {
+            "explorer_verified_tokens": 10,
+            "explorer_verified_launch_transactions": 9,
+            "explorer_verified_dex_swap_transactions": 20,
+            "explorer_verified_transactions": 29,
+        }
+    )
+
+    with pytest.raises(ValueError, match="all 10.*launches"):
         build_phase1_acceptance_report(*fixtures)
 
 
 def test_phase1_acceptance_rejects_explorer_dex_coverage_drift():
     fixtures = list(_fixtures())
-    fixtures[2]["explorer_verified_dex_swap_transactions"] = 19
-    fixtures[2]["explorer_verified_transactions"] = 29
+    fixtures[2].update(
+        {
+            "explorer_verified_tokens": 10,
+            "explorer_verified_launch_transactions": 10,
+            "explorer_verified_dex_swap_transactions": 19,
+            "explorer_verified_transactions": 29,
+        }
+    )
 
     with pytest.raises(ValueError, match="explorer/DEX checkpoint coverage"):
         build_phase1_acceptance_report(*fixtures)
