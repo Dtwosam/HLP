@@ -821,7 +821,11 @@ success case while still rejecting unnecessary recovery when the requested
 source artifacts are already complete. The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
-runs.
+runs. Readiness now also resolves each candidate finalizer's launch-commit
+readiness and ledger files and requires the frozen source run, evidence run,
+ledger generation and exact nine route run IDs to match the current ledger
+before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
+artifact from an older evidence or route ledger therefore cannot close Phase 1.
 
 A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
 unarmed. After the ledger finalizer produces a real PASS artifact and that run
