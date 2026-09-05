@@ -41,6 +41,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import base64
           import json
           import os
           import urllib.parse
@@ -74,6 +75,20 @@ jobs:
               )
               with urllib.request.urlopen(request, timeout=30) as response:
                   return json.load(response)
+
+          def json_file_at_ref(path, ref):
+              encoded_path = urllib.parse.quote(path, safe="/")
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              payload = get(
+                  f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+              )
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"unexpected contents encoding for {path}@{ref}"
+                  )
+              return json.loads(
+                  base64.b64decode(payload.get("content") or "")
+              )
 
           def artifact_names(run_id):
               names = set()
@@ -139,6 +154,54 @@ jobs:
                   payload["job_counts"] = job_counts(run_id)
               return payload
 
+          def route_run_payload(route, run_id):
+              payload = run_payload(run_id)
+              head_sha = str(payload.get("head_sha") or "")
+              if len(head_sha) != 40:
+                  raise SystemExit(
+                      f"readiness viability route head SHA is invalid: {route}"
+                  )
+              launch_readiness = json_file_at_ref(
+                  ".github/phase1-pons-viability-ready.json",
+                  head_sha,
+              )
+              launch_ledger = json_file_at_ref(
+                  ".github/phase1-pons-viability-runs.json",
+                  head_sha,
+              )
+              payload.update(
+                  {
+                      "launch_readiness_generation": int(
+                          launch_readiness.get("generation", 0)
+                      ),
+                      "launch_readiness_source_run_id": int(
+                          launch_readiness.get(
+                              "source_eligibility_run_id",
+                              0,
+                          )
+                      ),
+                      "launch_readiness_evidence_run_id": int(
+                          launch_readiness.get("evidence_run_id", 0)
+                      ),
+                      "launch_ledger_generation": int(
+                          launch_ledger.get("generation", 0)
+                      ),
+                      "launch_ledger_evidence_run_id": int(
+                          launch_ledger.get("evidence_run_id", 0)
+                      ),
+                      "launch_route_slot": int(
+                          (launch_ledger.get("routes") or {}).get(
+                              route,
+                              -1,
+                          )
+                      ),
+                      "launch_ledger_routes": sorted(
+                          (launch_ledger.get("routes") or {}).keys()
+                      ),
+                  }
+              )
+              return payload
+
           ready_config = json.loads(
               Path(".github/phase1-pons-viability-ready.json").read_text()
           )
@@ -169,7 +232,7 @@ jobs:
           )
           viability_runs = {
               route: (
-                  run_payload(route_run_ids[route])
+                  route_run_payload(route, route_run_ids[route])
                   if route_run_ids[route] > 0
                   else None
               )
