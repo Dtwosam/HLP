@@ -91,6 +91,48 @@ jobs:
           path: v1v3
           run-id: ${{ inputs.v1_v3_run_id }}
           github-token: ${{ github.token }}
+      - id: v1v3_sources
+        name: Resolve representative V1 V3 shard sources
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v1v3/pons-v1-v3-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V1 V3 tape is not sharded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v1v3_sources.outputs.partial_run_id != '' && steps.v1v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v1v3_sources.outputs.prior_gap_run_id != '' && steps.v1v3_sources.outputs.prior_gap_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-curve-full
@@ -109,6 +151,48 @@ jobs:
           path: v2v4
           run-id: ${{ inputs.v2_v4_run_id }}
           github-token: ${{ github.token }}
+      - id: v2v4_sources
+        name: Resolve representative V2 V4 shard sources
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v2v4/pons-v2-v4-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V2 V4 tape is not sharded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v2v4_sources.outputs.partial_run_id != '' && steps.v2v4_sources.outputs.partial_run_id != inputs.v2_v4_run_id }}
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v2v4_sources.outputs.prior_gap_run_id != '' && steps.v2v4_sources.outputs.prior_gap_run_id != inputs.v2_v4_run_id }}
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
       - name: Freeze representative launch and market-event paths
         run: |
           mkdir -p artifacts
@@ -124,6 +208,7 @@ jobs:
               build_representative_market_path_rows,
               summarize_representative_market_paths,
           )
+          from hlp.data.sharded_tape import iter_sharded_jsonl
           from hlp.data.snapshot import write_jsonl_snapshot
 
           SNAPSHOT_HEAD = 54_486_035
@@ -192,7 +277,8 @@ jobs:
                       f"representative market-path source snapshot changed: "
                       f"{path}"
                   )
-              if provenance.get("source") != source:
+              allowed = {source} if isinstance(source, str) else set(source)
+              if provenance.get("source") not in allowed:
                   raise SystemExit(
                       f"representative market-path source provenance changed: "
                       f"{path}"
@@ -201,8 +287,13 @@ jobs:
 
           v1_v3_manifest, v1_v3_provenance = require_manifest(
               "v1v3/pons-v1-v3-full.jsonl.manifest.json",
-              source="stream_merged_global_v3_topic_shards",
+              source={
+                  "stream_merged_global_v3_topic_shards",
+                  "manifest_gap_aware_v1_v3_recovery",
+              },
           )
+          if v1_v3_provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V1 V3 storage mode changed")
           if int(
               v1_v3_provenance.get("source_registry_run_id", -1)
           ) != int("${{ inputs.registry_run_id }}"):
@@ -246,8 +337,13 @@ jobs:
 
           v2_v4_manifest, v2_v4_provenance = require_manifest(
               "v2v4/pons-v2-v4-full.jsonl.manifest.json",
-              source="stream_merged_global_poolmanager_v4_shards",
+              source={
+                  "stream_merged_global_poolmanager_v4_shards",
+                  "manifest_gap_aware_v4_recovery",
+              },
           )
+          if v2_v4_provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V2 V4 storage mode changed")
           if int(
               v2_v4_provenance.get("transition_run_id", -1)
           ) != int("${{ inputs.transition_run_id }}"):
@@ -312,8 +408,9 @@ jobs:
               read_jsonl(
                   "registry/pons-full-launch-registry.jsonl"
               ),
-              v1_v3_rows=read_jsonl(
-                  "v1v3/pons-v1-v3-full.jsonl"
+              v1_v3_rows=iter_sharded_jsonl(
+                  Path("v1v3-shards"),
+                  Path("v1v3/pons-v1-v3-full.jsonl.manifest.json"),
               ),
               v2_curve_rows=read_jsonl(
                   "v2curve/pons-v2-curve-full.jsonl"
@@ -324,8 +421,9 @@ jobs:
               registration_rows=read_jsonl(
                   "transition/pons-v2-registrations-full.jsonl"
               ),
-              v2_v4_rows=read_jsonl(
-                  "v2v4/pons-v2-v4-full.jsonl"
+              v2_v4_rows=iter_sharded_jsonl(
+                  Path("v2v4-shards"),
+                  Path("v2v4/pons-v2-v4-full.jsonl.manifest.json"),
               ),
           )
           summary_rows = summarize_representative_market_paths(
