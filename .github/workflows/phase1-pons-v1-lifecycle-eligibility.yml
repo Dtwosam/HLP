@@ -15,11 +15,12 @@ on:
       quote_audit_run_id:
         description: "Successful full-Pons quote-audit run"
         required: true
+        default: "33923299711"
         type: string
       quote_audit_artifact_name:
         description: "Artifact containing pons-quote-registry.jsonl"
         required: true
-        default: "phase1-pons-full-quote-audit"
+        default: "phase1-pons-full-quote-audit-current"
         type: string
       anchor_run_id:
         description: "Successful phase1-pons-weth-usdg-anchor-full run"
