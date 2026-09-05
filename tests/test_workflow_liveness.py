@@ -119,6 +119,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v2-v4-recover-gaps.yml",
     "phase1-pons-v1-v3-recover-gaps.yml",
     "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+    "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     "phase1-pons-stock-oracle-promote-v2-delta.yml",
 }
 
@@ -313,6 +314,26 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert 'default: "33921477647"' in content
     assert 'default: "33923160281"' in content
     assert "pons-select-v3-quote-routes" in content
+
+
+def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v4-quote-fallback-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v4-quote-events-gap" in content
+    assert "manifest_gap_aware_v4_quote_recovery" in content
+    assert 'default: "150000"' in content
+    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert "V4 quote gap plan exceeds 240 matrix jobs" in content
+    assert "phase1-pons-v4-quote-routes-selected" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
 
 
 def test_v3_quote_gap_recovery_is_manual_gap_aware_and_bounded():
