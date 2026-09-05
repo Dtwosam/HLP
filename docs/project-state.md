@@ -498,6 +498,17 @@ research threshold or starting another archive crawl:
   persists those source IDs into the final representative validation manifest.
   Inert graph-validation run **33986987191** confirmed the stricter reusable
   input contract compiles without launching representative acquisition.
+  Representative validation now also records the exact V1 and V2 lifecycle
+  artifact SHA256 values; final Phase 1 acceptance requires those hashes to
+  match the lifecycle hashes cryptographically bound into the promoted eligible
+  universe, so matching run IDs alone are no longer sufficient. A reusable
+  `phase1-pons-post-eligibility-evidence-chain` stages the normal post-crawl
+  handoff: it fail-closes on source parent **33982556591**, runs the current-code
+  eligible-universe promotion and representative evidence chain under one caller
+  run ID, then publishes
+  `phase1-pons-post-eligibility-evidence-ready`. Its guarded one-shot watches
+  `.github/phase1-pons-evidence-launch.txt`; inert validation run
+  **33988716778** skipped cleanly while compiling the nested graph.
 
 The final Phase 1 viability path is also staged fail-closed:
 
@@ -520,7 +531,26 @@ The final Phase 1 viability path is also staged fail-closed:
   it executes V1 and V2 registry scans as two separate jobs over the same
   bounded range so accounting preserves the frozen overlapping-generation
   work geometry instead of deduplicating it. Quote-fallback measurements reuse
-  only the canonical V3/V4 route files from a completed eligibility run;
+  only the canonical V3/V4 route files from a completed eligibility run.
+  Current branch orchestration keeps those nine measurements as **nine
+  individually guarded workflow runs**, not one matrix/caller run: a shared
+  `.github/phase1-pons-viability-ready.json` must first name a successful
+  post-eligibility evidence run, then the nine route-specific one-shots are
+  launched sequentially and each calls
+  `phase1-pons-viability-guarded-route` -> the canonical bounded measurement.
+  This preserves the frozen distinct-run-ID contract and keeps archive pressure
+  one route at a time. Two no-RPC probes established why more automatic
+  branch-only chaining is not used: run **33988308531** received HTTP 404 when
+  its branch workflow attempted to dispatch another branch-only workflow with
+  `GITHUB_TOKEN`, and successful source probe **33988762949** produced no
+  `workflow_run` watcher run because that watcher is not on the default
+  branch. A same-push shared-concurrency experiment also cancelled excess
+  pending route workflows, so it is not a valid nine-run serializer.
+  Completed route IDs are recorded in
+  `.github/phase1-pons-viability-runs.json`; the guarded
+  `phase1-pons-viability-ledger-finalize-one-shot` independently verifies the
+  evidence run, all nine successful route workflow identities, branch and
+  distinct run IDs before passing them to the reusable final acceptance chain;
 - the frozen heavy-acquisition contract requires exact full-history work-block
   floors for exactly nine routes, totaling **331,011,903 processed
   work-blocks**. The Pons registry floor intentionally counts its overlapping
@@ -625,9 +655,12 @@ cryptographically binds the exact V1 and V2 lifecycle artifact SHA256 values,
 and the final acceptance function requires those hashes to agree with the
 freeze summary before PASS. Inert launcher run **33987410394** skipped cleanly,
 proving the reusable promotion graph compiles without touching the archive
-lane. Final acceptance may consume this promoted universe run while
-representative reconstruction continues to use the original full eligibility
-parent for lifecycle, venue and quote artifacts.
+lane. The normal supported path wraps that promotion together with representative
+reconstruction in the post-eligibility evidence chain described above, so its
+single successful caller run ID contains both
+`phase1-pons-eligible-universe` and
+`phase1-pons-representative-validation`. The standalone promotion and
+representative launchers remain recovery/debug fallbacks.
 
 The egress projection additionally needs instrumented measured runs;
 older completed runs cannot retroactively provide response-byte counters. No
