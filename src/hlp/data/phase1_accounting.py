@@ -372,9 +372,11 @@ def summarize_phase1_runs(
         "all_runs_successful": not incomplete and not unsuccessful,
         "accounting_scope_note": (
             "request and response-byte totals sum explicit top-level counters "
-            "printed by HLP jobs; processed blocks use reported from/to ranges "
-            "and runtime uses reported acquisition timers plus GitHub job "
-            "timestamps. The accounting does not infer unreported traffic or "
-            "claim that every counter is billable by the same provider"
+            "printed by HLP jobs; processed work blocks deduplicate repeated "
+            "reported ranges within each job but preserve overlap across "
+            "distinct jobs/scans, while runtime uses reported acquisition "
+            "timers plus GitHub job timestamps. The accounting does not infer "
+            "unreported traffic or claim that every counter is billable by "
+            "the same provider"
         ),
     }
