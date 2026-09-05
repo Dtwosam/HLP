@@ -113,6 +113,23 @@ def _fixtures():
                 "price_crosscheck_scope": "canonical_dex_swap",
                 "price_match": True,
                 "price_crosscheck_status": "matched",
+                "price_checkpoints": [
+                    {
+                        "checkpoint_roles": ["first"],
+                        "price_match": True,
+                        "price_crosscheck_status": "matched",
+                    },
+                    {
+                        "checkpoint_roles": ["max"],
+                        "price_match": True,
+                        "price_crosscheck_status": "matched",
+                    },
+                    {
+                        "checkpoint_roles": ["last"],
+                        "price_match": True,
+                        "price_crosscheck_status": "matched",
+                    },
+                ],
             }
         )
 
@@ -155,6 +172,9 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["dex_matched"] == 10
     assert summary["dex_price_targeted"] == 10
     assert summary["dex_price_matched"] == 10
+    assert summary["dex_price_checkpoints_targeted"] == 30
+    assert summary["dex_price_checkpoints_matched"] == 30
+    assert summary["dex_price_multi_checkpoint_tokens"] == 10
     assert summary["dex_price_no_swap_checkpoint"] == 0
 
 
@@ -266,6 +286,7 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
             "price_crosscheck_scope": "not_applicable",
             "price_match": None,
             "price_crosscheck_status": "not_applicable",
+            "price_checkpoints": [],
         }
     )
     market_paths[-1].update(
@@ -330,6 +351,25 @@ def test_representative_validation_rejects_dex_price_mismatch():
         )
 
 
+def test_representative_validation_rejects_nested_dex_checkpoint_mismatch():
+    sample, v1, v2, holders, dex, market_paths, priced_paths = _fixtures()
+    dex[0]["price_checkpoints"][1]["price_match"] = False
+    dex[0]["price_checkpoints"][1][
+        "price_crosscheck_status"
+    ] = "outside_candle"
+
+    with pytest.raises(ValueError, match="DEX checkpoint mismatch"):
+        build_representative_validation_rows(
+            sample,
+            v1_lifecycle_rows=v1,
+            v2_lifecycle_rows=v2,
+            holder_summary_rows=holders,
+            dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
+            priced_path_summary_rows=priced_paths,
+        )
+
+
 def test_representative_validation_allows_explicit_no_swap_checkpoint():
     sample, v1, v2, holders, dex, market_paths, priced_paths = _fixtures()
     dex[0].update(
@@ -337,6 +377,7 @@ def test_representative_validation_allows_explicit_no_swap_checkpoint():
             "price_crosscheck_scope": "no_swap_checkpoint",
             "price_match": None,
             "price_crosscheck_status": "no_swap_checkpoint",
+            "price_checkpoints": [],
         }
     )
 
