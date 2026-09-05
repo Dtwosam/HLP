@@ -539,6 +539,24 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "time.sleep(" not in content
 
 
+def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
+    content = _workflow("phase1-pons-acceptance-gate.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-acquisition-viability-projection" in content
+    assert "build_phase1_acceptance_report" in content
+    assert "REQUIRED_PHASE1_ACQUISITION_ROUTES" in content
+    assert 'phase1_acceptance_status"] != "pass"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
 def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
     content = _workflow(
         "phase1-pons-acquisition-viability-projection.yml"
