@@ -1,0 +1,22 @@
+name: phase1-pons-stock-oracle-promote-v2-delta-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promote:
+    if: ${{ contains(github.event.head_commit.message, 'launch stock oracle promotion') }}
+    uses: ./.github/workflows/phase1-pons-stock-oracle-promote-v2-delta.yml
+    with:
+      full_quote_audit_run_id: "33923299711"
+      full_quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+      v2_oracle_run_id: "33912985322"
+    secrets: inherit
