@@ -29,6 +29,26 @@ on:
         description: "Successful phase1-pons-stock-oracle-full run"
         required: true
         type: string
+  workflow_call:
+    inputs:
+      source_registry_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
 
 permissions:
   contents: read
