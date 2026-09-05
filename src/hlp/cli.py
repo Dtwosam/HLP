@@ -72,6 +72,7 @@ from hlp.data.quote_routes import (
     build_v3_route_initial_usd_states,
     build_v3_route_usd_updates,
     discover_delayed_v3_usdg_routes,
+    discover_delayed_v3_weth_routes,
     merge_v3_quote_routes,
     select_v3_quote_routes,
 )
@@ -2088,6 +2089,90 @@ def cmd_pons_merge_quote_usd_tapes(args: argparse.Namespace) -> int:
         "initial_states": state_manifest,
         "updates": update_manifest,
         "source_pairs": len(pairs),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pons_delayed_v3_weth_routes(
+    args: argparse.Namespace,
+) -> int:
+    """Find the first later WETH V3 swap for one unresolved quote asset."""
+    quote_token = args.quote_token.lower()
+    audit = [
+        row for row in _load_jsonl(args.audit)
+        if str(row["quote_token"]).lower() == quote_token
+    ]
+    if len(audit) != 1:
+        raise SystemExit(
+            "delayed V3 WETH scan requires exactly one matching audit row: "
+            f"{quote_token} matches={len(audit)}"
+        )
+    source = audit[0]
+    if bool(source.get("v3_causal_ready")):
+        raise SystemExit(
+            "delayed V3 WETH scan refuses an already-causally-priced asset"
+        )
+    weth_candidates = [
+        row for row in source.get("v3_candidates", [])
+        if str(row.get("anchor_token") or "").lower()
+        == ROBINHOOD_WETH.lower()
+    ]
+    if not weth_candidates:
+        raise SystemExit(
+            "delayed V3 WETH scan has no frozen WETH candidate pool"
+        )
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = discover_delayed_v3_weth_routes(
+        rpc,
+        audit,
+        from_block=args.from_block,
+        to_block=args.to_block,
+        max_forward_blocks=args.max_forward_blocks,
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    if len(rows) != 1:
+        raise SystemExit(
+            f"delayed V3 WETH scan returned {len(rows)} rows, expected one"
+        )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "first_post_use_swap_on_known_uniswap_v3_weth_routes",
+            "chain_id": 4663,
+            "audit": Path(args.audit).name,
+            "quote_token": quote_token,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "max_forward_blocks": args.max_forward_blocks,
+            "candidate_pools": sorted(
+                str(row["pool"]).lower() for row in weth_candidates
+            ),
+            "activation_semantics": (
+                "first observable WETH V3 swap at or after the requested "
+                "bounded continuation start; USD conversion is deferred to "
+                "the event-ordered WETH/USD anchor replay"
+            ),
+        },
+    )
+    ready = [row for row in rows if row["delayed_route_ready"]]
+    print(json.dumps({
+        **manifest,
+        "quote_token": quote_token,
+        "delayed_route_ready": len(ready),
+        "covered_launches": sum(int(row["launches"]) for row in ready),
+        "searched_from_block": rows[0]["searched_from_block"],
+        "searched_to_block": rows[0]["searched_to_block"],
+        "candidate_pools": rows[0]["candidate_pools"],
+        "route": None if not ready else ready[0]["route"],
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
 
@@ -5232,6 +5317,27 @@ def build_parser() -> argparse.ArgumentParser:
     delayed_quote_v3.add_argument("--out", required=True)
     delayed_quote_v3.set_defaults(
         func=cmd_rpc_pons_delayed_v3_usdg_routes
+    )
+
+    delayed_quote_v3_weth = sub.add_parser(
+        "rpc-pons-delayed-v3-weth-routes"
+    )
+    delayed_quote_v3_weth.add_argument("--audit", required=True)
+    delayed_quote_v3_weth.add_argument("--quote-token", required=True)
+    delayed_quote_v3_weth.add_argument("--from-block", type=int)
+    delayed_quote_v3_weth.add_argument("--to-block", type=int, required=True)
+    delayed_quote_v3_weth.add_argument(
+        "--max-forward-blocks", type=int, default=500_000
+    )
+    delayed_quote_v3_weth.add_argument(
+        "--chunk-size", type=int, default=2_000
+    )
+    delayed_quote_v3_weth.add_argument(
+        "--min-chunk-size", type=int, default=25
+    )
+    delayed_quote_v3_weth.add_argument("--out", required=True)
+    delayed_quote_v3_weth.set_defaults(
+        func=cmd_rpc_pons_delayed_v3_weth_routes
     )
 
     merge_quote_usd = sub.add_parser("pons-merge-quote-usd-tapes")
