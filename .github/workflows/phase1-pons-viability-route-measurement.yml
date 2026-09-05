@@ -225,6 +225,9 @@ jobs:
                       "evidence_run_id": evidence_run_id,
                       "source_eligibility_run_id": source_run_id,
                       "fallback_artifact_run_id": fallback_run_id,
+                      "registry_generation": (
+                          "v1" if route == "pons_registry" else None
+                      ),
                       "sequence_id": os.environ.get("SEQUENCE_ID", ""),
                   },
                   indent=2,
@@ -332,9 +335,17 @@ jobs:
         env:
           FROM_BLOCK: ${{ inputs.from_block }}
           TO_BLOCK: ${{ inputs.to_block }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          SEQUENCE_ID: ${{ inputs.sequence_id }}
         run: |
+          mkdir -p artifacts
           python - <<'PY'
+          import json
           import os
+          from pathlib import Path
+
           lo = int(os.environ["FROM_BLOCK"])
           hi = int(os.environ["TO_BLOCK"])
           if lo < 26_841_846:
@@ -343,6 +354,47 @@ jobs:
               )
           if hi < lo or hi - lo + 1 > 50_000:
               raise SystemExit("invalid pons_registry V2 measurement range")
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "pons_registry V2 measurement source run changed"
+              )
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          if evidence_run_id < 0:
+              raise SystemExit(
+                  "pons_registry V2 evidence run ID cannot be negative"
+              )
+          fallback_text = os.environ.get(
+              "ELIGIBILITY_RUN_ID",
+              "",
+          ).strip()
+          fallback_run_id = int(fallback_text) if fallback_text else 0
+          Path("artifacts/phase1-route-measurement.json").write_text(
+              json.dumps(
+                  {
+                      "route": "pons_registry",
+                      "registry_generation": "v2",
+                      "from_block": lo,
+                      "to_block": hi,
+                      "processed_block_span": hi - lo + 1,
+                      "snapshot_head_block": 54_486_035,
+                      "measurement_run_id": int(
+                          os.environ["GITHUB_RUN_ID"]
+                      ),
+                      "measurement_head_sha": os.environ["GITHUB_SHA"],
+                      "evidence_run_id": evidence_run_id,
+                      "source_eligibility_run_id": source_run_id,
+                      "fallback_artifact_run_id": fallback_run_id,
+                      "sequence_id": os.environ.get("SEQUENCE_ID", ""),
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
           PY
       - name: Measure V2 launch-registry scan separately
         env:
