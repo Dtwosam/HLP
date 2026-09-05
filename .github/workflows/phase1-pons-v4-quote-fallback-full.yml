@@ -116,6 +116,23 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          v3_manifest = json.loads(
+              Path(
+                  "canonical-v3/pons-v3-quote-routes.jsonl.manifest.json"
+              ).read_text()
+          )
+          v3_provenance = v3_manifest.get("provenance") or {}
+          if (
+              int(v3_provenance.get("chain_id", -1)) != 4663
+              or int(v3_provenance.get("snapshot_head_block", -1))
+              != int(os.environ["SNAPSHOT_HEAD"])
+              or v3_provenance.get("source")
+              != "causal_v3_routes_plus_delayed_skhy_weth"
+              or int(v3_provenance.get("routes", -1)) != 26
+          ):
+              raise SystemExit(
+                  "canonical V3 route-manifest provenance changed"
+              )
           if len(probe_rows) != 5:
               raise SystemExit(
                   "frozen residual V4 probe must contain exactly five "
