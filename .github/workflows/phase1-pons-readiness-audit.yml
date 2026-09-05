@@ -48,7 +48,7 @@ jobs:
           from pathlib import Path
 
           from hlp.data.phase1_readiness import (
-              VIABILITY_ROUTE_WORKFLOWS,
+              VIABILITY_ROUTE_WORKFLOW_PATHS,
               build_phase1_readiness_report,
           )
 
@@ -132,6 +132,7 @@ jobs:
                   "conclusion": run.get("conclusion"),
                   "head_branch": run.get("head_branch"),
                   "head_sha": run.get("head_sha"),
+                  "path": run.get("path"),
                   "artifacts": artifact_names(run_id),
               }
               if include_jobs:
@@ -157,7 +158,7 @@ jobs:
           )
           route_run_ids = {
               route: int((ledger.get("routes") or {}).get(route, 0))
-              for route in VIABILITY_ROUTE_WORKFLOWS
+              for route in VIABILITY_ROUTE_WORKFLOW_PATHS
           }
 
           source_run = run_payload(source_run_id, include_jobs=True)
