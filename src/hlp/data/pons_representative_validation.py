@@ -178,16 +178,39 @@ def build_representative_validation_rows(
         scope = str(dex_row.get("crosscheck_scope"))
         external_match = dex_row.get("external_match")
         mismatches = list(dex_row.get("mismatches") or [])
+        price_scope = str(dex_row.get("price_crosscheck_scope"))
+        price_match = dex_row.get("price_match")
+        price_status = str(dex_row.get("price_crosscheck_status"))
         if scope == "canonical_dex_pool":
             if external_match is not True or mismatches:
                 raise ValueError(
                     f"representative DEX cross-check failed for {token}: "
                     f"mismatches={mismatches}"
                 )
+            if price_scope == "canonical_dex_swap":
+                if price_match is not True or price_status != "matched":
+                    raise ValueError(
+                        f"representative DEX price cross-check failed for "
+                        f"{token}: status={price_status}"
+                    )
+            elif price_scope == "no_swap_checkpoint":
+                if price_match is not None:
+                    raise ValueError(
+                        f"invalid no-swap DEX price state for {token}"
+                    )
+            else:
+                raise ValueError(
+                    f"unsupported representative DEX price scope for "
+                    f"{token}: {price_scope}"
+                )
         elif scope == "no_registered_v4_pool":
             if version != "v2" or external_match is not None or mismatches:
                 raise ValueError(
                     f"invalid no-pool DEX cross-check state for {token}"
+                )
+            if price_scope != "not_applicable" or price_match is not None:
+                raise ValueError(
+                    f"invalid no-pool DEX price state for {token}"
                 )
         else:
             raise ValueError(
@@ -213,6 +236,8 @@ def build_representative_validation_rows(
                 "holder_last_block_number": holder_last_block,
                 "dex_crosscheck_scope": scope,
                 "external_match": external_match,
+                "dex_price_crosscheck_scope": price_scope,
+                "dex_price_match": price_match,
                 "validation_status": "complete",
             }
         )
@@ -257,6 +282,17 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         "final_holders": sum(int(row["holder_count"]) for row in values),
         "dex_targeted": scopes.get("canonical_dex_pool", 0),
         "dex_matched": sum(row.get("external_match") is True for row in values),
+        "dex_price_targeted": sum(
+            row.get("dex_price_crosscheck_scope") == "canonical_dex_swap"
+            for row in values
+        ),
+        "dex_price_matched": sum(
+            row.get("dex_price_match") is True for row in values
+        ),
+        "dex_price_no_swap_checkpoint": sum(
+            row.get("dex_price_crosscheck_scope") == "no_swap_checkpoint"
+            for row in values
+        ),
         "no_registered_v4_pool": scopes.get("no_registered_v4_pool", 0),
         "complete_tokens": sum(
             row.get("validation_status") == "complete" for row in values
