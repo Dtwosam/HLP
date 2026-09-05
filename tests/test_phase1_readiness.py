@@ -3,6 +3,7 @@ import pytest
 from hlp.data.phase1_readiness import (
     EVIDENCE_REQUIRED_ARTIFACTS,
     FINAL_ACCEPTANCE_ARTIFACT,
+    FINALIZER_WORKFLOW_PATH,
     SOURCE_ELIGIBILITY_RUN_ID,
     SOURCE_REQUIRED_ARTIFACTS,
     VIABILITY_ROUTE_REQUIRED_ARTIFACTS,
@@ -83,6 +84,22 @@ def _ledger_ids(start=1000):
     return {
         route: start + index
         for index, route in enumerate(VIABILITY_ROUTE_WORKFLOW_PATHS)
+    }
+
+
+def _finalizer(run_id=5000, *, evidence_run_id=400, route_ids=None):
+    return {
+        **_run(
+            run_id,
+            name="phase1-pons-viability-ledger-finalize-one-shot",
+            path=FINALIZER_WORKFLOW_PATH,
+            artifacts=[FINAL_ACCEPTANCE_ARTIFACT],
+        ),
+        "launch_readiness_source_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "launch_readiness_evidence_run_id": evidence_run_id,
+        "launch_ledger_generation": 1,
+        "launch_ledger_evidence_run_id": evidence_run_id,
+        "launch_ledger_routes": dict(route_ids or _ledger_ids()),
     }
 
 
@@ -270,11 +287,7 @@ def test_readiness_advances_to_final_acceptance_after_nine_routes():
 
 
 def test_readiness_reports_phase1_complete_only_with_acceptance_artifact():
-    finalizer = _run(
-        5000,
-        name="phase1-pons-viability-ledger-finalize-one-shot",
-        artifacts=[FINAL_ACCEPTANCE_ARTIFACT],
-    )
+    finalizer = _finalizer()
     report = _report(
         evidence_run=_evidence(),
         evidence_run_id=400,
@@ -322,11 +335,8 @@ def test_readiness_rejects_evidence_ledger_drift():
 
 
 def test_readiness_does_not_treat_successful_finalizer_without_pass_artifact_as_complete():
-    finalizer = _run(
-        5000,
-        name="phase1-pons-viability-ledger-finalize-one-shot",
-        artifacts=[],
-    )
+    finalizer = _finalizer()
+    finalizer["artifacts"] = []
     report = _report(
         evidence_run=_evidence(),
         evidence_run_id=400,
@@ -626,4 +636,26 @@ def test_readiness_successful_source_missing_artifact_requires_recovery():
         "recommended_pricing_run_id": 0,
         "next_action": "launch_recovered_phase1_completion",
     }
+
+def test_readiness_rejects_finalizer_from_stale_route_ledger():
+    stale_routes = _ledger_ids()
+    stale_routes["pons_v1_v3"] = 9999
+    finalizer = _finalizer(route_ids=stale_routes)
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=_route_runs(),
+        finalizer_runs=[finalizer],
+    )
+
+    assert report["phase1_ready"] is False
+    assert report["stage"] == "final_acceptance"
+    assert report["next_action"] == "launch_phase1_final_acceptance"
+    assert report["invalid_finalizers"] == [
+        {"run_id": 5000, "reason": "ledger_routes_mismatch"}
+    ]
 
