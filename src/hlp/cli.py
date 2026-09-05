@@ -1989,6 +1989,8 @@ def cmd_rpc_pons_delayed_v3_usdg_routes(
 
 def cmd_pons_merge_quote_usd_tapes(args: argparse.Namespace) -> int:
     """Merge disjoint generic quote/USD state and update artifacts."""
+    if args.snapshot_head is not None and args.snapshot_head <= 0:
+        raise SystemExit("--snapshot-head must be positive")
     if len(args.state) != len(args.events):
         raise SystemExit(
             "--state and --events must be supplied the same number of times"
