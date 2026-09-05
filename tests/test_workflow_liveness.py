@@ -137,7 +137,7 @@ def test_viability_route_measurement_is_manual_bounded_and_canonical():
     assert "shared measurement range must postdate V2 deployment" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
     assert "phase1-pons-v4-quote-fallback-full" in content
-    assert "quote fallback measurement requires eligibility_run_id" in content
+    assert "quote fallback measurement requires fallback artifact run ID" in content
     assert "run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}" in content
     assert 'sequence_id:' in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
