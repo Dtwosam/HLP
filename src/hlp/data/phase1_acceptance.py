@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from hlp.data.phase1_viability import REQUIRED_PHASE1_ROUTE_BLOCKS
+
 
 SNAPSHOT_HEAD_BLOCK = 54_486_035
 EXPECTED_PONS_LAUNCHES = 494_639
@@ -11,16 +13,8 @@ EXPECTED_V1_LAUNCHES = 268_688
 EXPECTED_V2_LAUNCHES = 225_951
 FREE_DAILY_METHOD_CALLS = 10_000
 
-REQUIRED_PHASE1_ACQUISITION_ROUTES = (
-    "pons_registry",
-    "pons_v1_v3",
-    "pons_v2_curve",
-    "pons_v2_transition",
-    "pons_v2_v4",
-    "weth_usdg_anchor",
-    "stock_oracle",
-    "quote_v3_fallback",
-    "quote_v4_fallback",
+REQUIRED_PHASE1_ACQUISITION_ROUTES = tuple(
+    REQUIRED_PHASE1_ROUTE_BLOCKS
 )
 
 
@@ -399,6 +393,21 @@ def build_phase1_acceptance_report(
         required_routes
     ):
         raise ValueError("viability projection route count changed")
+    observed_route_blocks = dict(
+        viability.get("required_route_blocks") or {}
+    )
+    expected_route_blocks = dict(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    if observed_route_blocks != expected_route_blocks:
+        raise ValueError(
+            "viability projection required route-block contract changed"
+        )
+    if _int(
+        viability.get("required_work_blocks"),
+        field="viability.required_work_blocks",
+    ) != sum(expected_route_blocks.values()):
+        raise ValueError(
+            "viability projection required work-block total changed"
+        )
     if viability.get("all_routes_instrumented") is not True:
         raise ValueError("viability projection contains uninstrumented routes")
     if viability.get("all_observed_rpc_routes_free") is not True:
