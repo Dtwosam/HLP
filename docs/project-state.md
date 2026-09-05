@@ -482,10 +482,11 @@ research threshold or starting another archive crawl:
   extraction, priced-path replay, Transfer/holder reconstruction, the bounded
   GeckoTerminal DEX cross-check and final representative validation. Market-path
   extraction and Transfer acquisition start in parallel after the sample freeze.
-  If the Transfer matrix fails or is cancelled after preserving successful
-  shards, the same parent run automatically retries only missing ranges by
-  passing its own run ID back as `prior_run_id`. A later rerun may also reuse
-  Transfer shards from an explicitly supplied earlier representative run.
+  The chain calls the reusable Transfer workflow exactly once. If that matrix
+  fails or is cancelled after preserving successful shards, a later
+  representative-chain run resumes only missing ranges by supplying the earlier
+  parent run as `prior_transfer_run_id`; this avoids discarding completed
+  holder work while keeping the reusable-workflow graph fail-closed.
 
 The final Phase 1 viability path is also staged fail-closed:
 
