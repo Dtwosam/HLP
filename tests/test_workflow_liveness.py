@@ -416,10 +416,16 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "manifest_gap_aware_v4_recovery" in content
     assert 'default: "100000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
-    assert "V4 gap plan exceeds 240 matrix jobs" in content
-    assert "max-parallel: 2" in content
-    assert "timeout-minutes: 30" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "V4 gap plan exceeds two serialized 240-job waves" in content
+    assert content.count("max-parallel: 2") == 2
+    assert content.count("timeout-minutes: 30") >= 2
+    assert "matrix_1: ${{ steps.plan.outputs.matrix_1 }}" in content
+    assert "matrix_2: ${{ steps.plan.outputs.matrix_2 }}" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, recover_1]" in content
+    assert "needs: [plan, recover_1, recover_2]" in content
     assert "time.sleep(" not in content
 
 
@@ -571,11 +577,17 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "manifest_gap_aware_v1_v3_recovery" in content
     assert 'default: "100000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
-    assert "V1 V3 gap plan exceeds 240 matrix jobs" in content
+    assert "V1 V3 gap plan exceeds two serialized 240-job waves" in content
     assert "Pons V1 pools missing V3 Initialize" in content
-    assert "max-parallel: 2" in content
-    assert "timeout-minutes: 30" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert content.count("max-parallel: 2") == 2
+    assert content.count("timeout-minutes: 30") >= 2
+    assert "matrix_1: ${{ steps.plan.outputs.matrix_1 }}" in content
+    assert "matrix_2: ${{ steps.plan.outputs.matrix_2 }}" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, recover_1]" in content
+    assert "needs: [plan, recover_1, recover_2]" in content
     assert "time.sleep(" not in content
 
 
