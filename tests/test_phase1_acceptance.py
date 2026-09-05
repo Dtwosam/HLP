@@ -142,6 +142,10 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
     )
+    assert report["required_route_blocks"] == REQUIRED_PHASE1_ROUTE_BLOCKS
+    assert report["required_work_blocks"] == sum(
+        REQUIRED_PHASE1_ROUTE_BLOCKS.values()
+    )
 
 
 def test_phase1_acceptance_rejects_inconsistent_lifecycle_runs():
