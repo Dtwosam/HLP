@@ -123,12 +123,16 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
 
           from hlp.data.reconstruct import event_order
-          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.sharded_tape import (
+              canonical_jsonl_bytes,
+              write_virtual_jsonl_manifest,
+          )
 
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
           START = int(os.environ["GENERATION_START"])
@@ -197,14 +201,22 @@ jobs:
                   )
               assert previous_hi == HEAD, (previous_hi, HEAD)
 
-          snapshot = write_jsonl_snapshot(
-              rows(),
-              output=Path("artifacts/pons-v2-v4-full.jsonl"),
+          digest = hashlib.sha256()
+          for row in rows():
+              digest.update(canonical_jsonl_bytes(row))
+          snapshot = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/pons-v2-v4-full.jsonl.manifest.json"
+              ),
+              path_name="pons-v2-v4-full.jsonl",
+              records=counts["records"],
+              sha256=digest.hexdigest(),
               provenance={
                   "source": "stream_merged_global_poolmanager_v4_shards",
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "transition_run_id": int(os.environ["TRANSITION_RUN_ID"]),
+                  "storage_mode": "sharded_artifacts",
                   "filter_semantics": (
                       "PoolManager Initialize/Swap global topic scan followed "
                       "by frozen Pons V2 registration membership"

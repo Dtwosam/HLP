@@ -89,6 +89,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -284,7 +285,10 @@ jobs:
           from pathlib import Path
 
           from hlp.data.reconstruct import event_order
-          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.sharded_tape import (
+              canonical_jsonl_bytes,
+              write_virtual_jsonl_manifest,
+          )
 
           START = int(os.environ["GENERATION_START"])
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
@@ -384,9 +388,16 @@ jobs:
                       path.name, local, manifest["records"]
                   )
 
-          snapshot = write_jsonl_snapshot(
-              rows(),
-              output=Path("artifacts/pons-v2-v4-full.jsonl"),
+          digest = hashlib.sha256()
+          for row in rows():
+              digest.update(canonical_jsonl_bytes(row))
+          snapshot = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/pons-v2-v4-full.jsonl.manifest.json"
+              ),
+              path_name="pons-v2-v4-full.jsonl",
+              records=counts["records"],
+              sha256=digest.hexdigest(),
               provenance={
                   "source": "manifest_gap_aware_v4_recovery",
                   "chain_id": 4663,
@@ -400,6 +411,7 @@ jobs:
                       if "${{ inputs.prior_gap_run_id }}"
                       else None
                   ),
+                  "storage_mode": "sharded_artifacts",
                   "filter_semantics": (
                       "PoolManager Initialize/Swap global topic scan followed "
                       "by frozen Pons V2 registration membership"
