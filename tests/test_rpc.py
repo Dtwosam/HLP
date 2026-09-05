@@ -178,6 +178,48 @@ def test_batch_rpc_retries_incomplete_http_body():
     assert calls == 2
 
 
+def test_call_retries_incomplete_http_body():
+    attempts = {"count": 0}
+
+    def transport(request, timeout):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise http.client.IncompleteRead(b"partial", 10)
+        return json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "result": hex(4663)}
+        ).encode()
+
+    rpc = RpcClient(
+        "https://example.invalid",
+        attempts=2,
+        backoff_seconds=0,
+        transport=transport,
+    )
+    assert rpc.chain_id() == 4663
+    assert rpc.requests_made == 2
+
+
+def test_batch_call_retries_incomplete_http_body():
+    attempts = {"count": 0}
+
+    def transport(request, timeout):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise http.client.IncompleteRead(b"partial", 10)
+        return json.dumps(
+            [{"jsonrpc": "2.0", "id": 1, "result": hex(10)}]
+        ).encode()
+
+    rpc = RpcClient(
+        "https://example.invalid",
+        attempts=2,
+        backoff_seconds=0,
+        transport=transport,
+    )
+    assert rpc.batch_call([("eth_blockNumber", [])]) == [hex(10)]
+    assert rpc.requests_made == 2
+
+
 def test_retry_after_header_is_parsed_for_429():
     import urllib.error
 
