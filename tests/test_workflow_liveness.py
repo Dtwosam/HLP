@@ -178,6 +178,9 @@ def test_blockscout_transaction_smoke_is_bounded_and_identity_checked():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "MAX_BLOCK_LOOKBACK = 20" in content
+    assert "https://rpc.mainnet.chain.robinhood.com" in content
+    assert 'rpc("eth_chainId", [])' in content
+    assert "int(chain_id, 16) != 4663" in content
     assert "/api/v2/transactions/" in content
     assert "blockscout_reachable" in content
     assert "transaction_identity_match" in content
