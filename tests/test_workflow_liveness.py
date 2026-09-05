@@ -708,6 +708,28 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
+def test_representative_evidence_one_shot_is_guarded_and_pinned():
+    content = _workflow("phase1-pons-representative-evidence-one-shot.yml")
+    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "launch representative evidence" in content
+    assert 'eligibility_run_id: "33982556591"' in content
+    assert 'oracle_run_id: "33974681334"' in content
+    assert 'runner_smoke_run_id: "33920762592"' in content
+    assert "workflow_dispatch:" not in content
+
+
+def test_viability_measurement_one_shot_is_guarded_and_pinned():
+    content = _workflow(
+        "phase1-pons-viability-route-measurement-one-shot.yml"
+    )
+    assert "phase1-pons-viability-route-measurement.yml" in content
+    assert "launch viability route measurement" in content
+    assert 'route: "pons_registry"' in content
+    assert 'from_block: "54436036"' in content
+    assert 'to_block: "54486035"' in content
+    assert 'eligibility_run_id: "33982556591"' in content
+    assert "workflow_dispatch:" not in content
+
 def test_full_eligibility_one_shot_is_guarded_and_pinned():
     content = _workflow(
         "phase1-pons-full-eligibility-acquisition-one-shot.yml"
