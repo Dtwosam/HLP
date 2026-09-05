@@ -29,6 +29,16 @@ on:
       route_audit_filename:
         required: true
         type: string
+    outputs:
+      completion_status:
+        description: "route_resolved or searched_to_snapshot_head"
+        value: ${{ jobs.finalize.outputs.completion_status }}
+      route_ready:
+        description: "Whether SKHY/WETH resolved"
+        value: ${{ jobs.finalize.outputs.route_ready }}
+      search_to_block:
+        description: "Inclusive final searched block"
+        value: ${{ jobs.finalize.outputs.search_to_block }}
 
 permissions:
   contents: read
@@ -168,6 +178,10 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      completion_status: ${{ steps.freeze.outputs.completion_status }}
+      route_ready: ${{ steps.freeze.outputs.route_ready }}
+      search_to_block: ${{ steps.freeze.outputs.search_to_block }}
     env:
       SNAPSHOT_HEAD: '54486035'
       SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
@@ -177,7 +191,8 @@ jobs:
         with:
           pattern: phase1-pons-skhy-v3-weth-segment-*
           path: segments
-      - name: Freeze completed SKHY/WETH continuation
+      - id: freeze
+        name: Freeze completed SKHY/WETH continuation
         run: |
           mkdir -p artifacts
           python - <<'PY'
@@ -258,6 +273,14 @@ jobs:
           ).write_text(
               json.dumps(final, indent=2, sort_keys=True) + "\n"
           )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"completion_status={final['completion_status']}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(f"search_to_block={search_to}\n")
           print(json.dumps(final, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4

@@ -677,6 +677,9 @@ def test_skhy_segmented_continuation_is_manual_sequential_and_complete():
     assert "segmented SKHY continuation ended before snapshot head" in content
     assert '"remaining_unsearched_blocks": remaining' in content
     assert "max_blocks_per_segment" in content
+    assert "jobs.finalize.outputs.completion_status" in content
+    assert "steps.freeze.outputs.route_ready" in content
+    assert "GITHUB_OUTPUT" in content
     assert "time.sleep(" not in content
 
 
@@ -827,6 +830,9 @@ def test_skhy_v3_weth_segmented_is_manual_sequential_and_early_stopping():
     assert "if: ${{ always() }}" in content
     assert "searched_to_snapshot_head" in content
     assert "route_resolved" in content
+    assert "jobs.finalize.outputs.completion_status" in content
+    assert "steps.freeze.outputs.route_ready" in content
+    assert "GITHUB_OUTPUT" in content
     assert "max_blocks_per_segment" in content
     assert "max-parallel:" not in content
     assert "time.sleep(" not in content
