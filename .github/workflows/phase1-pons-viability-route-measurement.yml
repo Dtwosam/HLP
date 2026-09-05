@@ -100,7 +100,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: phase1-pons-viability-route-measurement-${{ inputs.route }}-${{ github.ref }}
+  group: phase1-pons-viability-route-measurement-${{ github.ref }}
   cancel-in-progress: false
 
 env:
