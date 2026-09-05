@@ -255,3 +255,25 @@ def test_readiness_rejects_evidence_ledger_drift():
             ledger_route_run_ids=_ledger_ids(),
             viability_runs=_route_runs(),
         )
+
+
+def test_readiness_does_not_treat_successful_finalizer_without_pass_artifact_as_complete():
+    finalizer = _run(
+        5000,
+        name="phase1-pons-viability-ledger-finalize-one-shot",
+        artifacts=[],
+    )
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=_route_runs(),
+        finalizer_runs=[finalizer],
+    )
+
+    assert report["phase1_ready"] is False
+    assert report["stage"] == "final_acceptance"
+    assert report["next_action"] == "launch_phase1_final_acceptance"
+    assert report["final_acceptance_run_id"] == 0
