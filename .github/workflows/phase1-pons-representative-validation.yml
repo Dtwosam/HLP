@@ -23,6 +23,10 @@ on:
         description: "Successful representative market-path freeze run"
         required: true
         type: string
+      priced_path_run_id:
+        description: "Successful representative priced-path replay run"
+        required: true
+        type: string
       dex_crosscheck_run_id:
         description: "Successful representative DEX cross-check run"
         required: true
@@ -42,6 +46,9 @@ on:
         required: true
         type: string
       market_path_run_id:
+        required: true
+        type: string
+      priced_path_run_id:
         required: true
         type: string
       dex_crosscheck_run_id:
@@ -96,6 +103,12 @@ jobs:
           name: phase1-pons-representative-market-paths
           path: market-paths
           run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
@@ -164,6 +177,10 @@ jobs:
                   "market-paths/"
                   "pons-representative-market-path-summary.jsonl"
               ),
+              priced_path_summary_rows=read_jsonl(
+                  "priced-paths/"
+                  "pons-representative-priced-path-summary.jsonl"
+              ),
           )
           summary = summarize_representative_validation(rows)
           if summary["tokens"] != 10 or summary["complete_tokens"] != 10:
@@ -193,6 +210,9 @@ jobs:
                   ),
                   "market_path_run_id": int(
                       "${{ inputs.market_path_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ inputs.priced_path_run_id }}"
                   ),
                   "dex_crosscheck_run_id": int(
                       "${{ inputs.dex_crosscheck_run_id }}"
