@@ -55,6 +55,17 @@ VIABILITY_ROUTE_WORKFLOW_PATHS = {
     ),
 }
 
+VIABILITY_ROUTE_REQUIRED_ARTIFACTS = {
+    route: (
+        f"phase1-pons-viability-measurement-{route}-primary",
+    )
+    for route in VIABILITY_ROUTE_WORKFLOW_PATHS
+}
+VIABILITY_ROUTE_REQUIRED_ARTIFACTS["pons_registry"] = (
+    "phase1-pons-viability-measurement-pons_registry-primary",
+    "phase1-pons-viability-measurement-pons_registry-secondary",
+)
+
 FINAL_ACCEPTANCE_ARTIFACT = "phase1-pons-acceptance-gate"
 
 
@@ -259,6 +270,19 @@ def build_phase1_readiness_report(
                     "reason": "run_not_successful",
                     "status": run.get("status"),
                     "conclusion": run.get("conclusion"),
+                }
+            )
+            continue
+        missing_artifacts = sorted(
+            set(VIABILITY_ROUTE_REQUIRED_ARTIFACTS[route])
+            - _artifact_names(run)
+        )
+        if missing_artifacts:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "measurement_artifacts_missing",
+                    "missing_artifacts": missing_artifacts,
                 }
             )
             continue
