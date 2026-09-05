@@ -491,7 +491,13 @@ research threshold or starting another archive crawl:
   frozen **200k-block** default as manual dispatch; an inert caller probe caught
   the previous missing required-input default, and the staged representative
   one-shot now passes GitHub graph validation and skips cleanly until its
-  explicit launch phrase is committed.
+  explicit launch phrase is committed. Representative validation now also binds
+  the market-path V1/V3 and V2/V4 source run IDs to the lifecycle evidence,
+  verifies the canonical registry, V2 curve, transition, quote-audit, anchor,
+  stock-oracle and quote-fallback run IDs carried by upstream manifests, and
+  persists those source IDs into the final representative validation manifest.
+  Inert graph-validation run **33986987191** confirmed the stricter reusable
+  input contract compiles without launching representative acquisition.
 
 The final Phase 1 viability path is also staged fail-closed:
 
@@ -530,7 +536,13 @@ The final Phase 1 viability path is also staged fail-closed:
   `phase1-pons-final-acceptance-chain` graph has also been validated through
   an inert caller, so its nine distinct measurement IDs can later flow through
   accounting -> viability projection -> acceptance without another reusable-
-  workflow contract discovery.
+  workflow contract discovery. The acceptance function independently rechecks
+  that route evidence IDs are positive, match each route's declared evidence
+  count and are never reused across routes, then republishes the exact
+  route-to-evidence-run map in the PASS report. It also freezes the canonical
+  representative registry/curve/transition/quote-audit/anchor/oracle source run
+  IDs and rejects drift before PASS, so those guarantees do not depend only on
+  the orchestration layer.
 
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
