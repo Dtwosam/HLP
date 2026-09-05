@@ -341,6 +341,12 @@ research threshold or starting another archive crawl:
   V3, V2 curve, graduation/registration and V4 tapes down to the exact
   representative cohort, preserving each token's launch-to-market event path
   without issuing new provider requests;
+- a second artifact-only replay uses those exact 10-token events plus the
+  frozen anchor/oracle/fallback tapes to materialize every causal token/USD
+  price and market-cap point with the same V1/V2 pricing functions used by
+  lifecycle eligibility; final representative validation requires its
+  per-token point counts, priced/unpriced accounting, maximum market cap and
+  maximum block to agree with the lifecycle summaries;
 - a resumable Transfer backfill reconstructs exact holder balances/counts and
   fails closed unless every sampled token begins with a launch-time mint;
 - GeckoTerminal is used only as independent DEX evidence, never canonical
@@ -363,9 +369,10 @@ research threshold or starting another archive crawl:
   created before this instrumentation remain request/storage evidence only;
   response-byte evidence must come from instrumented future or bounded runs;
 - an artifact-only representative validation join requires all 10 tokens to
-  have consistent lifecycle pricing evidence, detailed launch/trade path
-  coverage, holder replay, pool identity reconciliation and explicit DEX
-  price-cross-check state before it can publish a complete validation bundle.
+  have consistent lifecycle pricing evidence, detailed launch/trade paths,
+  detailed per-event USD price replay, holder replay, pool identity
+  reconciliation and explicit DEX price-cross-check state before it can
+  publish a complete validation bundle.
 
 The final Phase 1 viability path is also staged fail-closed:
 
