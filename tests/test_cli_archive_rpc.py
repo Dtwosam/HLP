@@ -459,3 +459,17 @@ def test_representative_transfer_and_holder_parsers():
     ])
     assert holders.transfers == "transfers.jsonl"
     assert holders.summary_out == "holder-summary.jsonl"
+
+def test_representative_sample_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pons-representative-sample",
+        "--v1-lifecycle", "v1.jsonl",
+        "--v2-lifecycle", "v2.jsonl",
+        "--outcomes", "outcomes.jsonl",
+        "--out", "sample.jsonl",
+    ])
+    assert args.v1_lifecycle == "v1.jsonl"
+    assert args.runners == 5
+    assert args.failures == 5
+    assert args.out == "sample.jsonl"
