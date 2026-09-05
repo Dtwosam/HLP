@@ -1,4 +1,5 @@
 name: phase1-pons-full-eligibility-acquisition-one-shot
+# launch-generation: 1
 
 on:
   push:
