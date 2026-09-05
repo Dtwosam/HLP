@@ -33,6 +33,16 @@ on:
         required: false
         default: ""
         type: string
+      evidence_run_id:
+        description: "Validated post-eligibility evidence run; required for acceptance measurements"
+        required: false
+        default: ""
+        type: string
+      source_eligibility_run_id:
+        description: "Frozen original full eligibility parent"
+        required: false
+        default: "33982556591"
+        type: string
       sequence_id:
         description: "Optional parent completion-sequence identity for exact run discovery"
         required: false
@@ -79,6 +89,14 @@ on:
       eligibility_run_id:
         required: false
         default: ""
+        type: string
+      evidence_run_id:
+        required: false
+        default: ""
+        type: string
+      source_eligibility_run_id:
+        required: false
+        default: "33982556591"
         type: string
       sequence_id:
         required: false
@@ -136,6 +154,8 @@ jobs:
           FROM_BLOCK: ${{ inputs.from_block }}
           TO_BLOCK: ${{ inputs.to_block }}
           ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
           SEQUENCE_ID: ${{ inputs.sequence_id }}
         run: |
           python - <<'PY'
@@ -166,12 +186,29 @@ jobs:
               raise SystemExit(
                   f"viability measurement exceeds 50000-block ceiling: {span}"
               )
+          fallback_text = os.environ.get(
+              "ELIGIBILITY_RUN_ID",
+              "",
+          ).strip()
+          fallback_run_id = int(fallback_text) if fallback_text else 0
           if route in {"quote_v3_fallback", "quote_v4_fallback"}:
-              value = os.environ.get("ELIGIBILITY_RUN_ID", "").strip()
-              if not value or int(value) <= 0:
+              if fallback_run_id <= 0:
                   raise SystemExit(
                       "quote fallback measurement requires fallback artifact run ID"
                   )
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "viability measurement source eligibility run changed"
+              )
+          if evidence_run_id < 0:
+              raise SystemExit(
+                  "viability measurement evidence run ID cannot be negative"
+              )
           Path("artifacts").mkdir()
           Path("artifacts/phase1-route-measurement.json").write_text(
               json.dumps(
@@ -181,6 +218,13 @@ jobs:
                       "to_block": hi,
                       "processed_block_span": span,
                       "snapshot_head_block": 54_486_035,
+                      "measurement_run_id": int(
+                          os.environ["GITHUB_RUN_ID"]
+                      ),
+                      "measurement_head_sha": os.environ["GITHUB_SHA"],
+                      "evidence_run_id": evidence_run_id,
+                      "source_eligibility_run_id": source_run_id,
+                      "fallback_artifact_run_id": fallback_run_id,
                       "sequence_id": os.environ.get("SEQUENCE_ID", ""),
                   },
                   indent=2,
