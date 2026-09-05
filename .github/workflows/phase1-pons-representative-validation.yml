@@ -501,6 +501,27 @@ jobs:
                   "dex_crosscheck_run_id": int(
                       "${{ inputs.dex_crosscheck_run_id }}"
                   ),
+                  "registry_run_id": int(
+                      "${{ inputs.registry_run_id }}"
+                  ),
+                  "v2_curve_run_id": int(
+                      "${{ inputs.v2_curve_run_id }}"
+                  ),
+                  "transition_run_id": int(
+                      "${{ inputs.transition_run_id }}"
+                  ),
+                  "quote_audit_run_id": int(
+                      "${{ inputs.quote_audit_run_id }}"
+                  ),
+                  "anchor_run_id": int(
+                      "${{ inputs.anchor_run_id }}"
+                  ),
+                  "oracle_run_id": int(
+                      "${{ inputs.oracle_run_id }}"
+                  ),
+                  "fallback_run_id": int(
+                      "${{ inputs.fallback_run_id }}"
+                  ),
                   "source_coverage_sha256": coverage_snapshot["sha256"],
               },
           )
