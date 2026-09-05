@@ -1,4 +1,5 @@
 name: phase1-dispatch-permission-probe-launcher
+# probe-generation: 1
 
 on:
   push:
