@@ -284,9 +284,6 @@ def build_phase1_readiness_report(
     )
     source_completed = source_run.get("status") == "completed"
     source_successful = _successful(source_run) and not source_missing
-    source_terminal_failure = bool(
-        source_completed and source_run.get("conclusion") != "success"
-    )
     source_requires_recovery = bool(
         source_completed and not source_successful
     )
