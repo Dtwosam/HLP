@@ -1,5 +1,5 @@
 name: phase1-pons-representative-call-probe
-# target: transfers
+# target: transfers-defaulted
 
 on:
   push:
