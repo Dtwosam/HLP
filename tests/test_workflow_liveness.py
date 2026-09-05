@@ -448,3 +448,5 @@ def test_v4_quote_continuation_is_reusable_without_push_trigger():
     assert "workflow_dispatch:" in trigger_block
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
+    assert "known_pool_only" in content
+    assert "EXTRA+=(--known-pool-only)" in content
