@@ -153,6 +153,7 @@ NETWORK_SMOKE_WORKFLOWS = {
     "phase1-dex-pool-census.yml",
     "phase1-pons-v1-multigen-smoke.yml",
     "phase1-v1-shared-tape-smoke.yml",
+    "phase1-pons-representative-dex-crosscheck.yml",
 }
 
 
@@ -551,5 +552,21 @@ def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     assert "summarize_phase1_runs" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
+    content = _workflow("phase1-pons-representative-dex-crosscheck.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "GeckoTerminalClient" in content
+    assert "geckoterminal_public_api" in content
+    assert "not canonical historical truth" in content
+    assert "representative DEX cross-check requires exactly 10" in content
+    assert "independent DEX pool reconciliation failed" in content
+    assert 'default: "33911022718"' in content
+    assert 'default: "33912452330"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
 
