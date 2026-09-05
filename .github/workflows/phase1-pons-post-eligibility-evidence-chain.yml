@@ -209,7 +209,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Record post-eligibility evidence handoff
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative
+      - name: Validate and record post-eligibility evidence handoff
         env:
           SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
         run: |
@@ -219,14 +233,43 @@ jobs:
           import os
           from pathlib import Path
 
+          from hlp.data.phase1_evidence import (
+              validate_post_eligibility_evidence_bundle,
+          )
+
           source_run_id = int(os.environ["SOURCE_RUN_ID"])
+          validation = validate_post_eligibility_evidence_bundle(
+              eligible_summary=json.loads(
+                  Path(
+                      "eligible/pons-eligible-universe-summary.json"
+                  ).read_text()
+              ),
+              eligible_manifest=json.loads(
+                  Path(
+                      "eligible/"
+                      "pons-eligible-100k-universe.jsonl.manifest.json"
+                  ).read_text()
+              ),
+              representative_summary=json.loads(
+                  Path(
+                      "representative/"
+                      "pons-representative-validation-summary.json"
+                  ).read_text()
+              ),
+              representative_manifest=json.loads(
+                  Path(
+                      "representative/"
+                      "pons-representative-validation.jsonl.manifest.json"
+                  ).read_text()
+              ),
+              expected_lifecycle_run_id=source_run_id,
+              expected_v1_v3_run_id=source_run_id,
+              expected_v2_v4_run_id=source_run_id,
+          )
           report = {
-              "status": "ready",
+              **validation,
               "recovery_mode": False,
               "source_eligibility_run_id": source_run_id,
-              "lifecycle_run_id": source_run_id,
-              "v1_v3_run_id": source_run_id,
-              "v2_v4_run_id": source_run_id,
               "evidence_run_id": int(os.environ["GITHUB_RUN_ID"]),
               "eligible_universe_artifact": "phase1-pons-eligible-universe",
               "representative_artifact": "phase1-pons-representative-validation",
