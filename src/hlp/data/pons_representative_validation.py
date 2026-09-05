@@ -26,17 +26,18 @@ def build_representative_validation_rows(
     v2_lifecycle_rows: Iterable[dict],
     holder_summary_rows: Iterable[dict],
     dex_crosscheck_rows: Iterable[dict],
-    explorer_summary_rows: Iterable[dict],
     market_path_summary_rows: Iterable[dict],
     priced_path_summary_rows: Iterable[dict],
+    explorer_summary_rows: Iterable[dict] | None = None,
 ) -> list[dict]:
     """Join the frozen 10-token sample to independent Phase 1 evidence.
 
     This function does not create new labels or infer missing history. It only
     proves that every sampled token has the already-required launch/lifecycle
     price evidence, a frozen detailed market path plus per-event USD replay,
-    complete transfer/holder replay, explicit DEX reconciliation, and
-    independent Blockscout transaction verification.
+    complete transfer/holder replay and explicit independent DEX
+    reconciliation. Blockscout transaction verification is supplementary when
+    a permitted runtime can reach the explorer API.
     """
     sample = [dict(row) for row in sample_rows]
     if len(sample) != 10:
@@ -93,17 +94,19 @@ def build_representative_validation_rows(
             f"missing={missing} extra={extra}"
         )
 
-    explorer = _token_index(
-        explorer_summary_rows,
-        label="representative explorer summary",
-    )
-    if set(explorer) != set(sample_by_token):
-        missing = sorted(set(sample_by_token) - set(explorer))
-        extra = sorted(set(explorer) - set(sample_by_token))
-        raise ValueError(
-            "representative explorer summary coverage mismatch: "
-            f"missing={missing} extra={extra}"
+    explorer = {}
+    if explorer_summary_rows is not None:
+        explorer = _token_index(
+            explorer_summary_rows,
+            label="representative explorer summary",
         )
+        if set(explorer) != set(sample_by_token):
+            missing = sorted(set(sample_by_token) - set(explorer))
+            extra = sorted(set(explorer) - set(sample_by_token))
+            raise ValueError(
+                "representative explorer summary coverage mismatch: "
+                f"missing={missing} extra={extra}"
+            )
 
     market_paths = _token_index(
         market_path_summary_rows,
@@ -317,45 +320,54 @@ def build_representative_validation_rows(
             for checkpoint in price_checkpoints
             for role in list(checkpoint.get("checkpoint_roles") or [])
         )
-        explorer_row = explorer[token]
-        if str(explorer_row.get("pons_version")) != version:
-            raise ValueError(
-                f"representative explorer version mismatch for {token}"
+        explorer_row = explorer.get(token)
+        explorer_dex_transactions = 0
+        explorer_transactions = 0
+        explorer_launch_transactions = 0
+        explorer_roles = Counter()
+        explorer_status = "not_run"
+        if explorer_row is not None:
+            if str(explorer_row.get("pons_version")) != version:
+                raise ValueError(
+                    f"representative explorer version mismatch for {token}"
+                )
+            if str(explorer_row.get("sample_group")) != str(
+                sample_row.get("sample_group")
+            ):
+                raise ValueError(
+                    f"representative explorer sample-group mismatch for {token}"
+                )
+            if int(explorer_row.get("launch_block", -1)) != launch_block:
+                raise ValueError(
+                    f"representative explorer launch mismatch for {token}"
+                )
+            if int(
+                explorer_row.get("verified_launch_transactions", -1)
+            ) != 1:
+                raise ValueError(
+                    f"representative explorer launch is not verified for {token}"
+                )
+            if explorer_row.get("all_transactions_matched") is not True:
+                raise ValueError(
+                    f"representative explorer has unmatched transaction for "
+                    f"{token}"
+                )
+            explorer_launch_transactions = 1
+            explorer_dex_transactions = int(
+                explorer_row.get("verified_dex_swap_transactions", -1)
             )
-        if str(explorer_row.get("sample_group")) != str(
-            sample_row.get("sample_group")
-        ):
-            raise ValueError(
-                f"representative explorer sample-group mismatch for {token}"
+            explorer_transactions = int(
+                explorer_row.get("verified_transactions", -1)
             )
-        if int(explorer_row.get("launch_block", -1)) != launch_block:
-            raise ValueError(
-                f"representative explorer launch mismatch for {token}"
+            if explorer_transactions != 1 + explorer_dex_transactions:
+                raise ValueError(
+                    f"representative explorer transaction accounting mismatch "
+                    f"for {token}"
+                )
+            explorer_roles = Counter(
+                dict(explorer_row.get("checkpoint_role_counts") or {})
             )
-        if int(
-            explorer_row.get("verified_launch_transactions", -1)
-        ) != 1:
-            raise ValueError(
-                f"representative explorer launch is not verified for {token}"
-            )
-        if explorer_row.get("all_transactions_matched") is not True:
-            raise ValueError(
-                f"representative explorer has unmatched transaction for {token}"
-            )
-        explorer_dex_transactions = int(
-            explorer_row.get("verified_dex_swap_transactions", -1)
-        )
-        explorer_transactions = int(
-            explorer_row.get("verified_transactions", -1)
-        )
-        if explorer_transactions != 1 + explorer_dex_transactions:
-            raise ValueError(
-                f"representative explorer transaction accounting mismatch "
-                f"for {token}"
-            )
-        explorer_roles = Counter(
-            dict(explorer_row.get("checkpoint_role_counts") or {})
-        )
+            explorer_status = "verified"
         registered_v4 = bool(market_path.get("registered_v4"))
         has_v4_market_events = bool(
             market_path.get("has_v4_market_events")
@@ -399,16 +411,17 @@ def build_representative_validation_rows(
                         f"representative DEX checkpoint roles invalid for "
                         f"{token}: {dict(checkpoint_roles)}"
                     )
-                if explorer_dex_transactions != len(price_checkpoints):
-                    raise ValueError(
-                        f"representative explorer/DEX checkpoint count "
-                        f"mismatch for {token}"
-                    )
-                if explorer_roles != checkpoint_roles:
-                    raise ValueError(
-                        f"representative explorer/DEX checkpoint roles "
-                        f"mismatch for {token}"
-                    )
+                if explorer_row is not None:
+                    if explorer_dex_transactions != len(price_checkpoints):
+                        raise ValueError(
+                            f"representative explorer/DEX checkpoint count "
+                            f"mismatch for {token}"
+                        )
+                    if explorer_roles != checkpoint_roles:
+                        raise ValueError(
+                            f"representative explorer/DEX checkpoint roles "
+                            f"mismatch for {token}"
+                        )
                 bad_checkpoints = [
                     checkpoint
                     for checkpoint in price_checkpoints
@@ -428,7 +441,10 @@ def build_representative_validation_rows(
                     raise ValueError(
                         f"invalid no-swap DEX price state for {token}"
                     )
-                if explorer_dex_transactions != 0 or explorer_roles:
+                if (
+                    explorer_row is not None
+                    and (explorer_dex_transactions != 0 or explorer_roles)
+                ):
                     raise ValueError(
                         f"invalid no-swap explorer state for {token}"
                     )
@@ -454,7 +470,10 @@ def build_representative_validation_rows(
                 raise ValueError(
                     f"invalid no-pool DEX price state for {token}"
                 )
-            if explorer_dex_transactions != 0 or explorer_roles:
+            if (
+                explorer_row is not None
+                and (explorer_dex_transactions != 0 or explorer_roles)
+            ):
                 raise ValueError(
                     f"invalid no-pool explorer state for {token}"
                 )
@@ -499,8 +518,11 @@ def build_representative_validation_rows(
                     checkpoint.get("price_match") is True
                     for checkpoint in price_checkpoints
                 ),
+                "explorer_evidence_status": explorer_status,
                 "explorer_verified_transactions": explorer_transactions,
-                "explorer_verified_launch_transactions": 1,
+                "explorer_verified_launch_transactions": (
+                    explorer_launch_transactions
+                ),
                 "explorer_verified_dex_swap_transactions": (
                     explorer_dex_transactions
                 ),
@@ -588,6 +610,10 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         ),
         "dex_price_no_swap_checkpoint": sum(
             row.get("dex_price_crosscheck_scope") == "no_swap_checkpoint"
+            for row in values
+        ),
+        "explorer_verified_tokens": sum(
+            row.get("explorer_evidence_status") == "verified"
             for row in values
         ),
         "explorer_verified_transactions": sum(
