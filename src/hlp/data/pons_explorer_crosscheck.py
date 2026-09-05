@@ -193,6 +193,77 @@ def reconcile_blockscout_transaction(
     return output
 
 
+def build_representative_explorer_token_summaries(
+    rows: Iterable[dict],
+    sample_rows: Iterable[dict],
+) -> list[dict]:
+    """Return one verified Blockscout coverage row per representative token."""
+    sample = _sample_index(sample_rows)
+    grouped: dict[str, list[dict]] = {token: [] for token in sample}
+    for source in rows:
+        row = dict(source)
+        token = str(row["token"]).lower()
+        if token not in grouped:
+            raise ValueError(
+                f"explorer row outside representative sample: {token}"
+            )
+        if row.get("external_match") is not True or row.get("mismatches"):
+            raise ValueError(
+                f"representative explorer transaction mismatch for {token}"
+            )
+        grouped[token].append(row)
+
+    output = []
+    for token, sample_row in sample.items():
+        token_rows = grouped[token]
+        launches = [
+            row
+            for row in token_rows
+            if row.get("verification_type") == "launch_transaction"
+        ]
+        if len(launches) != 1:
+            raise ValueError(
+                f"representative explorer must have one launch for {token}"
+            )
+        dex = [
+            row
+            for row in token_rows
+            if row.get("verification_type") == "dex_swap_transaction"
+        ]
+        roles = Counter(
+            role
+            for row in dex
+            for role in list(row.get("checkpoint_roles") or [])
+        )
+        if dex and roles != {"first": 1, "max": 1, "last": 1}:
+            raise ValueError(
+                f"representative explorer DEX roles invalid for {token}: "
+                f"{dict(roles)}"
+            )
+        output.append(
+            {
+                "token": token,
+                "pons_version": sample_row["pons_version"],
+                "sample_group": sample_row.get("sample_group"),
+                "launch_block": int(sample_row["launch_block"]),
+                "verified_launch_transactions": 1,
+                "verified_dex_swap_transactions": len(dex),
+                "checkpoint_role_counts": dict(sorted(roles.items())),
+                "verified_transactions": len(token_rows),
+                "all_transactions_matched": True,
+            }
+        )
+
+    output.sort(
+        key=lambda row: (
+            row["pons_version"],
+            row["launch_block"],
+            row["token"],
+        )
+    )
+    return output
+
+
 def summarize_representative_explorer_crosscheck(
     rows: Iterable[dict],
     sample_rows: Iterable[dict],
