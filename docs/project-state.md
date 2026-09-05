@@ -516,7 +516,14 @@ fired unless the oracle run succeeds and the archive lane is otherwise clear.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
-30-minute cap. The egress projection additionally needs instrumented measured runs;
+30-minute cap. The canonical V1/V3 and V2/V4 aggregates now remain as virtual
+JSONL manifests over ordered shard artifacts instead of publishing another
+monolithic full-tape copy. Lifecycle and representative consumers resolve
+current, partial and prior-recovery shard files by manifest identity
+(block range, record count and SHA), not basename alone, because successive
+gap-recovery generations may legitimately reuse compact names such as
+`*-gap-000.jsonl`.
+The egress projection additionally needs instrumented measured runs;
 older completed runs cannot retroactively provide response-byte counters. No
 representative validation, viability projection or acceptance artifact should
 be counted as complete until those upstream frozen inputs and measurements
