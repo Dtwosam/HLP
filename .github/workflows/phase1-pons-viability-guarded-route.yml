@@ -106,6 +106,20 @@ jobs:
                   "evidence handoff run is not completed successfully: "
                   f"status={run.get('status')} conclusion={run.get('conclusion')}"
               )
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          evidence_path = str(run.get("path") or "").split("@", 1)[0]
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  f"evidence handoff workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("evidence handoff branch changed")
 
           names = set()
           page = 1
