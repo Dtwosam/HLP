@@ -194,9 +194,12 @@ Two reusable manual-only range recovery workflows split any exact failed curve
 or anchor interval into four smaller subshards and merge only that interval.
 On top of those primitives, manifest-driven gap recovery now reads every
 successful partial-run manifest, derives the exact uncovered block intervals,
-and creates only bounded retry jobs: at most 200k blocks for V2 curve gaps and
-150k blocks for anchor gaps. The final merge proves strict block continuity
-against the preserved prefix before publishing the canonical full tape.
+and creates only bounded retry jobs. A live recovery measurement on 2026-09-05
+showed that 200k-block V2 tail jobs at the first two missing ranges both reached
+the 20-minute job cap, so V2 curve gaps are now capped at **50k blocks**. Anchor
+gaps remain capped at 150k blocks until that path is measured separately. The
+final merge proves strict block continuity against the preserved prefix before
+publishing the canonical full tape.
 Successful historical shards are never re-fetched just because a later dense
 range timed out.
 
