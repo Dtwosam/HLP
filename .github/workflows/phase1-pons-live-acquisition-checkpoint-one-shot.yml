@@ -1,5 +1,5 @@
 name: phase1-pons-live-acquisition-checkpoint-one-shot
-# checkpoint generation 1
+# checkpoint generation 2
 
 on:
   push:
