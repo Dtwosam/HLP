@@ -25,6 +25,8 @@ _RESPONSE_BYTE_KEYS = {
     "response_bytes_received",
     "bytes_received",
     "geckoterminal_bytes",
+    "rhj_bytes",
+    "chainlink_directory_bytes",
 }
 
 
