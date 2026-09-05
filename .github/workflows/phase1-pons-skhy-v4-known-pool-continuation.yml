@@ -19,9 +19,9 @@ on:
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
       forward_blocks:
-        description: "Maximum continuation blocks; capped at 500,000"
+        description: "Maximum continuation blocks; capped at 100,000"
         required: true
-        default: "500000"
+        default: "100000"
         type: string
       expected_prior_search_end:
         description: "Optional exact prior search boundary; empty for chained segments"
@@ -81,7 +81,7 @@ env:
 jobs:
   continue_known_pool:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     outputs:
       search_to_block: ${{ steps.result.outputs.search_to_block }}
       route_ready: ${{ steps.result.outputs.route_ready }}
@@ -112,9 +112,9 @@ jobs:
           from pathlib import Path
 
           forward_blocks = int(os.environ["FORWARD_BLOCKS"])
-          if not 1 <= forward_blocks <= 500_000:
+          if not 1 <= forward_blocks <= 100_000:
               raise SystemExit(
-                  "forward_blocks must be between 1 and 500000"
+                  "forward_blocks must be between 1 and 100000"
               )
 
           rows = [

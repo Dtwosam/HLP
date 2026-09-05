@@ -24,9 +24,9 @@ on:
         default: ""
         type: string
       forward_blocks:
-        description: "Maximum segment size; capped at 500,000 blocks"
+        description: "Maximum segment size; capped at 100,000 blocks"
         required: true
-        default: "500000"
+        default: "100000"
         type: string
       output_artifact_name:
         description: "Artifact name for this continuation segment"
@@ -94,7 +94,7 @@ jobs:
       next_from_block: ${{ steps.result.outputs.next_from_block }}
       route_ready: ${{ steps.result.outputs.route_ready }}
       continue_needed: ${{ steps.result.outputs.continue_needed }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       REQUESTED_FROM_BLOCK: ${{ inputs.from_block }}
@@ -121,9 +121,9 @@ jobs:
           from pathlib import Path
 
           forward = int(os.environ["FORWARD_BLOCKS"])
-          if not 1 <= forward <= 500_000:
+          if not 1 <= forward <= 100_000:
               raise SystemExit(
-                  "forward_blocks must be between 1 and 500000"
+                  "forward_blocks must be between 1 and 100000"
               )
 
           rows = [

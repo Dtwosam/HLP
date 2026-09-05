@@ -199,9 +199,10 @@ A second, still-unexecuted resolution path is now staged from the frozen V3
 audit: SKHY has one exact Uniswap V3 **SKHY/WETH** candidate,
 `0x13f78b235d19141f572986afcaab66ce7744b4ef`, fee **3000**. The bounded
 continuation scans only that pool for its first positive-liquidity swap. The
-reusable primitive still rejects requests above **500k blocks**, but after the
-measured keyless DELL timeout the canonical segmented wrapper now uses **nine
-sequential <=250k-block segments** with early stopping. If it resolves, USD
+reusable primitive now rejects requests above **100k blocks** and has a
+**30-minute** job ceiling. The canonical segmented wrapper uses up to **23
+sequential <=100k-block segments** with early stopping, matching the measured
+DELL timing class. If it resolves, USD
 conversion is deferred until replay and composes each SKHY/WETH swap with the
 event-ordered canonical WETH/USDG anchor, avoiding end-of-block lookahead.
 
@@ -228,9 +229,9 @@ canonical full-history block workload.
 
 The V4 continuation path supports fail-closed `known_pool_only` mode. For
 SKHY it skips redundant Initialize discovery and scans only Swap logs for the
-already-frozen candidate pool ID. The primitive is capped at **500k blocks per
-20-minute job**, while the canonical segmented wrapper uses **seven
-<=250k-block segments**, stops as soon as a segment resolves the frozen route,
+already-frozen candidate pool ID. The primitive is capped at **100k blocks per
+30-minute job**, while the canonical segmented wrapper uses up to **17
+<=100k-block segments**, stops as soon as a segment resolves the frozen route,
 and can now be promoted directly into the alternate 25/5 canonical ownership
 path. Finalization selects the latest completed segment and publishes an
 artifact only if SKHY resolved or the scan reached snapshot head with zero
