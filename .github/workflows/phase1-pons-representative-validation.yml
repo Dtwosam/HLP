@@ -197,6 +197,24 @@ jobs:
               raise SystemExit(
                   "representative validation sample V2 run mismatch"
               )
+          if int(sample_summary.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "representative validation runner smoke run mismatch"
+              )
+          if sample_summary.get("runner_smoke_universe_sha256") != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "representative validation runner smoke universe SHA mismatch"
+              )
+          if sample_summary.get("runner_smoke_outcomes_sha256") != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "representative validation runner smoke outcomes SHA mismatch"
+              )
 
           def manifest_and_provenance(path, *, snapshot=True):
               manifest = json.loads(Path(path).read_text())
@@ -350,6 +368,11 @@ jobs:
           sample = read_jsonl(
               "sample/pons-representative-sample.jsonl"
           )
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
           if len(sample) != 10:
               raise SystemExit(
                   "representative coverage requires exactly 10 sample tokens"
@@ -474,6 +497,15 @@ jobs:
                   coverage["no_unexplained_block_gaps"]
               ),
               "source_coverage_sha256": coverage_snapshot["sha256"],
+              "runner_smoke_run_id": int(
+                  sample_summary["runner_smoke_run_id"]
+              ),
+              "runner_smoke_universe_sha256": sample_summary[
+                  "runner_smoke_universe_sha256"
+              ],
+              "runner_smoke_outcomes_sha256": sample_summary[
+                  "runner_smoke_outcomes_sha256"
+              ],
           })
           if summary["tokens"] != 10 or summary["complete_tokens"] != 10:
               raise SystemExit(
@@ -491,6 +523,15 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": 54_486_035,
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "runner_smoke_run_id": int(
+                      sample_summary["runner_smoke_run_id"]
+                  ),
+                  "runner_smoke_universe_sha256": sample_summary[
+                      "runner_smoke_universe_sha256"
+                  ],
+                  "runner_smoke_outcomes_sha256": sample_summary[
+                      "runner_smoke_outcomes_sha256"
+                  ],
                   "v1_eligibility_run_id": int(
                       "${{ inputs.v1_eligibility_run_id }}"
                   ),
