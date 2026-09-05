@@ -326,6 +326,8 @@ def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v4-quote-events-gap" in content
     assert "manifest_gap_aware_v4_quote_recovery" in content
+    assert "activation_by_pool" in content
+    assert 'int(row["block_number"]) >= (' in content
     assert 'default: "150000"' in content
     assert "max_gap_blocks must be between 1 and 150000" in content
     assert "V4 quote gap plan exceeds 240 matrix jobs" in content
