@@ -140,6 +140,10 @@ jobs:
               raise SystemExit("recovery source eligibility run changed")
           if v1_id <= 0 or v2_id < 0 or pricing_id < 0:
               raise SystemExit("recovery run IDs are invalid")
+          if pricing_id > 0 and v2_id <= 0:
+              raise SystemExit(
+                  "reused pricing requires an explicit V2/V4 run ID"
+              )
 
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
