@@ -696,9 +696,38 @@ def test_skhy_v3_weth_continuation_is_manual_known_pool_and_bounded():
     assert "--archive" in content
     assert "rpc-pons-delayed-v3-weth-routes" in content
     assert '--quote-token "$SKHY_TOKEN"' in content
+    assert "continue_needed" in content
+    assert "next_from_block" in content
+    assert "route_ready" in content
     assert "first_observed_usd_price" in content
     assert "deferred to event-ordered WETH/USD anchor replay" in content
     assert "timeout-minutes: 20" in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+
+def test_skhy_v3_weth_segmented_is_manual_sequential_and_early_stopping():
+    content = _workflow(
+        "phase1-pons-skhy-v3-weth-segmented.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert content.count(
+        "phase1-pons-skhy-v3-weth-continuation.yml"
+    ) == 5
+    assert content.count('forward_blocks: "500000"') == 5
+    assert "needs.segment_0.outputs.continue_needed == 'true'" in content
+    assert "needs.segment_1.outputs.continue_needed == 'true'" in content
+    assert "needs.segment_2.outputs.continue_needed == 'true'" in content
+    assert "needs.segment_3.outputs.continue_needed == 'true'" in content
+    assert "needs.segment_0.outputs.next_from_block" in content
+    assert "needs.segment_3.outputs.next_from_block" in content
+    assert "if: ${{ always() }}" in content
+    assert "searched_to_snapshot_head" in content
+    assert "route_resolved" in content
+    assert "max_blocks_per_segment" in content
     assert "max-parallel:" not in content
     assert "time.sleep(" not in content
 
