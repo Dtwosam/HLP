@@ -591,6 +591,31 @@ def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     assert "max-parallel:" not in content
     assert "time.sleep(" not in content
 
+def test_representative_explorer_crosscheck_is_manual_public_and_bounded():
+    content = _workflow(
+        "phase1-pons-representative-explorer-crosscheck.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "BlockscoutClient" in content
+    assert "build_representative_explorer_targets" in content
+    assert "build_representative_explorer_token_summaries" in content
+    assert "10 <= len(targets) <= 40" in content
+    assert "blockscout_requests" in content
+    assert "blockscout_response_bytes" in content
+    assert "transaction_identity_and_block" in content
+    assert "raw chain" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
 def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
     content = _workflow("phase1-pons-representative-dex-crosscheck.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
@@ -677,6 +702,9 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "priced_path_run_id" in content
     assert "pons-representative-priced-path-summary.jsonl" in content
     assert "phase1-pons-representative-dex-crosscheck" in content
+    assert "phase1-pons-representative-explorer-crosscheck" in content
+    assert "explorer_crosscheck_run_id" in content
+    assert "pons-representative-explorer-token-summary.jsonl" in content
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
     assert "representative validation must contain exactly 10" in content
