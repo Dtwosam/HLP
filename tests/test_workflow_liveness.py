@@ -1360,6 +1360,9 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
         "phase1-pons-viability-ledger-finalize-one-shot.yml"
     )
     assert ".github/phase1-pons-viability-runs.json" in content
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert "viability ledger evidence run does not match readiness" in content
+    assert "viability readiness source run changed" in content
     assert "launch Phase 1 final acceptance" in content
     assert "viability run ledger is not armed" in content
     assert "nine distinct route run IDs" in content
