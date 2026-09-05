@@ -572,6 +572,30 @@ def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
 
 
 
+def test_representative_market_paths_are_manual_artifact_only_and_bounded():
+    content = _workflow("phase1-pons-representative-market-paths.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-full-registry-recovered" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-curve-full" in content
+    assert "phase1-pons-v2-transition-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "build_representative_market_path_rows" in content
+    assert "summarize_representative_market_paths" in content
+    assert "no provider requests" in content
+    assert 'default: "33911022718"' in content
+    assert 'default: "33936232604"' in content
+    assert 'default: "33912452330"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
 def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     content = _workflow("phase1-pons-representative-validation.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
