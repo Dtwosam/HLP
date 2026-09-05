@@ -218,6 +218,36 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["explorer_verified_dex_swap_transactions"] == 30
 
 
+def test_representative_validation_allows_no_explorer_evidence():
+    (
+        sample,
+        v1,
+        v2,
+        holders,
+        dex,
+        _explorer,
+        market_paths,
+        priced_paths,
+    ) = _fixtures()
+
+    rows = build_representative_validation_rows(
+        sample,
+        v1_lifecycle_rows=v1,
+        v2_lifecycle_rows=v2,
+        holder_summary_rows=holders,
+        dex_crosscheck_rows=dex,
+        market_path_summary_rows=market_paths,
+        priced_path_summary_rows=priced_paths,
+    )
+    summary = summarize_representative_validation(rows)
+
+    assert summary["explorer_verified_tokens"] == 0
+    assert summary["explorer_verified_transactions"] == 0
+    assert summary["explorer_verified_launch_transactions"] == 0
+    assert summary["explorer_verified_dex_swap_transactions"] == 0
+    assert summary["complete_tokens"] == 10
+
+
 def test_representative_validation_fails_closed_on_missing_holder():
     sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
 
