@@ -16,6 +16,7 @@ def _fixtures():
     v2 = []
     holders = []
     dex = []
+    market_paths = []
 
     for index in range(1, 11):
         token = _token(index)
@@ -54,6 +55,33 @@ def _fixtures():
                 "accounted_supply_raw": 1_000_000,
             }
         )
+        registered_v4 = version == "v2"
+        stage_counts = (
+            {"launch": 1, "v1_v3": 7}
+            if version == "v1"
+            else {
+                "launch": 1,
+                "v2_curve": 8,
+                "v2_graduation": 1,
+                "v2_registration": 1,
+                "v2_v4": 4,
+            }
+        )
+        market_paths.append(
+            {
+                "token": token,
+                "pons_version": version,
+                "sample_group": group,
+                "launch_block": launch_block,
+                "path_rows": sum(stage_counts.values()),
+                "stage_counts": stage_counts,
+                "first_path_block": launch_block,
+                "last_path_block": 1_500 + index,
+                "graduated": registered_v4,
+                "registered_v4": registered_v4,
+                "has_v4_market_events": registered_v4,
+            }
+        )
         dex.append(
             {
                 "token": token,
@@ -68,19 +96,24 @@ def _fixtures():
             }
         )
 
-    return sample, v1, v2, holders, dex
+    return sample, v1, v2, holders, dex, market_paths
 
 
-def test_representative_validation_joins_all_phase1_evidence():
-    sample, v1, v2, holders, dex = _fixtures()
-
-    rows = build_representative_validation_rows(
+def _build(fixtures):
+    sample, v1, v2, holders, dex, market_paths = fixtures
+    return build_representative_validation_rows(
         sample,
         v1_lifecycle_rows=v1,
         v2_lifecycle_rows=v2,
         holder_summary_rows=holders,
         dex_crosscheck_rows=dex,
+        market_path_summary_rows=market_paths,
     )
+
+
+def test_representative_validation_joins_all_phase1_evidence():
+    fixtures = _fixtures()
+    rows = _build(fixtures)
     summary = summarize_representative_validation(rows)
 
     assert len(rows) == 10
@@ -89,6 +122,9 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["sample_groups"] == {"failure": 5, "runner": 5}
     assert summary["pons_versions"] == {"v1": 5, "v2": 5}
     assert summary["priced_points"] == 100
+    assert summary["market_path_rows"] == 110
+    assert summary["market_path_registered_v4"] == 5
+    assert summary["market_path_with_v4_events"] == 5
     assert summary["transfers"] == sum(25 + index for index in range(1, 11))
     assert summary["dex_targeted"] == 10
     assert summary["dex_matched"] == 10
@@ -98,7 +134,7 @@ def test_representative_validation_joins_all_phase1_evidence():
 
 
 def test_representative_validation_fails_closed_on_missing_holder():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
 
     with pytest.raises(ValueError, match="holder summary coverage"):
         build_representative_validation_rows(
@@ -107,11 +143,26 @@ def test_representative_validation_fails_closed_on_missing_holder():
             v2_lifecycle_rows=v2,
             holder_summary_rows=holders[:-1],
             dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
+        )
+
+
+def test_representative_validation_fails_closed_on_missing_market_path():
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
+
+    with pytest.raises(ValueError, match="market-path summary coverage"):
+        build_representative_validation_rows(
+            sample,
+            v1_lifecycle_rows=v1,
+            v2_lifecycle_rows=v2,
+            holder_summary_rows=holders,
+            dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths[:-1],
         )
 
 
 def test_representative_validation_requires_priced_market_evidence():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
     v1[0]["price_points"] = 2
     v1[0]["priced_points"] = 0
     v1[0]["max_market_cap_proxy_usd"] = None
@@ -123,11 +174,12 @@ def test_representative_validation_requires_priced_market_evidence():
             v2_lifecycle_rows=v2,
             holder_summary_rows=holders,
             dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
         )
 
 
 def test_representative_validation_rejects_external_pool_mismatch():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
     dex[0]["external_status"] = "mismatch"
     dex[0]["external_match"] = False
     dex[0]["mismatches"] = ["token_pair"]
@@ -139,11 +191,12 @@ def test_representative_validation_rejects_external_pool_mismatch():
             v2_lifecycle_rows=v2,
             holder_summary_rows=holders,
             dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
         )
 
 
 def test_representative_validation_allows_explicit_unregistered_v2_pool():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
     dex[-1].update(
         {
             "crosscheck_scope": "no_registered_v4_pool",
@@ -154,6 +207,15 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
             "price_crosscheck_status": "not_applicable",
         }
     )
+    market_paths[-1].update(
+        {
+            "stage_counts": {"launch": 1, "v2_curve": 8},
+            "path_rows": 9,
+            "graduated": False,
+            "registered_v4": False,
+            "has_v4_market_events": False,
+        }
+    )
 
     rows = build_representative_validation_rows(
         sample,
@@ -161,6 +223,7 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
         v2_lifecycle_rows=v2,
         holder_summary_rows=holders,
         dex_crosscheck_rows=dex,
+        market_path_summary_rows=market_paths,
     )
     summary = summarize_representative_validation(rows)
 
@@ -169,10 +232,26 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
     assert summary["dex_price_targeted"] == 9
     assert summary["dex_price_matched"] == 9
     assert summary["no_registered_v4_pool"] == 1
+    assert summary["market_path_registered_v4"] == 4
+
+
+def test_representative_validation_rejects_registration_without_v4_events():
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
+    market_paths[-1]["has_v4_market_events"] = False
+
+    with pytest.raises(ValueError, match="has no V4 market events"):
+        build_representative_validation_rows(
+            sample,
+            v1_lifecycle_rows=v1,
+            v2_lifecycle_rows=v2,
+            holder_summary_rows=holders,
+            dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
+        )
 
 
 def test_representative_validation_rejects_dex_price_mismatch():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
     dex[0]["price_match"] = False
     dex[0]["price_crosscheck_status"] = "outside_candle"
 
@@ -183,11 +262,12 @@ def test_representative_validation_rejects_dex_price_mismatch():
             v2_lifecycle_rows=v2,
             holder_summary_rows=holders,
             dex_crosscheck_rows=dex,
+            market_path_summary_rows=market_paths,
         )
 
 
 def test_representative_validation_allows_explicit_no_swap_checkpoint():
-    sample, v1, v2, holders, dex = _fixtures()
+    sample, v1, v2, holders, dex, market_paths = _fixtures()
     dex[0].update(
         {
             "price_crosscheck_scope": "no_swap_checkpoint",
@@ -202,6 +282,7 @@ def test_representative_validation_allows_explicit_no_swap_checkpoint():
         v2_lifecycle_rows=v2,
         holder_summary_rows=holders,
         dex_crosscheck_rows=dex,
+        market_path_summary_rows=market_paths,
     )
     summary = summarize_representative_validation(rows)
     assert summary["dex_price_targeted"] == 9
