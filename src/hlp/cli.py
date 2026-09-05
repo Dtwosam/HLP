@@ -140,6 +140,7 @@ from hlp.data.reconstruct import (
     v3_quote_price_at_block,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
+from hlp.data.sharded_tape import iter_sharded_jsonl
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
 from hlp.data.transition import summarize_v2_transition_continuity
 from hlp.data.trench_curve import (
@@ -3003,7 +3004,12 @@ def cmd_pons_v1_lifecycle_eligibility(args: argparse.Namespace) -> int:
     initial_quote_usd, quote_updates = _load_quote_usd_inputs(args)
     points = build_v1_market_cap_points(
         registry,
-        _iter_jsonl(args.v3_events),
+        _iter_event_tape(
+            file_path=args.v3_events,
+            shard_dir=args.v3_events_dir,
+            aggregate_manifest=args.v3_events_manifest,
+            label="V1 V3 events",
+        ),
         _iter_jsonl(args.anchor_events),
         initial_weth_usd=initial_weth_usd,
         weth_decimals=weth_decimals,
@@ -3032,7 +3038,13 @@ def cmd_pons_v1_lifecycle_eligibility(args: argparse.Namespace) -> int:
             "source": "streamed_full_v1_v3_replay_summary_only",
             "chain_id": 4663,
             "registry": Path(args.registry).name,
-            "v3_events": Path(args.v3_events).name,
+            "v3_events": _event_tape_source_name(
+                file_path=args.v3_events,
+                aggregate_manifest=args.v3_events_manifest,
+            ),
+            "v3_events_storage": (
+                "single_jsonl" if args.v3_events else "sharded_artifacts"
+            ),
             "quote_registry": Path(args.quote_registry).name,
             "anchor_events": Path(args.anchor_events).name,
             "anchor_initial": Path(args.anchor_initial).name,
@@ -3174,7 +3186,12 @@ def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
     v4_points = build_v2_v4_market_cap_points(
         registry,
         registrations,
-        _iter_jsonl(args.v4_events),
+        _iter_event_tape(
+            file_path=args.v4_events,
+            shard_dir=args.v4_events_dir,
+            aggregate_manifest=args.v4_events_manifest,
+            label="V2 V4 events",
+        ),
         _iter_jsonl(args.anchor_events),
         initial_weth_usd=initial_weth_usd,
         initial_quote_usd=v4_initial_quote_usd,
@@ -3199,7 +3216,13 @@ def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
             "curve_summary": Path(args.curve_summary).name,
             "graduations": Path(args.graduations).name,
             "registrations": Path(args.registrations).name,
-            "v4_events": Path(args.v4_events).name,
+            "v4_events": _event_tape_source_name(
+                file_path=args.v4_events,
+                aggregate_manifest=args.v4_events_manifest,
+            ),
+            "v4_events_storage": (
+                "single_jsonl" if args.v4_events else "sharded_artifacts"
+            ),
             "anchor_events": Path(args.anchor_events).name,
             "anchor_initial": Path(args.anchor_initial).name,
             "oracle_state": (
@@ -4256,6 +4279,35 @@ def _load_jsonl(path: str) -> list[dict]:
     return list(_iter_jsonl(path))
 
 
+def _iter_event_tape(
+    *,
+    file_path: str | None,
+    shard_dir: str | None,
+    aggregate_manifest: str | None,
+    label: str,
+):
+    if file_path:
+        if shard_dir or aggregate_manifest:
+            raise SystemExit(
+                f"{label}: single-file and sharded inputs are mutually exclusive"
+            )
+        return _iter_jsonl(file_path)
+    if not shard_dir or not aggregate_manifest:
+        raise SystemExit(
+            f"{label}: sharded input requires both directory and manifest"
+        )
+    return iter_sharded_jsonl(Path(shard_dir), Path(aggregate_manifest))
+
+
+def _event_tape_source_name(
+    *,
+    file_path: str | None,
+    aggregate_manifest: str | None,
+) -> str:
+    source = file_path or aggregate_manifest
+    if not source:
+        raise SystemExit("event tape source is missing")
+    return Path(source).name
 
 
 def _load_quote_usd_inputs(
@@ -5433,7 +5485,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     v1_eligibility = sub.add_parser("pons-v1-lifecycle-eligibility")
     v1_eligibility.add_argument("--registry", required=True)
-    v1_eligibility.add_argument("--v3-events", required=True)
+    v1_v3_source = v1_eligibility.add_mutually_exclusive_group(required=True)
+    v1_v3_source.add_argument("--v3-events")
+    v1_v3_source.add_argument("--v3-events-dir")
+    v1_eligibility.add_argument("--v3-events-manifest")
     v1_eligibility.add_argument("--quote-registry", required=True)
     v1_eligibility.add_argument("--anchor-events", required=True)
     v1_eligibility.add_argument("--anchor-initial", required=True)
@@ -5469,7 +5524,12 @@ def build_parser() -> argparse.ArgumentParser:
     v2_lifecycle_eligibility.add_argument("--curve-summary", required=True)
     v2_lifecycle_eligibility.add_argument("--graduations", required=True)
     v2_lifecycle_eligibility.add_argument("--registrations", required=True)
-    v2_lifecycle_eligibility.add_argument("--v4-events", required=True)
+    v2_v4_source = v2_lifecycle_eligibility.add_mutually_exclusive_group(
+        required=True
+    )
+    v2_v4_source.add_argument("--v4-events")
+    v2_v4_source.add_argument("--v4-events-dir")
+    v2_lifecycle_eligibility.add_argument("--v4-events-manifest")
     v2_lifecycle_eligibility.add_argument("--anchor-events", required=True)
     v2_lifecycle_eligibility.add_argument("--anchor-initial", required=True)
     v2_lifecycle_eligibility.add_argument("--oracle-state")
