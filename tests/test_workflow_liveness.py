@@ -539,6 +539,25 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "time.sleep(" not in content
 
 
+def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
+    content = _workflow(
+        "phase1-pons-acquisition-viability-projection.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-acquisition-accounting" in content
+    assert "project_phase1_acquisition_plan" in content
+    assert "route_plan_json" in content
+    assert "zero_cost_route_evidence" in content
+    assert "does not mark Phase 1 PASS" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
 def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     content = _workflow("phase1-pons-acquisition-accounting.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
