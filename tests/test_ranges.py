@@ -52,3 +52,22 @@ def test_plan_missing_subranges_never_refetches_covered_blocks():
         (15, 18),
         (19, 20),
     ]
+
+def test_plan_missing_subranges_reuses_prior_gap_coverage():
+    assert plan_missing_subranges(
+        1,
+        40,
+        [
+            (31, 40),  # successful partial-recovery suffix
+            (1, 10),   # successful partial-recovery prefix
+            (16, 20),  # successful earlier gap-recovery artifact
+        ],
+        max_blocks=4,
+    ) == [
+        (11, 14),
+        (15, 15),
+        (21, 24),
+        (25, 28),
+        (29, 30),
+    ]
+
