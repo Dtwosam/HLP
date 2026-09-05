@@ -436,6 +436,20 @@ def build_phase1_acceptance_report(
         raise ValueError(
             "representative and universe V2 lifecycle evidence disagree"
         )
+    if _sha256(
+        representative_provenance.get("v1_eligibility_sha256"),
+        field="representative.v1_eligibility_sha256",
+    ) != v1_eligibility_sha256:
+        raise ValueError(
+            "representative and universe V1 lifecycle artifact SHA disagree"
+        )
+    if _sha256(
+        representative_provenance.get("v2_eligibility_sha256"),
+        field="representative.v2_eligibility_sha256",
+    ) != v2_eligibility_sha256:
+        raise ValueError(
+            "representative and universe V2 lifecycle artifact SHA disagree"
+        )
 
     representative_source_run_ids = {}
     for field, expected in REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS.items():
@@ -473,6 +487,13 @@ def build_phase1_acceptance_report(
     )
     if fallback_run_id <= 0:
         raise ValueError("representative fallback run provenance is invalid")
+    if fallback_run_id not in {
+        v1_eligibility_run_id,
+        v2_eligibility_run_id,
+    }:
+        raise ValueError(
+            "representative fallback run does not match lifecycle evidence"
+        )
     representative_source_run_ids["fallback_run_id"] = fallback_run_id
 
     route_names = [str(value) for value in viability.get("route_names") or []]
