@@ -92,6 +92,19 @@ def _response_byte_counters(records: Iterable[dict]) -> Counter[str]:
     return counters
 
 
+def _rpc_route_counters(records: Iterable[dict]) -> Counter[str]:
+    counters: Counter[str] = Counter()
+    for record in records:
+        route = record.get("rpc_route")
+        if route is None:
+            continue
+        label = str(route).strip()
+        if not label:
+            raise ValueError("rpc_route cannot be empty")
+        counters[label] += 1
+    return counters
+
+
 def _nonnegative_float(value: object, *, field: str) -> float:
     try:
         result = float(value)
@@ -166,6 +179,7 @@ def summarize_action_run(
     )
     request_totals: Counter[str] = Counter()
     response_byte_totals: Counter[str] = Counter()
+    rpc_route_totals: Counter[str] = Counter()
     reported_ranges: list[tuple[int, int]] = []
     reported_elapsed_seconds = 0.0
     job_runtime_values: list[float] = []
@@ -185,6 +199,7 @@ def summarize_action_run(
         json_records += len(records)
         request_totals.update(_request_counters(records))
         response_byte_totals.update(_response_byte_counters(records))
+        rpc_route_totals.update(_rpc_route_counters(records))
         reported_ranges.extend(_reported_block_ranges(records))
         elapsed = [
             _nonnegative_float(
@@ -232,6 +247,8 @@ def summarize_action_run(
             sorted(response_byte_totals.items())
         ),
         "counted_response_bytes": sum(response_byte_totals.values()),
+        "rpc_route_counts": dict(sorted(rpc_route_totals.items())),
+        "reported_rpc_routes": sorted(rpc_route_totals),
         "reported_block_ranges": [
             [lo, hi] for lo, hi in merged_ranges
         ],
@@ -270,6 +287,7 @@ def summarize_phase1_runs(
 
     request_totals: Counter[str] = Counter()
     response_byte_totals: Counter[str] = Counter()
+    rpc_route_totals: Counter[str] = Counter()
     artifact_bytes = 0
     reported_processed_blocks = 0
     reported_elapsed_seconds = 0.0
@@ -289,6 +307,11 @@ def summarize_phase1_runs(
             response_byte_totals[str(key)] += _nonnegative_int(
                 value,
                 field=f"response_byte_counters.{key}",
+            )
+        for key, value in dict(row.get("rpc_route_counts") or {}).items():
+            rpc_route_totals[str(key)] += _nonnegative_int(
+                value,
+                field=f"rpc_route_counts.{key}",
             )
         artifact_bytes += _nonnegative_int(
             row.get("artifact_bytes", 0),
@@ -325,6 +348,8 @@ def summarize_phase1_runs(
         ),
         "counted_response_bytes": counted_response_bytes,
         "counted_response_gib": counted_response_bytes / (1024 ** 3),
+        "rpc_route_counts": dict(sorted(rpc_route_totals.items())),
+        "reported_rpc_routes": sorted(rpc_route_totals),
         "reported_processed_blocks": reported_processed_blocks,
         "reported_elapsed_seconds": reported_elapsed_seconds,
         "job_runtime_seconds": job_runtime_seconds,
