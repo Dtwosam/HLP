@@ -13,6 +13,15 @@ EXPECTED_V1_LAUNCHES = 268_688
 EXPECTED_V2_LAUNCHES = 225_951
 FREE_DAILY_METHOD_CALLS = 10_000
 
+REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS = {
+    "registry_run_id": 33_911_022_718,
+    "v2_curve_run_id": 33_936_232_604,
+    "transition_run_id": 33_912_452_330,
+    "quote_audit_run_id": 33_923_299_711,
+    "anchor_run_id": 33_972_109_927,
+    "oracle_run_id": 33_974_681_334,
+}
+
 REQUIRED_PHASE1_ACQUISITION_ROUTES = tuple(
     REQUIRED_PHASE1_ROUTE_BLOCKS
 )
@@ -396,6 +405,44 @@ def build_phase1_acceptance_report(
             "representative and universe V2 lifecycle evidence disagree"
         )
 
+    representative_source_run_ids = {}
+    for field, expected in REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS.items():
+        observed = _int(
+            representative_provenance.get(field),
+            field=f"representative.{field}",
+        )
+        if observed != expected:
+            raise ValueError(
+                f"representative canonical source run changed: "
+                f"{field}={observed} != {expected}"
+            )
+        representative_source_run_ids[field] = observed
+
+    for field in (
+        "sample_run_id",
+        "transfer_run_id",
+        "market_path_run_id",
+        "priced_path_run_id",
+        "dex_crosscheck_run_id",
+    ):
+        run_id = _int(
+            representative_provenance.get(field),
+            field=f"representative.{field}",
+        )
+        if run_id <= 0:
+            raise ValueError(
+                f"representative upstream run provenance is invalid: {field}"
+            )
+        representative_source_run_ids[field] = run_id
+
+    fallback_run_id = _int(
+        representative_provenance.get("fallback_run_id"),
+        field="representative.fallback_run_id",
+    )
+    if fallback_run_id <= 0:
+        raise ValueError("representative fallback run provenance is invalid")
+    representative_source_run_ids["fallback_run_id"] = fallback_run_id
+
     route_names = [str(value) for value in viability.get("route_names") or []]
     required_routes = list(REQUIRED_PHASE1_ACQUISITION_ROUTES)
     if len(route_names) != len(set(route_names)):
@@ -570,6 +617,7 @@ def build_phase1_acceptance_report(
         "representative_coverage_sources": coverage_sources,
         "representative_no_unexplained_block_gaps": True,
         "representative_source_coverage_sha256": coverage_sha,
+        "representative_source_run_ids": representative_source_run_ids,
         "required_acquisition_routes": required_routes,
         "required_route_blocks": expected_route_blocks,
         "route_evidence_run_ids": route_evidence_run_ids,
