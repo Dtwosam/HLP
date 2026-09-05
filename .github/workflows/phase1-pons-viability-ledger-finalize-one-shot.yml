@@ -90,6 +90,21 @@ jobs:
               "phase1-pons-viability-measurement-pons_registry-secondary",
           }
 
+          readiness = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          if int(readiness.get("generation", 0)) <= 0:
+              raise SystemExit("viability evidence readiness is not armed")
+          if int(readiness.get("source_eligibility_run_id", 0)) != 33_982_556_591:
+              raise SystemExit("viability readiness source run changed")
+          readiness_evidence_run_id = int(
+              readiness.get("evidence_run_id", 0)
+          )
+          if readiness_evidence_run_id <= 0:
+              raise SystemExit(
+                  "viability readiness evidence run ID must be positive"
+              )
+
           ledger = json.loads(
               Path(".github/phase1-pons-viability-runs.json").read_text()
           )
@@ -98,6 +113,10 @@ jobs:
           evidence_run_id = int(ledger.get("evidence_run_id", 0))
           if evidence_run_id <= 0:
               raise SystemExit("viability ledger evidence run ID must be positive")
+          if evidence_run_id != readiness_evidence_run_id:
+              raise SystemExit(
+                  "viability ledger evidence run does not match readiness"
+              )
 
           routes = dict(ledger.get("routes") or {})
           if set(routes) != set(expected):
