@@ -933,6 +933,11 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "4861b2af1d549eb41c53341a07f6de71dce4d9486b769543c1376beab9c19ab9" in content
     assert "6fb40693b77d7434d4e579a2225fed2c65061841a5ea9d0ba56f785071fc6ef2" in content
     assert "frozen runner smoke must contain exactly five eligible" in content
+    assert "runner_smoke_universe_sha256" in content
+    assert "runner_smoke_outcomes_sha256" in content
+    assert "representative runner cohort drifted from frozen smoke evidence" in content
+    assert '"runner_tokens": sorted(sample_runner_tokens)' in content
+    assert '"failure_tokens": failure_tokens' in content
     assert 'versions != {"v1": 4, "v2": 1}' in content
     assert "--runners 5 --failures 5" in content
     assert "representative sample must freeze exactly five runners" in content
