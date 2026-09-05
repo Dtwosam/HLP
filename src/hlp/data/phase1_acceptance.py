@@ -475,6 +475,7 @@ def build_phase1_acceptance_report(
         raise ValueError(
             "viability projection route details do not match required routes"
         )
+    used_evidence_run_ids: set[int] = set()
     for row in route_projections:
         name = str(row.get("route"))
         if name not in REQUIRED_PHASE1_ACQUISITION_ROUTES:
@@ -493,8 +494,31 @@ def build_phase1_acceptance_report(
             row.get("evidence_processed_blocks"),
             field=f"{name}.evidence_processed_blocks",
         )
-        if not list(row.get("evidence_run_ids") or []):
-            raise ValueError(f"viability route has no run evidence: {name}")
+        evidence_run_ids = [
+            _int(value, field=f"{name}.evidence_run_ids")
+            for value in list(row.get("evidence_run_ids") or [])
+        ]
+        if not evidence_run_ids or min(evidence_run_ids) <= 0:
+            raise ValueError(f"viability route has no valid run evidence: {name}")
+        if len(evidence_run_ids) != len(set(evidence_run_ids)):
+            raise ValueError(
+                f"viability route repeats an evidence run id: {name}"
+            )
+        evidence_runs = _int(
+            row.get("evidence_runs"),
+            field=f"{name}.evidence_runs",
+        )
+        if evidence_runs != len(evidence_run_ids):
+            raise ValueError(
+                f"viability route evidence-run count disagrees: {name}"
+            )
+        overlap = used_evidence_run_ids & set(evidence_run_ids)
+        if overlap:
+            raise ValueError(
+                "viability evidence run reused across routes: "
+                f"{sorted(overlap)}"
+            )
+        used_evidence_run_ids.update(evidence_run_ids)
 
     accounting_run_id = _int(
         viability.get("accounting_run_id"),
