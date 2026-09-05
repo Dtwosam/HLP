@@ -68,6 +68,9 @@ jobs:
           import urllib.request
           from pathlib import Path
 
+          from hlp.data.github_actions import (
+              fetch_github_actions_job_log,
+          )
           from hlp.data.phase1_accounting import (
               summarize_action_run,
               summarize_phase1_runs,
@@ -158,9 +161,9 @@ jobs:
                   job_id = int(job["id"])
                   if job.get("status") != "completed":
                       continue
-                  logs[job_id] = request(
-                      f"/actions/jobs/{job_id}/logs",
-                      decode_json=False,
+                  logs[job_id] = fetch_github_actions_job_log(
+                      base + f"/actions/jobs/{job_id}/logs",
+                      token,
                   )
 
               summary = summarize_action_run(
