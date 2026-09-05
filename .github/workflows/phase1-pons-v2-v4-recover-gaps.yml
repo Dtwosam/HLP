@@ -19,7 +19,7 @@ on:
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
-        default: "100000"
+        default: "50000"
         type: string
   workflow_call:
     inputs:
