@@ -6,6 +6,13 @@ on:
       transition_run_id:
         description: "Successful phase1-pons-v2-transition-full run"
         required: true
+        default: "33912452330"
+        type: string
+  workflow_call:
+    inputs:
+      transition_run_id:
+        description: "Successful phase1-pons-v2-transition-full run"
+        required: true
         type: string
 
 permissions:
