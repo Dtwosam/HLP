@@ -1,7 +1,10 @@
 from decimal import Decimal
 
 from hlp.config import ROBINHOOD_WETH
-from hlp.data.v2_curve import build_v2_curve_market_cap_points
+from hlp.data.v2_curve import (
+    build_v2_curve_market_cap_points,
+    summarize_v2_curve_market_caps,
+)
 
 
 TOKEN = "0x" + "11" * 20
@@ -192,6 +195,36 @@ def test_stock_quote_uses_causal_oracle_price():
 
 
 
+def test_summary_keeps_v4_swap_checkpoint_separate_from_initialize():
+    rows = [
+        {
+            "token": TOKEN,
+            "curve": CURVE,
+            "quote_token": ROBINHOOD_WETH.lower(),
+            "launch_block": 10,
+            "block_number": 40,
+            "event_type": "v4_swap",
+            "pricing_status": "priced_weth_usdg",
+            "market_cap_proxy_usd": "400000",
+        },
+        {
+            "token": TOKEN,
+            "curve": CURVE,
+            "quote_token": ROBINHOOD_WETH.lower(),
+            "launch_block": 10,
+            "block_number": 41,
+            "event_type": "v4_initialize",
+            "pricing_status": "priced_weth_usdg",
+            "market_cap_proxy_usd": "800000",
+        },
+    ]
+    row = summarize_v2_curve_market_caps(rows)[0]
+    assert row["max_market_cap_proxy_usd"] == "800000"
+    assert row["max_market_cap_block"] == 41
+    assert row["v4_swap_max_market_cap_proxy_usd"] == "400000"
+    assert row["v4_swap_max_market_cap_block"] == 40
+
+
 def test_merge_lifecycle_summary_keeps_post_graduation_max():
     from hlp.data.v2_curve import merge_v2_lifecycle_market_cap_summaries
 
@@ -226,6 +259,8 @@ def test_merge_lifecycle_summary_keeps_post_graduation_max():
         "priced_points": 4,
         "max_market_cap_proxy_usd": "800000",
         "max_market_cap_block": 40,
+        "v4_swap_max_market_cap_proxy_usd": "700000",
+        "v4_swap_max_market_cap_block": 39,
         "crossed_100k": True,
     }]
     row = merge_v2_lifecycle_market_cap_summaries(
@@ -237,6 +272,8 @@ def test_merge_lifecycle_summary_keeps_post_graduation_max():
     assert row["crossed_100k"] is True
     assert row["max_market_cap_proxy_usd"] == "800000"
     assert row["max_market_cap_phase"] == "v4"
+    assert row["v4_swap_max_market_cap_proxy_usd"] == "700000"
+    assert row["v4_swap_max_market_cap_block"] == 39
     assert row["price_points"] == 8
     assert row["graduated"] is True
     assert row["has_v4_price_points"] is True
