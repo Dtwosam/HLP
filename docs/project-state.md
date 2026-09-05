@@ -441,7 +441,10 @@ research threshold or starting another archive crawl:
 - a resumable Transfer backfill reconstructs exact holder balances/counts and
   fails closed unless every sampled token begins with a launch-time mint;
 - GeckoTerminal is used only as independent DEX evidence, never canonical
-  history; the client supports pool identity and bounded OHLCV reads;
+  history; the client supports pool identity and bounded OHLCV reads. Every
+  actual HTTP attempt is now rate-paced, transient 429/5xx responses alone are
+  retried, `Retry-After` is honored, permanent HTTP errors fail immediately,
+  and the request counter includes retry attempts rather than only successes;
 - a separate bounded Blockscout cross-check can verify exact transaction
   identity and mined block for representative launches plus each distinct
   first/max/last DEX price checkpoint, but it is **supplementary only** while
@@ -501,7 +504,13 @@ research threshold or starting another archive crawl:
   Representative validation now also records the exact V1 and V2 lifecycle
   artifact SHA256 values; final Phase 1 acceptance requires those hashes to
   match the lifecycle hashes cryptographically bound into the promoted eligible
-  universe, so matching run IDs alone are no longer sufficient. A reusable
+  universe, so matching run IDs alone are no longer sufficient. The
+  representative sample also binds its five runner tokens exactly to frozen
+  research-smoke run **33920762592** and carries the frozen smoke universe SHA
+  `4861b2af...9c19ab9` plus outcome SHA `6fb40693...1fc6ef2` into the final
+  representative manifest. Phase 1 acceptance freezes that runner-smoke run and
+  both full SHA256 values independently, so the >=5x runner proof cannot drift
+  behind a valid-looking dynamic sample run. A reusable
   `phase1-pons-post-eligibility-evidence-chain` stages the normal post-crawl
   handoff: it fail-closes on source parent **33982556591**, runs the current-code
   eligible-universe promotion and representative evidence chain under one caller
@@ -535,11 +544,15 @@ The final Phase 1 viability path is also staged fail-closed:
   Current branch orchestration keeps those nine measurements as **nine
   individually guarded workflow runs**, not one matrix/caller run: a shared
   `.github/phase1-pons-viability-ready.json` must first name a successful
-  post-eligibility evidence run, then the nine route-specific one-shots are
-  launched sequentially and each calls
+  post-eligibility evidence run and
+  `.github/phase1-pons-viability-runs.json` must be armed to that same
+  evidence run. Each route-specific one-shot then calls
   `phase1-pons-viability-guarded-route` -> the canonical bounded measurement.
-  This preserves the frozen distinct-run-ID contract and keeps archive pressure
-  one route at a time. Two no-RPC probes established why more automatic
+  The guard refuses RPC work if the ledger is unarmed, names a different
+  evidence run, has a changed route set, or already contains a positive run ID
+  for that route; intentional reruns therefore require explicitly clearing the
+  route slot first. This preserves the frozen distinct-run-ID contract and
+  keeps archive pressure one route at a time. Two no-RPC probes established why more automatic
   branch-only chaining is not used: run **33988308531** received HTTP 404 when
   its branch workflow attempted to dispatch another branch-only workflow with
   `GITHUB_TOKEN`, and successful source probe **33988762949** produced no
@@ -548,9 +561,14 @@ The final Phase 1 viability path is also staged fail-closed:
   pending route workflows, so it is not a valid nine-run serializer.
   Completed route IDs are recorded in
   `.github/phase1-pons-viability-runs.json`; the guarded
-  `phase1-pons-viability-ledger-finalize-one-shot` independently verifies the
-  evidence run, all nine successful route workflow **file paths**, branch and
-  distinct run IDs before passing them to the reusable final acceptance chain.
+  `phase1-pons-viability-ledger-finalize-one-shot` independently requires the
+  ledger evidence run to equal the armed readiness evidence run, then verifies
+  all nine successful route workflow **file paths**, branch, distinct run IDs
+  and expected measurement artifacts before passing them to the reusable final
+  acceptance chain. Every route must expose its
+  `phase1-pons-viability-measurement-<route>-primary` artifact, and
+  `pons_registry` must additionally expose its V2 secondary measurement
+  artifact.
   Workflow paths are used deliberately because GitHub replaces the run
   `name` field with the custom `run-name` string; inert route run
   **33988929710** demonstrated that distinction before any acceptance evidence
