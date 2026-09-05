@@ -167,10 +167,57 @@ def build_phase1_acceptance_report(
             "representative validation has empty Pons generation coverage"
         )
 
-    _positive(
+    price_points = _int(
+        representative.get("price_points"),
+        field="representative.price_points",
+    )
+    priced_points = _int(
         representative.get("priced_points"),
         field="representative.priced_points",
     )
+    unpriced_points = _int(
+        representative.get("unpriced_points"),
+        field="representative.unpriced_points",
+    )
+    if (
+        price_points <= 0
+        or priced_points <= 0
+        or unpriced_points < 0
+        or price_points != priced_points + unpriced_points
+    ):
+        raise ValueError(
+            "representative lifecycle price-point accounting is invalid"
+        )
+
+    detailed_price_points = _int(
+        representative.get("detailed_price_points"),
+        field="representative.detailed_price_points",
+    )
+    detailed_priced_points = _int(
+        representative.get("detailed_priced_points"),
+        field="representative.detailed_priced_points",
+    )
+    detailed_unpriced_points = _int(
+        representative.get("detailed_unpriced_points"),
+        field="representative.detailed_unpriced_points",
+    )
+    if (
+        detailed_price_points != price_points
+        or detailed_priced_points != priced_points
+        or detailed_unpriced_points != unpriced_points
+    ):
+        raise ValueError(
+            "representative detailed and lifecycle price paths disagree"
+        )
+    detailed_complete_tokens = _int(
+        representative.get("detailed_price_path_complete_tokens"),
+        field="representative.detailed_price_path_complete_tokens",
+    )
+    if not 0 <= detailed_complete_tokens <= 10:
+        raise ValueError(
+            "representative detailed price-path completeness is invalid"
+        )
+
     _positive(
         representative.get("market_path_rows"),
         field="representative.market_path_rows",
@@ -336,6 +383,11 @@ def build_phase1_acceptance_report(
         "v1_eligibility_run_id": v1_eligibility_run_id,
         "v2_eligibility_run_id": v2_eligibility_run_id,
         "representative_tokens": 10,
+        "representative_price_points": price_points,
+        "representative_detailed_price_points": detailed_price_points,
+        "representative_detailed_price_path_complete_tokens": (
+            detailed_complete_tokens
+        ),
         "representative_dex_targeted": dex_targeted,
         "representative_dex_matched": dex_matched,
         "required_acquisition_routes": required_routes,
