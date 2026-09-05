@@ -12,6 +12,26 @@ FREE_RPC_ROUTES = frozenset({
     "solidrpc_authenticated_free",
 })
 
+PHASE1_SNAPSHOT_HEAD_BLOCK = 54_486_035
+
+# Frozen acquisition work units from the Phase 1 full-history workflow
+# geometry. These count blocks processed by each independent scan; overlapping
+# scans (notably Pons V1 + V2 registry acquisition) intentionally count twice.
+REQUIRED_PHASE1_ROUTE_BLOCKS = {
+    "pons_registry": (
+        PHASE1_SNAPSHOT_HEAD_BLOCK - 8_600_612 + 1
+        + PHASE1_SNAPSHOT_HEAD_BLOCK - 26_841_846 + 1
+    ),
+    "pons_v1_v3": PHASE1_SNAPSHOT_HEAD_BLOCK - 8_621_658 + 1,
+    "pons_v2_curve": PHASE1_SNAPSHOT_HEAD_BLOCK - 26_841_846 + 1,
+    "pons_v2_transition": PHASE1_SNAPSHOT_HEAD_BLOCK - 26_841_846 + 1,
+    "pons_v2_v4": PHASE1_SNAPSHOT_HEAD_BLOCK - 26_841_846 + 1,
+    "weth_usdg_anchor": PHASE1_SNAPSHOT_HEAD_BLOCK - 8_621_658 + 1,
+    "stock_oracle": PHASE1_SNAPSHOT_HEAD_BLOCK - 8_621_658 + 1,
+    "quote_v3_fallback": PHASE1_SNAPSHOT_HEAD_BLOCK - 35_992_329 + 1,
+    "quote_v4_fallback": PHASE1_SNAPSHOT_HEAD_BLOCK - 36_023_158 + 1,
+}
+
 
 def _positive_int(value: object, *, field: str) -> int:
     if isinstance(value, bool):
@@ -198,6 +218,20 @@ def project_phase1_acquisition_plan(
     if not plans:
         raise ValueError("Phase 1 acquisition plan cannot be empty")
 
+    plan_names = [str(row.get("route") or "").strip() for row in plans]
+    if any(not name for name in plan_names):
+        raise ValueError("Phase 1 route plan has empty route name")
+    if len(plan_names) != len(set(plan_names)):
+        raise ValueError("Phase 1 acquisition plan contains duplicate routes")
+    required_names = set(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    if set(plan_names) != required_names:
+        missing = sorted(required_names - set(plan_names))
+        extra = sorted(set(plan_names) - required_names)
+        raise ValueError(
+            "Phase 1 acquisition route contract mismatch: "
+            f"missing={missing} extra={extra}"
+        )
+
     summary_rows = [dict(row) for row in run_summaries]
     summary_ids = [
         _positive_int(row.get("run_id"), field="run_id")
@@ -218,12 +252,21 @@ def project_phase1_acquisition_plan(
     projected = []
 
     for plan in plans:
-        name = str(plan.get("route") or "").strip()
-        if not name:
-            raise ValueError("Phase 1 route plan has empty route name")
+        name = str(plan["route"]).strip()
         if name in names:
             raise ValueError(f"duplicate Phase 1 route plan: {name}")
         names.add(name)
+
+        required_blocks = _positive_int(
+            plan.get("required_blocks"),
+            field=f"{name}.required_blocks",
+        )
+        expected_blocks = REQUIRED_PHASE1_ROUTE_BLOCKS[name]
+        if required_blocks != expected_blocks:
+            raise ValueError(
+                f"route {name} required_blocks changed: "
+                f"{required_blocks} != {expected_blocks}"
+            )
 
         run_ids = [
             _positive_int(value, field=f"{name}.run_ids")
@@ -248,10 +291,7 @@ def project_phase1_acquisition_plan(
             project_route_requirements(
                 name,
                 [summaries[run_id] for run_id in run_ids],
-                required_blocks=_positive_int(
-                    plan.get("required_blocks"),
-                    field=f"{name}.required_blocks",
-                ),
+                required_blocks=required_blocks,
                 free_daily_method_calls=free_daily_method_calls,
             )
         )
@@ -278,6 +318,8 @@ def project_phase1_acquisition_plan(
         "routes": len(projected),
         "route_names": [row["route"] for row in projected],
         "route_projections": projected,
+        "required_route_blocks": dict(REQUIRED_PHASE1_ROUTE_BLOCKS),
+        "required_work_blocks": sum(REQUIRED_PHASE1_ROUTE_BLOCKS.values()),
         "all_routes_instrumented": True,
         "all_observed_rpc_routes_free": all(
             row["all_observed_rpc_routes_free"] for row in projected
@@ -299,9 +341,11 @@ def project_phase1_acquisition_plan(
             row["all_observed_rpc_routes_free"] for row in projected
         ),
         "projection_scope_note": (
-            "capacity projection uses the worst observed per-processed-block "
-            "request, response-byte, artifact-byte and runtime rates from "
-            "successful instrumented evidence runs. It is a conservative "
-            "planning estimate, not a provider billing claim."
+            "capacity projection uses the frozen full-history work-block "
+            "geometry plus the worst observed per-processed-block request, "
+            "response-byte, artifact-byte and runtime rates from successful "
+            "instrumented evidence runs. Overlapping independent scans count "
+            "as separate work. It is a conservative planning estimate, not a "
+            "provider billing claim."
         ),
     }
