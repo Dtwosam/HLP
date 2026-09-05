@@ -11,6 +11,14 @@ on:
         description: "Successful phase1-pons-v2-lifecycle-eligibility run"
         required: true
         type: string
+  workflow_call:
+    inputs:
+      v1_eligibility_run_id:
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        required: true
+        type: string
 
 permissions:
   contents: read
