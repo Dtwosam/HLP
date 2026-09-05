@@ -34,6 +34,30 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: python -m pip install -e .
+      - id: evidence
+        name: Resolve armed evidence run
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          run_id = int(config.get("evidence_run_id", 0))
+          if run_id < 0:
+              raise SystemExit("readiness evidence run ID cannot be negative")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"evidence_run_id={run_id}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' }}
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
       - name: Build Phase 1 readiness report
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -239,6 +263,15 @@ jobs:
               for route in VIABILITY_ROUTE_WORKFLOW_PATHS
           }
 
+          handoff_path = Path(
+              "handoff/phase1-post-eligibility-evidence-ready.json"
+          )
+          evidence_handoff = (
+              json.loads(handoff_path.read_text())
+              if handoff_path.exists()
+              else None
+          )
+
           finalizer_runs = []
           if (
               evidence_run_id > 0
@@ -283,6 +316,7 @@ jobs:
               ledger_generation=ledger_generation,
               ledger_evidence_run_id=ledger_evidence_run_id,
               ledger_route_run_ids=route_run_ids,
+              evidence_handoff=evidence_handoff,
           )
           report.update(
               {
@@ -333,6 +367,12 @@ jobs:
                   summary.write(
                       "- Missing source artifacts: "
                       + ", ".join(report["source_missing_artifacts"])
+                      + "\n"
+                  )
+              if report.get("evidence_handoff_errors"):
+                  summary.write(
+                      "- Evidence handoff errors: "
+                      + "; ".join(report["evidence_handoff_errors"])
                       + "\n"
                   )
               if report.get("invalid_viability_routes"):
