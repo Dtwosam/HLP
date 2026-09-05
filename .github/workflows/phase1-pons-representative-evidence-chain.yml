@@ -174,4 +174,11 @@ jobs:
       market_path_run_id: ${{ format('{0}', github.run_id) }}
       priced_path_run_id: ${{ format('{0}', github.run_id) }}
       dex_crosscheck_run_id: ${{ format('{0}', github.run_id) }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      fallback_run_id: ${{ inputs.eligibility_run_id }}
     secrets: inherit
