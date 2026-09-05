@@ -489,9 +489,11 @@ pricing inputs. A manual-only
 `phase1-pons-full-eligibility-acquisition-chain` now serializes V1 V3 first,
 V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain.
 A guarded one-shot launcher is staged against resumable oracle promotion run
-**33974681334**; its initial creation is intentionally skipped and it must not
-be fired unless that run freezes the canonical stock-oracle artifact and the
-archive lane is otherwise clear.
+**33974681334**; its initial creation is intentionally skipped. The full chain
+now preflights that run's canonical stock-oracle artifact—23 feeds, the single
+DELL delta, matching summary/manifests/checksums, chain 4663 and the frozen
+snapshot head—before V1/V3 acquisition can start. The launcher must not be
+fired unless the oracle run succeeds and the archive lane is otherwise clear.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former

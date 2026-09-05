@@ -660,6 +660,11 @@ def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     assert "workflow_dispatch:" in trigger_block
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
+    assert "phase1-pons-stock-oracle-full" in content
+    assert "canonical stock oracle must contain 23 feeds" in content
+    assert 'summary.get("delta_symbols") != ["DELL"]' in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
     assert "phase1-pons-v1-v3-full.yml" in content
     assert "phase1-pons-v2-v4-full.yml" in content
     assert "needs: v1_v3" in content
