@@ -37,7 +37,7 @@ def _fixtures():
             "launch_block": launch_block,
             "eligibility_status": status,
             "pricing_complete": group == "failure",
-            "price_points": 12,
+            "price_points": 12 if group == "runner" else 10,
             "priced_points": 10,
             "unpriced_points": 2 if group == "runner" else 0,
             "max_market_cap_proxy_usd": (
@@ -106,6 +106,7 @@ def test_representative_validation_fails_closed_on_missing_holder():
 
 def test_representative_validation_requires_priced_market_evidence():
     sample, v1, v2, holders, dex = _fixtures()
+    v1[0]["price_points"] = 2
     v1[0]["priced_points"] = 0
     v1[0]["max_market_cap_proxy_usd"] = None
 
