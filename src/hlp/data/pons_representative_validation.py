@@ -297,6 +297,12 @@ def build_representative_validation_rows(
         price_scope = str(dex_row.get("price_crosscheck_scope"))
         price_match = dex_row.get("price_match")
         price_status = str(dex_row.get("price_crosscheck_status"))
+        price_checkpoints = list(dex_row.get("price_checkpoints") or [])
+        checkpoint_roles = Counter(
+            role
+            for checkpoint in price_checkpoints
+            for role in list(checkpoint.get("checkpoint_roles") or [])
+        )
         registered_v4 = bool(market_path.get("registered_v4"))
         has_v4_market_events = bool(
             market_path.get("has_v4_market_events")
@@ -326,8 +332,36 @@ def build_representative_validation_rows(
                         f"representative DEX price cross-check failed for "
                         f"{token}: status={price_status}"
                     )
+                if not price_checkpoints:
+                    raise ValueError(
+                        f"representative DEX price checkpoints missing for "
+                        f"{token}"
+                    )
+                if checkpoint_roles != {
+                    "first": 1,
+                    "max": 1,
+                    "last": 1,
+                }:
+                    raise ValueError(
+                        f"representative DEX checkpoint roles invalid for "
+                        f"{token}: {dict(checkpoint_roles)}"
+                    )
+                bad_checkpoints = [
+                    checkpoint
+                    for checkpoint in price_checkpoints
+                    if (
+                        checkpoint.get("price_match") is not True
+                        or checkpoint.get("price_crosscheck_status")
+                        != "matched"
+                    )
+                ]
+                if bad_checkpoints:
+                    raise ValueError(
+                        f"representative DEX checkpoint mismatch for "
+                        f"{token}"
+                    )
             elif price_scope == "no_swap_checkpoint":
-                if price_match is not None:
+                if price_match is not None or price_checkpoints:
                     raise ValueError(
                         f"invalid no-swap DEX price state for {token}"
                     )
@@ -345,7 +379,11 @@ def build_representative_validation_rows(
                 raise ValueError(
                     f"invalid no-pool DEX cross-check state for {token}"
                 )
-            if price_scope != "not_applicable" or price_match is not None:
+            if (
+                price_scope != "not_applicable"
+                or price_match is not None
+                or price_checkpoints
+            ):
                 raise ValueError(
                     f"invalid no-pool DEX price state for {token}"
                 )
@@ -385,6 +423,11 @@ def build_representative_validation_rows(
                 "external_match": external_match,
                 "dex_price_crosscheck_scope": price_scope,
                 "dex_price_match": price_match,
+                "dex_price_checkpoint_count": len(price_checkpoints),
+                "dex_price_checkpoint_matched": sum(
+                    checkpoint.get("price_match") is True
+                    for checkpoint in price_checkpoints
+                ),
                 "validation_status": "complete",
             }
         )
@@ -456,6 +499,16 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         ),
         "dex_price_matched": sum(
             row.get("dex_price_match") is True for row in values
+        ),
+        "dex_price_checkpoints_targeted": sum(
+            int(row["dex_price_checkpoint_count"]) for row in values
+        ),
+        "dex_price_checkpoints_matched": sum(
+            int(row["dex_price_checkpoint_matched"]) for row in values
+        ),
+        "dex_price_multi_checkpoint_tokens": sum(
+            int(row["dex_price_checkpoint_count"]) > 1
+            for row in values
         ),
         "dex_price_no_swap_checkpoint": sum(
             row.get("dex_price_crosscheck_scope") == "no_swap_checkpoint"
