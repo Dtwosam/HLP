@@ -6,6 +6,18 @@ on:
       route_audit_run_id:
         description: "Successful phase1-pons-unpriced-v3-route-audit-one-shot run"
         required: true
+        default: "33921477647"
+        type: string
+      delayed_probe_run_id:
+        description: "Successful phase1-pons-delayed-v3-route-probe-one-shot run"
+        required: true
+        default: "33923160281"
+        type: string
+  workflow_call:
+    inputs:
+      route_audit_run_id:
+        description: "Successful phase1-pons-unpriced-v3-route-audit-one-shot run"
+        required: true
         type: string
       delayed_probe_run_id:
         description: "Successful phase1-pons-delayed-v3-route-probe-one-shot run"
