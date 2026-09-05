@@ -1380,6 +1380,10 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
         assert workflow_name in content
     assert 'run.get("path")' in content
     assert "viability route workflow path mismatch" in content
+    assert "viability route measurement artifacts missing" in content
+    assert "phase1-pons-viability-measurement-pons_registry-primary" in content
+    assert "phase1-pons-viability-measurement-pons_registry-secondary" in content
+    assert "artifact_names(run_id)" in content
     assert 'run.get("name") != expected[route]' not in content
     assert "phase1-pons-final-acceptance-chain.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
