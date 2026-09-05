@@ -116,6 +116,106 @@ jobs:
           path: dex
           run-id: ${{ inputs.dex_crosscheck_run_id }}
           github-token: ${{ github.token }}
+      - name: Validate representative evidence provenance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          HEAD = 54_486_035
+          sample_run = int("${{ inputs.sample_run_id }}")
+          v1_run = int("${{ inputs.v1_eligibility_run_id }}")
+          v2_run = int("${{ inputs.v2_eligibility_run_id }}")
+          market_path_run = int("${{ inputs.market_path_run_id }}")
+
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          if int(sample_summary["v1_eligibility_run_id"]) != v1_run:
+              raise SystemExit(
+                  "representative validation sample V1 run mismatch"
+              )
+          if int(sample_summary["v2_eligibility_run_id"]) != v2_run:
+              raise SystemExit(
+                  "representative validation sample V2 run mismatch"
+              )
+
+          def provenance(path, *, snapshot=True):
+              manifest = json.loads(Path(path).read_text())
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative evidence chain mismatch: {path}"
+                  )
+              if snapshot and int(
+                  prov.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"representative evidence snapshot mismatch: {path}"
+                  )
+              return prov
+
+          transfer = provenance(
+              "transfers/"
+              "pons-representative-transfers-full.jsonl.manifest.json"
+          )
+          market = provenance(
+              "market-paths/"
+              "pons-representative-market-paths.jsonl.manifest.json"
+          )
+          priced = provenance(
+              "priced-paths/"
+              "pons-representative-priced-paths.jsonl.manifest.json"
+          )
+          dex = provenance(
+              "dex/"
+              "pons-representative-dex-crosscheck.jsonl.manifest.json",
+              snapshot=False,
+          )
+
+          for label, prov in [
+              ("transfer", transfer),
+              ("market_path", market),
+              ("priced_path", priced),
+              ("dex", dex),
+          ]:
+              if int(prov.get("sample_run_id", -1)) != sample_run:
+                  raise SystemExit(
+                      f"representative {label} sample run mismatch"
+                  )
+
+          if int(
+              priced.get("market_path_run_id", -1)
+          ) != market_path_run:
+              raise SystemExit(
+                  "representative priced path source run mismatch"
+              )
+          if int(dex.get("v1_eligibility_run_id", -1)) != v1_run:
+              raise SystemExit(
+                  "representative DEX V1 lifecycle run mismatch"
+              )
+          if int(dex.get("v2_eligibility_run_id", -1)) != v2_run:
+              raise SystemExit(
+                  "representative DEX V2 lifecycle run mismatch"
+              )
+
+          print(json.dumps({
+              "sample_run_id": sample_run,
+              "v1_eligibility_run_id": v1_run,
+              "v2_eligibility_run_id": v2_run,
+              "transfer_run_id": int("${{ inputs.transfer_run_id }}"),
+              "market_path_run_id": market_path_run,
+              "priced_path_run_id": int(
+                  "${{ inputs.priced_path_run_id }}"
+              ),
+              "dex_crosscheck_run_id": int(
+                  "${{ inputs.dex_crosscheck_run_id }}"
+              ),
+              "provenance_consistent": True,
+          }, sort_keys=True))
+          PY
       - name: Build fail-closed representative validation bundle
         run: |
           mkdir -p artifacts
