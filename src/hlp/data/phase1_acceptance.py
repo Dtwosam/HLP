@@ -496,6 +496,8 @@ def build_phase1_acceptance_report(
 
     for field in (
         "sample_run_id",
+        "v1_v3_run_id",
+        "v2_v4_run_id",
         "transfer_run_id",
         "market_path_run_id",
         "priced_path_run_id",
