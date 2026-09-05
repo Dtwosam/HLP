@@ -1,0 +1,23 @@
+name: phase1-pons-anchor-promote-recovered-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-anchor-promote-recovered-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promote:
+    if: ${{ contains(github.event.head_commit.message, 'launch recovered anchor promotion') }}
+    uses: ./.github/workflows/phase1-pons-weth-usdg-anchor-promote-recovered.yml
+    with:
+      preserved_run_id: "33912536839"
+      partial_recovery_run_id: "33925648293"
+      gap_recovery_run_id: "33957294304"
+      range_repair_run_id: "33970898635"
+    secrets: inherit
