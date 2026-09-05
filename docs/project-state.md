@@ -560,7 +560,30 @@ archive crawl began, proving 23 feeds, the single DELL delta, matching
 summary/manifests/checksums, chain 4663 and snapshot head **54,486,035**.
 The run has now entered the 240-shard V1/V3 stage with max-parallel 2. V2/V4,
 pricing/fallback resolution and lifecycle eligibility remain serialized behind
-that stage and its automatic manifest-gap recovery path.
+that stage and its automatic manifest-gap recovery path. The first two V1/V3
+shards completed successfully in about 26 minutes each. Artifact/log-only
+checkpoint run **33984605170** accounted those completed jobs without issuing
+provider requests: **382,203 processed blocks**, **3,590 RPC requests**,
+**998,686,641 response bytes (0.9301 GiB)**, **313,821 artifact bytes** and
+**3,084.999 seconds** of reported acquisition time, all through
+`solidrpc_keyless_public`. A simple same-density operational extrapolation is
+about **430.8k requests**, **111.6 GiB response egress** and **51.4 hours of
+two-way-parallel wall time** for the complete V1/V3 route. This checkpoint is
+explicitly non-acceptance evidence because the parent acquisition is still
+incomplete; frozen viability still requires its separate bounded route
+measurement run and worst-observed-per-block projection.
+
+The current branch also hardens manual rescue beyond the launch commit's
+single-wave recovery implementation: V1/V3 and V2/V4 gap recovery now split up
+to **480** 100k-block gaps into two **serialized** <=240-job waves, each still
+capped at max-parallel 2. That covers even a total V1/V3 loss (~459 retry
+intervals) without failing the planner solely on GitHub matrix size. Inert
+reusable-workflow probe run **33984733342** skipped cleanly, proving GitHub
+accepts both two-wave call graphs. These later branch changes do not mutate the
+already-running acquisition pinned to commit
+`c53b3a63156976a5873752c332fa7578011249b0`; they are the fail-safe manual
+rescue path if that run's original automatic recovery cannot close a large
+failure set.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
