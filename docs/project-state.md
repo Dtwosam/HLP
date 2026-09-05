@@ -760,14 +760,16 @@ exist.
 - [x] prove the canonical WETH/USDG V3 USD anchor predates Pons (anchor first-code block **1,506,281**)
 - [x] build and freeze the complete historical Pons launch registry through one immutable snapshot head
 - [ ] build the complete historical Pons $100k+ eligible universe across V1/V2 full lifecycles
-- [ ] benchmark wide authenticated Free eth_getLogs ranges if/when a Free key is configured; keyless sharding remains the required fallback
+- [x] resolve authenticated-Free benchmarking for the current environment: no Free API key is configured, so authenticated-wide-range benchmarking is not applicable to this Phase 1 run; keyless sharding remains the required fallback and the live crawl/accounting evidence uses that route
 - [ ] reconstruct >=10 representative Pons tokens end-to-end
 - [ ] cross-check reconstructed launch/trade/price paths against independent DEX/explorer evidence
 - [ ] quantify full-history request and storage requirements
 - [ ] prove the complete Pons + required downstream DEX acquisition plan remains within $0
-- [ ] record Phase 1 PASS and merge PR #3
+- [ ] record Phase 1 PASS
 
-Phase 2 stays locked until these pass.
+After the PASS artifact is recorded and the fail-closed closeout audit succeeds,
+mark PR #3 ready and merge it into `main`. Phase 2 stays locked until both
+Phase 1 PASS and that merge are complete.
 
 ## Deferred decisions
 
