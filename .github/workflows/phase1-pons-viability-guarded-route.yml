@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       source_eligibility_run_id: ${{ steps.check.outputs.source_eligibility_run_id }}
+      evidence_run_id: ${{ steps.check.outputs.evidence_run_id }}
       quote_fallback_run_id: ${{ steps.routing.outputs.lifecycle_run_id }}
     steps:
       - uses: actions/checkout@v4
@@ -347,6 +348,8 @@ jobs:
       from_block: "54436036"
       to_block: "54486035"
       eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}
+      evidence_run_id: ${{ needs.preflight.outputs.evidence_run_id }}
+      source_eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}
       sequence_id: ${{ inputs.sequence_id }}
       registry_run_id: "33911022718"
       v2_registry_run_id: "33912235341"
