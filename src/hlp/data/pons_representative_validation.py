@@ -26,13 +26,14 @@ def build_representative_validation_rows(
     v2_lifecycle_rows: Iterable[dict],
     holder_summary_rows: Iterable[dict],
     dex_crosscheck_rows: Iterable[dict],
+    market_path_summary_rows: Iterable[dict],
 ) -> list[dict]:
     """Join the frozen 10-token sample to independent Phase 1 evidence.
 
     This function does not create new labels or infer missing history. It only
     proves that every sampled token has the already-required launch/lifecycle
-    price evidence, complete transfer/holder replay, and an explicit DEX
-    reconciliation result.
+    price evidence, a frozen detailed market path, complete transfer/holder
+    replay, and an explicit DEX reconciliation result.
     """
     sample = [dict(row) for row in sample_rows]
     if len(sample) != 10:
@@ -86,6 +87,18 @@ def build_representative_validation_rows(
         extra = sorted(set(dex) - set(sample_by_token))
         raise ValueError(
             "representative DEX cross-check coverage mismatch: "
+            f"missing={missing} extra={extra}"
+        )
+
+    market_paths = _token_index(
+        market_path_summary_rows,
+        label="representative market-path summary",
+    )
+    if set(market_paths) != set(sample_by_token):
+        missing = sorted(set(sample_by_token) - set(market_paths))
+        extra = sorted(set(market_paths) - set(sample_by_token))
+        raise ValueError(
+            "representative market-path summary coverage mismatch: "
             f"missing={missing} extra={extra}"
         )
 
@@ -151,6 +164,47 @@ def build_representative_validation_rows(
                 f"ineligible representative token has incomplete pricing: {token}"
             )
 
+        market_path = market_paths[token]
+        if str(market_path.get("pons_version")) != version:
+            raise ValueError(
+                f"representative market-path version mismatch for {token}"
+            )
+        if str(market_path.get("sample_group")) != str(
+            sample_row.get("sample_group")
+        ):
+            raise ValueError(
+                f"representative market-path sample-group mismatch for {token}"
+            )
+        if int(market_path.get("launch_block", -1)) != launch_block:
+            raise ValueError(
+                f"representative market-path launch mismatch for {token}"
+            )
+        path_rows = int(market_path.get("path_rows", 0))
+        first_path_block = int(market_path.get("first_path_block", -1))
+        last_path_block = int(market_path.get("last_path_block", -1))
+        stage_counts = dict(market_path.get("stage_counts") or {})
+        if path_rows <= 1:
+            raise ValueError(
+                f"representative market path has no market events for {token}"
+            )
+        if int(stage_counts.get("launch", 0)) != 1:
+            raise ValueError(
+                f"representative market path launch count is invalid for {token}"
+            )
+        if first_path_block != launch_block or last_path_block < launch_block:
+            raise ValueError(
+                f"representative market-path block coverage is invalid for {token}"
+            )
+        if version == "v1":
+            if int(stage_counts.get("v1_v3", 0)) <= 0:
+                raise ValueError(
+                    f"Pons V1 representative market path has no V3 events: {token}"
+                )
+        elif int(stage_counts.get("v2_curve", 0)) <= 0:
+            raise ValueError(
+                f"Pons V2 representative market path has no curve events: {token}"
+            )
+
         holder = holders[token]
         transfers = int(holder.get("transfers", 0))
         holder_count = int(holder.get("holder_count", -1))
@@ -181,7 +235,24 @@ def build_representative_validation_rows(
         price_scope = str(dex_row.get("price_crosscheck_scope"))
         price_match = dex_row.get("price_match")
         price_status = str(dex_row.get("price_crosscheck_status"))
+        registered_v4 = bool(market_path.get("registered_v4"))
+        has_v4_market_events = bool(
+            market_path.get("has_v4_market_events")
+        )
+        if version == "v1":
+            if registered_v4 or has_v4_market_events:
+                raise ValueError(
+                    f"Pons V1 representative has impossible V4 path state: {token}"
+                )
+        elif registered_v4 and not has_v4_market_events:
+            raise ValueError(
+                f"registered V2 representative has no V4 market events: {token}"
+            )
         if scope == "canonical_dex_pool":
+            if version == "v2" and not registered_v4:
+                raise ValueError(
+                    f"V2 representative DEX pool lacks path registration: {token}"
+                )
             if external_match is not True or mismatches:
                 raise ValueError(
                     f"representative DEX cross-check failed for {token}: "
@@ -204,6 +275,10 @@ def build_representative_validation_rows(
                     f"{token}: {price_scope}"
                 )
         elif scope == "no_registered_v4_pool":
+            if registered_v4:
+                raise ValueError(
+                    f"no-pool DEX state contradicts path registration for {token}"
+                )
             if version != "v2" or external_match is not None or mismatches:
                 raise ValueError(
                     f"invalid no-pool DEX cross-check state for {token}"
@@ -230,6 +305,12 @@ def build_representative_validation_rows(
                 "unpriced_points": unpriced_points,
                 "pricing_complete": pricing_complete,
                 "max_market_cap_proxy_usd": str(max_market_cap),
+                "market_path_rows": path_rows,
+                "market_path_first_block": first_path_block,
+                "market_path_last_block": last_path_block,
+                "market_path_stage_counts": stage_counts,
+                "market_path_registered_v4": registered_v4,
+                "market_path_has_v4_market_events": has_v4_market_events,
                 "transfers": transfers,
                 "holder_count": holder_count,
                 "accounted_supply_raw": supply_raw,
@@ -278,6 +359,15 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         "price_points": sum(int(row["price_points"]) for row in values),
         "priced_points": sum(int(row["priced_points"]) for row in values),
         "unpriced_points": sum(int(row["unpriced_points"]) for row in values),
+        "market_path_rows": sum(
+            int(row["market_path_rows"]) for row in values
+        ),
+        "market_path_registered_v4": sum(
+            bool(row["market_path_registered_v4"]) for row in values
+        ),
+        "market_path_with_v4_events": sum(
+            bool(row["market_path_has_v4_market_events"]) for row in values
+        ),
         "transfers": sum(int(row["transfers"]) for row in values),
         "final_holders": sum(int(row["holder_count"]) for row in values),
         "dex_targeted": scopes.get("canonical_dex_pool", 0),
