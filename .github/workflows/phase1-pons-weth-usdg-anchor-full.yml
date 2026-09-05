@@ -59,7 +59,7 @@ jobs:
         run: |
           mkdir -p artifacts
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
-          printf -v SHARD "%02d" "$SHARD_INDEX"
+          printf -v SHARD "%03d" "$SHARD_INDEX"
           hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v1-price-path             --token "$WETH"             --quote-token "$USDG"             --pool "$ANCHOR_POOL"             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --out "artifacts/anchor-shard-${SHARD}.jsonl"
       - uses: actions/upload-artifact@v4
         with:

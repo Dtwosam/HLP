@@ -295,8 +295,11 @@ without increasing concurrent RPC pressure:
 The V1/V3 and V2/V4 full tapes had not yet been executed when the DELL oracle
 recovery supplied a stronger keyless timing sample: successful 100k-block DELL
 jobs took about **11m40s** end-to-end. The old 358k/432k venue shards were
-therefore resized before first execution. This changes only partitioning and
-runner headroom; the frozen full-history processed-block floors are unchanged.
+therefore resized before first execution. All workflows with more than 99
+shards now use **three-digit shard suffixes** so lexical artifact ordering stays
+identical to numeric block order during stream merges. This changes only
+partitioning and runner headroom; the frozen full-history processed-block floors
+are unchanged.
 
 Two reusable manual-only range recovery workflows split a bounded exact
 failed curve or anchor interval into four smaller subshards and merge only that

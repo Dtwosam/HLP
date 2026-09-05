@@ -85,7 +85,7 @@ jobs:
         run: |
           mkdir -p artifacts
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
-          printf -v SHARD "%02d" "$SHARD_INDEX"
+          printf -v SHARD "%03d" "$SHARD_INDEX"
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             rpc-v3-pons-tape \
             --registry registry/pons-full-launch-registry.jsonl \

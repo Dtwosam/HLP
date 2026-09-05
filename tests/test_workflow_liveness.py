@@ -88,6 +88,13 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         else:
             assert "SHARD_COUNT: '16'" in content, name
             assert "timeout-minutes: 35" in content, name
+        if name in {
+            "phase1-pons-v1-v3-full.yml",
+            "phase1-pons-v2-v4-full.yml",
+            "phase1-pons-weth-usdg-anchor-full.yml",
+        }:
+            assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content, name
+            assert 'printf -v SHARD "%02d" "$SHARD_INDEX"' not in content, name
         assert "max-parallel: 4" not in content, name
 
 
