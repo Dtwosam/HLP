@@ -343,6 +343,42 @@ jobs:
             --oracle-events oracle/pons-stock-oracle-updates.jsonl \
             --snapshot-head "$SNAPSHOT_HEAD" \
             --out artifacts/pons-v1-lifecycle-eligibility.jsonl
+      - name: Bind V1 lifecycle source run provenance
+        env:
+          SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/"
+              "pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          manifest = json.loads(path.read_text())
+          provenance = dict(manifest.get("provenance") or {})
+          provenance.update({
+              "source_registry_run_id": int(
+                  os.environ["SOURCE_REGISTRY_RUN_ID"]
+              ),
+              "v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"]),
+              "quote_audit_run_id": int(
+                  os.environ["QUOTE_AUDIT_RUN_ID"]
+              ),
+              "anchor_run_id": int(os.environ["ANCHOR_RUN_ID"]),
+              "oracle_run_id": int(os.environ["ORACLE_RUN_ID"]),
+          })
+          manifest["provenance"] = provenance
+          path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(provenance, sort_keys=True))
+          PY
       - name: Freeze V1 tokens that ever reached the $100k universe gate
         run: |
           python - <<'PY'
