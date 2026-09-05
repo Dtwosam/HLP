@@ -57,6 +57,9 @@ def _fixtures():
         "no_registered_v4_pool": 1,
         "dex_price_targeted": 8,
         "dex_price_matched": 8,
+        "dex_price_checkpoints_targeted": 20,
+        "dex_price_checkpoints_matched": 20,
+        "dex_price_multi_checkpoint_tokens": 6,
         "dex_price_no_swap_checkpoint": 1,
         "validation_sha256": "representative-sha",
     }
@@ -108,6 +111,10 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report[
         "representative_detailed_price_path_complete_tokens"
     ] == 7
+    assert report["representative_dex_price_tokens_targeted"] == 8
+    assert report["representative_dex_price_checkpoints_targeted"] == 20
+    assert report["representative_dex_price_checkpoints_matched"] == 20
+    assert report["representative_dex_multi_checkpoint_tokens"] == 6
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
@@ -149,6 +156,23 @@ def test_phase1_acceptance_rejects_detailed_price_path_drift():
         ValueError,
         match="detailed and lifecycle price paths disagree",
     ):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_nested_dex_checkpoint_mismatch():
+    fixtures = list(_fixtures())
+    fixtures[2]["dex_price_checkpoints_matched"] -= 1
+
+    with pytest.raises(ValueError, match="checkpoint evidence has mismatches"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_incomplete_checkpoint_coverage():
+    fixtures = list(_fixtures())
+    fixtures[2]["dex_price_checkpoints_targeted"] = 7
+    fixtures[2]["dex_price_checkpoints_matched"] = 7
+
+    with pytest.raises(ValueError, match="below targeted token coverage"):
         build_phase1_acceptance_report(*fixtures)
 
 
