@@ -570,3 +570,21 @@ def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
 
+
+
+def test_representative_validation_is_manual_artifact_only_and_fail_closed():
+    content = _workflow("phase1-pons-representative-validation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-v1-lifecycle-eligibility" in content
+    assert "phase1-pons-v2-lifecycle-eligibility" in content
+    assert "phase1-pons-representative-transfers-full" in content
+    assert "phase1-pons-representative-dex-crosscheck" in content
+    assert "build_representative_validation_rows" in content
+    assert "summarize_representative_validation" in content
+    assert "representative validation must contain exactly 10" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
