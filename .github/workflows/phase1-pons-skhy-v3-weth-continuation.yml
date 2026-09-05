@@ -180,13 +180,7 @@ jobs:
           if [ -z "$REQUESTED_FROM_BLOCK" ]; then
             hlp --timeout 30 --attempts 5 --min-interval 0.1               deployment-block "$SKHY_WETH_POOL"               --low "$SKHY_FIRST_PONS_USE"               --high "$SNAPSHOT_HEAD"               --archive               > artifacts/skhy-v3-weth-deployment.json
             FIRST_CODE_BLOCK="$(
-              python - <<'PY'
-          import json
-          from pathlib import Path
-          print(json.loads(
-              Path("artifacts/skhy-v3-weth-deployment.json").read_text()
-          )["first_code_block"])
-          PY
+              python -c 'import json; from pathlib import Path; print(json.loads(Path("artifacts/skhy-v3-weth-deployment.json").read_text())["first_code_block"])'
             )"
             START="$FIRST_CODE_BLOCK"
           else
