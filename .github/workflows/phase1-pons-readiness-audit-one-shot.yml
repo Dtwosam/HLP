@@ -1,5 +1,5 @@
 name: phase1-pons-readiness-audit-one-shot
-# audit-generation: 3
+# audit-generation: 4
 
 on:
   push:
