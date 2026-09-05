@@ -19,4 +19,5 @@ jobs:
       full_quote_audit_run_id: "33923299711"
       full_quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
       v2_oracle_run_id: "33912985322"
+      prior_delta_run_id: "33972806063"
     secrets: inherit
