@@ -515,6 +515,7 @@ def cmd_rpc_dex_pool_window(args: argparse.Namespace) -> int:
                 "v3": v3_manifest,
                 "v4": v4_manifest,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -592,6 +593,7 @@ def cmd_rpc_pools_fun_registry_window(args: argparse.Namespace) -> int:
         "launches": len(registry),
         "quote_tokens": sorted({row["quote_token"] for row in registry}),
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -657,6 +659,7 @@ def cmd_rpc_pools_fun_v3_tape(args: argparse.Namespace) -> int:
         "initialized_pools": len({row.pool for row in initializes}),
         "swapped_pools": len({row.pool for row in swaps}),
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -747,6 +750,7 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
         "tokens_crossed_100k": sum(bool(row["crossed_100k"]) for row in summary),
         "initial_weth_usd": str(initial_weth_usd),
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -836,6 +840,7 @@ def cmd_rpc_pools_trade_registry_window(args: argparse.Namespace) -> int:
                 "non_instant_creations": len(crowd_or_other),
                 "non_instant_examples": crowd_or_other[:20],
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -922,6 +927,7 @@ def cmd_rpc_pools_trade_v4_tape(args: argparse.Namespace) -> int:
                     row.pool_id for row in swaps
                 }),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1022,6 +1028,7 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
                 "quote_decimals": quote_decimals,
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1073,6 +1080,7 @@ def cmd_rpc_hood_fun_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 "event_counts": counters,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1189,6 +1197,7 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
                 ),
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1239,6 +1248,7 @@ def cmd_rpc_trench_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 "event_counts": counters,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1355,6 +1365,7 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
                 ),
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1405,6 +1416,7 @@ def cmd_rpc_flap_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 "event_counts": counters,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1500,6 +1512,7 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
                 "unpriced_tokens": sum(r["priced_points"] == 0 for r in summary),
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -1534,6 +1547,7 @@ def cmd_rpc_pons_quote_causality(args: argparse.Namespace) -> int:
             row["quote_token"] for row in rows if not row["causal_ready"]
         ],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1586,6 +1600,7 @@ def cmd_rpc_pons_validate_v4_quote_pool(
         "pool_id": row["pool_id"],
         "initialize_block": row["initialize"]["block_number"],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1653,6 +1668,7 @@ def cmd_rpc_pons_extend_v4_quote_routes(
             for row in unresolved
         ],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1782,6 +1798,7 @@ def cmd_rpc_v4_quote_route_tape(args: argparse.Namespace) -> int:
         **manifest,
         **counters,
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1883,6 +1900,7 @@ def cmd_rpc_pons_unpriced_quote_v4_routes(
             for row in unresolved
         ],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1937,6 +1955,7 @@ def cmd_rpc_pons_unpriced_quote_v3_routes(
             if not row["v3_causal_ready"]
         ],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -1990,6 +2009,7 @@ def cmd_rpc_pons_delayed_v3_usdg_routes(
         ],
         "routes": [row["route"] for row in ready],
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -2258,6 +2278,7 @@ def cmd_rpc_pons_stock_oracle_lifecycle(args: argparse.Namespace) -> int:
             min((int(row["first_launch_block"]) for row in specs), default=None)
         ),
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -2339,6 +2360,7 @@ def cmd_rpc_v2_stock_oracle_window(args: argparse.Namespace) -> int:
                 "chainlink_directory_requests": directory.requests_made,
                 "chainlink_directory_bytes": directory.bytes_received,
                 "archive_rpc_requests": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -2492,6 +2514,7 @@ def cmd_rpc_v2_v4_market_cap_window(args: argparse.Namespace) -> int:
                     bool(row["crossed_100k"]) for row in summary
                 ),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -2588,6 +2611,7 @@ def cmd_rpc_v2_transition_tape(args: argparse.Namespace) -> int:
         "matched_registrations": len(registrations),
         "unmatched": unmatched,
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -2637,6 +2661,7 @@ def cmd_rpc_v2_graduation_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 **counters,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -2690,6 +2715,7 @@ def cmd_rpc_v2_registration_tape(args: argparse.Namespace) -> int:
                 **manifest,
                 **counters,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -2812,6 +2838,7 @@ def cmd_rpc_v2_v4_tape(args: argparse.Namespace) -> int:
                 **counters,
                 "matched_pool_ids": len(matched_ids),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3171,6 +3198,7 @@ def cmd_rpc_v2_curve_market_cap_window(args: argparse.Namespace) -> int:
                 ),
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3263,6 +3291,7 @@ def cmd_rpc_v2_curve_tape(args: argparse.Namespace) -> int:
                 **counters,
                 "matched_curves": len(matched_curves),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3412,6 +3441,7 @@ def cmd_rpc_v2_registry_window(args: argparse.Namespace) -> int:
                 "bootstrap_pair_economics": len(bootstrap_pair_economics),
                 "resolved_config_events": len(resolved),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3506,6 +3536,7 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
                 "factories_with_launches": len(launch_config_ids_by_factory),
                 "bootstrap_configs": len(bootstrap),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3621,6 +3652,7 @@ def cmd_rpc_pons_transfer_tape(args: argparse.Namespace) -> int:
                 "tokens": len(tokens),
                 "transfers": len(rows),
                 "rpc_requests": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3824,6 +3856,7 @@ def cmd_rpc_pons_transaction_enrich(args: argparse.Namespace) -> int:
                 "unique_initiators": len(unique_initiators),
                 "unique_destinations": len(destination_counts),
                 "rpc_requests": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -3901,6 +3934,7 @@ def cmd_rpc_pons_time_enrich(args: argparse.Namespace) -> int:
                 "eligible_points": len(enriched_outcomes),
                 "drawdown_episodes": len(enriched_episodes),
                 "rpc_requests": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -4222,6 +4256,7 @@ def cmd_rpc_v3_pons_tape(args: argparse.Namespace) -> int:
                 **counters,
                 "matched_pools": len(matched_pools),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -4330,6 +4365,7 @@ def cmd_rpc_v3_quote_route_tape(args: argparse.Namespace) -> int:
         **manifest,
         **counters,
         "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
@@ -4444,6 +4480,7 @@ def cmd_rpc_v1_market_cap_window(args: argparse.Namespace) -> int:
                 "weth_decimals": weth_state.decimals,
                 "usdg_decimals": usdg_state.decimals,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -4517,6 +4554,7 @@ def cmd_rpc_v1_usd_path(args: argparse.Namespace) -> int:
                 **manifest,
                 "initial_weth_usd": str(initial_weth_usd),
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -4560,6 +4598,7 @@ def cmd_rpc_v1_price_path(args: argparse.Namespace) -> int:
             {
                 **manifest,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
@@ -4626,6 +4665,7 @@ def cmd_rpc_pons_sample(args: argparse.Namespace) -> int:
             {
                 **manifest,
                 "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             },
             sort_keys=True,
