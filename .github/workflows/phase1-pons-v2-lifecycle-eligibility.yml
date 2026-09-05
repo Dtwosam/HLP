@@ -473,6 +473,46 @@ jobs:
             --fallback-events fallback/pons-quote-fallback-updates.jsonl \
             --snapshot-head "$SNAPSHOT_HEAD" \
             --out artifacts/pons-v2-lifecycle-eligibility.jsonl
+      - name: Bind V2 lifecycle source run provenance
+        env:
+          V2_REGISTRY_RUN_ID: ${{ inputs.v2_registry_run_id }}
+          CURVE_RUN_ID: ${{ inputs.curve_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          V4_RUN_ID: ${{ inputs.v4_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+          FALLBACK_RUN_ID: ${{ inputs.fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/"
+              "pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          manifest = json.loads(path.read_text())
+          provenance = dict(manifest.get("provenance") or {})
+          provenance.update({
+              "v2_registry_run_id": int(
+                  os.environ["V2_REGISTRY_RUN_ID"]
+              ),
+              "curve_run_id": int(os.environ["CURVE_RUN_ID"]),
+              "transition_run_id": int(
+                  os.environ["TRANSITION_RUN_ID"]
+              ),
+              "v4_run_id": int(os.environ["V4_RUN_ID"]),
+              "anchor_run_id": int(os.environ["ANCHOR_RUN_ID"]),
+              "oracle_run_id": int(os.environ["ORACLE_RUN_ID"]),
+              "fallback_run_id": int(os.environ["FALLBACK_RUN_ID"]),
+          })
+          manifest["provenance"] = provenance
+          path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(provenance, sort_keys=True))
+          PY
       - name: Freeze V2 tokens that ever reached the $100k universe gate
         run: |
           python - <<'PY'
