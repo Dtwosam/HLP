@@ -2248,7 +2248,9 @@ def cmd_pons_quote_audit(args: argparse.Namespace) -> int:
         "blocking_quote_assets": len(blocking),
         "blocking_tokens": [row["quote_token"] for row in blocking],
         "rhj_requests": assets.requests_made,
+        "rhj_bytes": assets.bytes_received,
         "chainlink_directory_requests": directory.requests_made,
+        "chainlink_directory_bytes": directory.bytes_received,
     }, sort_keys=True))
     return 0
 
