@@ -1,0 +1,34 @@
+name: phase1-pons-completion-one-shot
+# validation-generation: 1
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-completion-one-shot.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  complete:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 completion') }}
+    uses: ./.github/workflows/phase1-pons-completion-chain.yml
+    with:
+      source_eligibility_run_id: "33982556591"
+      prior_completion_run_id: ""
+      prior_transfer_run_id: ""
+      measurement_from_block: "54436036"
+      measurement_to_block: "54486035"
+      oracle_run_id: "33974681334"
+      runner_smoke_run_id: "33920762592"
+      registry_run_id: "33911022718"
+      v2_registry_run_id: "33912235341"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+      anchor_run_id: "33972109927"
+    secrets: inherit
