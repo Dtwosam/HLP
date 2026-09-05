@@ -173,30 +173,43 @@ Pons use, so the earlier intervals remain explicitly partial. A non-overlapping
 500,000-block V4 continuation then resolved FIG as well. The measured V4
 fallback now covers **3,870 launches across 4 of the 5 original V3 misses**.
 
-Only **SKHY / 129 launches** remains unresolved. Its bounded V4 search is
-complete through block **52,863,525**, leaving **1,622,510** blocks to the
-frozen snapshot head. The cumulative probe already found one exact SKHY/USDG
-PoolManager candidate: pool id
+Only **SKHY / 129 launches** remains unresolved in frozen evidence. Its
+bounded V4 search is complete through block **52,863,525**, leaving
+**1,622,510** blocks to the frozen snapshot head. The cumulative probe already
+found one exact SKHY/USDG PoolManager candidate: pool id
 `0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601`,
 initialized at block **52,798,959** with fee **10,000**, tick spacing **200**
 and no hooks. No positive-liquidity swap was observed through the prior search
 end.
 
-The V4 continuation path supports a fail-closed `known_pool_only` mode.
-For SKHY this skips redundant future Initialize discovery and scans only Swap
-logs for the already-frozen candidate pool ID, roughly halving the remaining
-log-query shape versus generic discovery. The primitive is now capped at
-**500k blocks per 20-minute job** and a reusable segmented orchestrator chains
-four such jobs sequentially, publishing a final artifact only if SKHY resolves
-or the scan reaches snapshot head with zero unsearched blocks. Resolved rows
-become zero-RPC no-ops in later segments. This avoids risking the remaining
-1,622,510 blocks in one near-timeout job. The primitive refuses
-`known_pool_only` when an unresolved row has no existing candidate. A
-separate archive deployment-boundary probe proved the SKHY token contract
-already existed from
-block **8,691,227**, so the missing price history is a liquidity/venue-coverage
-problem rather than a token-deployment gap. The official Chainlink directory
-inventory also has no SKHY/SK hynix near-match, so no feed alias is assumed.
+A second, still-unexecuted resolution path is now staged from the frozen V3
+audit: SKHY has one exact Uniswap V3 **SKHY/WETH** candidate,
+`0x13f78b235d19141f572986afcaab66ce7744b4ef`, fee **3000**. The bounded
+continuation scans only that pool for its first positive-liquidity swap, in
+sequential <=500k-block segments. If it resolves, USD conversion is deferred
+until replay and composes each SKHY/WETH swap with the event-ordered canonical
+WETH/USDG anchor, avoiding end-of-block lookahead.
+
+A resolved SKHY/WETH route is folded directly into the canonical V3 fallback
+route set: **25 direct-USDG routes + 1 delayed SKHY/WETH route = 26 V3-owned
+feedless assets**, leaving exactly **4** assets for V4. V4 then fails closed
+unless its one non-V4 residual is exactly SKHY and the canonical 26-route V3
+manifest proves that ownership. The generic fallback requires disjoint
+**26 V3 + 4 V4 = 30** assets. This does **not** add another V3 full-history
+block scan: SKHY becomes a 26th address in the existing 16-shard V3 route scan,
+so the frozen V3 processed-block geometry remains unchanged; only response
+volume can change.
+
+The original V4 continuation path remains available and supports fail-closed
+`known_pool_only` mode. For SKHY it skips redundant Initialize discovery and
+scans only Swap logs for the already-frozen candidate pool ID. The primitive is
+capped at **500k blocks per 20-minute job** and the segmented orchestrator
+publishes a final artifact only if SKHY resolves or the scan reaches snapshot
+head with zero unsearched blocks. A separate archive deployment-boundary probe
+proved the SKHY token contract already existed from block **8,691,227**, so
+the missing price history is a liquidity/venue-coverage problem rather than a
+token-deployment gap. The official Chainlink directory inventory also has no
+SKHY/SK hynix near-match, so no feed alias is assumed.
 
 V3 and V4 fallback tapes remain venue-specific for provenance, then merge into
 one disjoint generic quote/USD fallback artifact before both V1 and V2
