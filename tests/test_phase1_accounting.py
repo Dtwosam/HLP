@@ -85,6 +85,7 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
     assert result["reported_rpc_routes"] == ["solidrpc_keyless_public"]
     assert result["reported_block_ranges"] == [[10, 29]]
     assert result["reported_processed_blocks"] == 20
+    assert result["reported_unique_processed_blocks"] == 20
     assert result["reported_elapsed_seconds"] == 20.5
     assert result["job_runtime_seconds"] == 210
     assert result["max_job_runtime_seconds"] == 120
@@ -115,7 +116,30 @@ def test_summarize_action_run_deduplicates_repeated_reported_ranges():
     result = summarize_action_run(run, jobs, [], logs)
     assert result["reported_block_ranges"] == [[10, 25]]
     assert result["reported_processed_blocks"] == 16
+    assert result["reported_unique_processed_blocks"] == 16
     assert result["reported_elapsed_seconds"] == 4
+
+
+def test_summarize_action_run_preserves_overlap_across_distinct_jobs():
+    run = {
+        "id": 125,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    jobs = [
+        {"id": 1, "conclusion": "success"},
+        {"id": 2, "conclusion": "success"},
+    ]
+    logs = {
+        1: 'x {"from_block": 10, "to_block": 19}\n',
+        2: 'x {"from_block": 15, "to_block": 24}\n',
+    }
+
+    result = summarize_action_run(run, jobs, [], logs)
+
+    assert result["reported_block_ranges"] == [[10, 24]]
+    assert result["reported_processed_blocks"] == 20
+    assert result["reported_unique_processed_blocks"] == 15
 
 
 def test_phase1_summary_reports_quota_egress_runtime_and_failures():
