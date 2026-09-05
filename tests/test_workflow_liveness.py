@@ -639,6 +639,16 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
+def test_skhy_v4_one_shot_launcher_is_explicit_and_guarded():
+    content = _workflow(
+        "phase1-pons-skhy-v4-known-pool-segmented-one-shot.yml"
+    )
+    assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
+    assert "launch SKHY V4 known-pool continuation" in content
+    assert 'prior_probe_run_id: "33926428274"' in content
+    assert "workflow_dispatch:" not in content
+
+
 def test_skhy_segmented_continuation_is_manual_sequential_and_complete():
     content = _workflow(
         "phase1-pons-skhy-v4-known-pool-segmented.yml"

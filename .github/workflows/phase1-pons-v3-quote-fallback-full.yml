@@ -14,7 +14,7 @@ on:
         default: "33923160281"
         type: string
       skhy_weth_run_id:
-        description: "Successful phase1-pons-skhy-v3-weth-segmented run with route_resolved"
+        description: "Completed SKHY/WETH segmented run proving route_resolved or searched_to_snapshot_head"
         required: true
         type: string
       anchor_run_id:
@@ -32,7 +32,7 @@ on:
         required: true
         type: string
       skhy_weth_run_id:
-        description: "Resolved segmented SKHY/WETH route run"
+        description: "Completed segmented SKHY/WETH proof run"
         required: true
         type: string
       anchor_run_id:

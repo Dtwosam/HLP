@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       v3_run_id:
-        description: "Successful canonical 26-route phase1-pons-v3-quote-fallback-full run"
+        description: "Successful canonical 25- or 26-route phase1-pons-v3-quote-fallback-full run"
         required: true
         type: string
       v4_run_id:
@@ -14,7 +14,7 @@ on:
   workflow_call:
     inputs:
       v3_run_id:
-        description: "Successful canonical 26-route phase1-pons-v3-quote-fallback-full run"
+        description: "Successful canonical 25- or 26-route phase1-pons-v3-quote-fallback-full run"
         required: true
         type: string
       v4_run_id:
