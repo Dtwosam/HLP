@@ -1,0 +1,30 @@
+name: phase1-pons-final-acceptance-call-probe
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-final-acceptance-call-probe.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    if: ${{ contains(github.event.head_commit.message, 'never launch final acceptance call probe') }}
+    uses: ./.github/workflows/phase1-pons-final-acceptance-chain.yml
+    with:
+      eligibility_run_id: "1"
+      representative_run_id: "2"
+      pons_registry_run_id: "3"
+      pons_v1_v3_run_id: "4"
+      pons_v2_curve_run_id: "5"
+      pons_v2_transition_run_id: "6"
+      pons_v2_v4_run_id: "7"
+      weth_usdg_anchor_run_id: "8"
+      stock_oracle_run_id: "9"
+      quote_v3_fallback_run_id: "10"
+      quote_v4_fallback_run_id: "11"
+    secrets: inherit
