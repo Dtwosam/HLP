@@ -54,12 +54,14 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
     logs = {
         1: (
             'x {"requests_made": 5, "rhj_requests": 2, '
-            '"response_bytes_received": 1000, "elapsed_seconds": 12.5, '
+            '"response_bytes_received": 1000, "rpc_route": '
+            '"solidrpc_keyless_public", "elapsed_seconds": 12.5, '
             '"provenance": {"from_block": 10, "to_block": 19}}\n'
         ),
         2: (
             'x {"archive_rpc_requests": 7, "records": 99, '
-            '"response_bytes_received": 2500, "elapsed_seconds": 8, '
+            '"response_bytes_received": 2500, "rpc_route": '
+            '"solidrpc_keyless_public", "elapsed_seconds": 8, '
             '"provenance": {"from_block": 20, "to_block": 29}}\n'
         ),
     }
@@ -74,6 +76,8 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
         "response_bytes_received": 3500
     }
     assert result["counted_response_bytes"] == 3500
+    assert result["rpc_route_counts"] == {"solidrpc_keyless_public": 2}
+    assert result["reported_rpc_routes"] == ["solidrpc_keyless_public"]
     assert result["reported_block_ranges"] == [[10, 29]]
     assert result["reported_processed_blocks"] == 20
     assert result["reported_elapsed_seconds"] == 20.5
@@ -117,6 +121,7 @@ def test_phase1_summary_reports_quota_egress_runtime_and_failures():
             "conclusion": "success",
             "request_counters": {"requests_made": 9_000},
             "response_byte_counters": {"response_bytes_received": 10_000},
+            "rpc_route_counts": {"solidrpc_keyless_public": 3},
             "reported_processed_blocks": 500_000,
             "reported_elapsed_seconds": 100,
             "job_runtime_seconds": 120,
@@ -131,6 +136,10 @@ def test_phase1_summary_reports_quota_egress_runtime_and_failures():
                 "response_bytes_received": 20_000,
                 "geckoterminal_bytes": 500,
             },
+            "rpc_route_counts": {
+                "solidrpc_authenticated_free": 1,
+                "custom_archive_rpc": 1,
+            },
             "reported_processed_blocks": 250_000,
             "reported_elapsed_seconds": 50,
             "job_runtime_seconds": 60,
@@ -141,6 +150,16 @@ def test_phase1_summary_reports_quota_egress_runtime_and_failures():
     assert result["counted_network_requests"] == 10_500
     assert result["minimum_free_quota_days_for_counted_requests"] == 2
     assert result["counted_response_bytes"] == 30_500
+    assert result["rpc_route_counts"] == {
+        "custom_archive_rpc": 1,
+        "solidrpc_authenticated_free": 1,
+        "solidrpc_keyless_public": 3,
+    }
+    assert result["reported_rpc_routes"] == [
+        "custom_archive_rpc",
+        "solidrpc_authenticated_free",
+        "solidrpc_keyless_public",
+    ]
     assert result["reported_processed_blocks"] == 750_000
     assert result["reported_elapsed_seconds"] == 150
     assert result["job_runtime_seconds"] == 180
