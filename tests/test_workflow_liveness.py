@@ -1211,8 +1211,8 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
         "fallback_run_id:",
     ):
         assert source_input in content
-    assert "representative market path registry_run_id mismatch" in content
-    assert "representative priced path oracle_run_id mismatch" in content
+    assert "representative market path {field} mismatch" in content
+    assert "representative priced path {field} mismatch" in content
     assert "representative DEX registry run mismatch" in content
     assert "representative DEX transition run mismatch" in content
     assert "representative validation must contain exactly 10" in content
