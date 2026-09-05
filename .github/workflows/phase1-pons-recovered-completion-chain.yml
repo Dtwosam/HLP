@@ -22,6 +22,11 @@ on:
         required: false
         default: ""
         type: string
+      pricing_run_id:
+        description: "Optional prior recovery/source run with completed lifecycle and fallback artifacts"
+        required: false
+        default: ""
+        type: string
       oracle_run_id:
         required: true
         default: "33974681334"
@@ -63,6 +68,10 @@ on:
         default: ""
         type: string
       prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      pricing_run_id:
         required: false
         default: ""
         type: string
@@ -114,6 +123,7 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
         run: |
           python - <<'PY'
           import json
@@ -124,10 +134,12 @@ jobs:
           v1_id = int(os.environ["V1_V3_RUN_ID"])
           v2_text = os.environ["V2_V4_RUN_ID"].strip()
           v2_id = int(v2_text) if v2_text else 0
+          pricing_text = os.environ["PRICING_RUN_ID"].strip()
+          pricing_id = int(pricing_text) if pricing_text else 0
           if source_id != 33_982_556_591:
               raise SystemExit("recovery source eligibility run changed")
-          if v1_id <= 0 or v2_id < 0:
-              raise SystemExit("recovery venue run IDs are invalid")
+          if v1_id <= 0 or v2_id < 0 or pricing_id < 0:
+              raise SystemExit("recovery run IDs are invalid")
 
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -225,18 +237,62 @@ jobs:
           if v2_id:
               verify_venue(v2_id, "phase1-pons-v2-v4-full", allowed_v2)
 
+          if pricing_id:
+              pricing = get(
+                  f"/repos/{repo}/actions/runs/{pricing_id}"
+              )
+              if pricing.get("status") != "completed":
+                  raise SystemExit(
+                      "reused pricing run is not terminal"
+                  )
+              pricing_path = str(
+                  pricing.get("path") or ""
+              ).split("@", 1)[0]
+              allowed_pricing_paths = {
+                  ".github/workflows/"
+                  "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+                  ".github/workflows/"
+                  "phase1-pons-recovered-completion-one-shot.yml",
+              }
+              if pricing_path not in allowed_pricing_paths:
+                  raise SystemExit(
+                      "reused pricing workflow path is not allowed: "
+                      f"{pricing_path}"
+                  )
+              if pricing.get("head_branch") != (
+                  "phase1/data-acquisition-spike"
+              ):
+                  raise SystemExit("reused pricing branch changed")
+              required_pricing_artifacts = {
+                  "phase1-pons-v1-lifecycle-eligibility",
+                  "phase1-pons-v2-lifecycle-eligibility",
+                  "phase1-pons-v3-quote-fallback-full",
+                  "phase1-pons-v4-quote-fallback-full",
+                  "phase1-pons-quote-fallback-full",
+              }
+              missing_pricing = sorted(
+                  required_pricing_artifacts - artifacts(pricing_id)
+              )
+              if missing_pricing:
+                  raise SystemExit(
+                      "reused pricing run is missing lifecycle/fallback "
+                      f"artifacts: {missing_pricing}"
+                  )
+
           print(json.dumps({
               "source_eligibility_run_id": source_id,
               "v1_v3_run_id": v1_id,
               "v2_v4_run_id": v2_id,
-              "resume_v2_v4": v2_id == 0,
+              "pricing_run_id": pricing_id,
+              "resume_v2_v4": v2_id == 0 and pricing_id == 0,
+              "reuse_pricing": pricing_id > 0,
               "preflight": "pass",
           }, sort_keys=True))
           PY
 
   v2_v4:
     needs: preflight
-    if: ${{ needs.preflight.result == 'success' && inputs.v2_v4_run_id == '' }}
+    if: ${{ needs.preflight.result == 'success' && inputs.pricing_run_id == '' && inputs.v2_v4_run_id == '' }}
     uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
     with:
       transition_run_id: ${{ inputs.transition_run_id }}
@@ -258,7 +314,7 @@ jobs:
       - preflight
       - v2_v4
       - v2_v4_recovery
-    if: ${{ always() && needs.preflight.result == 'success' && (inputs.v2_v4_run_id != '' || needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
+    if: ${{ always() && inputs.pricing_run_id == '' && needs.preflight.result == 'success' && (inputs.v2_v4_run_id != '' || needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
     with:
       oracle_run_id: ${{ inputs.oracle_run_id }}
@@ -275,12 +331,23 @@ jobs:
       transition_run_id: ${{ inputs.transition_run_id }}
     secrets: inherit
 
+  promote_reused_universe:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && inputs.pricing_run_id != '' }}
+    uses: ./.github/workflows/phase1-pons-eligible-universe-promote.yml
+    with:
+      source_eligibility_run_id: ${{ inputs.pricing_run_id }}
+    secrets: inherit
+
   representative:
-    needs: pricing
-    if: ${{ needs.pricing.result == 'success' }}
+    needs:
+      - preflight
+      - pricing
+      - promote_reused_universe
+    if: ${{ always() && needs.preflight.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success')) }}
     uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
     with:
-      eligibility_run_id: ${{ format('{0}', github.run_id) }}
+      eligibility_run_id: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}
       v1_v3_run_id: ${{ inputs.v1_v3_run_id }}
       v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || format('{0}', github.run_id) }}
       oracle_run_id: ${{ inputs.oracle_run_id }}
@@ -297,8 +364,9 @@ jobs:
   ready:
     needs:
       - pricing
+      - promote_reused_universe
       - representative
-    if: ${{ always() && needs.pricing.result == 'success' && needs.representative.result == 'success' }}
+    if: ${{ always() && needs.representative.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -315,6 +383,7 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
         run: |
           mkdir -p artifacts
           python - <<'PY'
@@ -341,11 +410,17 @@ jobs:
               raise SystemExit("recovered representative evidence is incomplete")
 
           v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          pricing_text = os.environ["PRICING_RUN_ID"].strip()
+          pricing_run_id = (
+              int(pricing_text)
+              if pricing_text
+              else int(os.environ["GITHUB_RUN_ID"])
+          )
           report = {
               "status": "ready",
               "recovery_mode": True,
               "source_eligibility_run_id": int(os.environ["SOURCE_RUN_ID"]),
-              "lifecycle_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "lifecycle_run_id": pricing_run_id,
               "v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"]),
               "v2_v4_run_id": (
                   int(v2_text)
