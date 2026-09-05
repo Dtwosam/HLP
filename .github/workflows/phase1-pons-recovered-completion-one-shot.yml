@@ -21,6 +21,7 @@ jobs:
       v1_v3_run_id: ${{ steps.read.outputs.v1_v3_run_id }}
       v2_v4_run_id: ${{ steps.read.outputs.v2_v4_run_id }}
       prior_transfer_run_id: ${{ steps.read.outputs.prior_transfer_run_id }}
+      pricing_run_id: ${{ steps.read.outputs.pricing_run_id }}
     steps:
       - uses: actions/checkout@v4
       - id: read
@@ -39,14 +40,19 @@ jobs:
           v1_id = int(config.get("v1_v3_run_id", 0))
           v2_id = int(config.get("v2_v4_run_id", 0))
           prior_id = int(config.get("prior_transfer_run_id", 0))
+          pricing_id = int(config.get("pricing_run_id", 0))
           if generation <= 0:
               raise SystemExit("recovered completion config is not armed")
           if source_id != 33_982_556_591:
               raise SystemExit("recovered completion source run changed")
           if v1_id <= 0:
               raise SystemExit("recovered completion V1/V3 run must be positive")
-          if v2_id < 0 or prior_id < 0:
+          if v2_id < 0 or prior_id < 0 or pricing_id < 0:
               raise SystemExit("recovered completion optional run IDs are invalid")
+          if pricing_id > 0 and v2_id <= 0:
+              raise SystemExit(
+                  "reused pricing requires an explicit V2/V4 run ID"
+              )
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"source_eligibility_run_id={source_id}\n")
@@ -61,12 +67,18 @@ jobs:
                   + (str(prior_id) if prior_id else "")
                   + "\n"
               )
+              output.write(
+                  "pricing_run_id="
+                  + (str(pricing_id) if pricing_id else "")
+                  + "\n"
+              )
           print(json.dumps({
               "generation": generation,
               "source_eligibility_run_id": source_id,
               "v1_v3_run_id": v1_id,
               "v2_v4_run_id": v2_id,
               "prior_transfer_run_id": prior_id,
+              "pricing_run_id": pricing_id,
           }, sort_keys=True))
           PY
 
@@ -79,6 +91,7 @@ jobs:
       v1_v3_run_id: ${{ needs.config.outputs.v1_v3_run_id }}
       v2_v4_run_id: ${{ needs.config.outputs.v2_v4_run_id }}
       prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
+      pricing_run_id: ${{ needs.config.outputs.pricing_run_id }}
       oracle_run_id: "33974681334"
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
