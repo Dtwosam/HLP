@@ -600,3 +600,30 @@ def test_readiness_terminal_failure_reuses_complete_source_pricing():
         "recommended_pricing_run_id": SOURCE_ELIGIBILITY_RUN_ID,
         "next_action": "launch_recovered_phase1_completion",
     }
+
+def test_readiness_successful_source_missing_artifact_requires_recovery():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-lifecycle-eligibility"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="success",
+            artifacts=artifacts,
+        )
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "launch_recovered_phase1_completion"
+    assert report["source_recovery_plan"] == {
+        "source_has_v1_v3_full": True,
+        "source_has_v2_v4_full": True,
+        "source_has_complete_pricing": False,
+        "recommended_v1_v3_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_v2_v4_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_pricing_run_id": 0,
+        "next_action": "launch_recovered_phase1_completion",
+    }
+
