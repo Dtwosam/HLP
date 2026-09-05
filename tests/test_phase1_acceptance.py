@@ -43,6 +43,15 @@ def _fixtures():
             "v1_eligibility_sha256": "a" * 64,
             "v2_eligibility_sha256": "b" * 64,
             "sample_run_id": 404,
+            "runner_smoke_run_id": 33_920_762_592,
+            "runner_smoke_universe_sha256": (
+                "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+                "b769543c1376beab9c19ab9"
+            ),
+            "runner_smoke_outcomes_sha256": (
+                "6fb40693b77d7434d4e579a2225fed2c65061841"
+                "a5ea9d0ba56f785071fc6ef2"
+            ),
             "transfer_run_id": 405,
             "market_path_run_id": 406,
             "priced_path_run_id": 407,
@@ -91,6 +100,15 @@ def _fixtures():
         "coverage_sample_start_block": 1000,
         "no_unexplained_block_gaps": True,
         "source_coverage_sha256": "c" * 64,
+        "runner_smoke_run_id": 33_920_762_592,
+        "runner_smoke_universe_sha256": (
+            "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+            "b769543c1376beab9c19ab9"
+        ),
+        "runner_smoke_outcomes_sha256": (
+            "6fb40693b77d7434d4e579a2225fed2c65061841"
+            "a5ea9d0ba56f785071fc6ef2"
+        ),
         "validation_sha256": "representative-sha",
     }
     route_projections = [
@@ -163,6 +181,7 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["representative_no_unexplained_block_gaps"] is True
     assert report["representative_source_coverage_sha256"] == "c" * 64
     assert report["representative_source_run_ids"] == {
+        "runner_smoke_run_id": 33_920_762_592,
         "registry_run_id": 33_911_022_718,
         "v2_curve_run_id": 33_936_232_604,
         "transition_run_id": 33_912_452_330,
@@ -175,6 +194,16 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         "priced_path_run_id": 407,
         "dex_crosscheck_run_id": 408,
         "fallback_run_id": 101,
+    }
+    assert report["representative_runner_smoke_sha256"] == {
+        "runner_smoke_universe_sha256": (
+            "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+            "b769543c1376beab9c19ab9"
+        ),
+        "runner_smoke_outcomes_sha256": (
+            "6fb40693b77d7434d4e579a2225fed2c65061841"
+            "a5ea9d0ba56f785071fc6ef2"
+        ),
     }
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
@@ -407,4 +436,28 @@ def test_phase1_acceptance_rejects_representative_fallback_run_drift():
     fixtures[3]["provenance"]["fallback_run_id"] = 999
 
     with pytest.raises(ValueError, match="fallback run does not match"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_runner_smoke_run_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["runner_smoke_run_id"] += 1
+
+    with pytest.raises(ValueError, match="canonical source run changed"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_runner_smoke_hash_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["runner_smoke_outcomes_sha256"] = "d" * 64
+
+    with pytest.raises(ValueError, match="runner smoke SHA changed"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_runner_smoke_summary_hash_drift():
+    fixtures = list(_fixtures())
+    fixtures[2]["runner_smoke_universe_sha256"] = "d" * 64
+
+    with pytest.raises(ValueError, match="runner smoke SHA summary disagrees"):
         build_phase1_acceptance_report(*fixtures)
