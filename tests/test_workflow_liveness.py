@@ -1226,6 +1226,12 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative DEX transition run mismatch" in content
     assert "v1_eligibility_sha256" in content
     assert "v2_eligibility_sha256" in content
+    assert "runner_smoke_run_id" in content
+    assert "runner_smoke_universe_sha256" in content
+    assert "runner_smoke_outcomes_sha256" in content
+    assert "representative validation runner smoke run mismatch" in content
+    assert "representative validation runner smoke universe SHA mismatch" in content
+    assert "representative validation runner smoke outcomes SHA mismatch" in content
     assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "representative validation must contain exactly 10" in content
