@@ -20,11 +20,13 @@ def _run(
     artifacts=(),
     job_counts=None,
     path=None,
+    head_branch="phase1/data-acquisition-spike",
 ):
     return {
         "id": run_id,
         "name": name,
         "path": path,
+        "head_branch": head_branch,
         "status": status,
         "conclusion": conclusion,
         "artifacts": list(artifacts),
@@ -45,6 +47,10 @@ def _evidence(run_id=400):
     return _run(
         run_id,
         name="phase1-pons-post-eligibility-evidence-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-post-eligibility-evidence-one-shot.yml"
+        ),
         artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
     )
 
@@ -289,7 +295,7 @@ def test_readiness_does_not_treat_successful_finalizer_without_pass_artifact_as_
     assert report["final_acceptance_run_id"] == 0
 
 
-def test_readiness_switches_to_recovery_on_failed_source_job():
+def test_readiness_waits_for_parent_recovery_while_source_is_active():
     report = _report(
         source_run=_source(
             status="queued",
@@ -305,7 +311,7 @@ def test_readiness_switches_to_recovery_on_failed_source_job():
     )
 
     assert report["stage"] == "eligibility_acquisition"
-    assert report["next_action"] == "recover_full_eligibility_acquisition"
+    assert report["next_action"] == "wait_for_full_eligibility_acquisition"
     assert report["source_failed_jobs"] == 1
     assert report["source_job_counts"]["in_progress"] == 2
 
@@ -360,3 +366,59 @@ def test_readiness_requires_registry_primary_and_secondary_artifacts():
             ],
         }
     ]
+
+
+def test_readiness_advances_from_terminal_source_failure_with_recovered_evidence():
+    source = _source(
+        status="completed",
+        conclusion="failure",
+        artifacts=(),
+        job_counts={"success": 16, "cancelled": 1},
+    )
+    evidence = _run(
+        500,
+        name="phase1-pons-recovered-completion-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-recovered-completion-one-shot.yml"
+        ),
+        artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
+    )
+
+    report = _report(
+        source_run=source,
+        evidence_run=evidence,
+        evidence_run_id=500,
+    )
+
+    assert report["stage"] == "viability_measurements"
+    assert report["next_action"] == "arm_viability_run_ledger"
+    assert report["evidence_run_id"] == 500
+
+
+def test_readiness_rejects_unapproved_recovery_evidence_workflow():
+    source = _source(
+        status="completed",
+        conclusion="failure",
+        artifacts=(),
+    )
+    evidence = _run(
+        500,
+        path=".github/workflows/unapproved.yml",
+        artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
+    )
+
+    report = _report(
+        source_run=source,
+        evidence_run=evidence,
+        evidence_run_id=500,
+    )
+
+    assert report["stage"] == "post_eligibility_evidence"
+    assert (
+        report["next_action"]
+        == "recover_or_rerun_post_eligibility_evidence"
+    )
+    assert report["evidence_workflow_path"] == (
+        ".github/workflows/unapproved.yml"
+    )
