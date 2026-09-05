@@ -168,6 +168,7 @@ def test_curve_range_recovery_is_manual_small_and_bounded():
     assert "\n  push:" not in trigger_block
     assert "max-parallel: 2" in content
     assert "SHARD_COUNT: '4'" in content
+    assert "recovery range exceeds 200000-block ceiling" in content
     assert "timeout-minutes: 20" in content
     assert "time.sleep(" not in content
 
@@ -180,6 +181,7 @@ def test_anchor_range_recovery_is_manual_small_and_bounded():
     assert "\n  push:" not in trigger_block
     assert "max-parallel: 2" in content
     assert "SHARD_COUNT: '4'" in content
+    assert "recovery range exceeds 600000-block ceiling" in content
     assert "timeout-minutes: 20" in content
     assert "time.sleep(" not in content
 
