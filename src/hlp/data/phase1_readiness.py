@@ -98,14 +98,44 @@ def build_phase1_readiness_report(
     source_missing = sorted(
         set(SOURCE_REQUIRED_ARTIFACTS) - source_artifacts
     )
+    source_job_counts = {
+        str(key): int(value)
+        for key, value in dict(
+            source_run.get("job_counts") or {}
+        ).items()
+    }
+    failed_job_states = {
+        "failure",
+        "cancelled",
+        "timed_out",
+        "startup_failure",
+        "action_required",
+        "stale",
+    }
+    source_failed_jobs = sum(
+        count
+        for state, count in source_job_counts.items()
+        if state in failed_job_states
+    )
     if not _successful(source_run) or source_missing:
+        source_terminal_failure = bool(
+            source_run.get("status") == "completed"
+            and source_run.get("conclusion") != "success"
+        )
+        next_action = (
+            "recover_full_eligibility_acquisition"
+            if source_failed_jobs > 0 or source_terminal_failure
+            else "wait_for_full_eligibility_acquisition"
+        )
         return {
             "phase1_ready": False,
             "stage": "eligibility_acquisition",
-            "next_action": "wait_for_or_recover_full_eligibility_acquisition",
+            "next_action": next_action,
             "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
             "source_status": source_run.get("status"),
             "source_conclusion": source_run.get("conclusion"),
+            "source_job_counts": source_job_counts,
+            "source_failed_jobs": source_failed_jobs,
             "source_missing_artifacts": source_missing,
             "evidence_run_id": 0,
             "completed_viability_routes": [],
