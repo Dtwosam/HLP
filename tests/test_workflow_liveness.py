@@ -634,16 +634,14 @@ def test_skhy_segmented_continuation_is_manual_sequential_and_complete():
     assert content.count(
         "uses: ./.github/workflows/"
         "phase1-pons-skhy-v4-known-pool-continuation.yml"
-    ) == 4
-    assert content.count('forward_blocks: "500000"') == 4
-    assert "needs: segment-0" in content
-    assert "needs: segment-1" in content
-    assert "needs: segment-2" in content
-    assert "needs: segment-3" in content
-    assert "phase1-pons-skhy-v4-segment-0" in content
-    assert "phase1-pons-skhy-v4-segment-1" in content
-    assert "phase1-pons-skhy-v4-segment-2" in content
-    assert "phase1-pons-skhy-v4-segment-3" in content
+    ) == 7
+    assert content.count('forward_blocks: "250000"') == 7
+    for index in range(6):
+        assert f"needs: segment-{index}" in content
+        assert f"phase1-pons-skhy-v4-segment-{index}" in content
+    assert "phase1-pons-skhy-v4-segment-6" in content
+    assert '"continuation_segments": 7' in content
+    assert '"max_blocks_per_segment": 250000' in content
     assert "phase1-pons-skhy-v4-known-pool-segmented" in content
     assert "segmented SKHY continuation ended before snapshot head" in content
     assert '"remaining_unsearched_blocks": remaining' in content

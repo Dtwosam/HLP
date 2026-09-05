@@ -221,9 +221,10 @@ per-job span and retry safety, not the canonical full-history block workload.
 The original V4 continuation path remains available and supports fail-closed
 `known_pool_only` mode. For SKHY it skips redundant Initialize discovery and
 scans only Swap logs for the already-frozen candidate pool ID. The primitive is
-capped at **500k blocks per 20-minute job** and the segmented orchestrator
-publishes a final artifact only if SKHY resolves or the scan reaches snapshot
-head with zero unsearched blocks. A separate archive deployment-boundary probe
+capped at **500k blocks per 20-minute job**, while the canonical segmented
+wrapper now uses **seven <=250k-block segments** after the measured keyless
+timeout. The orchestrator publishes a final artifact only if SKHY resolves or
+the scan reaches snapshot head with zero unsearched blocks. A separate archive deployment-boundary probe
 proved the SKHY token contract already existed from block **8,691,227**, so
 the missing price history is a liquidity/venue-coverage problem rather than a
 token-deployment gap. The official Chainlink directory inventory also has no
