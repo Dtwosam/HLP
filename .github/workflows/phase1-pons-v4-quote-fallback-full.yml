@@ -73,6 +73,13 @@ jobs:
           import os
           from pathlib import Path
 
+          probe_rows = [
+              json.loads(line)
+              for line in Path(
+                  "probe/${{ inputs.probe_filename }}"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
           routes = [
               json.loads(line)
               for line in Path(
@@ -81,6 +88,38 @@ jobs:
               if line.strip()
           ]
           assert routes, "probe selected no V4 fallback routes"
+          unresolved = [
+              row for row in probe_rows
+              if not row.get("causal_route_ready")
+              and not row.get("delayed_route_ready")
+          ]
+          if len(probe_rows) != 5:
+              raise SystemExit(
+                  "frozen residual V4 probe must contain exactly five "
+                  f"V3-miss quote assets, got {len(probe_rows)}"
+              )
+          if unresolved:
+              raise SystemExit(
+                  "cannot freeze V4 quote fallback with unresolved residual "
+                  "quote assets: "
+                  + json.dumps(
+                      [
+                          {
+                              "symbol": row.get("symbol"),
+                              "quote_token": row["quote_token"],
+                              "launches": int(row["launches"]),
+                              "search_to_block": int(row["search_to_block"]),
+                          }
+                          for row in unresolved
+                      ],
+                      sort_keys=True,
+                  )
+              )
+          if len(routes) != len(probe_rows):
+              raise SystemExit(
+                  "selected V4 routes do not exactly cover residual probe: "
+                  f"routes={len(routes)} probe={len(probe_rows)}"
+              )
           assert all(
               row["anchor_token"].lower()
               == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
@@ -90,6 +129,8 @@ jobs:
           configured = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
           assert earliest >= configured, (earliest, configured)
           report = {
+              "residual_quote_assets": len(probe_rows),
+              "unresolved_assets": 0,
               "selected_routes": len(routes),
               "covered_launches": sum(int(row["launches"]) for row in routes),
               "earliest_activation_block": earliest,
