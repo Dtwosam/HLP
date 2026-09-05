@@ -2950,14 +2950,6 @@ def cmd_pons_v2_curve_eligibility(args: argparse.Namespace) -> int:
                 None if not args.fallback_events
                 else Path(args.fallback_events).name
             ),
-            "fallback_state": (
-                None if not args.fallback_state
-                else Path(args.fallback_state).name
-            ),
-            "fallback_events": (
-                None if not args.fallback_events
-                else Path(args.fallback_events).name
-            ),
             "eligibility_threshold_usd": "100000",
             "threshold_semantics": (
                 "reached at least once on complete reconstructed V2 curve path"
@@ -3049,6 +3041,14 @@ def cmd_pons_v2_lifecycle_eligibility(args: argparse.Namespace) -> int:
             ),
             "oracle_events": (
                 None if not args.oracle_events else Path(args.oracle_events).name
+            ),
+            "fallback_state": (
+                None if not args.fallback_state
+                else Path(args.fallback_state).name
+            ),
+            "fallback_events": (
+                None if not args.fallback_events
+                else Path(args.fallback_events).name
             ),
             "eligibility_threshold_usd": "100000",
             "threshold_semantics": (
