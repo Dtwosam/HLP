@@ -117,6 +117,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
     "phase1-pons-v2-transition-recover-gaps.yml",
     "phase1-pons-v2-v4-recover-gaps.yml",
+    "phase1-pons-stock-oracle-promote-v2-delta.yml",
 }
 
 
@@ -266,6 +267,23 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+def test_stock_oracle_delta_promotion_is_manual_bounded_and_fail_closed():
+    content = _workflow("phase1-pons-stock-oracle-promote-v2-delta.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "SHARD_COUNT: '8'" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "expected_full={len(expected_rows)}" in content
+    assert "existing_v2={len(existing_tokens)}" in content
+    assert "expected exactly one full-Pons stock-feed delta" in content
+    assert "promoted_v2_oracle_plus_full_pons_delta" in content
+    assert "promoted oracle does not exactly cover full-Pons stock feeds" in content
     assert "time.sleep(" not in content
 
 
