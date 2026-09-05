@@ -13,6 +13,11 @@ on:
         required: true
         default: "33925648293"
         type: string
+      prior_gap_run_id:
+        description: "Optional earlier anchor gap-recovery run whose successful gap artifacts must be reused"
+        required: false
+        default: ""
+        type: string
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
@@ -27,6 +32,11 @@ on:
       partial_recovery_run_id:
         description: "Finished partial anchor tail-recovery run"
         required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier anchor gap-recovery run whose successful gap artifacts must be reused"
+        required: false
+        default: ""
         type: string
       max_gap_blocks:
         description: "Maximum blocks per retry job"
@@ -70,6 +80,14 @@ jobs:
           merge-multiple: true
           run-id: ${{ inputs.partial_recovery_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-anchor-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
       - id: plan
         name: Derive only missing anchor tail ranges
         env:
@@ -89,14 +107,21 @@ jobs:
           if max_blocks <= 0:
               raise SystemExit("max_gap_blocks must be positive")
 
-          manifests = sorted(
-              Path("partial").glob(
-                  "anchor-recovery-*.jsonl.manifest.json"
+          manifests = (
+              sorted(
+                  Path("partial").glob(
+                      "anchor-recovery-*.jsonl.manifest.json"
+                  )
+              )
+              + sorted(
+                  Path("prior-gaps").glob(
+                      "anchor-gap-*.jsonl.manifest.json"
+                  )
               )
           )
           if not manifests:
               raise SystemExit(
-                  "partial recovery run has no successful anchor artifacts"
+                  "recovery sources have no successful anchor artifacts"
               )
 
           covered = []
@@ -108,6 +133,7 @@ jobs:
               hi = int(prov["to_block"])
               covered.append((lo, hi))
               sources.append({
+                  "source": path.parent.name,
                   "manifest": path.name,
                   "from_block": lo,
                   "to_block": hi,
@@ -227,6 +253,14 @@ jobs:
           run-id: ${{ inputs.partial_recovery_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-anchor-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
         if: ${{ needs.plan.outputs.gap_count != '0' }}
         with:
           pattern: phase1-pons-anchor-gap-*
@@ -255,6 +289,7 @@ jobs:
           files = (
               list(Path("preserved").glob("anchor-shard-*.jsonl"))
               + list(Path("partial").glob("anchor-recovery-*.jsonl"))
+              + list(Path("prior-gaps").glob("anchor-gap-*.jsonl"))
               + list(Path("gaps").glob("anchor-gap-*.jsonl"))
           )
           if not files:
@@ -287,6 +322,7 @@ jobs:
               previous_hi = hi
               expected_records += int(manifest["records"])
               manifests.append({
+                  "source": path.parent.name,
                   "file": path.name,
                   "sha256": manifest["sha256"],
                   "records": int(manifest["records"]),
@@ -333,6 +369,11 @@ jobs:
                   ),
                   "partial_recovery_run_id": int(
                       "${{ inputs.partial_recovery_run_id }}"
+                  ),
+                  "prior_gap_run_id": (
+                      int("${{ inputs.prior_gap_run_id }}")
+                      if "${{ inputs.prior_gap_run_id }}"
+                      else None
                   ),
                   "weth": os.environ["WETH"].lower(),
                   "usdg": os.environ["USDG"].lower(),
