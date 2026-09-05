@@ -156,6 +156,31 @@ def build_phase1_acceptance_report(
     if v1_eligibility_run_id <= 0 or v2_eligibility_run_id <= 0:
         raise ValueError("eligible universe lifecycle run provenance is invalid")
 
+    v1_v3_run_id = _int(
+        eligible_provenance.get("v1_v3_run_id"),
+        field="eligible.v1_v3_run_id",
+    )
+    v2_v4_run_id = _int(
+        eligible_provenance.get("v2_v4_run_id"),
+        field="eligible.v2_v4_run_id",
+    )
+    if v1_v3_run_id <= 0 or v2_v4_run_id <= 0:
+        raise ValueError("eligible universe venue run provenance is invalid")
+    if _int(
+        eligible.get("validated_v1_v3_run_id"),
+        field="eligible.validated_v1_v3_run_id",
+    ) != v1_v3_run_id:
+        raise ValueError(
+            "eligible universe V1/V3 run disagrees with provenance"
+        )
+    if _int(
+        eligible.get("validated_v2_v4_run_id"),
+        field="eligible.validated_v2_v4_run_id",
+    ) != v2_v4_run_id:
+        raise ValueError(
+            "eligible universe V2/V4 run disagrees with provenance"
+        )
+
     v1_eligibility_sha256 = _sha256(
         eligible_provenance.get("v1_eligibility_sha256"),
         field="eligible.v1_eligibility_sha256",
@@ -460,6 +485,20 @@ def build_phase1_acceptance_report(
         raise ValueError(
             "representative and universe V2 lifecycle artifact SHA disagree"
         )
+    if _int(
+        representative_provenance.get("v1_v3_run_id"),
+        field="representative.v1_v3_run_id",
+    ) != v1_v3_run_id:
+        raise ValueError(
+            "representative and universe V1/V3 venue evidence disagree"
+        )
+    if _int(
+        representative_provenance.get("v2_v4_run_id"),
+        field="representative.v2_v4_run_id",
+    ) != v2_v4_run_id:
+        raise ValueError(
+            "representative and universe V2/V4 venue evidence disagree"
+        )
 
     representative_runner_smoke_sha256 = {}
     for field, expected in REPRESENTATIVE_RUNNER_SMOKE_SHA256.items():
@@ -672,6 +711,8 @@ def build_phase1_acceptance_report(
         "eligible_v2": eligible_v2,
         "v1_eligibility_run_id": v1_eligibility_run_id,
         "v2_eligibility_run_id": v2_eligibility_run_id,
+        "v1_v3_run_id": v1_v3_run_id,
+        "v2_v4_run_id": v2_v4_run_id,
         "v1_eligibility_sha256": v1_eligibility_sha256,
         "v2_eligibility_sha256": v2_eligibility_sha256,
         "representative_tokens": 10,
