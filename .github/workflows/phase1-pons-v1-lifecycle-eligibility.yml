@@ -85,6 +85,50 @@ jobs:
           path: v3
           run-id: ${{ inputs.v1_v3_run_id }}
           github-token: ${{ github.token }}
+      - id: v3_sources
+        name: Resolve V1 V3 shard source runs
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v3/pons-v1-v3-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit(
+                  "canonical V1 V3 tape is not stored as sharded artifacts"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v3_sources.outputs.partial_run_id != '' && steps.v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v3_sources.outputs.prior_gap_run_id != '' && steps.v3_sources.outputs.prior_gap_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.quote_audit_artifact_name }}
@@ -290,7 +334,8 @@ jobs:
           mkdir -p artifacts
           hlp pons-v1-lifecycle-eligibility \
             --registry registry/pons-full-launch-registry.jsonl \
-            --v3-events v3/pons-v1-v3-full.jsonl \
+            --v3-events-dir v3-shards \
+            --v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json \
             --quote-registry quotes/pons-quote-registry.jsonl \
             --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
             --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
