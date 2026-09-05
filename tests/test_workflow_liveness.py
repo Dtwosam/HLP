@@ -1445,6 +1445,19 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "phase1-post-eligibility-evidence-ready.json" in content
     assert "evidence handoff lifecycle run ID must be positive" in content
     assert "normal evidence handoff routing changed" in content
+    assert "evidence handoff snapshot head changed" in content
+    assert "evidence handoff Pons launch count changed" in content
+    assert "evidence handoff eligible universe is empty" in content
+    assert "evidence handoff representative token count changed" in content
+    for field in (
+        "eligible_universe_sha256",
+        "representative_validation_sha256",
+        "v1_eligibility_sha256",
+        "v2_eligibility_sha256",
+    ):
+        assert field in content
+    assert "evidence handoff hash is invalid" in content
+    assert '"evidence_hashes": evidence_hashes' in content
     assert "evidence lifecycle/pricing workflow path is not allowed" in content
     assert "evidence lifecycle/pricing run is missing fallback" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
