@@ -292,10 +292,25 @@ def test_stock_oracle_delta_promotion_is_manual_bounded_and_fail_closed():
 
 def test_v4_quote_fallback_uses_cumulative_forward_probe():
     content = _workflow("phase1-pons-v4-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
     assert 'default: "33926428274"' in content
     assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
     assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
     assert "pons-select-v4-quote-routes" in content
+
+
+def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
+    content = _workflow("phase1-pons-v3-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33921477647"' in content
+    assert 'default: "33923160281"' in content
+    assert "pons-select-v3-quote-routes" in content
 
 
 def test_v4_quote_continuation_is_reusable_without_push_trigger():
