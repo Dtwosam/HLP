@@ -62,6 +62,9 @@ def _fixtures():
                 "external_status": "matched",
                 "external_match": True,
                 "mismatches": [],
+                "price_crosscheck_scope": "canonical_dex_swap",
+                "price_match": True,
+                "price_crosscheck_status": "matched",
             }
         )
 
@@ -89,6 +92,9 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["transfers"] == sum(25 + index for index in range(1, 11))
     assert summary["dex_targeted"] == 10
     assert summary["dex_matched"] == 10
+    assert summary["dex_price_targeted"] == 10
+    assert summary["dex_price_matched"] == 10
+    assert summary["dex_price_no_swap_checkpoint"] == 0
 
 
 def test_representative_validation_fails_closed_on_missing_holder():
@@ -143,6 +149,9 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
             "crosscheck_scope": "no_registered_v4_pool",
             "external_status": "not_applicable",
             "external_match": None,
+            "price_crosscheck_scope": "not_applicable",
+            "price_match": None,
+            "price_crosscheck_status": "not_applicable",
         }
     )
 
@@ -157,4 +166,44 @@ def test_representative_validation_allows_explicit_unregistered_v2_pool():
 
     assert summary["dex_targeted"] == 9
     assert summary["dex_matched"] == 9
+    assert summary["dex_price_targeted"] == 9
+    assert summary["dex_price_matched"] == 9
     assert summary["no_registered_v4_pool"] == 1
+
+
+def test_representative_validation_rejects_dex_price_mismatch():
+    sample, v1, v2, holders, dex = _fixtures()
+    dex[0]["price_match"] = False
+    dex[0]["price_crosscheck_status"] = "outside_candle"
+
+    with pytest.raises(ValueError, match="DEX price cross-check failed"):
+        build_representative_validation_rows(
+            sample,
+            v1_lifecycle_rows=v1,
+            v2_lifecycle_rows=v2,
+            holder_summary_rows=holders,
+            dex_crosscheck_rows=dex,
+        )
+
+
+def test_representative_validation_allows_explicit_no_swap_checkpoint():
+    sample, v1, v2, holders, dex = _fixtures()
+    dex[0].update(
+        {
+            "price_crosscheck_scope": "no_swap_checkpoint",
+            "price_match": None,
+            "price_crosscheck_status": "no_swap_checkpoint",
+        }
+    )
+
+    rows = build_representative_validation_rows(
+        sample,
+        v1_lifecycle_rows=v1,
+        v2_lifecycle_rows=v2,
+        holder_summary_rows=holders,
+        dex_crosscheck_rows=dex,
+    )
+    summary = summarize_representative_validation(rows)
+    assert summary["dex_price_targeted"] == 9
+    assert summary["dex_price_matched"] == 9
+    assert summary["dex_price_no_swap_checkpoint"] == 1
