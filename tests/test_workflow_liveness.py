@@ -1523,6 +1523,13 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
     assert 'run.get("path")' in content
     assert "viability route workflow path mismatch" in content
     assert "viability route measurement artifacts missing" in content
+    assert "json_file_at_ref" in content
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "viability route evidence changed since launch" in content
+    assert "viability route ledger evidence changed since launch" in content
+    assert "viability route launch slot was not empty" in content
+    assert '"route_launch_evidence_bound": True' in content
     assert "phase1-pons-viability-measurement-pons_registry-primary" in content
     assert "phase1-pons-viability-measurement-pons_registry-secondary" in content
     assert "artifact_names(run_id)" in content
