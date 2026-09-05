@@ -646,7 +646,7 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "route_ready" in content
     assert "search_to_block" in content
     assert "GITHUB_OUTPUT" in content
-    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 30" in content
     assert "time.sleep(" not in content
 
 
