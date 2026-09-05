@@ -487,8 +487,11 @@ eligibility artifacts. Actions history contains no completed
 full venue tapes remain upstream acquisition blockers alongside the unfinished
 pricing inputs. A manual-only
 `phase1-pons-full-eligibility-acquisition-chain` now serializes V1 V3 first,
-V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain;
-it should be launched only after any existing archive-heavy acquisition clears.
+V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain.
+A guarded one-shot launcher is staged against resumable oracle promotion run
+**33974681334**; its initial creation is intentionally skipped and it must not
+be fired unless that run freezes the canonical stock-oracle artifact and the
+archive lane is otherwise clear.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former

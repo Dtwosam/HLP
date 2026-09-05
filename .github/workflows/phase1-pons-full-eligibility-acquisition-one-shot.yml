@@ -1,0 +1,29 @@
+name: phase1-pons-full-eligibility-acquisition-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-full-eligibility-acquisition-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  acquire:
+    if: ${{ contains(github.event.head_commit.message, 'launch full eligibility acquisition') }}
+    uses: ./.github/workflows/phase1-pons-full-eligibility-acquisition-chain.yml
+    with:
+      oracle_run_id: "33974681334"
+      source_registry_run_id: "33911022718"
+      transition_run_id: "33912452330"
+      anchor_run_id: "33972109927"
+      route_audit_run_id: "33921477647"
+      delayed_probe_run_id: "33923160281"
+      residual_v4_probe_run_id: "33926428274"
+      quote_audit_run_id: "33923299711"
+      v2_registry_run_id: "33912235341"
+      curve_run_id: "33936232604"
+    secrets: inherit

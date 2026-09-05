@@ -641,6 +641,17 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
+def test_full_eligibility_one_shot_is_guarded_and_pinned():
+    content = _workflow(
+        "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+    )
+    assert "phase1-pons-full-eligibility-acquisition-chain.yml" in content
+    assert "launch full eligibility acquisition" in content
+    assert 'oracle_run_id: "33974681334"' in content
+    assert 'anchor_run_id: "33972109927"' in content
+    assert "workflow_dispatch:" not in content
+
+
 def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     content = _workflow(
         "phase1-pons-full-eligibility-acquisition-chain.yml"
