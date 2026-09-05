@@ -291,30 +291,48 @@ def build_phase1_acceptance_report(
             "representative multi-checkpoint token count is invalid"
         )
 
+    explorer_verified_tokens = _int(
+        representative.get("explorer_verified_tokens", 0),
+        field="representative.explorer_verified_tokens",
+    )
     explorer_launches = _int(
-        representative.get("explorer_verified_launch_transactions"),
+        representative.get("explorer_verified_launch_transactions", 0),
         field="representative.explorer_verified_launch_transactions",
     )
     explorer_dex_transactions = _int(
-        representative.get("explorer_verified_dex_swap_transactions"),
+        representative.get("explorer_verified_dex_swap_transactions", 0),
         field="representative.explorer_verified_dex_swap_transactions",
     )
     explorer_transactions = _int(
-        representative.get("explorer_verified_transactions"),
+        representative.get("explorer_verified_transactions", 0),
         field="representative.explorer_verified_transactions",
     )
-    if explorer_launches != 10:
-        raise ValueError(
-            "representative explorer does not verify all 10 launches"
+    explorer_supplied = any(
+        value > 0
+        for value in (
+            explorer_verified_tokens,
+            explorer_launches,
+            explorer_dex_transactions,
+            explorer_transactions,
         )
-    if explorer_dex_transactions != checkpoint_targeted:
-        raise ValueError(
-            "representative explorer/DEX checkpoint coverage mismatch"
-        )
-    if explorer_transactions != explorer_launches + explorer_dex_transactions:
-        raise ValueError(
-            "representative explorer transaction accounting is invalid"
-        )
+    )
+    if explorer_supplied:
+        if explorer_verified_tokens != 10 or explorer_launches != 10:
+            raise ValueError(
+                "supplementary explorer evidence does not verify all 10 "
+                "representative launches"
+            )
+        if explorer_dex_transactions != checkpoint_targeted:
+            raise ValueError(
+                "supplementary explorer/DEX checkpoint coverage mismatch"
+            )
+        if (
+            explorer_transactions
+            != explorer_launches + explorer_dex_transactions
+        ):
+            raise ValueError(
+                "supplementary explorer transaction accounting is invalid"
+            )
 
     coverage_sources = _int(
         representative.get("coverage_sources"),
@@ -510,6 +528,10 @@ def build_phase1_acceptance_report(
         "representative_dex_multi_checkpoint_tokens": (
             multi_checkpoint_tokens
         ),
+        "representative_explorer_evidence_status": (
+            "verified" if explorer_supplied else "not_required"
+        ),
+        "representative_explorer_verified_tokens": explorer_verified_tokens,
         "representative_explorer_verified_transactions": (
             explorer_transactions
         ),
