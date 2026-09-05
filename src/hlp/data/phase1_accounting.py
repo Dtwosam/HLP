@@ -183,6 +183,7 @@ def summarize_action_run(
     response_byte_totals: Counter[str] = Counter()
     rpc_route_totals: Counter[str] = Counter()
     reported_ranges: list[tuple[int, int]] = []
+    reported_processed_blocks = 0
     reported_elapsed_seconds = 0.0
     job_runtime_values: list[float] = []
     json_records = 0
@@ -202,7 +203,11 @@ def summarize_action_run(
         request_totals.update(_request_counters(records))
         response_byte_totals.update(_response_byte_counters(records))
         rpc_route_totals.update(_rpc_route_counters(records))
-        reported_ranges.extend(_reported_block_ranges(records))
+        job_ranges = _reported_block_ranges(records)
+        reported_ranges.extend(job_ranges)
+        reported_processed_blocks += sum(
+            hi - lo + 1 for lo, hi in job_ranges
+        )
         elapsed = [
             _nonnegative_float(
                 record["elapsed_seconds"],
@@ -254,7 +259,8 @@ def summarize_action_run(
         "reported_block_ranges": [
             [lo, hi] for lo, hi in merged_ranges
         ],
-        "reported_processed_blocks": sum(
+        "reported_processed_blocks": reported_processed_blocks,
+        "reported_unique_processed_blocks": sum(
             hi - lo + 1 for lo, hi in merged_ranges
         ),
         "reported_elapsed_seconds": reported_elapsed_seconds,
