@@ -707,14 +707,26 @@ captured **17 successful shards** after the first timeout:
 (0.1966 GiB)**, **24,297.851 reported acquisition seconds** and **27,142 GitHub
 job-runtime seconds**, still entirely through `solidrpc_keyless_public`.
 Using the aggregate 17-shard density only as an operational forecast, full
-V1/V3 is about **420.6k requests**, **93.17 GiB response egress**, **2.78 GiB
+V1/V3 was about **420.6k requests**, **93.17 GiB response egress**, **2.78 GiB
 artifact storage**, **95.29 serialized acquisition hours**, or roughly
-**47.64 hours wall time** at max-parallel 2. The artifact-density increase
-versus the 7-shard checkpoint reflects the much denser later shards and is why
-the larger sample supersedes the earlier storage forecast. These checkpoints
-are explicitly non-acceptance evidence because the parent acquisition is still
-incomplete; frozen viability still requires its separate bounded route
-measurement run and worst-observed-per-block projection.
+**47.64 hours wall time** at max-parallel 2. Artifact/log-only checkpoint
+**33999864199** now supersedes that operational sample with **27 successful
+acquisition shards**: **5,159,742 processed blocks**, **47,200 RPC requests**,
+**10,208,439,963 response bytes (9.5074 GiB)**, **380,669,336 artifact bytes
+(0.3545 GiB)**, **37,836.375 reported acquisition seconds** and **40,970
+GitHub job-runtime seconds**, all through `solidrpc_keyless_public`. Scaling
+that 27-shard aggregate density across the exact **45,864,378-block** V1/V3
+range gives an updated operational forecast of about **419.6k requests**,
+**84.51 GiB response egress**, **3.15 GiB artifact storage**, **93.42
+serialized acquisition hours** (about **46.71 hours** at max-parallel 2), and
+**101.16 projected GitHub job-runtime hours** (about **50.58 hours** at
+max-parallel 2). The larger sample reduces the response-egress estimate while
+raising the artifact-storage estimate, confirming that density changes
+materially across later shards and that measured checkpoints should supersede
+smaller-sample extrapolations. These checkpoints are explicitly non-acceptance
+evidence because the parent acquisition is still incomplete; frozen viability
+still requires its separate bounded route measurement run and
+worst-observed-per-block projection.
 
 The current branch also hardens manual rescue beyond the launch commit's
 single-wave recovery implementation. After the live shard-15 timeout proved
