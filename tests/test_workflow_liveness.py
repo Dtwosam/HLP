@@ -1183,3 +1183,19 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative validation must contain exactly 10" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
+
+
+def test_live_acquisition_checkpoint_launcher_is_pinned_and_artifact_only():
+    content = _workflow(
+        "phase1-pons-live-acquisition-checkpoint-one-shot.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch live acquisition checkpoint" in content
+    assert 'run_ids_json: "[33982556591]"' in content
+    assert 'require_successful_runs: false' in content
+    assert "phase1-pons-acquisition-accounting.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
