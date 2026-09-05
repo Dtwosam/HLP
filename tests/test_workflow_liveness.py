@@ -115,6 +115,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v4-quote-continuation.yml",
     "phase1-pons-v2-curve-recover-tail-one-shot.yml",
     "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
+    "phase1-pons-v2-transition-recover-gaps.yml",
 }
 
 
@@ -223,6 +224,26 @@ def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
 
+
+
+def test_transition_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v2-transition-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "graduations-gap" in content
+    assert "registrations-gap" in content
+    assert "transition artifact families disagree" in content
+    assert "manifest_gap_aware_transition_recovery" in content
+    assert 'default: "150000"' in content
+    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
 
 
 def test_v4_quote_continuation_is_reusable_without_push_trigger():
