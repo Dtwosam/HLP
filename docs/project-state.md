@@ -583,7 +583,11 @@ accepts both two-wave call graphs. These later branch changes do not mutate the
 already-running acquisition pinned to commit
 `c53b3a63156976a5873752c332fa7578011249b0`; they are the fail-safe manual
 rescue path if that run's original automatic recovery cannot close a large
-failure set.
+failure set. A guarded
+`phase1-pons-live-venue-rescue-one-shot` launcher is staged against parent
+run **33982556591** with separate exact launch phrases for V1/V3 and V2/V4;
+its inert creation run **33984797673** skipped cleanly, proving the reusable
+rescue graph compiles without issuing provider requests.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
