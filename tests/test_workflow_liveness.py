@@ -415,7 +415,10 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert '"ownership_mode": ownership_mode' in content
     assert "externally_resolved_assets" in content
     assert "residual_quote_assets" in content
-    assert content.count("- uses: actions/upload-artifact@v4") == 2
+    assert (
+        "- uses: actions/upload-artifact@v4\n"
+        "      - uses: actions/upload-artifact@v4"
+    ) not in content
     assert "SHARD_COUNT: '64'" in content
     assert "max-parallel: 2" in content
 
