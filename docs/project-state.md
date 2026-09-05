@@ -248,9 +248,11 @@ from block **52,263,453**. Its Chainlink feed
 **52,263,452**. The reusable
 `phase1-pons-stock-oracle-promote-v2-delta` workflow therefore promotes the
 22-asset V2 oracle tape and scans only DELL's missing tail. Live run
-**33972806063** proved that the first two **500k-block** DELL shards both hit
-the **20-minute** GitHub job ceiling before artifact upload, with no provider
-error. The canonical delta ceiling is therefore **100k blocks** per job,
+**33972806063** proved that all four full **500k-block** DELL shards
+(000-003) hit the **20-minute** GitHub job ceiling before artifact upload,
+with no provider error. Only the final **222,583-block** tail remained small
+enough to continue under the old geometry. The canonical delta ceiling is
+therefore **100k blocks** per job,
 retaining max-parallel 2 and the same fail-closed 23-vs-22 ownership check.
 The promotion accepts an optional prior interrupted delta run, validates its
 successful shard manifests, and plans only exact uncovered subranges before
