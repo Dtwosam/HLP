@@ -463,7 +463,14 @@ def build_phase1_acceptance_report(
             raise ValueError(f"unexpected viability route detail: {name}")
         if row.get("all_observed_rpc_routes_free") is not True:
             raise ValueError(f"viability route is not proven free: {name}")
-        _positive(row.get("required_blocks"), field=f"{name}.required_blocks")
+        detail_required_blocks = _int(
+            row.get("required_blocks"),
+            field=f"{name}.required_blocks",
+        )
+        if detail_required_blocks != expected_route_blocks[name]:
+            raise ValueError(
+                f"viability route required-block detail changed: {name}"
+            )
         _positive(
             row.get("evidence_processed_blocks"),
             field=f"{name}.evidence_processed_blocks",
