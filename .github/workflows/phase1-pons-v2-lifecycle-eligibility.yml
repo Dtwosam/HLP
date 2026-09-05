@@ -203,6 +203,41 @@ jobs:
               ),
           ]
 
+          fallback_summary = json.loads(
+              Path(
+                  "fallback/pons-quote-fallback-summary.json"
+              ).read_text()
+          )
+          if int(
+              fallback_summary.get("snapshot_head_block", -1)
+          ) != HEAD:
+              raise SystemExit(
+                  "generic quote fallback summary snapshot changed"
+              )
+          expected_fallback = {
+              "owned_quote_assets": 30,
+              "v3_routes": 26,
+              "v4_routes": 4,
+              "v3_v4_overlap_assets": 0,
+          }
+          observed_fallback = {
+              key: int(fallback_summary.get(key, -1))
+              for key in expected_fallback
+          }
+          if observed_fallback != expected_fallback:
+              raise SystemExit(
+                  "generic quote fallback ownership contract changed: "
+                  f"expected={expected_fallback} "
+                  f"observed={observed_fallback}"
+              )
+          if (
+              int(fallback_summary.get("v3_run_id", -1)) <= 0
+              or int(fallback_summary.get("v4_run_id", -1)) <= 0
+          ):
+              raise SystemExit(
+                  "generic quote fallback has invalid V3/V4 run provenance"
+              )
+
           validated = []
           for path, expected_records, expected_sha in specs:
               if not path.exists():
@@ -252,6 +287,13 @@ jobs:
           report = {
               "chain_id": CHAIN_ID,
               "snapshot_head_block": HEAD,
+              "fallback_ownership": observed_fallback,
+              "fallback_v3_run_id": int(
+                  fallback_summary["v3_run_id"]
+              ),
+              "fallback_v4_run_id": int(
+                  fallback_summary["v4_run_id"]
+              ),
               "validated_manifests": validated,
               "validated_manifest_count": len(validated),
           }
