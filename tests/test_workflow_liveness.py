@@ -22,6 +22,7 @@ WORKFLOWS = [
     "phase1-pons-skhy-v4-known-pool-continuation.yml",
     "phase1-pons-skhy-v4-known-pool-segmented.yml",
     "phase1-pons-representative-transfers-full.yml",
+    "phase1-pons-representative-evidence-chain.yml",
     "phase1-pons-acquisition-accounting.yml",
 ]
 
@@ -137,6 +138,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     "phase1-pons-stock-oracle-promote-v2-delta.yml",
     "phase1-pons-representative-transfers-full.yml",
+    "phase1-pons-representative-evidence-chain.yml",
 }
 
 
@@ -781,6 +783,30 @@ def test_v4_quote_continuation_is_reusable_without_push_trigger():
     assert "\n  push:" not in trigger_block
     assert "known_pool_only" in content
     assert "EXTRA+=(--known-pool-only)" in content
+
+def test_representative_evidence_chain_threads_one_parent_run_and_retries_transfers():
+    content = _workflow("phase1-pons-representative-evidence-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cancel-in-progress: false" in content
+    assert "phase1-pons-representative-sample-freeze.yml" in content
+    assert "phase1-pons-representative-market-paths.yml" in content
+    assert content.count("phase1-pons-representative-transfers-full.yml") == 2
+    assert "phase1-pons-representative-priced-paths.yml" in content
+    assert "phase1-pons-representative-dex-crosscheck.yml" in content
+    assert "phase1-pons-representative-validation.yml" in content
+    assert content.count("v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
+    assert content.count("v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
+    assert "v1_v3_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "v2_v4_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "prior_run_id: ${{ inputs.prior_transfer_run_id }}" in content
+    assert "prior_run_id: ${{ format('{0}', github.run_id) }}" in content
+    assert "needs.transfers.result == 'failure'" in content
+    assert "needs.transfers_retry.result == 'success'" in content
+    assert content.count("format('{0}', github.run_id)") >= 12
 
 def test_representative_sample_freeze_is_reusable_and_pinned():
     content = _workflow("phase1-pons-representative-sample-freeze.yml")
