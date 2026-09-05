@@ -1192,6 +1192,8 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "validate_representative_coverage_report" in content
     assert "pons-representative-source-coverage.jsonl" in content
     assert "source_coverage_sha256" in content
+    assert "representative market path V1 venue run mismatch" in content
+    assert "representative market path V2 venue run mismatch" in content
     assert "representative validation must contain exactly 10" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
