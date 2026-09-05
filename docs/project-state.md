@@ -253,9 +253,15 @@ The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed
 in **1,514.118 seconds** with **1,070** RPC requests. Manifest-gap recovery run
 **33957294304** is now reusing that shard and plans **34** exact missing jobs
-covering **5,016,417** blocks from 49,469,619 through 54,486,035. The anchor gap
-workflow keeps the conservative **150k-block** retry cap; the stabilized
-adaptive log scanner is shared by this path too.
+covering **5,016,417** blocks from 49,469,619 through 54,486,035.
+
+The first two measured **150k-block** anchor gaps both completed inside the
+20-minute recovery bound: gap 000 produced **168,023** events in **1,103.111
+seconds** with **1,415** RPC requests, while gap 001 produced **163,019** events
+in **1,093.740 seconds** with **1,418** requests. That validates the current
+150k retry size on the keyless route, but it is close enough to the job limit
+that the cap is not increased. The stabilized adaptive log scanner is shared
+by this path too.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
