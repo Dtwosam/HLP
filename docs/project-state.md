@@ -629,7 +629,15 @@ summary/manifests/checksums, chain 4663 and snapshot head **54,486,035**.
 The run has now entered the 240-shard V1/V3 stage with max-parallel 2. V2/V4,
 pricing/fallback resolution and lifecycle eligibility remain serialized behind
 that stage and its automatic manifest-gap recovery path. The first two V1/V3
-shards completed successfully in about 26 minutes each. Artifact/log-only
+shards completed successfully in about 26 minutes each. On **2026-09-05**,
+V1/V3 shard **15** (blocks **11,488,181-11,679,282**, 191,102 blocks) hit the
+pinned workflow's **40-minute** job timeout and was cancelled; this was a job
+runtime limit, not a decoded RPC correctness failure. The launch-commit
+`c53b3a6` recovery planner is already wired to run after a failed/cancelled
+V1/V3 matrix and splits missing coverage with
+`max_gap_blocks=100000`, so this observed shard becomes exactly two bounded
+recovery jobs, far below its original 240-job matrix ceiling. No competing
+manual rescue has been launched while the parent matrix is still active. Artifact/log-only
 checkpoint run **33984605170** first accounted those two jobs without issuing
 provider requests. A stronger artifact/log-only checkpoint,
 **33987497436**, later captured the first **7 successful shards**:
@@ -658,7 +666,24 @@ failure set. A guarded
 `phase1-pons-live-venue-rescue-one-shot` launcher is staged against parent
 run **33982556591** with separate exact launch phrases for V1/V3 and V2/V4;
 its inert creation run **33984797673** skipped cleanly, proving the reusable
-rescue graph compiles without issuing provider requests.
+rescue graph compiles without issuing provider requests. A second,
+**terminal-only** fallback now closes the downstream gap if the pinned parent
+ultimately cannot finish: `phase1-pons-recovered-completion-chain` accepts a
+complete recovered V1/V3 run plus an optional recovered V2/V4 run. It refuses
+to start until source run **33982556591** is completed non-successfully,
+validates the source/venue workflow paths and full venue artifacts, resumes
+V2/V4 itself when no complete V2/V4 run is supplied (with current manifest-gap
+recovery), then runs current pricing/lifecycle, the eligible-universe freeze,
+representative evidence, and publishes the standard
+`phase1-pons-post-eligibility-evidence-ready` artifact under one new evidence
+run ID. Both lifecycle consumers already resolve recovery manifests through
+their `partial_run_id` / `prior_gap_run_id` shard provenance. The guarded
+launcher is backed by
+`.github/phase1-pons-recovered-completion.json`, remains generation **0**
+and therefore unarmed; inert graph-validation run **33994104743** skipped
+cleanly. Viability readiness and finalization accept evidence only from the
+normal post-eligibility wrapper or this recovered-completion wrapper, on
+`phase1/data-acquisition-spike`.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
@@ -699,7 +724,13 @@ top-level reusable-workflow `queued` state cannot be mistaken for a failure.
 Real audit run **33989828191** completed successfully and classified the live
 parent as `eligibility_acquisition` with next action
 `wait_for_full_eligibility_acquisition`, **0 failed jobs**, 2 in-progress
-jobs and no premature evidence/viability readiness claim. The audit's
+jobs and no premature evidence/viability readiness claim. After the shard-15
+timeout, audit run **33994147766** again passed and still returned
+`wait_for_full_eligibility_acquisition` while the parent remained active,
+now explicitly reporting **1 cancelled job** alongside the running matrix.
+The readiness state machine only switches to recovery after the frozen parent
+is terminal; a terminal failed parent may advance only through a successful
+approved recovered-completion evidence run. The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
 runs.
