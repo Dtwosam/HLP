@@ -493,12 +493,15 @@ research threshold or starting another archive crawl:
   fails or is cancelled after preserving successful shards, a later
   representative-chain run resumes only missing ranges by supplying the earlier
   parent run as `prior_transfer_run_id`; this avoids discarding completed
-  holder work while keeping the reusable-workflow graph fail-closed. The
-  reusable Transfer workflow's `workflow_call` contract now carries the same
-  frozen **200k-block** default as manual dispatch; an inert caller probe caught
-  the previous missing required-input default, and the staged representative
-  one-shot now passes GitHub graph validation and skips cleanly until its
-  explicit launch phrase is committed. Representative validation now also binds
+  holder work while keeping the reusable-workflow graph fail-closed. Transfer
+  acquisition now defaults to **100k-block** ranges and supports **four
+  serialized <=240-job waves** (up to 960 jobs), each at max-parallel 2 with a
+  30-minute RPC ceiling. The planner and final artifact merge have separate
+  45/90-minute artifact-processing ceilings. This means a dense failed transfer
+  run can be retried at 50k ranges without exceeding the full-history matrix
+  capacity. Inert representative graph run **33995597038** skipped cleanly
+  against the four-wave child workflow, and the staged one-shot remains inert
+  until its explicit launch phrase is committed. Representative validation now also binds
   the market-path V1/V3 and V2/V4 source run IDs to the lifecycle evidence,
   verifies the canonical registry, V2 curve, transition, quote-audit, anchor,
   stock-oracle and quote-fallback run IDs carried by upstream manifests, and
