@@ -131,15 +131,6 @@ jobs:
       prior_run_id: ${{ inputs.prior_transfer_run_id }}
     secrets: inherit
 
-  transfers_retry:
-    needs: transfers
-    if: ${{ always() && (needs.transfers.result == 'failure' || needs.transfers.result == 'cancelled') }}
-    uses: ./.github/workflows/phase1-pons-representative-transfers-full.yml
-    with:
-      sample_run_id: ${{ format('{0}', github.run_id) }}
-      prior_run_id: ${{ format('{0}', github.run_id) }}
-    secrets: inherit
-
   priced_paths:
     needs: market_paths
     if: ${{ needs.market_paths.result == 'success' }}
@@ -173,8 +164,7 @@ jobs:
       - priced_paths
       - dex_crosscheck
       - transfers
-      - transfers_retry
-    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && (needs.transfers.result == 'success' || needs.transfers_retry.result == 'success') }}
+    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && needs.transfers.result == 'success' }}
     uses: ./.github/workflows/phase1-pons-representative-validation.yml
     with:
       sample_run_id: ${{ format('{0}', github.run_id) }}
