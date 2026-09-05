@@ -203,6 +203,7 @@ def test_extend_v4_ready_row_is_chain_safe_noop():
     prior = [{
         "quote_token": TOKEN,
         "symbol": "TEST",
+        "first_launch_block": 1000,
         "search_to_block": 1600,
         "causal_route_ready": False,
         "delayed_route_ready": True,
