@@ -508,7 +508,20 @@ research threshold or starting another archive crawl:
   Representative validation now also records the exact V1 and V2 lifecycle
   artifact SHA256 values; final Phase 1 acceptance requires those hashes to
   match the lifecycle hashes cryptographically bound into the promoted eligible
-  universe, so matching run IDs alone are no longer sufficient. The
+  universe, so matching run IDs alone are no longer sufficient. Current V1/V2
+  lifecycle workflows also write their exact upstream venue run IDs
+  (`v1_v3_run_id` / `v4_run_id`) into lifecycle manifest provenance.
+  Eligible-universe promotion republishes those as `v1_v3_run_id` and
+  `v2_v4_run_id`, representative validation requires its detailed market-path
+  venue IDs to agree with the lifecycle manifests, and the Phase 1 PASS function
+  independently requires the universe and representative venue IDs to match.
+  Because the already-running parent is pinned to older code, missing venue
+  fields may be inferred as “venue run = lifecycle parent” **only** when that
+  lifecycle parent is exactly **33982556591**; any later/current-code lifecycle
+  run missing those fields fails closed. Inert graph validation confirmed the
+  strengthened normal representative path (**33994715659**), terminal recovery
+  path (**33994728825**) and current universe promotion (**33994761013**) all
+  compile without launching provider work. The
   representative sample also binds its five runner tokens exactly to frozen
   research-smoke run **33920762592** and carries the frozen smoke universe SHA
   `4861b2af...9c19ab9` plus outcome SHA `6fb40693...1fc6ef2` into the final
