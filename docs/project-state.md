@@ -355,8 +355,13 @@ research threshold or starting another archive crawl:
   price to fall inside GeckoTerminal's independent hourly OHLCV envelope;
   tokens with no DEX swap checkpoint or no registered V4 pool stay explicit
   rather than being silently treated as matched;
-- a manual GitHub-Actions accounting workflow measures reported request
-  counters and artifact bytes rather than estimating provider usage;
+- the shared RPC client now measures successful HTTP response bytes and every
+  RPC CLI summary reports that egress counter; the manual GitHub-Actions
+  accounting workflow aggregates explicit request counters, response bytes,
+  reported block ranges, acquisition elapsed time, GitHub job runtime and
+  artifact storage rather than estimating provider usage. Historical runs
+  created before this instrumentation remain request/storage evidence only;
+  response-byte evidence must come from instrumented future or bounded runs;
 - an artifact-only representative validation join requires all 10 tokens to
   have consistent lifecycle pricing evidence, detailed launch/trade path
   coverage, holder replay, pool identity reconciliation and explicit DEX
