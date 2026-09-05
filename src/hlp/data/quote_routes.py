@@ -349,6 +349,129 @@ def discover_delayed_v3_usdg_routes(
     return output
 
 
+def discover_delayed_v3_weth_routes(
+    rpc,
+    audit_rows: Iterable[dict],
+    *,
+    from_block: int | None,
+    to_block: int,
+    max_forward_blocks: int = 500_000,
+    chunk_size: int = 2_000,
+    min_chunk_size: int = 25,
+) -> list[dict]:
+    """Find first later WETH V3 swap for unresolved quote assets."""
+    if max_forward_blocks <= 0:
+        raise ValueError("max_forward_blocks must be positive")
+    output = []
+    for source in audit_rows:
+        if bool(source.get("v3_causal_ready")):
+            continue
+        token = source["quote_token"].lower()
+        first_use = int(source["first_launch_block"])
+        start = first_use if from_block is None else max(
+            first_use,
+            int(from_block),
+        )
+        end = min(
+            int(to_block),
+            start + int(max_forward_blocks) - 1,
+        )
+        candidates = {
+            row["pool"].lower(): row
+            for row in source.get("v3_candidates", [])
+            if row["anchor_token"].lower() == ROBINHOOD_WETH.lower()
+        }
+        result = {
+            "quote_token": token,
+            "symbol": source.get("symbol"),
+            "quote_decimals": int(source["quote_decimals"]),
+            "first_launch_block": first_use,
+            "launches": int(source["launches"]),
+            "versions": source.get("versions", {}),
+            "searched_from_block": start,
+            "searched_to_block": end,
+            "candidate_pools": sorted(candidates),
+            "delayed_route_ready": False,
+            "route": None,
+        }
+        if not candidates or end < start:
+            output.append(result)
+            continue
+
+        raw_logs = rpc.iter_logs_chunked(
+            start,
+            end,
+            address=sorted(candidates),
+            topics=[V3_SWAP_TOPIC],
+            chunk_size=chunk_size,
+            min_chunk_size=min_chunk_size,
+        )
+        first_raw = next(iter(raw_logs), None)
+        if first_raw is None:
+            output.append(result)
+            continue
+
+        swap = decode_v3_swap(first_raw)
+        pool = swap.pool.lower()
+        candidate = candidates.get(pool)
+        if candidate is None:
+            raise KeyError(
+                f"delayed V3 WETH swap came from unknown pool {pool}"
+            )
+        if swap.liquidity <= 0:
+            raise ValueError(
+                "first delayed V3 WETH swap has zero active liquidity"
+            )
+
+        state = read_v3_pool_static(rpc, pool, block=swap.block_number)
+        if {state.token0.lower(), state.token1.lower()} != {
+            token,
+            ROBINHOOD_WETH.lower(),
+        }:
+            raise ValueError("delayed V3 WETH route pool assets mismatch")
+        token_is_token0 = state.token0.lower() == token
+        quote_per_token = v3_v4_quote_per_token(
+            swap.sqrt_price_x96,
+            token_is_token0=token_is_token0,
+            token_decimals=int(source["quote_decimals"]),
+            quote_decimals=18,
+        )
+        if quote_per_token <= 0:
+            raise ValueError(
+                "delayed V3 WETH route price is not positive"
+            )
+
+        result["delayed_route_ready"] = True
+        result["route"] = {
+            "quote_token": token,
+            "symbol": source.get("symbol"),
+            "quote_decimals": int(source["quote_decimals"]),
+            "activation_block": int(swap.block_number),
+            "activation_transaction_index": swap.transaction_index,
+            "activation_log_index": int(swap.log_index),
+            "launches": int(source["launches"]),
+            "versions": source.get("versions", {}),
+            "pool": pool,
+            "block_number": int(swap.block_number),
+            "anchor_token": ROBINHOOD_WETH.lower(),
+            "anchor_decimals": 18,
+            "fee": int(candidate["fee"]),
+            "route_type": "uniswap_v3_direct_weth_delayed",
+            "activation_liquidity": int(swap.liquidity),
+            "first_observed_quote_per_token": str(quote_per_token),
+            # Exact USD conversion is intentionally deferred to
+            # build_v3_route_usd_updates, which advances the WETH/USD anchor
+            # by event order and avoids end-of-block lookahead.
+            "first_observed_usd_price": None,
+        }
+        output.append(result)
+
+    output.sort(
+        key=lambda row: (row["first_launch_block"], row["quote_token"])
+    )
+    return output
+
+
 def select_v3_quote_routes(audit_rows: Iterable[dict]) -> list[dict]:
     """Select one deterministic causal V3 route for each covered quote asset."""
     selected = []
