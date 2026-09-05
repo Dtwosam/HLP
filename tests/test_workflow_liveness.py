@@ -467,6 +467,12 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "cannot freeze complete $100k universe while eligibility" in content
+    assert "required eligibility manifest is missing" in content
+    assert "eligibility manifest snapshot mismatch" in content
+    assert "eligibility manifest record mismatch" in content
+    assert "268_688" in content
+    assert "225_951" in content
+    assert "eligibility artifact has invalid status values" in content
 
 
 def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
