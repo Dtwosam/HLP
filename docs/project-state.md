@@ -182,12 +182,18 @@ initialized at block **52,798,959** with fee **10,000**, tick spacing **200**
 and no hooks. No positive-liquidity swap was observed through the prior search
 end.
 
-The V4 continuation path now supports a fail-closed `known_pool_only` mode.
+The V4 continuation path supports a fail-closed `known_pool_only` mode.
 For SKHY this skips redundant future Initialize discovery and scans only Swap
-logs for already-frozen candidate pool IDs, roughly halving the remaining
-log-query shape versus the generic discovery continuation. It refuses that
-mode when an unresolved row has no existing candidate. A separate archive
-deployment-boundary probe proved the SKHY token contract already existed from
+logs for the already-frozen candidate pool ID, roughly halving the remaining
+log-query shape versus generic discovery. The primitive is now capped at
+**500k blocks per 20-minute job** and a reusable segmented orchestrator chains
+four such jobs sequentially, publishing a final artifact only if SKHY resolves
+or the scan reaches snapshot head with zero unsearched blocks. Resolved rows
+become zero-RPC no-ops in later segments. This avoids risking the remaining
+1,622,510 blocks in one near-timeout job. The primitive refuses
+`known_pool_only` when an unresolved row has no existing candidate. A
+separate archive deployment-boundary probe proved the SKHY token contract
+already existed from
 block **8,691,227**, so the missing price history is a liquidity/venue-coverage
 problem rather than a token-deployment gap. The official Chainlink directory
 inventory also has no SKHY/SK hynix near-match, so no feed alias is assumed.
@@ -401,10 +407,12 @@ The final Phase 1 viability path is also staged fail-closed:
   distinct jobs/scans remain separate work units; a global unique-block metric
   is retained separately for audit;
 - the frozen heavy-acquisition contract requires exact full-history work-block
-  floors for exactly nine routes; the Pons registry floor intentionally counts
-  its overlapping V1 and V2 generation scans separately:
-  Pons registry, V1 V3, V2 curve, V2 transition, V2 V4, WETH/USDG anchor,
-  stock oracle, V3 quote fallback and V4 quote fallback;
+  floors for exactly nine routes, totaling **331,011,903 processed
+  work-blocks**. The Pons registry floor intentionally counts its overlapping
+  V1 and V2 generation scans separately. The frozen routes are Pons registry,
+  V1 V3, V2 curve, V2 transition, V2 V4, WETH/USDG anchor, stock oracle,
+  V3 quote fallback and V4 quote fallback. The final PASS artifact validates
+  and republishes both the exact per-route block map and the total;
 - a final manual artifact-only acceptance gate can return
   `hlp-v1-phase1-data-viability` PASS only when the complete eligible universe,
   the 10-token end-to-end validation and all nine instrumented zero-cost route
