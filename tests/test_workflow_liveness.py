@@ -1315,7 +1315,14 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "workflow_dispatch:" not in trigger_block
     assert "\n  push:" not in trigger_block
     assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
     assert "viability evidence readiness is not armed" in content
+    assert "viability run ledger is not armed" in content
+    assert "viability run ledger evidence does not match readiness" in content
+    assert "viability run ledger route set changed" in content
+    assert "viability route already recorded in ledger" in content
+    assert "viability route ledger run ID cannot be negative" in content
+    assert "ROUTE: ${{ inputs.route }}" in content
     assert "33_982_556_591" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-pons-representative-validation" in content
