@@ -436,3 +436,26 @@ def test_extend_v4_quote_route_probe_parses():
     assert args.forward_blocks == 500000
     assert args.known_pool_only is True
     assert args.probe == "prior.jsonl"
+
+def test_representative_transfer_and_holder_parsers():
+    parser = build_parser()
+
+    transfers = parser.parse_args([
+        "rpc-pons-transfer-tape",
+        "--tokens", "sample.jsonl",
+        "--from-block", "100",
+        "--to-block", "200",
+        "--out", "transfers.jsonl",
+    ])
+    assert transfers.tokens == "sample.jsonl"
+    assert transfers.from_block == 100
+    assert transfers.chunk_size == 2000
+
+    holders = parser.parse_args([
+        "pons-holder-state",
+        "--transfers", "transfers.jsonl",
+        "--out", "holders.jsonl",
+        "--summary-out", "holder-summary.jsonl",
+    ])
+    assert holders.transfers == "transfers.jsonl"
+    assert holders.summary_out == "holder-summary.jsonl"
