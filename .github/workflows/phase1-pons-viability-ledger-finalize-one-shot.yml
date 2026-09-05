@@ -79,6 +79,17 @@ jobs:
               ),
           }
 
+          required_route_artifacts = {
+              route: {
+                  f"phase1-pons-viability-measurement-{route}-primary"
+              }
+              for route in expected
+          }
+          required_route_artifacts["pons_registry"] = {
+              "phase1-pons-viability-measurement-pons_registry-primary",
+              "phase1-pons-viability-measurement-pons_registry-secondary",
+          }
+
           ledger = json.loads(
               Path(".github/phase1-pons-viability-runs.json").read_text()
           )
@@ -121,6 +132,29 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as response:
                   return json.load(response)
 
+          def artifact_names(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  artifacts = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(a.get("name"))
+                      for a in artifacts
+                      if not a.get("expired")
+                  )
+                  if len(artifacts) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 1000 for run {run_id}"
+                      )
+              return names
+
           evidence = get(
               f"/repos/{repo}/actions/runs/{evidence_run_id}"
           )
@@ -132,22 +166,7 @@ jobs:
                   "viability ledger evidence run is not successful"
               )
 
-          evidence_artifacts = set()
-          page = 1
-          while True:
-              payload = get(
-                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
-                  f"?per_page=100&page={page}"
-              )
-              artifacts = list(payload.get("artifacts") or [])
-              evidence_artifacts.update(
-                  str(a.get("name"))
-                  for a in artifacts
-                  if not a.get("expired")
-              )
-              if len(artifacts) < 100:
-                  break
-              page += 1
+          evidence_artifacts = artifact_names(evidence_run_id)
           required_evidence = {
               "phase1-pons-post-eligibility-evidence-ready",
               "phase1-pons-eligible-universe",
@@ -181,6 +200,15 @@ jobs:
               if run.get("head_branch") != "phase1/data-acquisition-spike":
                   raise SystemExit(
                       f"viability route branch mismatch: {route}"
+                  )
+              route_artifacts = artifact_names(run_id)
+              missing_route_artifacts = sorted(
+                  required_route_artifacts[route] - route_artifacts
+              )
+              if missing_route_artifacts:
+                  raise SystemExit(
+                      f"viability route measurement artifacts missing: "
+                      f"{route} {missing_route_artifacts}"
                   )
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
