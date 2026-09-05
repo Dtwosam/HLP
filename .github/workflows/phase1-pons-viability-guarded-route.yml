@@ -213,6 +213,35 @@ jobs:
               raise SystemExit(
                   "evidence handoff recovery mode must be boolean"
               )
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit("evidence handoff snapshot head changed")
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit("evidence handoff Pons launch count changed")
+          if int(report.get("eligible_tokens", 0)) <= 0:
+              raise SystemExit("evidence handoff eligible universe is empty")
+          if int(report.get("representative_tokens", -1)) != 10:
+              raise SystemExit(
+                  "evidence handoff representative token count changed"
+              )
+          evidence_hashes = {}
+          for field in (
+              "eligible_universe_sha256",
+              "representative_validation_sha256",
+              "v1_eligibility_sha256",
+              "v2_eligibility_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value) != 64:
+                  raise SystemExit(
+                      f"evidence handoff hash is invalid: {field}"
+                  )
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"evidence handoff hash is invalid: {field}"
+                  ) from exc
+              evidence_hashes[field] = value
           if not recovery_mode and (
               lifecycle_run_id != source_run_id
               or int(report["v1_v3_run_id"]) != source_run_id
@@ -304,6 +333,7 @@ jobs:
               "lifecycle_run_id": lifecycle_run_id,
               "recovery_mode": recovery_mode,
               "required_fallback_artifacts": sorted(required),
+              "evidence_hashes": evidence_hashes,
               "routing": "pass",
           }, sort_keys=True))
           PY
