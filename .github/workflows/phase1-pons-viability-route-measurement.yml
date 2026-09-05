@@ -29,7 +29,7 @@ on:
         default: "54486035"
         type: string
       eligibility_run_id:
-        description: "Completed eligibility parent run; required for quote fallback route files"
+        description: "Run containing canonical quote fallback route files; required only for quote fallback measurements"
         required: false
         default: ""
         type: string
@@ -170,7 +170,7 @@ jobs:
               value = os.environ.get("ELIGIBILITY_RUN_ID", "").strip()
               if not value or int(value) <= 0:
                   raise SystemExit(
-                      "quote fallback measurement requires eligibility_run_id"
+                      "quote fallback measurement requires fallback artifact run ID"
                   )
           Path("artifacts").mkdir()
           Path("artifacts/phase1-route-measurement.json").write_text(
