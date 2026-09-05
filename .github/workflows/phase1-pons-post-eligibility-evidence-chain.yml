@@ -1,0 +1,240 @@
+name: phase1-pons-post-eligibility-evidence-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_eligibility_run_id:
+        description: "Completed full eligibility acquisition parent"
+        required: true
+        default: "33982556591"
+        type: string
+      prior_transfer_run_id:
+        description: "Optional earlier representative chain run whose Transfer shards should be reused"
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        required: true
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: true
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: true
+        default: "33972109927"
+        type: string
+  workflow_call:
+    inputs:
+      source_eligibility_run_id:
+        required: true
+        type: string
+      prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        required: false
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: false
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: false
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: false
+        default: "33972109927"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-post-eligibility-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify completed source parent and canonical artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["SOURCE_RUN_ID"])
+          if run_id <= 0:
+              raise SystemExit("source eligibility run ID must be positive")
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit(
+                  "source eligibility parent is not completed successfully: "
+                  f"status={run.get('status')} conclusion={run.get('conclusion')}"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              names.update(
+                  str(artifact.get("name"))
+                  for artifact in artifacts
+                  if not artifact.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit("source artifact pagination exceeded 2000 items")
+
+          required = {
+              "phase1-pons-v1-v3-full",
+              "phase1-pons-v2-v4-full",
+              "phase1-pons-v1-lifecycle-eligibility",
+              "phase1-pons-v2-lifecycle-eligibility",
+              "phase1-pons-v3-quote-fallback-full",
+              "phase1-pons-v4-quote-fallback-full",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  f"source eligibility parent is missing canonical artifacts: {missing}"
+              )
+          print(json.dumps({
+              "source_eligibility_run_id": run_id,
+              "required_artifacts": sorted(required),
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  promote_universe:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-eligible-universe-promote.yml
+    with:
+      source_eligibility_run_id: ${{ inputs.source_eligibility_run_id }}
+    secrets: inherit
+
+  representative:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
+    with:
+      eligibility_run_id: ${{ inputs.source_eligibility_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      prior_transfer_run_id: ${{ inputs.prior_transfer_run_id }}
+      runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      quote_audit_artifact_name: ${{ inputs.quote_audit_artifact_name }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+    secrets: inherit
+
+  ready:
+    needs:
+      - promote_universe
+      - representative
+    if: ${{ always() && needs.promote_universe.result == 'success' && needs.representative.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record post-eligibility evidence handoff
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = {
+              "status": "ready",
+              "source_eligibility_run_id": int(os.environ["SOURCE_RUN_ID"]),
+              "evidence_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "eligible_universe_artifact": "phase1-pons-eligible-universe",
+              "representative_artifact": "phase1-pons-representative-validation",
+          }
+          Path(
+              "artifacts/phase1-post-eligibility-evidence-ready.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
