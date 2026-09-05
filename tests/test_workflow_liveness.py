@@ -1439,3 +1439,37 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert 'source_eligibility_run_id: "33982556591"' in launcher
     assert "phase1-pons-readiness-audit.yml" in launcher
     assert "workflow_dispatch:" not in launcher
+
+
+def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
+    content = _workflow("phase1-pons-pass-closeout-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-pass-closeout.json" in content
+    assert "launch Phase 1 PASS closeout" in content
+    assert "phase1-pons-acceptance-gate" in content
+    assert "phase1-acceptance-report.json" in content
+    assert 'report.get("phase1_acceptance_status") != "pass"' in content
+    assert "hlp-v1-phase1-data-viability" in content
+    assert "331_011_903" in content
+    assert "phase1-pons-viability-ledger-finalize-one-shot.yml" in content
+    assert '["git", "merge-base", "--is-ancestor"' in content
+    assert ".github/phase1-pons-pass-closeout.json" in content
+    assert "docs/project-state.md" in content
+    assert "code changed after Phase 1 PASS evidence" in content
+    assert "## Phase 1 remaining gates" in content
+    assert '"- [ ]" in gate_section' in content
+    assert "Phase 1 PASS run is not recorded in project-state" in content
+    assert 'get(f"/repos/{repo}/pulls/3")' in content
+    assert 'pr.get("state") != "open"' in content
+    assert 'pr.get("draft") is not True' in content
+    assert '!= "phase1/data-acquisition-spike"' in content
+    assert '!= "main"' in content
+    assert "PR 3 head moved while Phase 1 closeout was running" in content
+    assert "safe_to_mark_pr_ready" in content
+    assert "safe_to_merge_after_required_checks" in content
+    assert "phase1-pons-pass-closeout" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
