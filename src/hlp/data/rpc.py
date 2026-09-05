@@ -6,6 +6,7 @@ belongs in adapters so source semantics stay testable and versioned.
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -118,7 +119,12 @@ class RpcClient:
                 # Blind retries waste quota and cannot repair a deterministic
                 # request. Higher-level callers may adapt the request shape.
                 raise
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                http.client.IncompleteRead,
+                json.JSONDecodeError,
+            ) as exc:
                 last_error = exc
                 if attempt == self.attempts:
                     break
@@ -189,6 +195,7 @@ class RpcClient:
             except (
                 urllib.error.URLError,
                 TimeoutError,
+                http.client.IncompleteRead,
                 json.JSONDecodeError,
             ) as exc:
                 last_error = exc
