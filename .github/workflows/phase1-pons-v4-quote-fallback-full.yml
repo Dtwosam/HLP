@@ -18,8 +18,8 @@ on:
         required: true
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
-      promoted_v3_run_id:
-        description: "Successful promoted V3 fallback run proving SKHY/WETH ownership"
+      v3_run_id:
+        description: "Successful canonical 26-route V3 fallback run proving SKHY/WETH ownership"
         required: true
         type: string
   workflow_call:
@@ -36,8 +36,8 @@ on:
         description: "Cumulative V4 quote probe JSONL filename"
         required: true
         type: string
-      promoted_v3_run_id:
-        description: "Promoted V3 fallback run proving SKHY/WETH ownership"
+      v3_run_id:
+        description: "Canonical 26-route V3 fallback run proving SKHY/WETH ownership"
         required: true
         type: string
 
@@ -74,9 +74,9 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v3-quote-fallback-promoted
-          path: promoted-v3
-          run-id: ${{ inputs.promoted_v3_run_id }}
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
       - name: Freeze deterministic V4 fallback routes
         run: |
@@ -112,7 +112,7 @@ jobs:
           promoted_v3 = [
               json.loads(line)
               for line in Path(
-                  "promoted-v3/pons-v3-quote-routes.jsonl"
+                  "canonical-v3/pons-v3-quote-routes.jsonl"
               ).read_text().splitlines()
               if line.strip()
           ]
@@ -123,7 +123,7 @@ jobs:
               )
           if len(promoted_v3) != 26:
               raise SystemExit(
-                  "promoted V3 fallback must contain exactly 26 routes"
+                  "canonical V3 fallback must contain exactly 26 routes"
               )
           skhy_v3 = [
               row for row in promoted_v3
@@ -131,7 +131,7 @@ jobs:
           ]
           if len(skhy_v3) != 1:
               raise SystemExit(
-                  "promoted V3 fallback must contain exactly one SKHY route"
+                  "canonical V3 fallback must contain exactly one SKHY route"
               )
           if (
               skhy_v3[0]["anchor_token"].lower()
@@ -140,7 +140,7 @@ jobs:
               != "uniswap_v3_direct_weth_delayed"
           ):
               raise SystemExit(
-                  "promoted SKHY V3 ownership is not the frozen WETH route"
+                  "canonical SKHY V3 ownership is not the frozen WETH route"
               )
 
           if len(unresolved) != 1:
@@ -192,8 +192,8 @@ jobs:
               "unresolved_assets": 0,
               "selected_routes": len(routes),
               "covered_launches": sum(int(row["launches"]) for row in routes),
-              "promoted_v3_run_id": int(
-                  "${{ inputs.promoted_v3_run_id }}"
+              "v3_run_id": int(
+                  "${{ inputs.v3_run_id }}"
               ),
               "earliest_activation_block": earliest,
               "routes": [
@@ -379,8 +379,8 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "probe_run_id": int("${{ inputs.probe_run_id }}"),
-                  "promoted_v3_run_id": int(
-                      "${{ inputs.promoted_v3_run_id }}"
+                  "v3_run_id": int(
+                      "${{ inputs.v3_run_id }}"
                   ),
                   "shards": manifests,
               },
