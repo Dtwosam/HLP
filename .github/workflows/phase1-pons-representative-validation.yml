@@ -186,6 +186,18 @@ jobs:
                   )
 
           if int(
+              market.get("v1_v3_run_id", -1)
+          ) != v1_run:
+              raise SystemExit(
+                  "representative market path V1 venue run mismatch"
+              )
+          if int(
+              market.get("v2_v4_run_id", -1)
+          ) != v2_run:
+              raise SystemExit(
+                  "representative market path V2 venue run mismatch"
+              )
+          if int(
               priced.get("market_path_run_id", -1)
           ) != market_path_run:
               raise SystemExit(
