@@ -11,6 +11,16 @@ on:
         description: "Successful phase1-pons-v4-quote-fallback-full run"
         required: true
         type: string
+  workflow_call:
+    inputs:
+      v3_run_id:
+        description: "Successful phase1-pons-v3-quote-fallback-full run"
+        required: true
+        type: string
+      v4_run_id:
+        description: "Successful phase1-pons-v4-quote-fallback-full run"
+        required: true
+        type: string
 
 permissions:
   contents: read
