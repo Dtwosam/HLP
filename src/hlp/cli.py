@@ -2007,6 +2007,7 @@ def cmd_pons_merge_quote_usd_tapes(args: argparse.Namespace) -> int:
         provenance={
             "source": "merged_disjoint_quote_usd_states",
             "chain_id": 4663,
+            "snapshot_head_block": args.snapshot_head,
             "state_sources": [Path(path).name for path in args.state],
         },
     )
@@ -2016,6 +2017,7 @@ def cmd_pons_merge_quote_usd_tapes(args: argparse.Namespace) -> int:
         provenance={
             "source": "stream_merged_disjoint_quote_usd_updates",
             "chain_id": 4663,
+            "snapshot_head_block": args.snapshot_head,
             "event_sources": [Path(path).name for path in args.events],
         },
     )
@@ -4947,6 +4949,7 @@ def build_parser() -> argparse.ArgumentParser:
     merge_quote_usd.add_argument("--events", action="append", default=[])
     merge_quote_usd.add_argument("--state-out", required=True)
     merge_quote_usd.add_argument("--out", required=True)
+    merge_quote_usd.add_argument("--snapshot-head", type=int)
     merge_quote_usd.set_defaults(func=cmd_pons_merge_quote_usd_tapes)
 
     select_quote_v3 = sub.add_parser("pons-select-v3-quote-routes")
