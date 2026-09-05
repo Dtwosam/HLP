@@ -66,8 +66,66 @@ jobs:
                   if line.strip()
               ]
 
+          HEAD = 54_486_035
+          CHAIN_ID = 4663
+
+          def validate_manifest(path, expected_records):
+              manifest_path = Path(path)
+              if not manifest_path.exists():
+                  raise SystemExit(
+                      f"required eligibility manifest is missing: {path}"
+                  )
+              manifest = json.loads(manifest_path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"eligibility manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"eligibility manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if int(manifest["records"]) != expected_records:
+                  raise SystemExit(
+                      f"eligibility manifest record mismatch: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              return manifest
+
+          v1_manifest = validate_manifest(
+              "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json",
+              268_688,
+          )
+          v2_manifest = validate_manifest(
+              "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json",
+              225_951,
+          )
+
           v1 = load("v1/pons-v1-lifecycle-eligibility.jsonl")
           v2 = load("v2/pons-v2-lifecycle-eligibility.jsonl")
+          if len(v1) != 268_688 or len(v2) != 225_951:
+              raise SystemExit(
+                  "eligibility artifact cardinality does not match frozen "
+                  f"registries: v1={len(v1)} v2={len(v2)}"
+              )
+          statuses = {"eligible", "ineligible", "unknown"}
+          unexpected_status = [
+              (row["token"], row.get("eligibility_status"))
+              for row in [*v1, *v2]
+              if row.get("eligibility_status") not in statuses
+          ]
+          if unexpected_status:
+              raise SystemExit(
+                  "eligibility artifact has invalid status values: "
+                  f"{unexpected_status[:10]}"
+              )
+
           v1_tokens = {row["token"].lower() for row in v1}
           v2_tokens = {row["token"].lower() for row in v2}
           assert not (v1_tokens & v2_tokens), "V1/V2 token overlap"
@@ -126,8 +184,10 @@ jobs:
               },
           )
           report = {
-              "snapshot_head_block": 54_486_035,
+              "snapshot_head_block": HEAD,
               "all_pons_launches": len(v1) + len(v2),
+              "validated_v1_input_sha256": v1_manifest["sha256"],
+              "validated_v2_input_sha256": v2_manifest["sha256"],
               "v1_launches": len(v1),
               "v2_launches": len(v2),
               "eligible_tokens": len(eligible),
