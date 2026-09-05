@@ -380,7 +380,9 @@ class RpcClient:
 
         Providers disagree sharply on eth_getLogs range limits. HLP starts
         with the caller's preferred window, halves it after a terminal RPC
-        error, and cautiously grows back after successful windows.
+        error, and grows back only after eight consecutive successful windows.
+        The streak prevents a dense range from oscillating between one known
+        good window and the immediately larger request the provider rejects.
         """
         if to_block < from_block:
             raise ValueError("to_block must be >= from_block")
@@ -390,6 +392,8 @@ class RpcClient:
         cursor = from_block
         target_size = chunk_size
         active_size = target_size
+        successful_windows = 0
+        grow_after_successes = 8
         while cursor <= to_block:
             end = min(to_block, cursor + active_size - 1)
             try:
@@ -403,6 +407,7 @@ class RpcClient:
                 if active_size <= min_chunk_size:
                     raise
                 active_size = max(min_chunk_size, active_size // 2)
+                successful_windows = 0
                 continue
 
             rows.sort(
@@ -415,7 +420,12 @@ class RpcClient:
             yield from rows
             cursor = end + 1
             if active_size < target_size:
-                active_size = min(target_size, active_size * 2)
+                successful_windows += 1
+                if successful_windows >= grow_after_successes:
+                    active_size = min(target_size, active_size * 2)
+                    successful_windows = 0
+            else:
+                successful_windows = 0
 
     def get_logs(
         self,
