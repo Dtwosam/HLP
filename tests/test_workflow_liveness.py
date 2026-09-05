@@ -446,6 +446,12 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert 'default: "33936232604"' in content
     assert 'default: "33912452330"' in content
     assert "cannot replay V2 lifecycle with uncovered quote assets" in content
+    assert "Validate frozen V2 lifecycle input manifests" in content
+    assert "required lifecycle manifest is missing" in content
+    assert "lifecycle manifest snapshot mismatch" in content
+    assert "frozen lifecycle SHA changed" in content
+    assert "validated_manifest_count" in content
+    assert "771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b" in content
 
 
 def test_eligible_universe_freeze_is_reusable_and_fails_closed():
