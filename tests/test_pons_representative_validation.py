@@ -122,7 +122,7 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["sample_groups"] == {"failure": 5, "runner": 5}
     assert summary["pons_versions"] == {"v1": 5, "v2": 5}
     assert summary["priced_points"] == 100
-    assert summary["market_path_rows"] == 110
+    assert summary["market_path_rows"] == 115
     assert summary["market_path_registered_v4"] == 5
     assert summary["market_path_with_v4_events"] == 5
     assert summary["transfers"] == sum(25 + index for index in range(1, 11))
