@@ -63,7 +63,7 @@ concurrency:
 jobs:
   crosscheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -260,6 +260,18 @@ jobs:
               block_rpc_route = rpc.route_label
 
           client = GeckoTerminalClient()
+          logical_gecko_requests = sum(
+              1 + len(checkpoints[target["token"]])
+              for target in targets
+              if target.get("pool_identifier") is not None
+          )
+          if logical_gecko_requests > 40:
+              raise SystemExit(
+                  "representative DEX logical request budget exceeded: "
+                  f"{logical_gecko_requests} > 40"
+              )
+          max_gecko_attempts = logical_gecko_requests * client.attempts
+
           rows = []
           for target in targets:
               token = target["token"]
@@ -424,6 +436,11 @@ jobs:
                   f"{len(price_failures)} representative tokens: "
                   f"{[row['token'] for row in price_failures]}"
               )
+          if client.requests_made > max_gecko_attempts:
+              raise SystemExit(
+                  "representative DEX HTTP attempt budget exceeded: "
+                  f"{client.requests_made} > {max_gecko_attempts}"
+              )
 
           snapshot = write_jsonl_snapshot(
               rows,
@@ -494,6 +511,10 @@ jobs:
                   block_rpc_response_bytes
               ),
               "rpc_route": block_rpc_route,
+              "geckoterminal_logical_request_budget": (
+                  logical_gecko_requests
+              ),
+              "geckoterminal_http_attempt_budget": max_gecko_attempts,
               "geckoterminal_requests": client.requests_made,
               "geckoterminal_bytes": client.bytes_received,
               "crosscheck_sha256": snapshot["sha256"],
