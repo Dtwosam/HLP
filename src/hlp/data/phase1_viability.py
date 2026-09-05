@@ -68,6 +68,59 @@ def _request_total(row: Mapping[str, object]) -> int:
     return _positive_int(total, field="request_counters total")
 
 
+def build_phase1_route_plan(
+    route_run_ids: Mapping[str, object],
+) -> list[dict]:
+    """Build the frozen nine-route plan from operator-supplied evidence IDs."""
+    supplied = {str(key).strip(): value for key, value in route_run_ids.items()}
+    if any(not key for key in supplied):
+        raise ValueError("Phase 1 route-run mapping has empty route name")
+
+    required = set(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    observed = set(supplied)
+    if observed != required:
+        missing = sorted(required - observed)
+        extra = sorted(observed - required)
+        raise ValueError(
+            "Phase 1 route-run mapping contract mismatch: "
+            f"missing={missing} extra={extra}"
+        )
+
+    plan = []
+    used_run_ids: set[int] = set()
+    for route, required_blocks in REQUIRED_PHASE1_ROUTE_BLOCKS.items():
+        raw_ids = supplied[route]
+        if isinstance(raw_ids, (str, bytes)) or not isinstance(
+            raw_ids, Iterable
+        ):
+            raise ValueError(
+                f"route {route} run ids must be an iterable of integers"
+            )
+        run_ids = [
+            _positive_int(value, field=f"{route}.run_ids")
+            for value in raw_ids
+        ]
+        if not run_ids:
+            raise ValueError(f"route {route} has no evidence run ids")
+        if len(run_ids) != len(set(run_ids)):
+            raise ValueError(f"route {route} repeats an evidence run id")
+        overlap = used_run_ids & set(run_ids)
+        if overlap:
+            raise ValueError(
+                f"Phase 1 evidence run reused across routes: "
+                f"{sorted(overlap)}"
+            )
+        used_run_ids.update(run_ids)
+        plan.append(
+            {
+                "route": route,
+                "run_ids": run_ids,
+                "required_blocks": required_blocks,
+            }
+        )
+    return plan
+
+
 def project_route_requirements(
     route: str,
     run_summaries: Iterable[Mapping[str, object]],
