@@ -1,0 +1,89 @@
+name: phase1-pons-recovered-completion-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-recovered-completion.json
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  config:
+    if: ${{ contains(github.event.head_commit.message, 'launch recovered Phase 1 completion') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_eligibility_run_id: ${{ steps.read.outputs.source_eligibility_run_id }}
+      v1_v3_run_id: ${{ steps.read.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ steps.read.outputs.v2_v4_run_id }}
+      prior_transfer_run_id: ${{ steps.read.outputs.prior_transfer_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        name: Read guarded recovery configuration
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(
+              Path(".github/phase1-pons-recovered-completion.json").read_text()
+          )
+          generation = int(config.get("generation", 0))
+          source_id = int(config.get("source_eligibility_run_id", 0))
+          v1_id = int(config.get("v1_v3_run_id", 0))
+          v2_id = int(config.get("v2_v4_run_id", 0))
+          prior_id = int(config.get("prior_transfer_run_id", 0))
+          if generation <= 0:
+              raise SystemExit("recovered completion config is not armed")
+          if source_id != 33_982_556_591:
+              raise SystemExit("recovered completion source run changed")
+          if v1_id <= 0:
+              raise SystemExit("recovered completion V1/V3 run must be positive")
+          if v2_id < 0 or prior_id < 0:
+              raise SystemExit("recovered completion optional run IDs are invalid")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"source_eligibility_run_id={source_id}\n")
+              output.write(f"v1_v3_run_id={v1_id}\n")
+              output.write(
+                  "v2_v4_run_id="
+                  + (str(v2_id) if v2_id else "")
+                  + "\n"
+              )
+              output.write(
+                  "prior_transfer_run_id="
+                  + (str(prior_id) if prior_id else "")
+                  + "\n"
+              )
+          print(json.dumps({
+              "generation": generation,
+              "source_eligibility_run_id": source_id,
+              "v1_v3_run_id": v1_id,
+              "v2_v4_run_id": v2_id,
+              "prior_transfer_run_id": prior_id,
+          }, sort_keys=True))
+          PY
+
+  recover:
+    needs: config
+    if: ${{ needs.config.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-recovered-completion-chain.yml
+    with:
+      source_eligibility_run_id: ${{ needs.config.outputs.source_eligibility_run_id }}
+      v1_v3_run_id: ${{ needs.config.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ needs.config.outputs.v2_v4_run_id }}
+      prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
+      oracle_run_id: "33974681334"
+      runner_smoke_run_id: "33920762592"
+      registry_run_id: "33911022718"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      anchor_run_id: "33972109927"
+    secrets: inherit
