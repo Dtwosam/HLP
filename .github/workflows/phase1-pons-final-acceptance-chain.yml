@@ -1,0 +1,211 @@
+name: phase1-pons-final-acceptance-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_run_id:
+        description: "Successful full eligibility acquisition-chain run"
+        required: true
+        type: string
+      representative_run_id:
+        description: "Successful representative evidence-chain run"
+        required: true
+        type: string
+      pons_registry_run_id:
+        description: "Instrumented pons_registry viability measurement run"
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        description: "Instrumented pons_v1_v3 viability measurement run"
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        description: "Instrumented pons_v2_curve viability measurement run"
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        description: "Instrumented pons_v2_transition viability measurement run"
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        description: "Instrumented pons_v2_v4 viability measurement run"
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        description: "Instrumented weth_usdg_anchor viability measurement run"
+        required: true
+        type: string
+      stock_oracle_run_id:
+        description: "Instrumented stock_oracle viability measurement run"
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        description: "Instrumented quote_v3_fallback viability measurement run"
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        description: "Instrumented quote_v4_fallback viability measurement run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      eligibility_run_id:
+        required: true
+        type: string
+      representative_run_id:
+        required: true
+        type: string
+      pons_registry_run_id:
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        required: true
+        type: string
+      stock_oracle_run_id:
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-final-acceptance-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_ids_json: ${{ steps.plan.outputs.run_ids_json }}
+      route_plan_json: ${{ steps.plan.outputs.route_plan_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Freeze distinct nine-route evidence plan
+        env:
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.data.phase1_viability import (
+              REQUIRED_PHASE1_ROUTE_BLOCKS,
+              build_phase1_route_plan,
+          )
+
+          env_keys = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          if list(env_keys) != list(REQUIRED_PHASE1_ROUTE_BLOCKS):
+              raise SystemExit("final acceptance route order changed")
+
+          route_run_ids = {}
+          for route, key in env_keys.items():
+              value = int(os.environ[key])
+              if value <= 0:
+                  raise SystemExit(f"{route} evidence run ID must be positive")
+              route_run_ids[route] = [value]
+
+          plan = build_phase1_route_plan(route_run_ids)
+          run_ids = [row["run_ids"][0] for row in plan]
+          if len(run_ids) != 9 or len(set(run_ids)) != 9:
+              raise SystemExit(
+                  "final acceptance requires nine distinct evidence run IDs"
+              )
+
+          compact_runs = json.dumps(run_ids, separators=(",", ":"))
+          compact_plan = json.dumps(
+              route_run_ids,
+              sort_keys=True,
+              separators=(",", ":"),
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"run_ids_json={compact_runs}\n")
+              handle.write(f"route_plan_json={compact_plan}\n")
+          print(
+              json.dumps(
+                  {
+                      "routes": len(plan),
+                      "required_work_blocks": sum(
+                          REQUIRED_PHASE1_ROUTE_BLOCKS.values()
+                      ),
+                      "distinct_evidence_runs": len(set(run_ids)),
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+  accounting:
+    needs: plan
+    if: ${{ needs.plan.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-accounting.yml
+    with:
+      run_ids_json: ${{ needs.plan.outputs.run_ids_json }}
+      free_daily_method_calls: "10000"
+      require_successful_runs: true
+    secrets: inherit
+
+  viability:
+    needs:
+      - plan
+      - accounting
+    if: ${{ needs.accounting.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-viability-projection.yml
+    with:
+      accounting_run_id: ${{ format('{0}', github.run_id) }}
+      route_plan_json: ${{ needs.plan.outputs.route_plan_json }}
+      free_daily_method_calls: "10000"
+    secrets: inherit
+
+  acceptance:
+    needs: viability
+    if: ${{ needs.viability.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acceptance-gate.yml
+    with:
+      eligible_universe_run_id: ${{ inputs.eligibility_run_id }}
+      representative_validation_run_id: ${{ inputs.representative_run_id }}
+      viability_projection_run_id: ${{ format('{0}', github.run_id) }}
+    secrets: inherit
