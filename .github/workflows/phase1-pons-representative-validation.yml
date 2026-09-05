@@ -15,6 +15,14 @@ on:
         description: "Successful V2 lifecycle eligibility run"
         required: true
         type: string
+      v1_v3_run_id:
+        description: "V1/V3 full or recovered venue run used by market paths"
+        required: true
+        type: string
+      v2_v4_run_id:
+        description: "V2/V4 full or recovered venue run used by market paths"
+        required: true
+        type: string
       transfer_run_id:
         description: "Successful representative transfer/holder run"
         required: true
@@ -68,6 +76,12 @@ on:
         required: true
         type: string
       v2_eligibility_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      v2_v4_run_id:
         required: true
         type: string
       transfer_run_id:
@@ -175,6 +189,8 @@ jobs:
           sample_run = int("${{ inputs.sample_run_id }}")
           v1_run = int("${{ inputs.v1_eligibility_run_id }}")
           v2_run = int("${{ inputs.v2_eligibility_run_id }}")
+          v1_v3_run = int("${{ inputs.v1_v3_run_id }}")
+          v2_v4_run = int("${{ inputs.v2_v4_run_id }}")
           market_path_run = int("${{ inputs.market_path_run_id }}")
           registry_run = int("${{ inputs.registry_run_id }}")
           v2_curve_run = int("${{ inputs.v2_curve_run_id }}")
@@ -267,13 +283,13 @@ jobs:
 
           if int(
               market.get("v1_v3_run_id", -1)
-          ) != v1_run:
+          ) != v1_v3_run:
               raise SystemExit(
                   "representative market path V1 venue run mismatch"
               )
           if int(
               market.get("v2_v4_run_id", -1)
-          ) != v2_run:
+          ) != v2_v4_run:
               raise SystemExit(
                   "representative market path V2 venue run mismatch"
               )
@@ -328,6 +344,8 @@ jobs:
               "sample_run_id": sample_run,
               "v1_eligibility_run_id": v1_run,
               "v2_eligibility_run_id": v2_run,
+              "v1_v3_run_id": v1_v3_run,
+              "v2_v4_run_id": v2_v4_run,
               "transfer_run_id": int("${{ inputs.transfer_run_id }}"),
               "market_path_run_id": market_path_run,
               "priced_path_run_id": int(
@@ -537,6 +555,12 @@ jobs:
                   ),
                   "v2_eligibility_run_id": int(
                       "${{ inputs.v2_eligibility_run_id }}"
+                  ),
+                  "v1_v3_run_id": int(
+                      "${{ inputs.v1_v3_run_id }}"
+                  ),
+                  "v2_v4_run_id": int(
+                      "${{ inputs.v2_v4_run_id }}"
                   ),
                   "transfer_run_id": int(
                       "${{ inputs.transfer_run_id }}"
