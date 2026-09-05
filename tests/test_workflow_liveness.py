@@ -20,6 +20,8 @@ WORKFLOWS = [
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
     "phase1-pons-skhy-v4-known-pool-continuation.yml",
+    "phase1-pons-representative-transfers-full.yml",
+    "phase1-pons-acquisition-accounting.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -125,6 +127,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v3-quote-fallback-recover-gaps.yml",
     "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     "phase1-pons-stock-oracle-promote-v2-delta.yml",
+    "phase1-pons-representative-transfers-full.yml",
 }
 
 
@@ -519,3 +522,34 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "representative sample must freeze exactly five runners" in content
     assert "representative sample must contain both Pons generations" in content
     assert "time.sleep(" not in content
+
+def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
+    content = _workflow("phase1-pons-representative-transfers-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "prior_run_id" in content
+    assert "plan_missing_subranges" in content
+    assert 'default: "200000"' in content
+    assert "max_blocks must be between 1 and 200000" in content
+    assert "representative transfer plan exceeds 240 matrix jobs" in content
+    assert "max-parallel: 2" in content
+    assert "time.sleep(" not in content
+
+
+def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
+    content = _workflow("phase1-pons-acquisition-accounting.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "actions: read" in content
+    assert "run_ids_json" in content
+    assert "at most 50 positive integer run IDs" in content
+    assert "summarize_action_run" in content
+    assert "summarize_phase1_runs" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
