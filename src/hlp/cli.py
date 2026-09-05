@@ -106,6 +106,11 @@ from hlp.data.pons_v2 import (
 )
 from hlp.data.pons_trade_features import build_pons_causal_trade_features
 from hlp.data.pons_trades import normalize_pons_trades
+from hlp.data.pons_holders import (
+    fetch_pons_transfer_rows,
+    reconstruct_pons_holder_states,
+    summarize_pons_holder_states,
+)
 from hlp.data.pons_transactions import (
     attach_pons_transaction_identities,
     fetch_transaction_identity_rows,
@@ -152,7 +157,7 @@ from hlp.data.v4 import (
     build_v2_graduation_seed_points,
     build_v2_v4_market_cap_points,
 )
-from hlp.protocols.erc20 import read_erc20_static
+from hlp.protocols.erc20 import TRANSFER_TOPIC, read_erc20_static
 from hlp.protocols.flap import FLAP_RECONSTRUCTION_TOPICS, decode_flap_event
 from hlp.protocols.hood_fun import HOOD_FUN_CURVE_TOPICS, decode_hood_fun_event
 from hlp.protocols.trench import TRENCH_CURVE_TOPICS, decode_trench_event
@@ -3510,6 +3515,104 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
 
 
 
+def cmd_rpc_pons_transfer_tape(args: argparse.Namespace) -> int:
+    """Acquire ERC-20 Transfer logs for a bounded representative Pons set."""
+    token_rows = _load_jsonl(args.tokens)
+    tokens = sorted({
+        row["token"].lower()
+        for row in token_rows
+    })
+    if not tokens:
+        raise SystemExit("representative token file contains no tokens")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = list(
+        fetch_pons_transfer_rows(
+            rpc,
+            tokens,
+            from_block=args.from_block,
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "erc20_transfer_logs_for_representative_pons_tokens",
+            "chain_id": 4663,
+            "tokens": Path(args.tokens).name,
+            "token_count": len(tokens),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": TRANSFER_TOPIC,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "tokens": len(tokens),
+                "transfers": len(rows),
+                "rpc_requests": rpc.requests_made,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_pons_holder_state(args: argparse.Namespace) -> int:
+    """Replay representative ERC-20 transfers into exact holder state."""
+    transfers = _load_jsonl(args.transfers)
+    rows = reconstruct_pons_holder_states(transfers)
+    summary = summarize_pons_holder_states(rows)
+
+    state_manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "complete_representative_erc20_transfer_replay",
+            "chain_id": 4663,
+            "transfers": Path(args.transfers).name,
+            "holder_semantics": (
+                "non-zero ERC-20 balances excluding the zero address; "
+                "negative balance replay fails closed on incomplete history"
+            ),
+        },
+    )
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "final_state_from_representative_transfer_replay",
+            "chain_id": 4663,
+            "holder_state_sha256": state_manifest["sha256"],
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "holder_states": state_manifest,
+                "summary": summary_manifest,
+                "tokens": len(summary),
+                "transfers": len(rows),
+                "final_holders": sum(
+                    int(row["holder_count"]) for row in summary
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_pons_normalize_trades(args: argparse.Namespace) -> int:
     """Normalize Pons V1/V2/V4 events into one wallet-level trade schema."""
     points = _load_jsonl(args.points)
@@ -4545,6 +4648,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    pons_transfers = sub.add_parser("rpc-pons-transfer-tape")
+    pons_transfers.add_argument("--tokens", required=True)
+    pons_transfers.add_argument("--from-block", type=int, required=True)
+    pons_transfers.add_argument("--to-block", type=int, required=True)
+    pons_transfers.add_argument("--chunk-size", type=int, default=2_000)
+    pons_transfers.add_argument("--min-chunk-size", type=int, default=25)
+    pons_transfers.add_argument("--out", required=True)
+    pons_transfers.set_defaults(func=cmd_rpc_pons_transfer_tape)
+
+    pons_holders = sub.add_parser("pons-holder-state")
+    pons_holders.add_argument("--transfers", required=True)
+    pons_holders.add_argument("--out", required=True)
+    pons_holders.add_argument("--summary-out", required=True)
+    pons_holders.set_defaults(func=cmd_pons_holder_state)
 
 
     pons_normalized_trades = sub.add_parser("pons-normalize-trades")
