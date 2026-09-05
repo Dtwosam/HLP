@@ -81,13 +81,27 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          state_tokens = {
+              row["quote_token"].lower() for row in states
+          }
+          update_tokens = {
+              row["quote_token"].lower() for row in updates
+          }
+          owned_tokens = state_tokens | update_tokens
+          if len(state_tokens) != 25:
+              raise SystemExit(
+                  "merged quote fallback must have exactly 25 causal initial "
+                  f"V3 states, got {len(state_tokens)}"
+              )
+          if len(owned_tokens) != 30:
+              raise SystemExit(
+                  "merged quote fallback must own exactly 30 feedless quote "
+                  f"assets, got {len(owned_tokens)}"
+              )
           report = {
-              "initial_state_assets": len({
-                  row["quote_token"].lower() for row in states
-              }),
-              "update_assets": len({
-                  row["quote_token"].lower() for row in updates
-              }),
+              "initial_state_assets": len(state_tokens),
+              "update_assets": len(update_tokens),
+              "owned_quote_assets": len(owned_tokens),
               "updates": len(updates),
               "v3_run_id": int("${{ inputs.v3_run_id }}"),
               "v4_run_id": int("${{ inputs.v4_run_id }}"),
