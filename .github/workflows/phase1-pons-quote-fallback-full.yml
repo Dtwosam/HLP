@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       v3_run_id:
-        description: "Successful phase1-pons-v3-quote-fallback-promote-skhy-weth run"
+        description: "Successful canonical 26-route phase1-pons-v3-quote-fallback-full run"
         required: true
         type: string
       v4_run_id:
@@ -14,7 +14,7 @@ on:
   workflow_call:
     inputs:
       v3_run_id:
-        description: "Successful phase1-pons-v3-quote-fallback-promote-skhy-weth run"
+        description: "Successful canonical 26-route phase1-pons-v3-quote-fallback-full run"
         required: true
         type: string
       v4_run_id:
@@ -46,7 +46,7 @@ jobs:
         run: python -m pip install -e .
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v3-quote-fallback-promoted
+          name: phase1-pons-v3-quote-fallback-full
           path: v3
           run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
