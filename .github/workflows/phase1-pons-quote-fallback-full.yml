@@ -30,6 +30,9 @@ concurrency:
   group: phase1-pons-quote-fallback-full-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  SNAPSHOT_HEAD: '54486035'
+
 jobs:
   merge:
     runs-on: ubuntu-latest
@@ -62,7 +65,8 @@ jobs:
             --state v4/pons-v4-quote-fallback-initial.jsonl \
             --events v4/pons-v4-quote-fallback-updates.jsonl \
             --state-out artifacts/pons-quote-fallback-initial.jsonl \
-            --out artifacts/pons-quote-fallback-updates.jsonl
+            --out artifacts/pons-quote-fallback-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD"
           python - <<'PY'
           import json
           from pathlib import Path
@@ -99,6 +103,7 @@ jobs:
                   f"assets, got {len(owned_tokens)}"
               )
           report = {
+              "snapshot_head_block": int("${{ env.SNAPSHOT_HEAD }}"),
               "initial_state_assets": len(state_tokens),
               "update_assets": len(update_tokens),
               "owned_quote_assets": len(owned_tokens),
