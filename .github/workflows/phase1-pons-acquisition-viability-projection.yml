@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       route_plan_json:
-        description: "JSON array: route, run_ids, required_blocks"
+        description: "JSON object route -> evidence run IDs; legacy full array also accepted"
         required: true
         type: string
       free_daily_method_calls:
@@ -66,18 +66,25 @@ jobs:
           from pathlib import Path
 
           from hlp.data.phase1_viability import (
+              build_phase1_route_plan,
               project_phase1_acquisition_plan,
           )
 
           try:
-              plan = json.loads(os.environ["ROUTE_PLAN_JSON"])
+              raw_plan = json.loads(os.environ["ROUTE_PLAN_JSON"])
           except json.JSONDecodeError as exc:
               raise SystemExit(
                   f"route_plan_json must be valid JSON: {exc}"
               ) from exc
-          if not isinstance(plan, list) or not plan:
+          if isinstance(raw_plan, dict):
+              plan = build_phase1_route_plan(raw_plan)
+          elif isinstance(raw_plan, list) and raw_plan:
+              # Backward-compatible path for an already-expanded frozen plan.
+              plan = raw_plan
+          else:
               raise SystemExit(
-                  "route_plan_json must be a non-empty JSON array"
+                  "route_plan_json must be a non-empty route->run_ids object "
+                  "or a non-empty expanded JSON array"
               )
 
           summaries = []
