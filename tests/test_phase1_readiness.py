@@ -17,6 +17,7 @@ def _run(
     status="completed",
     conclusion="success",
     artifacts=(),
+    job_counts=None,
 ):
     return {
         "id": run_id,
@@ -24,6 +25,7 @@ def _run(
         "status": status,
         "conclusion": conclusion,
         "artifacts": list(artifacts),
+        "job_counts": dict(job_counts or {}),
     }
 
 
@@ -98,7 +100,7 @@ def test_readiness_waits_for_full_eligibility_source():
     assert report["stage"] == "eligibility_acquisition"
     assert (
         report["next_action"]
-        == "wait_for_or_recover_full_eligibility_acquisition"
+        == "wait_for_full_eligibility_acquisition"
     )
     assert report["phase1_ready"] is False
     assert sorted(report["source_missing_artifacts"]) == sorted(
@@ -277,3 +279,24 @@ def test_readiness_does_not_treat_successful_finalizer_without_pass_artifact_as_
     assert report["stage"] == "final_acceptance"
     assert report["next_action"] == "launch_phase1_final_acceptance"
     assert report["final_acceptance_run_id"] == 0
+
+
+def test_readiness_switches_to_recovery_on_failed_source_job():
+    report = _report(
+        source_run=_source(
+            status="queued",
+            conclusion=None,
+            artifacts=(),
+            job_counts={
+                "success": 10,
+                "in_progress": 2,
+                "queued": 228,
+                "failure": 1,
+            },
+        )
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "recover_full_eligibility_acquisition"
+    assert report["source_failed_jobs"] == 1
+    assert report["source_job_counts"]["in_progress"] == 2
