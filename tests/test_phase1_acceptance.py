@@ -475,20 +475,31 @@ def test_phase1_acceptance_rejects_runner_smoke_summary_hash_drift():
 
 def test_phase1_acceptance_allows_explicit_recovered_venue_run_ids():
     fixtures = list(_fixtures())
+    fixtures[0]["validated_v1_v3_run_id"] = 901
+    fixtures[0]["validated_v2_v4_run_id"] = 902
+    fixtures[1]["provenance"]["v1_v3_run_id"] = 901
+    fixtures[1]["provenance"]["v2_v4_run_id"] = 902
     fixtures[3]["provenance"]["v1_v3_run_id"] = 901
     fixtures[3]["provenance"]["v2_v4_run_id"] = 902
 
     report = build_phase1_acceptance_report(*fixtures)
 
+    assert report["v1_v3_run_id"] == 901
+    assert report["v2_v4_run_id"] == 902
     assert report["representative_source_run_ids"]["v1_v3_run_id"] == 901
     assert report["representative_source_run_ids"]["v2_v4_run_id"] == 902
 
 
 def test_phase1_acceptance_rejects_invalid_recovered_venue_run_id():
     fixtures = list(_fixtures())
+    fixtures[0]["validated_v1_v3_run_id"] = 0
+    fixtures[1]["provenance"]["v1_v3_run_id"] = 0
     fixtures[3]["provenance"]["v1_v3_run_id"] = 0
 
-    with pytest.raises(ValueError, match="upstream run provenance is invalid"):
+    with pytest.raises(
+        ValueError,
+        match="eligible universe venue run provenance is invalid",
+    ):
         build_phase1_acceptance_report(*fixtures)
 
 
