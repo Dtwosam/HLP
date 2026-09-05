@@ -426,7 +426,8 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
         "- uses: actions/upload-artifact@v4\n"
         "      - uses: actions/upload-artifact@v4"
     ) not in content
-    assert "SHARD_COUNT: '64'" in content
+    assert "SHARD_COUNT: '128'" in content
+    assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content
     assert "max-parallel: 2" in content
 
 
@@ -450,7 +451,8 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "causal_v3_routes_with_optional_delayed_skhy_weth" in content
     assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
     assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
-    assert "SHARD_COUNT: '64'" in content
+    assert "SHARD_COUNT: '128'" in content
+    assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content
     assert "max-parallel: 2" in content
 
 

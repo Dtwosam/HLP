@@ -220,9 +220,11 @@ Neither ownership mode adds another full-history venue scan: SKHY is simply an
 additional address/pool in the already-required V3 or V4 quote scan, so the
 frozen **total processed-block geometry** remains unchanged; only response
 volume can change. After the measured keyless DELL oracle 500k-block timeout,
-the execution partition was tightened to **64 V3 shards** and **64 V4
-quote-fallback shards** with max-parallel 2. This changes only per-job span and
-retry safety, not the canonical full-history block workload.
+the execution partition was tightened again before first execution to
+**128 V3 shards** and **128 V4 quote-fallback shards** with max-parallel 2,
+about **144k blocks per shard**. Three-digit suffixes preserve numeric merge
+order above shard 99. This changes only per-job span and retry safety, not the
+canonical full-history block workload.
 
 The V4 continuation path supports fail-closed `known_pool_only` mode. For
 SKHY it skips redundant Initialize discovery and scans only Swap logs for the
