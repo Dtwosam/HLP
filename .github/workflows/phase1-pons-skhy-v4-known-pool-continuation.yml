@@ -19,9 +19,19 @@ on:
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
       forward_blocks:
-        description: "Maximum continuation blocks; capped at 2,000,000"
+        description: "Maximum continuation blocks; capped at 500,000"
         required: true
-        default: "2000000"
+        default: "500000"
+        type: string
+      expected_prior_search_end:
+        description: "Optional exact prior search boundary; empty for chained segments"
+        required: false
+        default: "52863525"
+        type: string
+      output_artifact_name:
+        description: "Artifact name for this continuation segment"
+        required: true
+        default: "phase1-pons-skhy-v4-known-pool-continuation"
         type: string
   workflow_call:
     inputs:
@@ -37,6 +47,14 @@ on:
       forward_blocks:
         required: true
         type: string
+      expected_prior_search_end:
+        required: false
+        default: ""
+        type: string
+      output_artifact_name:
+        required: true
+        default: "phase1-pons-skhy-v4-known-pool-continuation"
+        type: string
 
 permissions:
   contents: read
@@ -50,8 +68,6 @@ env:
   SNAPSHOT_HEAD: '54486035'
   SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
   SKHY_POOL_ID: '0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601'
-  EXPECTED_PRIOR_SEARCH_END: '52863525'
-
 jobs:
   continue-known-pool:
     runs-on: ubuntu-latest
@@ -59,6 +75,7 @@ jobs:
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
       FORWARD_BLOCKS: ${{ inputs.forward_blocks }}
+      EXPECTED_PRIOR_SEARCH_END: ${{ inputs.expected_prior_search_end }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -81,9 +98,9 @@ jobs:
           from pathlib import Path
 
           forward_blocks = int(os.environ["FORWARD_BLOCKS"])
-          if not 1 <= forward_blocks <= 2_000_000:
+          if not 1 <= forward_blocks <= 500_000:
               raise SystemExit(
-                  "forward_blocks must be between 1 and 2000000"
+                  "forward_blocks must be between 1 and 500000"
               )
 
           rows = [
@@ -93,26 +110,22 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
-          unresolved = [
+          skhy = [
               row for row in rows
-              if not row.get("causal_route_ready")
-              and not row.get("delayed_route_ready")
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
           ]
-          if len(unresolved) != 1:
+          if len(skhy) != 1:
               raise SystemExit(
-                  "expected exactly one unresolved cumulative V4 quote row: "
-                  f"found={len(unresolved)}"
+                  "expected exactly one SKHY cumulative V4 quote row: "
+                  f"found={len(skhy)}"
               )
-          row = unresolved[0]
-          if row["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
-              raise SystemExit(
-                  "remaining unresolved V4 quote is not the frozen SKHY token"
-              )
-          if int(row["search_to_block"]) != int(
-              os.environ["EXPECTED_PRIOR_SEARCH_END"]
+          row = skhy[0]
+          expected_end = os.environ["EXPECTED_PRIOR_SEARCH_END"].strip()
+          if expected_end and int(row["search_to_block"]) != int(
+              expected_end
           ):
               raise SystemExit(
-                  "SKHY prior search boundary changed from frozen evidence"
+                  "SKHY prior search boundary changed from expected evidence"
               )
           candidates = row.get("v4_candidates", [])
           if len(candidates) != 1:
@@ -149,6 +162,10 @@ jobs:
                   - int(row["search_to_block"])
               ),
               "forward_blocks": forward_blocks,
+              "route_ready_before_segment": bool(
+                  row.get("causal_route_ready")
+                  or row.get("delayed_route_ready")
+              ),
           }
           Path("artifacts/skhy-known-pool-plan.json").write_text(
               json.dumps(report, indent=2, sort_keys=True) + "\n"
@@ -232,6 +249,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phase1-pons-skhy-v4-known-pool-continuation
+          name: ${{ inputs.output_artifact_name }}
           path: artifacts/
           if-no-files-found: error
