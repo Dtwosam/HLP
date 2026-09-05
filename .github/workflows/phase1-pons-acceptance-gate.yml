@@ -1,0 +1,148 @@
+name: phase1-pons-acceptance-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligible_universe_run_id:
+        description: "Successful phase1-pons-eligible-universe-freeze run"
+        required: true
+        type: string
+      representative_validation_run_id:
+        description: "Successful phase1-pons-representative-validation run"
+        required: true
+        type: string
+      viability_projection_run_id:
+        description: "Successful phase1-pons-acquisition-viability-projection run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      eligible_universe_run_id:
+        required: true
+        type: string
+      representative_validation_run_id:
+        required: true
+        type: string
+      viability_projection_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-acceptance-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-acquisition-viability-projection
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build fail-closed Phase 1 acceptance report
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.phase1_acceptance import (
+              REQUIRED_PHASE1_ACQUISITION_ROUTES,
+              build_phase1_acceptance_report,
+          )
+
+          eligible_summary = json.loads(
+              Path(
+                  "eligible/pons-eligible-universe-summary.json"
+              ).read_text()
+          )
+          eligible_manifest = json.loads(
+              Path(
+                  "eligible/"
+                  "pons-eligible-100k-universe.jsonl.manifest.json"
+              ).read_text()
+          )
+          representative_summary = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation-summary.json"
+              ).read_text()
+          )
+          representative_manifest = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation.jsonl.manifest.json"
+              ).read_text()
+          )
+          viability_projection = json.loads(
+              Path(
+                  "viability/"
+                  "phase1-acquisition-viability-projection.json"
+              ).read_text()
+          )
+
+          report = build_phase1_acceptance_report(
+              eligible_summary,
+              eligible_manifest,
+              representative_summary,
+              representative_manifest,
+              viability_projection,
+          )
+          report.update(
+              {
+                  "eligible_universe_run_id": int(
+                      "${{ inputs.eligible_universe_run_id }}"
+                  ),
+                  "representative_validation_run_id": int(
+                      "${{ inputs.representative_validation_run_id }}"
+                  ),
+                  "viability_projection_run_id": int(
+                      "${{ inputs.viability_projection_run_id }}"
+                  ),
+              }
+          )
+
+          if report["phase1_acceptance_status"] != "pass":
+              raise SystemExit("Phase 1 acceptance report did not PASS")
+          if report["required_acquisition_routes"] != list(
+              REQUIRED_PHASE1_ACQUISITION_ROUTES
+          ):
+              raise SystemExit(
+                  "Phase 1 acceptance route contract changed"
+              )
+
+          Path("artifacts/phase1-acceptance-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acceptance-gate
+          path: artifacts/
+          if-no-files-found: error
