@@ -21,6 +21,11 @@ EVIDENCE_REQUIRED_ARTIFACTS = (
     "phase1-pons-representative-validation",
 )
 
+EVIDENCE_ALLOWED_WORKFLOW_PATHS = (
+    ".github/workflows/phase1-pons-post-eligibility-evidence-one-shot.yml",
+    ".github/workflows/phase1-pons-recovered-completion-one-shot.yml",
+)
+
 VIABILITY_ROUTE_WORKFLOW_PATHS = {
     "pons_registry": (
         ".github/workflows/phase1-pons-viability-pons-registry-one-shot.yml"
@@ -119,6 +124,27 @@ def build_phase1_readiness_report(
     if set(ledger_route_run_ids) != set(route_names):
         raise ValueError("readiness ledger route set changed")
 
+    evidence_id = int(configured_evidence_run_id)
+    if evidence_id > 0 and _run_id(evidence_run) != evidence_id:
+        raise ValueError("evidence run payload does not match configured run ID")
+
+    evidence_artifacts = _artifact_names(evidence_run)
+    evidence_missing = sorted(
+        set(EVIDENCE_REQUIRED_ARTIFACTS) - evidence_artifacts
+    )
+    evidence_path = (
+        str((evidence_run or {}).get("path") or "").split("@", 1)[0]
+    )
+    evidence_path_allowed = evidence_path in EVIDENCE_ALLOWED_WORKFLOW_PATHS
+    evidence_valid = bool(
+        evidence_id > 0
+        and _successful(evidence_run)
+        and not evidence_missing
+        and evidence_path_allowed
+        and (evidence_run or {}).get("head_branch")
+        == "phase1/data-acquisition-spike"
+    )
+
     source_artifacts = _artifact_names(source_run)
     source_missing = sorted(
         set(SOURCE_REQUIRED_ARTIFACTS) - source_artifacts
@@ -142,33 +168,50 @@ def build_phase1_readiness_report(
         for state, count in source_job_counts.items()
         if state in failed_job_states
     )
-    if not _successful(source_run) or source_missing:
-        source_terminal_failure = bool(
-            source_run.get("status") == "completed"
-            and source_run.get("conclusion") != "success"
-        )
-        next_action = (
-            "recover_full_eligibility_acquisition"
-            if source_failed_jobs > 0 or source_terminal_failure
-            else "wait_for_full_eligibility_acquisition"
-        )
-        return {
-            "phase1_ready": False,
-            "stage": "eligibility_acquisition",
-            "next_action": next_action,
-            "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
-            "source_status": source_run.get("status"),
-            "source_conclusion": source_run.get("conclusion"),
-            "source_job_counts": source_job_counts,
-            "source_failed_jobs": source_failed_jobs,
-            "source_missing_artifacts": source_missing,
-            "evidence_run_id": 0,
-            "completed_viability_routes": [],
-            "pending_viability_routes": route_names,
-            "final_acceptance_run_id": 0,
-        }
+    source_completed = source_run.get("status") == "completed"
+    source_successful = _successful(source_run) and not source_missing
+    source_terminal_failure = bool(
+        source_completed and source_run.get("conclusion") != "success"
+    )
 
-    evidence_id = int(configured_evidence_run_id)
+    if not source_successful:
+        if source_terminal_failure and evidence_valid:
+            pass
+        else:
+            if not source_completed:
+                next_action = "wait_for_full_eligibility_acquisition"
+            else:
+                next_action = "recover_full_eligibility_acquisition"
+                if evidence_id > 0:
+                    next_action = "recover_or_rerun_post_eligibility_evidence"
+            return {
+                "phase1_ready": False,
+                "stage": (
+                    "post_eligibility_evidence"
+                    if source_completed and evidence_id > 0
+                    else "eligibility_acquisition"
+                ),
+                "next_action": next_action,
+                "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+                "source_status": source_run.get("status"),
+                "source_conclusion": source_run.get("conclusion"),
+                "source_job_counts": source_job_counts,
+                "source_failed_jobs": source_failed_jobs,
+                "source_missing_artifacts": source_missing,
+                "evidence_run_id": evidence_id,
+                "evidence_status": (
+                    evidence_run.get("status") if evidence_run else None
+                ),
+                "evidence_conclusion": (
+                    evidence_run.get("conclusion") if evidence_run else None
+                ),
+                "evidence_missing_artifacts": evidence_missing,
+                "evidence_workflow_path": evidence_path,
+                "completed_viability_routes": [],
+                "pending_viability_routes": route_names,
+                "final_acceptance_run_id": 0,
+            }
+
     if evidence_id <= 0:
         return {
             "phase1_ready": False,
@@ -177,20 +220,14 @@ def build_phase1_readiness_report(
             "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
             "source_status": source_run.get("status"),
             "source_conclusion": source_run.get("conclusion"),
-            "source_missing_artifacts": [],
+            "source_missing_artifacts": source_missing,
             "evidence_run_id": 0,
             "completed_viability_routes": [],
             "pending_viability_routes": route_names,
             "final_acceptance_run_id": 0,
         }
 
-    if _run_id(evidence_run) != evidence_id:
-        raise ValueError("evidence run payload does not match configured run ID")
-    evidence_artifacts = _artifact_names(evidence_run)
-    evidence_missing = sorted(
-        set(EVIDENCE_REQUIRED_ARTIFACTS) - evidence_artifacts
-    )
-    if not _successful(evidence_run) or evidence_missing:
+    if not evidence_valid:
         return {
             "phase1_ready": False,
             "stage": "post_eligibility_evidence",
@@ -198,7 +235,7 @@ def build_phase1_readiness_report(
             "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
             "source_status": source_run.get("status"),
             "source_conclusion": source_run.get("conclusion"),
-            "source_missing_artifacts": [],
+            "source_missing_artifacts": source_missing,
             "evidence_run_id": evidence_id,
             "evidence_status": (
                 evidence_run.get("status") if evidence_run else None
@@ -207,6 +244,7 @@ def build_phase1_readiness_report(
                 evidence_run.get("conclusion") if evidence_run else None
             ),
             "evidence_missing_artifacts": evidence_missing,
+            "evidence_workflow_path": evidence_path,
             "completed_viability_routes": [],
             "pending_viability_routes": route_names,
             "final_acceptance_run_id": 0,
