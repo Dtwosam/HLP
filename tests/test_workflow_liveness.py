@@ -622,8 +622,10 @@ def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "phase1-pons-acquisition-accounting" in content
+    assert "build_phase1_route_plan" in content
     assert "project_phase1_acquisition_plan" in content
     assert "route_plan_json" in content
+    assert "route -> evidence run IDs" in content
     assert "zero_cost_route_evidence" in content
     assert "does not mark Phase 1 PASS" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
