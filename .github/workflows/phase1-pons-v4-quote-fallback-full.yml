@@ -18,6 +18,10 @@ on:
         required: true
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
+      promoted_v3_run_id:
+        description: "Successful promoted V3 fallback run proving SKHY/WETH ownership"
+        required: true
+        type: string
   workflow_call:
     inputs:
       probe_run_id:
@@ -32,6 +36,10 @@ on:
         description: "Cumulative V4 quote probe JSONL filename"
         required: true
         type: string
+      promoted_v3_run_id:
+        description: "Promoted V3 fallback run proving SKHY/WETH ownership"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -44,6 +52,8 @@ concurrency:
 env:
   SNAPSHOT_HEAD: '54486035'
   FIRST_V4_FALLBACK_SWAP: '36023158'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
 
 jobs:
   plan:
@@ -61,6 +71,12 @@ jobs:
           name: ${{ inputs.probe_artifact_name }}
           path: probe
           run-id: ${{ inputs.probe_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-promoted
+          path: promoted-v3
+          run-id: ${{ inputs.promoted_v3_run_id }}
           github-token: ${{ github.token }}
       - name: Freeze deterministic V4 fallback routes
         run: |
@@ -93,33 +109,71 @@ jobs:
               if not row.get("causal_route_ready")
               and not row.get("delayed_route_ready")
           ]
+          promoted_v3 = [
+              json.loads(line)
+              for line in Path(
+                  "promoted-v3/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
           if len(probe_rows) != 5:
               raise SystemExit(
                   "frozen residual V4 probe must contain exactly five "
                   f"V3-miss quote assets, got {len(probe_rows)}"
               )
-          if unresolved:
+          if len(promoted_v3) != 26:
               raise SystemExit(
-                  "cannot freeze V4 quote fallback with unresolved residual "
-                  "quote assets: "
-                  + json.dumps(
-                      [
-                          {
-                              "symbol": row.get("symbol"),
-                              "quote_token": row["quote_token"],
-                              "launches": int(row["launches"]),
-                              "search_to_block": int(row["search_to_block"]),
-                          }
-                          for row in unresolved
-                      ],
-                      sort_keys=True,
-                  )
+                  "promoted V3 fallback must contain exactly 26 routes"
               )
-          if len(routes) != len(probe_rows):
+          skhy_v3 = [
+              row for row in promoted_v3
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
+          ]
+          if len(skhy_v3) != 1:
               raise SystemExit(
-                  "selected V4 routes do not exactly cover residual probe: "
-                  f"routes={len(routes)} probe={len(probe_rows)}"
+                  "promoted V3 fallback must contain exactly one SKHY route"
               )
+          if (
+              skhy_v3[0]["anchor_token"].lower()
+              != os.environ["WETH"].lower()
+              or skhy_v3[0]["route_type"]
+              != "uniswap_v3_direct_weth_delayed"
+          ):
+              raise SystemExit(
+                  "promoted SKHY V3 ownership is not the frozen WETH route"
+              )
+
+          if len(unresolved) != 1:
+              raise SystemExit(
+                  "V4 fallback must leave exactly one externally-owned "
+                  f"residual, got {len(unresolved)}"
+              )
+          external = unresolved[0]
+          if external["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
+              raise SystemExit(
+                  "only SKHY may remain unresolved in the V4 fallback"
+              )
+
+          residual_tokens = {
+              row["quote_token"].lower() for row in probe_rows
+          }
+          route_tokens = {
+              row["quote_token"].lower() for row in routes
+          }
+          if len(routes) != 4 or len(route_tokens) != 4:
+              raise SystemExit(
+                  f"V4 fallback must select four unique routes, got {len(routes)}"
+              )
+          if (
+              route_tokens | {os.environ["SKHY_TOKEN"].lower()}
+              != residual_tokens
+          ):
+              raise SystemExit(
+                  "V3/V4 residual ownership does not cover the five frozen "
+                  "V3 misses exactly"
+              )
+          if os.environ["SKHY_TOKEN"].lower() in route_tokens:
+              raise SystemExit("SKHY cannot be owned by both V3 and V4")
           assert all(
               row["anchor_token"].lower()
               == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
@@ -130,9 +184,17 @@ jobs:
           assert earliest >= configured, (earliest, configured)
           report = {
               "residual_quote_assets": len(probe_rows),
+              "v4_unresolved_assets": 1,
+              "externally_resolved_assets": 1,
+              "externally_resolved_quote_token": (
+                  os.environ["SKHY_TOKEN"].lower()
+              ),
               "unresolved_assets": 0,
               "selected_routes": len(routes),
               "covered_launches": sum(int(row["launches"]) for row in routes),
+              "promoted_v3_run_id": int(
+                  "${{ inputs.promoted_v3_run_id }}"
+              ),
               "earliest_activation_block": earliest,
               "routes": [
                   {
@@ -317,6 +379,9 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "probe_run_id": int("${{ inputs.probe_run_id }}"),
+                  "promoted_v3_run_id": int(
+                      "${{ inputs.promoted_v3_run_id }}"
+                  ),
                   "shards": manifests,
               },
           )
