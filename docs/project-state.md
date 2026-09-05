@@ -256,9 +256,13 @@ fail fast above **240 matrix jobs**, below GitHub Actions' matrix ceiling, rathe
 than generating an invalid oversized matrix from an excessively small manual
 gap size. A live recovery measurement on 2026-09-05 showed that 200k-block V2
 tail jobs at the first two missing ranges both reached the 20-minute job cap, so
-V2 curve gaps are now capped at **50k blocks**. Anchor, transition and V4 gap
-workflows currently use a conservative **150k-block** ceiling until separately
-measured.
+V2 curve gaps are capped at **50k blocks**. Anchor gap recovery was
+initially tested at 150k, but live gap 018 (52,169,619-52,319,618) hit the
+20-minute runner cap before artifact upload. Future anchor manifest-gap jobs
+are therefore capped at **50k blocks**, and the four-way exact anchor range
+helper now rejects ranges above 200k so each subshard is at most 50k.
+Transition and V4 gap workflows remain at the separately bounded **150k**
+ceiling.
 
 The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed
@@ -266,13 +270,14 @@ in **1,514.118 seconds** with **1,070** RPC requests. Manifest-gap recovery run
 **33957294304** is now reusing that shard and plans **34** exact missing jobs
 covering **5,016,417** blocks from 49,469,619 through 54,486,035.
 
-The first two measured **150k-block** anchor gaps both completed inside the
+The first two measured **150k-block** anchor gaps completed inside the
 20-minute recovery bound: gap 000 produced **168,023** events in **1,103.111
 seconds** with **1,415** RPC requests, while gap 001 produced **163,019** events
-in **1,093.740 seconds** with **1,418** requests. That validates the current
-150k retry size on the keyless route, but it is close enough to the job limit
-that the cap is not increased. The stabilized adaptive log scanner is shared
-by this path too.
+in **1,093.740 seconds** with **1,418** requests. Later gap 018 demonstrated
+that 150k is not uniformly safe: it ran from 11:49:04 to 12:09:09 UTC and was
+cancelled before upload. The lower 50k recovery ceiling is therefore the
+fail-safe default for future anchor gaps. The stabilized adaptive log scanner
+is shared by this path too.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
@@ -391,8 +396,13 @@ The final Phase 1 viability path is also staged fail-closed:
   authenticated-Free routes are accepted as proven-free acquisition evidence;
 - a manual artifact-only viability projection consumes measured accounting
   runs and an explicit route plan, then uses the worst observed per-processed-
-  block request, egress, artifact-storage and runtime rate for each route;
-- the frozen heavy-acquisition contract requires exactly nine routes:
+  work-block request, egress, artifact-storage and runtime rate for each route.
+  Repeated ranges inside one job are deduplicated, while overlapping ranges in
+  distinct jobs/scans remain separate work units; a global unique-block metric
+  is retained separately for audit;
+- the frozen heavy-acquisition contract requires exact full-history work-block
+  floors for exactly nine routes; the Pons registry floor intentionally counts
+  its overlapping V1 and V2 generation scans separately:
   Pons registry, V1 V3, V2 curve, V2 transition, V2 V4, WETH/USDG anchor,
   stock oracle, V3 quote fallback and V4 quote fallback;
 - a final manual artifact-only acceptance gate can return
