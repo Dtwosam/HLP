@@ -908,8 +908,16 @@ def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transf
     assert "phase1-pons-representative-validation.yml" in content
     assert content.count("v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
     assert content.count("v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
-    assert "v1_v3_run_id: ${{ inputs.eligibility_run_id }}" in content
-    assert "v2_v4_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "v1_v3_run_id:" in content
+    assert "v2_v4_run_id:" in content
+    assert (
+        "inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || "
+        "inputs.eligibility_run_id"
+    ) in content
+    assert (
+        "inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || "
+        "inputs.eligibility_run_id"
+    ) in content
     assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "prior_run_id: ${{ inputs.prior_transfer_run_id }}" in content
     assert "registry_run_id: ${{ inputs.registry_run_id }}" in content
@@ -1210,6 +1218,10 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "source_coverage_sha256" in content
     assert "representative market path V1 venue run mismatch" in content
     assert "representative market path V2 venue run mismatch" in content
+    assert "v1_v3_run_id:" in content
+    assert "v2_v4_run_id:" in content
+    assert 'v1_v3_run = int("${{ inputs.v1_v3_run_id }}")' in content
+    assert 'v2_v4_run = int("${{ inputs.v2_v4_run_id }}")' in content
     for source_input in (
         "registry_run_id:",
         "v2_curve_run_id:",
