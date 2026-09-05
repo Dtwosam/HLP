@@ -190,8 +190,11 @@ without increasing concurrent RPC pressure:
 - V2 global PoolManager V4 tape: 64 shards, about 432k blocks each,
   max-parallel 2, 25-minute cap.
 
-Two reusable manual-only range recovery workflows split any exact failed curve
-or anchor interval into four smaller subshards and merge only that interval.
+Two reusable manual-only range recovery workflows split a bounded exact
+failed curve or anchor interval into four smaller subshards and merge only that
+interval. They reject spans above 200k blocks for V2 curves or 600k blocks for
+the anchor, keeping their four subshards within the same 50k/150k retry
+ceilings used by manifest-gap recovery.
 On top of those primitives, manifest-driven gap recovery now reads every
 successful partial-run manifest, derives the exact uncovered block intervals,
 and creates only bounded retry jobs. Both V2 curve and WETH/USDG anchor gap
