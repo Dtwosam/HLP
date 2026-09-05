@@ -305,6 +305,9 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
     assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
     assert "pons-select-v4-quote-routes" in content
+    assert "cannot freeze V4 quote fallback with unresolved residual" in content
+    assert "selected V4 routes do not exactly cover residual probe" in content
+    assert "residual_quote_assets" in content
 
 
 def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
