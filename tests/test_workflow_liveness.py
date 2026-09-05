@@ -192,6 +192,8 @@ def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert 'Path("prior-gaps").glob("curve-gap-*.jsonl")' in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
