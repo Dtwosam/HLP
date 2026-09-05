@@ -107,6 +107,42 @@ jobs:
               225_951,
           )
 
+          v1_lifecycle_run_id = int(
+              "${{ inputs.v1_eligibility_run_id }}"
+          )
+          v2_lifecycle_run_id = int(
+              "${{ inputs.v2_eligibility_run_id }}"
+          )
+
+          def venue_run_id(manifest, field, lifecycle_run_id):
+              provenance = manifest.get("provenance") or {}
+              value = provenance.get(field)
+              if value is None:
+                  if lifecycle_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          f"eligibility lifecycle venue provenance missing: "
+                          f"{field} run={lifecycle_run_id}"
+                      )
+                  return lifecycle_run_id
+              run_id = int(value)
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"eligibility lifecycle venue run is invalid: "
+                      f"{field}={run_id}"
+                  )
+              return run_id
+
+          v1_v3_run_id = venue_run_id(
+              v1_manifest,
+              "v1_v3_run_id",
+              v1_lifecycle_run_id,
+          )
+          v2_v4_run_id = venue_run_id(
+              v2_manifest,
+              "v4_run_id",
+              v2_lifecycle_run_id,
+          )
+
           v1 = load("v1/pons-v1-lifecycle-eligibility.jsonl")
           v2 = load("v2/pons-v2-lifecycle-eligibility.jsonl")
           if len(v1) != 268_688 or len(v2) != 225_951:
@@ -175,12 +211,10 @@ jobs:
                       "reached >=$100k market-cap proxy at least once in "
                       "complete observed Pons lifecycle"
                   ),
-                  "v1_eligibility_run_id": int(
-                      "${{ inputs.v1_eligibility_run_id }}"
-                  ),
-                  "v2_eligibility_run_id": int(
-                      "${{ inputs.v2_eligibility_run_id }}"
-                  ),
+                  "v1_eligibility_run_id": v1_lifecycle_run_id,
+                  "v2_eligibility_run_id": v2_lifecycle_run_id,
+                  "v1_v3_run_id": v1_v3_run_id,
+                  "v2_v4_run_id": v2_v4_run_id,
                   "v1_eligibility_sha256": v1_manifest["sha256"],
                   "v2_eligibility_sha256": v2_manifest["sha256"],
               },
@@ -190,6 +224,8 @@ jobs:
               "all_pons_launches": len(v1) + len(v2),
               "validated_v1_input_sha256": v1_manifest["sha256"],
               "validated_v2_input_sha256": v2_manifest["sha256"],
+              "validated_v1_v3_run_id": v1_v3_run_id,
+              "validated_v2_v4_run_id": v2_v4_run_id,
               "v1_launches": len(v1),
               "v2_launches": len(v2),
               "eligible_tokens": len(eligible),
