@@ -67,6 +67,11 @@ jobs:
           i = int(os.environ["SHARD_INDEX"])
           n = int(os.environ["SHARD_COUNT"])
           span = end - start + 1
+          if span > 200_000:
+              raise SystemExit(
+                  "recovery range exceeds 200000-block ceiling; "
+                  "use manifest gap recovery"
+              )
           lo = start + (span * i) // n
           hi = start + (span * (i + 1)) // n - 1
           if hi < lo:
