@@ -101,6 +101,75 @@ def _run_id(run: Mapping[str, Any] | None) -> int:
         return 0
 
 
+def _evidence_handoff_errors(
+    handoff: Mapping[str, Any] | None,
+    *,
+    evidence_run_id: int,
+    evidence_path: str,
+) -> list[str]:
+    if evidence_run_id <= 0:
+        return []
+    if not isinstance(handoff, Mapping):
+        return ["evidence handoff payload is missing"]
+
+    errors: list[str] = []
+    if handoff.get("status") != "ready":
+        errors.append("evidence handoff status is not ready")
+    if int(handoff.get("evidence_run_id", 0)) != evidence_run_id:
+        errors.append("evidence handoff run ID mismatch")
+    if int(
+        handoff.get("source_eligibility_run_id", 0)
+    ) != SOURCE_ELIGIBILITY_RUN_ID:
+        errors.append("evidence handoff source run mismatch")
+    if int(handoff.get("snapshot_head_block", -1)) != 54_486_035:
+        errors.append("evidence handoff snapshot head changed")
+    if int(handoff.get("all_pons_launches", -1)) != 494_639:
+        errors.append("evidence handoff Pons launch count changed")
+    if int(handoff.get("eligible_tokens", 0)) <= 0:
+        errors.append("evidence handoff eligible universe is empty")
+    if int(handoff.get("representative_tokens", -1)) != 10:
+        errors.append("evidence handoff representative token count changed")
+
+    for field in (
+        "eligible_universe_sha256",
+        "representative_validation_sha256",
+        "v1_eligibility_sha256",
+        "v2_eligibility_sha256",
+    ):
+        value = str(handoff.get(field) or "").lower()
+        if len(value) != 64:
+            errors.append(f"evidence handoff hash is invalid: {field}")
+            continue
+        try:
+            int(value, 16)
+        except ValueError:
+            errors.append(f"evidence handoff hash is invalid: {field}")
+
+    lifecycle_run_id = int(handoff.get("lifecycle_run_id", 0))
+    v1_v3_run_id = int(handoff.get("v1_v3_run_id", 0))
+    v2_v4_run_id = int(handoff.get("v2_v4_run_id", 0))
+    if min(lifecycle_run_id, v1_v3_run_id, v2_v4_run_id) <= 0:
+        errors.append("evidence handoff routing run ID is invalid")
+
+    recovery_mode = handoff.get("recovery_mode")
+    if not isinstance(recovery_mode, bool):
+        errors.append("evidence handoff recovery mode must be boolean")
+    elif evidence_path == EVIDENCE_ALLOWED_WORKFLOW_PATHS[0]:
+        if recovery_mode:
+            errors.append("normal evidence handoff is marked recovered")
+        if (
+            lifecycle_run_id != SOURCE_ELIGIBILITY_RUN_ID
+            or v1_v3_run_id != SOURCE_ELIGIBILITY_RUN_ID
+            or v2_v4_run_id != SOURCE_ELIGIBILITY_RUN_ID
+        ):
+            errors.append("normal evidence handoff routing changed")
+    elif evidence_path == EVIDENCE_ALLOWED_WORKFLOW_PATHS[1]:
+        if not recovery_mode:
+            errors.append("recovered evidence handoff is not marked recovered")
+
+    return errors
+
+
 def build_phase1_readiness_report(
     *,
     source_run: Mapping[str, Any],
@@ -112,6 +181,7 @@ def build_phase1_readiness_report(
     ledger_generation: int,
     ledger_evidence_run_id: int,
     ledger_route_run_ids: Mapping[str, int],
+    evidence_handoff: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if int(configured_source_run_id) != SOURCE_ELIGIBILITY_RUN_ID:
         raise ValueError("readiness source eligibility run changed")
@@ -136,11 +206,17 @@ def build_phase1_readiness_report(
         str((evidence_run or {}).get("path") or "").split("@", 1)[0]
     )
     evidence_path_allowed = evidence_path in EVIDENCE_ALLOWED_WORKFLOW_PATHS
+    evidence_handoff_errors = _evidence_handoff_errors(
+        evidence_handoff,
+        evidence_run_id=evidence_id,
+        evidence_path=evidence_path,
+    )
     evidence_valid = bool(
         evidence_id > 0
         and _successful(evidence_run)
         and not evidence_missing
         and evidence_path_allowed
+        and not evidence_handoff_errors
         and (evidence_run or {}).get("head_branch")
         == "phase1/data-acquisition-spike"
     )
@@ -207,6 +283,7 @@ def build_phase1_readiness_report(
                 ),
                 "evidence_missing_artifacts": evidence_missing,
                 "evidence_workflow_path": evidence_path,
+                "evidence_handoff_errors": evidence_handoff_errors,
                 "completed_viability_routes": [],
                 "pending_viability_routes": route_names,
                 "final_acceptance_run_id": 0,
@@ -245,6 +322,7 @@ def build_phase1_readiness_report(
             ),
             "evidence_missing_artifacts": evidence_missing,
             "evidence_workflow_path": evidence_path,
+            "evidence_handoff_errors": evidence_handoff_errors,
             "completed_viability_routes": [],
             "pending_viability_routes": route_names,
             "final_acceptance_run_id": 0,
