@@ -46,6 +46,15 @@ def _positive(value: object, *, field: str) -> float:
     return result
 
 
+def _sha256(value: object, *, field: str) -> str:
+    digest = str(value or "").lower()
+    if len(digest) != 64 or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise ValueError(f"{field} must be a 64-character SHA256 digest")
+    return digest
+
+
 def _manifest_provenance(
     manifest: Mapping[str, object],
     *,
@@ -136,6 +145,29 @@ def build_phase1_acceptance_report(
     )
     if v1_eligibility_run_id <= 0 or v2_eligibility_run_id <= 0:
         raise ValueError("eligible universe lifecycle run provenance is invalid")
+
+    v1_eligibility_sha256 = _sha256(
+        eligible_provenance.get("v1_eligibility_sha256"),
+        field="eligible.v1_eligibility_sha256",
+    )
+    v2_eligibility_sha256 = _sha256(
+        eligible_provenance.get("v2_eligibility_sha256"),
+        field="eligible.v2_eligibility_sha256",
+    )
+    if _sha256(
+        eligible.get("validated_v1_input_sha256"),
+        field="eligible.validated_v1_input_sha256",
+    ) != v1_eligibility_sha256:
+        raise ValueError(
+            "eligible universe V1 lifecycle SHA disagrees with provenance"
+        )
+    if _sha256(
+        eligible.get("validated_v2_input_sha256"),
+        field="eligible.validated_v2_input_sha256",
+    ) != v2_eligibility_sha256:
+        raise ValueError(
+            "eligible universe V2 lifecycle SHA disagrees with provenance"
+        )
 
     if _int(
         representative.get("snapshot_head_block"),
@@ -587,6 +619,8 @@ def build_phase1_acceptance_report(
         "eligible_v2": eligible_v2,
         "v1_eligibility_run_id": v1_eligibility_run_id,
         "v2_eligibility_run_id": v2_eligibility_run_id,
+        "v1_eligibility_sha256": v1_eligibility_sha256,
+        "v2_eligibility_sha256": v2_eligibility_sha256,
         "representative_tokens": 10,
         "representative_price_points": price_points,
         "representative_detailed_price_points": detailed_price_points,
