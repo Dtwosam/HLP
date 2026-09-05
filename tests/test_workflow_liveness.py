@@ -926,6 +926,12 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "prior_run_id" in content
     assert "plan_missing_subranges" in content
     assert 'default: "200000"' in content
+    call_block = content.split("  workflow_call:", 1)[1].split(
+        "\npermissions:", 1
+    )[0]
+    assert "max_blocks:" in call_block
+    assert 'default: "200000"' in call_block
+    assert "required: false" in call_block
     assert "max_blocks must be between 1 and 200000" in content
     assert "representative transfer plan exceeds 240 matrix jobs" in content
     assert "max-parallel: 2" in content
