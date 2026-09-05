@@ -330,6 +330,31 @@ Planned high-level scans:
 
 This sequencing prevents transfer/holder backfills for the overwhelming majority of coins that never become research-eligible.
 
+## Representative Phase 1 validation tooling
+
+The representative-token acceptance path is now staged without changing any
+research threshold or starting another archive crawl:
+
+- a deterministic freeze selects exactly five measured >=5x runners and five
+  lifecycle failures, with both Pons generations represented;
+- a resumable Transfer backfill reconstructs exact holder balances/counts and
+  fails closed unless every sampled token begins with a launch-time mint;
+- GeckoTerminal is used only as independent DEX evidence, never canonical
+  history; the client supports pool identity and bounded OHLCV reads;
+- a manual representative DEX cross-check fails on canonical pool/token-pair
+  disagreement and records explicit V2 tokens that never registered a V4 pool;
+- a manual GitHub-Actions accounting workflow measures reported request
+  counters and artifact bytes rather than estimating provider usage;
+- an artifact-only representative validation join requires all 10 tokens to
+  have consistent lifecycle pricing evidence, holder replay and DEX
+  reconciliation before it can publish a complete validation bundle.
+
+These are tooling completions, **not Phase 1 acceptance evidence yet**. The
+representative sample freeze still waits on canonical V1/V2 lifecycle
+eligibility artifacts, which in turn remain blocked on the unfinished pricing
+inputs. No representative transfer backfill or DEX validation artifact should
+be counted as complete until those upstream frozen inputs exist.
+
 ## Phase 1 remaining gates
 
 - [x] verify every relevant Pons generation/factory from raw chain
