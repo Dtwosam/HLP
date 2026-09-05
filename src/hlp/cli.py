@@ -1598,6 +1598,7 @@ def cmd_rpc_pons_extend_v4_quote_routes(
         forward_blocks=args.forward_blocks,
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
+        known_pool_only=args.known_pool_only,
     )
     manifest = write_jsonl_snapshot(
         rows,
@@ -1608,8 +1609,10 @@ def cmd_rpc_pons_extend_v4_quote_routes(
             "prior_probe": Path(args.probe).name,
             "snapshot_head_block": args.snapshot_head,
             "forward_blocks": args.forward_blocks,
+            "known_pool_only": bool(args.known_pool_only),
             "continuation_semantics": (
-                "start exactly one block after each unresolved prior search end"
+                "start exactly one block after each unresolved prior search "
+                "end; known-pool-only skips new Initialize discovery"
             ),
         },
     )
@@ -4858,6 +4861,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extend_quote_v4.add_argument(
         "--forward-blocks", type=int, default=500_000
+    )
+    extend_quote_v4.add_argument(
+        "--known-pool-only",
+        action="store_true",
+        help=(
+            "skip new Initialize discovery and scan only V4 candidates "
+            "already present in the prior probe"
+        ),
     )
     extend_quote_v4.add_argument("--chunk-size", type=int, default=2_000)
     extend_quote_v4.add_argument("--min-chunk-size", type=int, default=25)
