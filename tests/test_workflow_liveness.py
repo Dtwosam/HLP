@@ -1289,6 +1289,13 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "workflow_dispatch:" not in trigger_block
     assert "launch V1 V3 rescue" in content
     assert "launch V2 V4 rescue" in content
+    assert "live venue rescue is blocked while source parent is active" in content
+    assert "live venue rescue is unnecessary after source success" in content
+    assert "live venue rescue source workflow path changed" in content
+    assert "live venue rescue source branch changed" in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert content.count("needs: preflight") == 2
+    assert content.count("needs.preflight.result == 'success'") == 2
     assert content.count('partial_run_id: "33982556591"') == 2
     assert 'source_registry_run_id: "33911022718"' in content
     assert 'transition_run_id: "33912452330"' in content
