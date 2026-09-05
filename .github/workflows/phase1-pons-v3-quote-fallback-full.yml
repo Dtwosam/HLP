@@ -13,6 +13,14 @@ on:
         required: true
         default: "33923160281"
         type: string
+      skhy_weth_run_id:
+        description: "Successful phase1-pons-skhy-v3-weth-segmented run with route_resolved"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Successful canonical phase1-pons-weth-usdg-anchor-full run"
+        required: true
+        type: string
   workflow_call:
     inputs:
       route_audit_run_id:
@@ -21,6 +29,14 @@ on:
         type: string
       delayed_probe_run_id:
         description: "Successful phase1-pons-delayed-v3-route-probe-one-shot run"
+        required: true
+        type: string
+      skhy_weth_run_id:
+        description: "Resolved segmented SKHY/WETH route run"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Canonical WETH/USDG anchor run"
         required: true
         type: string
 
@@ -35,6 +51,9 @@ concurrency:
 env:
   SNAPSHOT_HEAD: '54486035'
   FIRST_FEEDLESS_PONS_USE: '35992329'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
 
 jobs:
   plan:
@@ -59,16 +78,26 @@ jobs:
           path: delayed
           run-id: ${{ inputs.delayed_probe_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-skhy-v3-weth-segmented
+          path: skhy
+          run-id: ${{ inputs.skhy_weth_run_id }}
+          github-token: ${{ github.token }}
       - name: Freeze deterministic V3 fallback route choices
         run: |
           mkdir -p artifacts
           hlp pons-select-v3-quote-routes \
             --audit audit/pons-unpriced-v3-route-audit.jsonl \
             --delayed delayed/pons-delayed-v3-usdg-routes.jsonl \
-            --out artifacts/pons-v3-quote-routes.jsonl
+            --out artifacts/pons-v3-quote-routes-base.jsonl
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
+
+          from hlp.data.quote_routes import merge_v3_quote_routes
+          from hlp.data.snapshot import write_jsonl_snapshot
 
           audit = [
               json.loads(line)
@@ -84,18 +113,72 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
-          selected = [
+          base_selected = [
               json.loads(line)
               for line in Path(
-                  "artifacts/pons-v3-quote-routes.jsonl"
+                  "artifacts/pons-v3-quote-routes-base.jsonl"
               ).read_text().splitlines()
               if line.strip()
           ]
-          selected_tokens = {
-              row["quote_token"].lower() for row in selected
+          base_tokens = {
+              row["quote_token"].lower() for row in base_selected
           }
           audit_tokens = {
               row["quote_token"].lower() for row in audit
+          }
+          base_unresolved = [
+              row for row in audit
+              if row["quote_token"].lower() not in base_tokens
+          ]
+          base_unresolved_tokens = {
+              row["quote_token"].lower() for row in base_unresolved
+          }
+
+          skhy_summary = json.loads(
+              Path(
+                  "skhy/pons-skhy-v3-weth-segmented-summary.json"
+              ).read_text()
+          )
+          if skhy_summary.get("completion_status") != "route_resolved":
+              raise SystemExit(
+                  "canonical V3 fallback requires resolved SKHY/WETH route"
+              )
+          if int(skhy_summary.get("snapshot_head_block", -1)) != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("SKHY/WETH snapshot head changed")
+          skhy_rows = [
+              json.loads(line)
+              for line in Path(
+                  "skhy/pons-skhy-v3-weth-continuation.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if len(skhy_rows) != 1 or not skhy_rows[0].get(
+              "delayed_route_ready"
+          ):
+              raise SystemExit(
+                  "canonical V3 fallback requires one ready SKHY/WETH row"
+              )
+          skhy_route = skhy_rows[0].get("route")
+          if not skhy_route:
+              raise SystemExit("ready SKHY/WETH row has no route")
+          if (
+              skhy_route["quote_token"].lower()
+              != os.environ["SKHY_TOKEN"].lower()
+              or skhy_route["anchor_token"].lower()
+              != os.environ["WETH"].lower()
+              or skhy_route["route_type"]
+              != "uniswap_v3_direct_weth_delayed"
+          ):
+              raise SystemExit("frozen SKHY/WETH route identity changed")
+
+          selected = merge_v3_quote_routes(
+              base_selected,
+              [{"delayed_route_ready": True, "route": skhy_route}],
+          )
+          selected_tokens = {
+              row["quote_token"].lower() for row in selected
           }
           unresolved = [
               row for row in audit
@@ -112,40 +195,85 @@ jobs:
                   "frozen V3 fallback audit must contain 30 unique feedless "
                   f"assets, got rows={len(audit)} unique={len(audit_tokens)}"
               )
-          if len(selected) != 25 or len(selected_tokens) != 25:
+          if len(base_selected) != 25 or len(base_tokens) != 25:
               raise SystemExit(
-                  "frozen V3 fallback must select exactly 25 unique causal "
-                  f"routes, got rows={len(selected)} unique={len(selected_tokens)}"
+                  "frozen base V3 fallback must select exactly 25 unique "
+                  f"causal routes, got rows={len(base_selected)} "
+                  f"unique={len(base_tokens)}"
               )
-          if len(unresolved) != 5:
+          if len(base_unresolved) != 5:
               raise SystemExit(
-                  "frozen V3 fallback must leave exactly five residual "
-                  f"assets for V4, got {len(unresolved)}"
+                  "frozen base V3 fallback must leave exactly five residual "
+                  f"assets, got {len(base_unresolved)}"
               )
-          if delayed_tokens != unresolved_tokens:
+          if delayed_tokens != base_unresolved_tokens:
               raise SystemExit(
-                  "delayed V3 probe does not exactly cover the five residual "
-                  f"assets: missing={sorted(unresolved_tokens - delayed_tokens)} "
-                  f"extra={sorted(delayed_tokens - unresolved_tokens)}"
+                  "delayed direct-USDG V3 probe does not exactly cover the "
+                  "five base residual assets"
               )
           if any(row.get("delayed_route_ready") for row in delayed):
               raise SystemExit(
-                  "frozen delayed V3 probe unexpectedly resolves a residual "
-                  "asset; refresh the deterministic route selection baseline"
+                  "frozen delayed direct-USDG V3 probe unexpectedly resolves "
+                  "a residual asset"
               )
-          non_usdg = [
+          if os.environ["SKHY_TOKEN"].lower() not in base_unresolved_tokens:
+              raise SystemExit("SKHY is not one of the five frozen V3 misses")
+          if len(selected) != 26 or len(selected_tokens) != 26:
+              raise SystemExit(
+                  "canonical V3 fallback must select exactly 26 unique routes"
+              )
+          if len(unresolved) != 4:
+              raise SystemExit(
+                  "canonical V3 fallback must leave exactly four residual "
+                  f"assets for V4, got {len(unresolved)}"
+              )
+          if os.environ["SKHY_TOKEN"].lower() in unresolved_tokens:
+              raise SystemExit("resolved SKHY remained in V4 residual set")
+          direct_usdg = [
               row for row in selected
-              if row["anchor_token"].lower()
-              != "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+              if row["anchor_token"].lower() == os.environ["USDG"].lower()
           ]
-          assert not non_usdg, non_usdg
+          direct_weth = [
+              row for row in selected
+              if row["anchor_token"].lower() == os.environ["WETH"].lower()
+          ]
+          if len(direct_usdg) != 25 or direct_weth != [skhy_route]:
+              raise SystemExit(
+                  "canonical V3 ownership must be 25 USDG + SKHY/WETH"
+              )
+
+          write_jsonl_snapshot(
+              selected,
+              output=Path("artifacts/pons-v3-quote-routes.jsonl"),
+              provenance={
+                  "source": "causal_v3_routes_plus_delayed_skhy_weth",
+                  "chain_id": 4663,
+                  "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+                  "route_audit_run_id": int(
+                      "${{ inputs.route_audit_run_id }}"
+                  ),
+                  "delayed_probe_run_id": int(
+                      "${{ inputs.delayed_probe_run_id }}"
+                  ),
+                  "skhy_weth_run_id": int(
+                      "${{ inputs.skhy_weth_run_id }}"
+                  ),
+                  "routes": 26,
+              },
+          )
           report = {
               "audited_assets": len(audit),
               "audited_launches": sum(int(row["launches"]) for row in audit),
+              "base_direct_usdg_assets": 25,
+              "supplemental_weth_assets": 1,
               "selected_assets": len(selected),
               "selected_launches": sum(
                   int(row["launches"]) for row in selected
               ),
+              "skhy_weth_run_id": int(
+                  "${{ inputs.skhy_weth_run_id }}"
+              ),
+              "unresolved_assets": len(unresolved),
               "unresolved": [
                   {
                       "quote_token": row["quote_token"],
