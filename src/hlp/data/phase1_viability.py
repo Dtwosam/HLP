@@ -198,9 +198,17 @@ def project_phase1_acquisition_plan(
     if not plans:
         raise ValueError("Phase 1 acquisition plan cannot be empty")
 
+    summary_rows = [dict(row) for row in run_summaries]
+    summary_ids = [
+        _positive_int(row.get("run_id"), field="run_id")
+        for row in summary_rows
+    ]
+    if len(summary_ids) != len(set(summary_ids)):
+        raise ValueError(
+            "Phase 1 acquisition projection has duplicate run evidence"
+        )
     summaries = {
-        _positive_int(row.get("run_id"), field="run_id"): dict(row)
-        for row in run_summaries
+        run_id: row for run_id, row in zip(summary_ids, summary_rows)
     }
     if not summaries:
         raise ValueError("Phase 1 acquisition projection has no run evidence")
