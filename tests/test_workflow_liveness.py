@@ -657,6 +657,9 @@ def test_representative_explorer_crosscheck_is_manual_public_and_bounded():
     assert "workflow_dispatch:" in trigger_block
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
+    assert "access_reverified" in content
+    assert "known 403" in content
+    assert "if: ${{ inputs.access_reverified == true }}" in content
     assert "phase1-pons-representative-sample" in content
     assert "phase1-pons-representative-market-paths" in content
     assert "phase1-pons-representative-priced-paths" in content
@@ -765,9 +768,9 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "priced_path_run_id" in content
     assert "pons-representative-priced-path-summary.jsonl" in content
     assert "phase1-pons-representative-dex-crosscheck" in content
-    assert "phase1-pons-representative-explorer-crosscheck" in content
-    assert "explorer_crosscheck_run_id" in content
-    assert "pons-representative-explorer-token-summary.jsonl" in content
+    assert "phase1-pons-representative-explorer-crosscheck" not in content
+    assert "explorer_crosscheck_run_id" not in content
+    assert "pons-representative-explorer-token-summary.jsonl" not in content
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
     assert "validate_representative_coverage_report" in content
