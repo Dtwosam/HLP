@@ -157,6 +157,7 @@ NETWORK_SMOKE_WORKFLOWS = {
     "phase1-v1-shared-tape-smoke.yml",
     "phase1-pons-representative-dex-crosscheck.yml",
     "phase1-blockscout-transaction-smoke.yml",
+    "phase1-blockscout-v2-smoke.yml",
 }
 
 
