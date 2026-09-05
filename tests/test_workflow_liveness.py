@@ -1551,6 +1551,11 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "phase1-pons-readiness-audit" in content
     assert "build_phase1_readiness_report" in content
     assert '"path": run.get("path")' in content
+    assert "json_file_at_ref" in content
+    assert "launch_readiness_evidence_run_id" in content
+    assert "launch_ledger_evidence_run_id" in content
+    assert "launch_route_slot" in content
+    assert "launch_ledger_routes" in content
     assert "VIABILITY_ROUTE_WORKFLOW_PATHS" in content
     assert "VIABILITY_ROUTE_WORKFLOWS" not in content
     assert "job_counts(run_id)" in content
