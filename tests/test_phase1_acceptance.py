@@ -35,6 +35,7 @@ def _fixtures():
             "snapshot_head_block": 54_486_035,
             "v1_eligibility_run_id": 101,
             "v2_eligibility_run_id": 202,
+            "source_coverage_sha256": "c" * 64,
         },
     }
     representative_summary = {
@@ -64,6 +65,12 @@ def _fixtures():
         "explorer_verified_transactions": 30,
         "explorer_verified_launch_transactions": 10,
         "explorer_verified_dex_swap_transactions": 20,
+        "coverage_sources": 11,
+        "continuous_sharded_sources": 7,
+        "snapshot_pinned_sources": 4,
+        "coverage_sample_start_block": 1000,
+        "no_unexplained_block_gaps": True,
+        "source_coverage_sha256": "c" * 64,
         "validation_sha256": "representative-sha",
     }
     route_projections = [
@@ -125,6 +132,9 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report[
         "representative_explorer_verified_dex_swap_transactions"
     ] == 20
+    assert report["representative_coverage_sources"] == 11
+    assert report["representative_no_unexplained_block_gaps"] is True
+    assert report["representative_source_coverage_sha256"] == "c" * 64
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
@@ -201,6 +211,22 @@ def test_phase1_acceptance_rejects_explorer_dex_coverage_drift():
     fixtures[2]["explorer_verified_transactions"] = 29
 
     with pytest.raises(ValueError, match="explorer/DEX checkpoint coverage"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_unexplained_source_gap():
+    fixtures = list(_fixtures())
+    fixtures[2]["no_unexplained_block_gaps"] = False
+
+    with pytest.raises(ValueError, match="unexplained source block gaps"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_coverage_sha_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["source_coverage_sha256"] = "d" * 64
+
+    with pytest.raises(ValueError, match="coverage SHA disagrees"):
         build_phase1_acceptance_report(*fixtures)
 
 
