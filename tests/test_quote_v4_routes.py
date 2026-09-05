@@ -267,8 +267,11 @@ def test_extend_v4_known_pool_can_find_first_later_swap(monkeypatch):
         lambda raw: swap,
     )
 
+    calls = []
+
     class Rpc:
         def iter_logs_chunked(self, start, end, **kwargs):
+            calls.append((start, end, kwargs["topics"]))
             if kwargs["topics"][0] == V4_INITIALIZE_TOPIC:
                 return iter(())
             return iter([object()])
@@ -300,11 +303,46 @@ def test_extend_v4_known_pool_can_find_first_later_swap(monkeypatch):
         prior,
         snapshot_head=2000,
         forward_blocks=500,
+        known_pool_only=True,
     )[0]
+    assert len(calls) == 1
+    assert calls[0][2] == [V4_SWAP_TOPIC, POOL_ID]
+    assert row["continuation_mode"] == "known_pool_only"
     assert row["delayed_route_ready"] is True
     assert row["selected_delayed_candidate"]["first_post_use_swap"][
         "block_number"
     ] == 1200
+
+
+def test_extend_v4_known_pool_only_requires_candidate():
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            raise AssertionError("known-pool-only must fail before RPC")
+
+    prior = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "first_launch_block": 1000,
+        "launches": 3,
+        "versions": {"v2": 3},
+        "search_from_block": 900,
+        "search_to_block": 1100,
+        "initialize_events": 0,
+        "v4_candidates": [],
+        "causal_route_ready": False,
+        "delayed_route_ready": False,
+        "selected_causal_candidate": None,
+        "selected_delayed_candidate": None,
+    }]
+    with pytest.raises(ValueError, match="requires an existing V4 candidate"):
+        extend_v4_usdg_routes(
+            Rpc(),
+            prior,
+            snapshot_head=2000,
+            forward_blocks=500,
+            known_pool_only=True,
+        )
 
 
 def test_validate_known_v4_usdg_pool_candidate(monkeypatch):
