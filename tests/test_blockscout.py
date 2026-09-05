@@ -56,6 +56,27 @@ def test_contract_deployment_joins_creation_and_transaction():
     assert row["transaction_hash"] == TX
 
 
+def test_transaction_rejects_wrong_hash():
+    class WrongHashBlockscout(BlockscoutClient):
+        def _get(self, url):
+            return {
+                "hash": "0x" + "ff" * 32,
+                "block": 12345,
+            }
+
+    with pytest.raises(BlockscoutError, match="hash mismatch"):
+        WrongHashBlockscout().transaction(TX)
+
+
+def test_transaction_rejects_unmined_payload():
+    class UnminedBlockscout(BlockscoutClient):
+        def _get(self, url):
+            return {"hash": TX, "block": None}
+
+    with pytest.raises(BlockscoutError, match="no mined block"):
+        UnminedBlockscout().transaction(TX)
+
+
 def test_indexed_logs_build_address_and_topic_query():
     seen = []
 
