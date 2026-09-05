@@ -290,21 +290,56 @@ jobs:
                   ):
                       continue
                   run_id = int(run["id"])
-                  finalizer_runs.append(
-                      {
-                          "id": run_id,
-                          "name": run.get("name"),
-                          "status": run.get("status"),
-                          "conclusion": run.get("conclusion"),
-                          "head_branch": run.get("head_branch"),
-                          "head_sha": run.get("head_sha"),
-                          "artifacts": (
-                              artifact_names(run_id)
-                              if run.get("status") == "completed"
-                              else []
-                          ),
-                      }
-                  )
+                  finalizer_head_sha = str(run.get("head_sha") or "")
+                  finalizer_payload = {
+                      "id": run_id,
+                      "name": run.get("name"),
+                      "path": run.get("path"),
+                      "status": run.get("status"),
+                      "conclusion": run.get("conclusion"),
+                      "head_branch": run.get("head_branch"),
+                      "head_sha": finalizer_head_sha,
+                      "artifacts": (
+                          artifact_names(run_id)
+                          if run.get("status") == "completed"
+                          else []
+                      ),
+                  }
+                  if len(finalizer_head_sha) == 40:
+                      launch_readiness = json_file_at_ref(
+                          ".github/phase1-pons-viability-ready.json",
+                          finalizer_head_sha,
+                      )
+                      launch_ledger = json_file_at_ref(
+                          ".github/phase1-pons-viability-runs.json",
+                          finalizer_head_sha,
+                      )
+                      finalizer_payload.update(
+                          {
+                              "launch_readiness_source_run_id": int(
+                                  launch_readiness.get(
+                                      "source_eligibility_run_id",
+                                      0,
+                                  )
+                              ),
+                              "launch_readiness_evidence_run_id": int(
+                                  launch_readiness.get("evidence_run_id", 0)
+                              ),
+                              "launch_ledger_generation": int(
+                                  launch_ledger.get("generation", 0)
+                              ),
+                              "launch_ledger_evidence_run_id": int(
+                                  launch_ledger.get("evidence_run_id", 0)
+                              ),
+                              "launch_ledger_routes": {
+                                  route: int(value)
+                                  for route, value in dict(
+                                      launch_ledger.get("routes") or {}
+                                  ).items()
+                              },
+                          }
+                      )
+                  finalizer_runs.append(finalizer_payload)
 
           report = build_phase1_readiness_report(
               source_run=source_run,
@@ -373,6 +408,15 @@ jobs:
                   summary.write(
                       "- Evidence handoff errors: "
                       + "; ".join(report["evidence_handoff_errors"])
+                      + "\n"
+                  )
+              if report.get("invalid_finalizers"):
+                  summary.write(
+                      "- Invalid finalizers: "
+                      + ", ".join(
+                          f"{row['run_id']}:{row['reason']}"
+                          for row in report["invalid_finalizers"]
+                      )
                       + "\n"
                   )
               if report.get("invalid_viability_routes"):
