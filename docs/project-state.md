@@ -674,20 +674,27 @@ incomplete; frozen viability still requires its separate bounded route
 measurement run and worst-observed-per-block projection.
 
 The current branch also hardens manual rescue beyond the launch commit's
-single-wave recovery implementation: V1/V3 and V2/V4 gap recovery now split up
-to **480** 100k-block gaps into two **serialized** <=240-job waves, each still
-capped at max-parallel 2. That covers even a total V1/V3 loss (~459 retry
-intervals) without failing the planner solely on GitHub matrix size. Inert
-reusable-workflow probe run **33984733342** skipped cleanly, proving GitHub
-accepts both two-wave call graphs. These later branch changes do not mutate the
-already-running acquisition pinned to commit
+single-wave recovery implementation. After the live shard-15 timeout proved
+dense ~191k-block jobs can hit a 40-minute ceiling, V1/V3 and V2/V4 recovery
+were expanded to **four serialized <=240-job waves** (up to **960** retry
+jobs), each still capped at max-parallel 2, and current/manual callers now use
+**50k-block** retry gaps. That is enough for even a total V1/V3 loss
+(~918 50k retry intervals) while giving roughly 4x less block work per retry
+than the timed-out production shard. Direct manual dispatch also defaults to
+50k. Inert guarded-rescue graph run **33995293956** and terminal recovered
+completion run **33995308083** both skipped cleanly with the new four-wave
+graphs; future full-eligibility graph run **33995361487** also skipped cleanly.
+These later branch changes do not mutate the already-running acquisition pinned to commit
 `c53b3a63156976a5873752c332fa7578011249b0`; they are the fail-safe manual
 rescue path if that run's original automatic recovery cannot close a large
 failure set. A guarded
 `phase1-pons-live-venue-rescue-one-shot` launcher is staged against parent
-run **33982556591** with separate exact launch phrases for V1/V3 and V2/V4;
-its inert creation run **33984797673** skipped cleanly, proving the reusable
-rescue graph compiles without issuing provider requests. A second,
+run **33982556591** with separate exact launch phrases for V1/V3 and V2/V4.
+The launcher now has its own GitHub-metadata preflight and refuses to call any
+recovery RPC while that frozen parent is still active or after it succeeds;
+only a terminal unsuccessful parent can reach the reusable rescue workflows.
+Its inert creation run **33984797673** and terminal-gate validation run
+**33995071926** both skipped cleanly. A second,
 **terminal-only** fallback now closes the downstream gap if the pinned parent
 ultimately cannot finish: `phase1-pons-recovered-completion-chain` accepts a
 complete recovered V1/V3 run plus an optional recovered V2/V4 run. It refuses
@@ -709,7 +716,11 @@ representative work, a retry can reuse those pricing artifacts, repromote the
 eligible universe on current code, and rerun only representative evidence.
 Reused pricing requires an explicit V2/V4 venue run ID and an approved
 source/recovery workflow path, so the retry cannot guess venue provenance.
-Inert resume-graph validation run **33994927060** skipped cleanly. Viability
+Before any representative RPC is allowed, the repromoted eligible-universe
+artifact must also prove that its validated V1/V3 and V2/V4 run IDs exactly
+match the recovery inputs; mismatched pricing/venue provenance fails
+artifact-only. Inert resume-graph validation runs **33994927060** and
+**33995014488** skipped cleanly. Viability
 readiness and finalization accept evidence only from the normal
 post-eligibility wrapper or this recovered-completion wrapper, on
 `phase1/data-acquisition-spike`.
