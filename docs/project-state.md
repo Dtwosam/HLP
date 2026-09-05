@@ -549,8 +549,12 @@ The final Phase 1 viability path is also staged fail-closed:
   Completed route IDs are recorded in
   `.github/phase1-pons-viability-runs.json`; the guarded
   `phase1-pons-viability-ledger-finalize-one-shot` independently verifies the
-  evidence run, all nine successful route workflow identities, branch and
-  distinct run IDs before passing them to the reusable final acceptance chain;
+  evidence run, all nine successful route workflow **file paths**, branch and
+  distinct run IDs before passing them to the reusable final acceptance chain.
+  Workflow paths are used deliberately because GitHub replaces the run
+  `name` field with the custom `run-name` string; inert route run
+  **33988929710** demonstrated that distinction before any acceptance evidence
+  was collected;
 - the frozen heavy-acquisition contract requires exact full-history work-block
   floors for exactly nine routes, totaling **331,011,903 processed
   work-blocks**. The Pons registry floor intentionally counts its overlapping
@@ -661,6 +665,22 @@ single successful caller run ID contains both
 `phase1-pons-eligible-universe` and
 `phase1-pons-representative-validation`. The standalone promotion and
 representative launchers remain recovery/debug fallbacks.
+
+An artifact/GitHub-metadata-only `phase1-pons-readiness-audit` now provides
+one fail-closed state machine across the remaining Phase 1 handoffs:
+eligibility acquisition -> post-eligibility evidence -> nine viability routes
+-> final acceptance -> PASS. It validates frozen run IDs, required artifact
+sets, exact viability workflow file paths, distinct route-run IDs and the
+presence of the actual `phase1-pons-acceptance-gate` artifact before it can
+report Phase 1 complete. It also reads the source run's job matrix so GitHub's
+top-level reusable-workflow `queued` state cannot be mistaken for a failure.
+Real audit run **33989828191** completed successfully and classified the live
+parent as `eligibility_acquisition` with next action
+`wait_for_full_eligibility_acquisition`, **0 failed jobs**, 2 in-progress
+jobs and no premature evidence/viability readiness claim. The audit's
+finalizer lookup is intentionally bounded and skipped until an evidence run
+and all nine route IDs exist, avoiding branch histories with >1,000 workflow
+runs.
 
 The egress projection additionally needs instrumented measured runs;
 older completed runs cannot retroactively provide response-byte counters. No
