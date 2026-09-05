@@ -644,13 +644,21 @@ provider requests. A stronger artifact/log-only checkpoint,
 **1,337,711 processed blocks**, **12,360 RPC requests**,
 **3,066,837,229 response bytes (2.8562 GiB)**, **9,969,790 artifact bytes**
 and **10,436.062 seconds** of reported acquisition time, all through
-`solidrpc_keyless_public`. A simple same-density operational extrapolation from
-that larger sample is about **423.8k requests**, **97.9 GiB response egress**,
-**0.318 GiB compressed artifact storage** and **49.7 hours of two-way-parallel
-wall time** for the complete V1/V3 route. These checkpoints are explicitly
-non-acceptance evidence because the parent acquisition is still incomplete;
-frozen viability still requires its separate bounded route measurement run and
-worst-observed-per-block projection.
+`solidrpc_keyless_public`. Artifact/log-only checkpoint **33994294187** then
+captured **17 successful shards** after the first timeout:
+**3,248,726 processed blocks**, **29,793 RPC requests**,
+**7,086,383,939 response bytes (6.5997 GiB)**, **211,108,881 artifact bytes
+(0.1966 GiB)**, **24,297.851 reported acquisition seconds** and **27,142 GitHub
+job-runtime seconds**, still entirely through `solidrpc_keyless_public`.
+Using the aggregate 17-shard density only as an operational forecast, full
+V1/V3 is about **420.6k requests**, **93.17 GiB response egress**, **2.78 GiB
+artifact storage**, **95.29 serialized acquisition hours**, or roughly
+**47.64 hours wall time** at max-parallel 2. The artifact-density increase
+versus the 7-shard checkpoint reflects the much denser later shards and is why
+the larger sample supersedes the earlier storage forecast. These checkpoints
+are explicitly non-acceptance evidence because the parent acquisition is still
+incomplete; frozen viability still requires its separate bounded route
+measurement run and worst-observed-per-block projection.
 
 The current branch also hardens manual rescue beyond the launch commit's
 single-wave recovery implementation: V1/V3 and V2/V4 gap recovery now split up
