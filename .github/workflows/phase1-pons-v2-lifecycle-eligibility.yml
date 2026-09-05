@@ -122,6 +122,146 @@ jobs:
           path: fallback
           run-id: ${{ inputs.fallback_run_id }}
           github-token: ${{ github.token }}
+      - name: Validate frozen V2 lifecycle input manifests
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          CHAIN_ID = 4663
+
+          specs = [
+              (
+                  Path(
+                      "registry/pons-v2-full-registry.jsonl.manifest.json"
+                  ),
+                  225_951,
+                  "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f",
+              ),
+              (
+                  Path(
+                      "curve/pons-v2-curve-full.jsonl.manifest.json"
+                  ),
+                  9_231_724,
+                  "771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b",
+              ),
+              (
+                  Path(
+                      "transition/pons-v2-graduations-full.jsonl.manifest.json"
+                  ),
+                  3_638,
+                  "492aa1bfd325050395727255b5de93c88935cf8e40bd580256ce69f9b3427f5e",
+              ),
+              (
+                  Path(
+                      "transition/pons-v2-registrations-full.jsonl.manifest.json"
+                  ),
+                  3_638,
+                  "8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93",
+              ),
+              (
+                  Path("v4/pons-v2-v4-full.jsonl.manifest.json"),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "fallback/pons-quote-fallback-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "fallback/pons-quote-fallback-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+          ]
+
+          validated = []
+          for path, expected_records, expected_sha in specs:
+              if not path.exists():
+                  raise SystemExit(
+                      f"required lifecycle manifest is missing: {path}"
+                  )
+              manifest = json.loads(path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"lifecycle manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"lifecycle manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if (
+                  expected_records is not None
+                  and int(manifest["records"]) != expected_records
+              ):
+                  raise SystemExit(
+                      f"frozen lifecycle record count changed: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              if (
+                  expected_sha is not None
+                  and manifest["sha256"] != expected_sha
+              ):
+                  raise SystemExit(
+                      f"frozen lifecycle SHA changed: {path} "
+                      f"expected={expected_sha} "
+                      f"actual={manifest['sha256']}"
+                  )
+              validated.append({
+                  "manifest": str(path),
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+                  "snapshot_head_block": HEAD,
+              })
+
+          report = {
+              "chain_id": CHAIN_ID,
+              "snapshot_head_block": HEAD,
+              "validated_manifests": validated,
+              "validated_manifest_count": len(validated),
+          }
+          Path(
+              "artifacts/pons-v2-input-manifest-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
       - name: Audit V2 quote source ownership before replay
         run: |
           mkdir -p artifacts
