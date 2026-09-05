@@ -476,8 +476,14 @@ The final Phase 1 viability path is also staged fail-closed:
 
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
-eligibility artifacts, which in turn remain blocked on the unfinished pricing
-inputs. Both lifecycle jobs stream the immutable full-history tapes rather than
+eligibility artifacts. Actions history contains no completed
+`phase1-pons-v1-v3-full` or `phase1-pons-v2-v4-full` run yet, so those two
+full venue tapes remain upstream acquisition blockers alongside the unfinished
+pricing inputs. A manual-only
+`phase1-pons-full-eligibility-acquisition-chain` now serializes V1 V3 first,
+V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain;
+it should be launched only after any existing archive-heavy acquisition clears.
+ Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
 30-minute cap. The egress projection additionally needs instrumented measured runs;

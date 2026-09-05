@@ -639,6 +639,24 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
+def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
+    content = _workflow(
+        "phase1-pons-full-eligibility-acquisition-chain.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-v1-v3-full.yml" in content
+    assert "phase1-pons-v2-v4-full.yml" in content
+    assert "needs: v1_v3" in content
+    assert "needs.v1_v3.result == 'success'" in content
+    assert "phase1-pons-pricing-eligibility-chain.yml" in content
+    assert "needs: v2_v4" in content
+    assert content.count("format('{0}', github.run_id)") == 2
+    assert "cancel-in-progress: false" in content
+
+
 def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
     content = _workflow("phase1-pons-pricing-eligibility-chain.yml")
     trigger_block = content.split("\npermissions:", 1)[0]

@@ -1,0 +1,128 @@
+name: phase1-pons-full-eligibility-acquisition-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      oracle_run_id:
+        description: "Successful canonical phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+      source_registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      anchor_run_id:
+        description: "Canonical recovered WETH/USDG anchor run"
+        required: true
+        default: "33972109927"
+        type: string
+      route_audit_run_id:
+        description: "Frozen unpriced V3 route-audit run"
+        required: true
+        default: "33921477647"
+        type: string
+      delayed_probe_run_id:
+        description: "Frozen delayed direct-USDG V3 probe run"
+        required: true
+        default: "33923160281"
+        type: string
+      residual_v4_probe_run_id:
+        description: "Frozen cumulative residual V4 probe run"
+        required: true
+        default: "33926428274"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      v2_registry_run_id:
+        description: "Frozen Pons V2 registry run"
+        required: true
+        default: "33912235341"
+        type: string
+      curve_run_id:
+        description: "Canonical recovered Pons V2 curve run"
+        required: true
+        default: "33936232604"
+        type: string
+  workflow_call:
+    inputs:
+      oracle_run_id:
+        required: true
+        type: string
+      source_registry_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      route_audit_run_id:
+        required: true
+        type: string
+      delayed_probe_run_id:
+        required: true
+        type: string
+      residual_v4_probe_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      v2_registry_run_id:
+        required: true
+        type: string
+      curve_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-full-eligibility-acquisition-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  v1_v3:
+    uses: ./.github/workflows/phase1-pons-v1-v3-full.yml
+    with:
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+    secrets: inherit
+
+  v2_v4:
+    needs: v1_v3
+    if: ${{ needs.v1_v3.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  pricing_eligibility:
+    needs: v2_v4
+    if: ${{ needs.v2_v4.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
+    with:
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      v1_v3_run_id: ${{ format('{0}', github.run_id) }}
+      v2_v4_run_id: ${{ format('{0}', github.run_id) }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      delayed_probe_run_id: ${{ inputs.delayed_probe_run_id }}
+      residual_v4_probe_run_id: ${{ inputs.residual_v4_probe_run_id }}
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      v2_registry_run_id: ${{ inputs.v2_registry_run_id }}
+      curve_run_id: ${{ inputs.curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
