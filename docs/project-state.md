@@ -197,9 +197,19 @@ successful partial-run manifest, derives the exact uncovered block intervals,
 and creates only bounded retry jobs. A live recovery measurement on 2026-09-05
 showed that 200k-block V2 tail jobs at the first two missing ranges both reached
 the 20-minute job cap, so V2 curve gaps are now capped at **50k blocks**. Anchor
-gaps remain capped at 150k blocks until that path is measured separately. The
-final merge proves strict block continuity against the preserved prefix before
-publishing the canonical full tape.
+gaps remain capped at 150k blocks until that path is measured separately.
+
+The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
+scanning: after shrinking a rejected window, the iterator immediately doubled
+again after one success, which can oscillate on dense log ranges. It now waits
+for eight consecutive successful windows before probing larger. The first two
+optimized 50k jobs completed with **466** and **474** RPC requests; the
+neighboring pre-change 50k success needed **804**. This is request-efficiency
+evidence, not a direct wall-clock benchmark, because event density and provider
+latency differ by range.
+
+The final merge proves strict block continuity against the preserved prefix
+before publishing the canonical full tape.
 Successful historical shards are never re-fetched just because a later dense
 range timed out.
 
