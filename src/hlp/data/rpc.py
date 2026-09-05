@@ -42,6 +42,7 @@ class RpcClient:
     min_interval_seconds: float = 0.0
     extra_headers: dict[str, str] | None = None
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
+    route_label: str = "unclassified"
     requests_made: int = field(default=0, init=False)
     response_bytes_received: int = field(default=0, init=False)
     _last_request_at: float | None = field(default=None, init=False, repr=False)
