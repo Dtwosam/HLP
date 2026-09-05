@@ -106,6 +106,29 @@ snapshot-head closure. The immutable recovered artifact is
 Measured V2 registry storage remains small relative to lifecycle tapes. Raw V3,
 V4 and anchor price events are expected to dominate Phase 1 storage.
 
+The canonical full V2 bonding-curve tape is now complete through the same frozen
+snapshot head in recovery run **33936232604**. The manifest-gap merge closed
+every block interval exactly and published `phase1-pons-v2-curve-full` with:
+
+- **9,231,724** total curve events;
+- **4,949,167** buys;
+- **4,277,267** sells;
+- **5,290** buybacks;
+- **182,738** curves with observed activity out of 225,951 registry curves;
+- **112** source files merged with strict event ordering and block continuity;
+- tape SHA-256:
+  `771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b`.
+
+The full V2 transition control tape had already completed successfully in run
+**33912452330** at the same snapshot head. It contains **3,638** graduations
+and **3,638** registrations for the same 3,638 tokens, with zero graduated
+tokens lacking a registration and zero registered tokens lacking a graduation.
+The frozen transition SHA-256 values are
+`492aa1bfd325050395727255b5de93c88935cf8e40bd580256ce69f9b3427f5e`
+for graduations and
+`8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`
+for registrations.
+
 ### Lifecycle boundary completeness
 
 - [x] V1 Uniswap V3 Initialize is retained as a price point rather than starting at first swap
@@ -211,9 +234,11 @@ measured.
 
 The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed
-in **1,514.118 seconds** with **1,070** RPC requests. The anchor gap workflow
-keeps the more conservative **150k-block** retry cap for its first manifest-gap
-recovery pass; the stabilized adaptive log scanner is shared by this path too.
+in **1,514.118 seconds** with **1,070** RPC requests. Manifest-gap recovery run
+**33957294304** is now reusing that shard and plans **34** exact missing jobs
+covering **5,016,417** blocks from 49,469,619 through 54,486,035. The anchor gap
+workflow keeps the conservative **150k-block** retry cap; the stabilized
+adaptive log scanner is shared by this path too.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
