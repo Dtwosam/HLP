@@ -421,7 +421,9 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
     assert content.count("max-parallel: 2") == 4
-    assert content.count("timeout-minutes: 30") >= 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
     for index in range(1, 5):
         assert (
             "matrix_"
@@ -597,7 +599,9 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
     assert "Pons V1 pools missing V3 Initialize" in content
     assert content.count("max-parallel: 2") == 4
-    assert content.count("timeout-minutes: 30") >= 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
     for index in range(1, 5):
         assert (
             "matrix_"
