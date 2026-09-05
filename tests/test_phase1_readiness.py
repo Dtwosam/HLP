@@ -659,3 +659,29 @@ def test_readiness_rejects_finalizer_from_stale_route_ledger():
         {"run_id": 5000, "reason": "ledger_routes_mismatch"}
     ]
 
+def test_readiness_accepts_recovered_evidence_after_incomplete_source_success():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-lifecycle-eligibility"
+    ]
+    evidence = _evidence()
+    evidence["path"] = (
+        ".github/workflows/"
+        "phase1-pons-recovered-completion-one-shot.yml"
+    )
+
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="success",
+            artifacts=artifacts,
+        ),
+        evidence_run=evidence,
+        evidence_run_id=400,
+        evidence_handoff=_handoff(400, recovered=True),
+    )
+
+    assert report["stage"] == "viability_measurements"
+    assert report["next_action"] == "arm_viability_run_ledger"
+
