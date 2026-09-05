@@ -428,7 +428,9 @@ def test_extend_v4_quote_route_probe_parses():
         "--probe", "prior.jsonl",
         "--snapshot-head", "2000",
         "--forward-blocks", "500000",
+        "--known-pool-only",
         "--out", "next.jsonl",
     ])
     assert args.forward_blocks == 500000
+    assert args.known_pool_only is True
     assert args.probe == "prior.jsonl"
