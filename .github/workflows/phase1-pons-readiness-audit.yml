@@ -148,41 +148,37 @@ jobs:
           }
 
           finalizer_runs = []
-          page = 1
-          while True:
+          if (
+              evidence_run_id > 0
+              and ledger_generation > 0
+              and all(value > 0 for value in route_run_ids.values())
+          ):
               payload = get(
                   f"/repos/{repo}/actions/runs"
                   f"?branch={urllib.parse.quote(branch)}"
-                  f"&per_page=100&page={page}"
+                  "&per_page=100&page=1"
               )
-              runs = list(payload.get("workflow_runs") or [])
-              for run in runs:
+              for run in list(payload.get("workflow_runs") or []):
                   if (
                       run.get("name")
-                      == "phase1-pons-viability-ledger-finalize-one-shot"
+                      != "phase1-pons-viability-ledger-finalize-one-shot"
                   ):
-                      run_id = int(run["id"])
-                      finalizer_runs.append(
-                          {
-                              "id": run_id,
-                              "name": run.get("name"),
-                              "status": run.get("status"),
-                              "conclusion": run.get("conclusion"),
-                              "head_branch": run.get("head_branch"),
-                              "head_sha": run.get("head_sha"),
-                              "artifacts": (
-                                  artifact_names(run_id)
-                                  if run.get("status") == "completed"
-                                  else []
-                              ),
-                          }
-                      )
-              if len(runs) < 100:
-                  break
-              page += 1
-              if page > 10:
-                  raise SystemExit(
-                      "finalizer run pagination exceeded 1000 branch runs"
+                      continue
+                  run_id = int(run["id"])
+                  finalizer_runs.append(
+                      {
+                          "id": run_id,
+                          "name": run.get("name"),
+                          "status": run.get("status"),
+                          "conclusion": run.get("conclusion"),
+                          "head_branch": run.get("head_branch"),
+                          "head_sha": run.get("head_sha"),
+                          "artifacts": (
+                              artifact_names(run_id)
+                              if run.get("status") == "completed"
+                              else []
+                          ),
+                      }
                   )
 
           report = build_phase1_readiness_report(
