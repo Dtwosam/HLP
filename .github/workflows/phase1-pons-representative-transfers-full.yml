@@ -15,7 +15,7 @@ on:
       max_blocks:
         description: "Maximum blocks per transfer shard"
         required: true
-        default: "200000"
+        default: "100000"
         type: string
   workflow_call:
     inputs:
@@ -28,7 +28,7 @@ on:
         type: string
       max_blocks:
         required: false
-        default: "200000"
+        default: "100000"
         type: string
 
 permissions:
@@ -45,10 +45,17 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
+      matrix_1: ${{ steps.plan.outputs.matrix_1 }}
+      matrix_2: ${{ steps.plan.outputs.matrix_2 }}
+      matrix_3: ${{ steps.plan.outputs.matrix_3 }}
+      matrix_4: ${{ steps.plan.outputs.matrix_4 }}
       gap_count: ${{ steps.plan.outputs.gap_count }}
+      gap_count_1: ${{ steps.plan.outputs.gap_count_1 }}
+      gap_count_2: ${{ steps.plan.outputs.gap_count_2 }}
+      gap_count_3: ${{ steps.plan.outputs.gap_count_3 }}
+      gap_count_4: ${{ steps.plan.outputs.gap_count_4 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -144,10 +151,10 @@ jobs:
               covered,
               max_blocks=max_blocks,
           )
-          if len(gaps) > 240:
+          if len(gaps) > 960:
               raise SystemExit(
-                  "representative transfer plan exceeds 240 matrix jobs; "
-                  "increase max_blocks within the 200000 ceiling"
+                  "representative transfer plan exceeds four serialized "
+                  "240-job waves"
               )
           include = [
               {
@@ -157,6 +164,11 @@ jobs:
               }
               for index, (lo, hi) in enumerate(gaps)
           ]
+          wave_1 = include[:240]
+          wave_2 = include[240:480]
+          wave_3 = include[480:720]
+          wave_4 = include[720:]
+
           report = {
               "sample_run_id": int("${{ inputs.sample_run_id }}"),
               "prior_run_id": (
@@ -171,6 +183,12 @@ jobs:
               "reused_sources": sources,
               "gap_jobs": include,
               "gap_job_count": len(include),
+              "gap_wave_job_counts": [
+                  len(wave_1),
+                  len(wave_2),
+                  len(wave_3),
+                  len(wave_4),
+              ],
               "gap_blocks": sum(
                   row["to_block"] - row["from_block"] + 1
                   for row in include
@@ -182,11 +200,21 @@ jobs:
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
-              handle.write(
-                  "matrix="
-                  + json.dumps({"include": include}, separators=(",", ":"))
-                  + "\n"
-              )
+              for index, wave in enumerate(
+                  (wave_1, wave_2, wave_3, wave_4),
+                  start=1,
+              ):
+                  handle.write(
+                      f"matrix_{index}="
+                      + json.dumps(
+                          {"include": wave},
+                          separators=(",", ":"),
+                      )
+                      + "\n"
+                  )
+                  handle.write(
+                      f"gap_count_{index}={len(wave)}\n"
+                  )
               handle.write(f"gap_count={len(include)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
@@ -196,15 +224,147 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
-  acquire:
+  acquire_1:
     needs: plan
-    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    if: ${{ needs.plan.outputs.gap_count_1 != '0' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 2
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact representative transfer interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          RANGE_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-transfer-tape \
+            --tokens sample/pons-representative-sample.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  acquire_2:
+    needs: [plan, acquire_1]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_1.result == 'success' || needs.acquire_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact representative transfer interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          RANGE_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-transfer-tape \
+            --tokens sample/pons-representative-sample.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  acquire_3:
+    needs: [plan, acquire_2]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_2.result == 'success' || needs.acquire_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_3) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact representative transfer interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          RANGE_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-transfer-tape \
+            --tokens sample/pons-representative-sample.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  acquire_4:
+    needs: [plan, acquire_3]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_3.result == 'success' || needs.acquire_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_4) }}
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
@@ -241,10 +401,10 @@ jobs:
           if-no-files-found: error
 
   merge:
-    needs: [plan, acquire]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire.result == 'success' || needs.acquire.result == 'skipped') }}
+    needs: [plan, acquire_1, acquire_2, acquire_3, acquire_4]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_1.result == 'success' || needs.acquire_1.result == 'skipped') && (needs.acquire_2.result == 'success' || needs.acquire_2.result == 'skipped') && (needs.acquire_3.result == 'success' || needs.acquire_3.result == 'skipped') && (needs.acquire_4.result == 'success' || needs.acquire_4.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
