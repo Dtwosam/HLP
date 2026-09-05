@@ -43,15 +43,47 @@ def write_virtual_jsonl_manifest(
     return manifest
 
 
-def _find_unique(root: Path, name: str) -> Path:
-    direct = root / name
-    if direct.exists():
-        return direct
-    matches = list(root.rglob(name))
-    if len(matches) != 1:
+def _find_shard(
+    root: Path,
+    shard: dict,
+) -> tuple[Path, dict]:
+    """Resolve a shard by manifest identity, not filename alone.
+
+    Gap-recovery generations intentionally reuse compact names such as
+    events-gap-000.jsonl. Consumers may therefore download different shards
+    with the same basename into separate source-run directories.
+    """
+    name = str(shard["file"])
+    lo = int(shard["from_block"])
+    hi = int(shard["to_block"])
+    expected_sha = str(shard["sha256"])
+    expected_records = int(shard["records"])
+
+    candidates = sorted(path for path in root.rglob(name) if path.is_file())
+    if not candidates:
         raise ValueError(
-            f"expected exactly one sharded tape file {name!r} under {root}, "
-            f"got {len(matches)}"
+            f"sharded tape file {name!r} is missing under {root}"
+        )
+
+    matches: list[tuple[Path, dict]] = []
+    for path in candidates:
+        sidecar = path.with_suffix(path.suffix + ".manifest.json")
+        if not sidecar.exists():
+            continue
+        manifest = json.loads(sidecar.read_text())
+        shard_prov = manifest.get("provenance") or {}
+        if (
+            manifest.get("sha256") == expected_sha
+            and int(manifest.get("records", -1)) == expected_records
+            and int(shard_prov.get("from_block", -1)) == lo
+            and int(shard_prov.get("to_block", -1)) == hi
+        ):
+            matches.append((path, manifest))
+
+    if not matches:
+        raise ValueError(
+            f"sharded tape manifest identity changed: {name}; "
+            f"checked {len(candidates)} candidate file(s)"
         )
     return matches[0]
 
@@ -83,17 +115,7 @@ def iter_sharded_jsonl(
             )
         previous_hi = hi
 
-        path = _find_unique(root, name)
-        sidecar = _find_unique(root, name + ".manifest.json")
-        manifest = json.loads(sidecar.read_text())
-        shard_prov = manifest.get("provenance") or {}
-        if (
-            manifest.get("sha256") != shard["sha256"]
-            or int(manifest.get("records", -1)) != int(shard["records"])
-            or int(shard_prov.get("from_block", -1)) != lo
-            or int(shard_prov.get("to_block", -1)) != hi
-        ):
-            raise ValueError(f"sharded tape manifest identity changed: {name}")
+        path, manifest = _find_shard(root, shard)
 
         local_records = 0
         local_digest = hashlib.sha256()
