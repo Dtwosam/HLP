@@ -539,6 +539,7 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert "V1 quote coverage is not complete" in content
     assert "Validate frozen V1 lifecycle input manifests" in content
     assert "required V1 lifecycle manifest is missing" in content
+    assert "timeout-minutes: 60" in content
     assert "V1 lifecycle manifest snapshot mismatch" in content
     assert "frozen V1 lifecycle SHA changed" in content
     assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
@@ -582,6 +583,7 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "cannot replay V2 lifecycle with uncovered quote assets" in content
     assert "Validate frozen V2 lifecycle input manifests" in content
     assert "required lifecycle manifest is missing" in content
+    assert "timeout-minutes: 60" in content
     assert "lifecycle manifest snapshot mismatch" in content
     assert "frozen lifecycle SHA changed" in content
     assert "validated_manifest_count" in content
