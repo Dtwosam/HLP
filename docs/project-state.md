@@ -279,11 +279,18 @@ covering **5,016,417** blocks from 49,469,619 through 54,486,035.
 The first two measured **150k-block** anchor gaps completed inside the
 20-minute recovery bound: gap 000 produced **168,023** events in **1,103.111
 seconds** with **1,415** RPC requests, while gap 001 produced **163,019** events
-in **1,093.740 seconds** with **1,418** requests. Later gap 018 demonstrated
-that 150k is not uniformly safe: it ran from 11:49:04 to 12:09:09 UTC and was
-cancelled before upload. The lower 50k recovery ceiling is therefore the
-fail-safe default for future anchor gaps. The stabilized adaptive log scanner
-is shared by this path too.
+in **1,093.740 seconds** with **1,418** requests. Later gaps **018**
+(52,169,619-52,319,618) and **025** (53,219,619-53,369,618) both timed out
+before artifact upload, proving that 150k is not uniformly safe. The lower 50k
+recovery ceiling is therefore the fail-safe default for future anchor gaps.
+
+A manual-only cancelled-gap repair wrapper is prepared but intentionally
+**not triggered while run 33957294304 is still active**. It repairs gap 018
+first and gap 025 only after 018 succeeds, using the reusable four-way exact
+range helper with distinct artifact suffixes. Each 150k hole is split into four
+~37.5k subshards with internal max-parallel 2, so the repair stays below the
+50k per-worker bound and cannot collide artifact names. The stabilized adaptive
+log scanner is shared by this path too.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
