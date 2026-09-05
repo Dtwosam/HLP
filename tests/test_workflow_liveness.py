@@ -783,14 +783,18 @@ def test_skhy_v3_weth_segmented_is_manual_sequential_and_early_stopping():
     assert "\n  push:" not in trigger_block
     assert content.count(
         "phase1-pons-skhy-v3-weth-continuation.yml"
-    ) == 5
-    assert content.count('forward_blocks: "500000"') == 5
-    assert "needs.segment_0.outputs.continue_needed == 'true'" in content
-    assert "needs.segment_1.outputs.continue_needed == 'true'" in content
-    assert "needs.segment_2.outputs.continue_needed == 'true'" in content
-    assert "needs.segment_3.outputs.continue_needed == 'true'" in content
-    assert "needs.segment_0.outputs.next_from_block" in content
-    assert "needs.segment_3.outputs.next_from_block" in content
+    ) == 9
+    assert content.count('forward_blocks: "250000"') == 9
+    for index in range(8):
+        assert (
+            f"needs.segment_{index}.outputs.continue_needed == 'true'"
+            in content
+        )
+        assert (
+            f"needs.segment_{index}.outputs.next_from_block"
+            in content
+        )
+    assert '"max_blocks_per_segment": 250000' in content
     assert "if: ${{ always() }}" in content
     assert "searched_to_snapshot_head" in content
     assert "route_resolved" in content

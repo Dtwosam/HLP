@@ -198,10 +198,12 @@ end.
 A second, still-unexecuted resolution path is now staged from the frozen V3
 audit: SKHY has one exact Uniswap V3 **SKHY/WETH** candidate,
 `0x13f78b235d19141f572986afcaab66ce7744b4ef`, fee **3000**. The bounded
-continuation scans only that pool for its first positive-liquidity swap, in
-sequential <=500k-block segments. If it resolves, USD conversion is deferred
-until replay and composes each SKHY/WETH swap with the event-ordered canonical
-WETH/USDG anchor, avoiding end-of-block lookahead.
+continuation scans only that pool for its first positive-liquidity swap. The
+reusable primitive still rejects requests above **500k blocks**, but after the
+measured keyless DELL timeout the canonical segmented wrapper now uses **nine
+sequential <=250k-block segments** with early stopping. If it resolves, USD
+conversion is deferred until replay and composes each SKHY/WETH swap with the
+event-ordered canonical WETH/USDG anchor, avoiding end-of-block lookahead.
 
 A resolved SKHY/WETH route is folded directly into the canonical V3 fallback
 route set: **25 direct-USDG routes + 1 delayed SKHY/WETH route = 26 V3-owned

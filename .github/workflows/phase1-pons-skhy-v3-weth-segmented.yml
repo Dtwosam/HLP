@@ -46,7 +46,7 @@ jobs:
       route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
       route_audit_filename: ${{ inputs.route_audit_filename }}
       from_block: ""
-      forward_blocks: "500000"
+      forward_blocks: "250000"
       output_artifact_name: phase1-pons-skhy-v3-weth-segment-0
     secrets: inherit
 
@@ -59,7 +59,7 @@ jobs:
       route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
       route_audit_filename: ${{ inputs.route_audit_filename }}
       from_block: ${{ needs.segment_0.outputs.next_from_block }}
-      forward_blocks: "500000"
+      forward_blocks: "250000"
       output_artifact_name: phase1-pons-skhy-v3-weth-segment-1
     secrets: inherit
 
@@ -72,7 +72,7 @@ jobs:
       route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
       route_audit_filename: ${{ inputs.route_audit_filename }}
       from_block: ${{ needs.segment_1.outputs.next_from_block }}
-      forward_blocks: "500000"
+      forward_blocks: "250000"
       output_artifact_name: phase1-pons-skhy-v3-weth-segment-2
     secrets: inherit
 
@@ -85,7 +85,7 @@ jobs:
       route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
       route_audit_filename: ${{ inputs.route_audit_filename }}
       from_block: ${{ needs.segment_2.outputs.next_from_block }}
-      forward_blocks: "500000"
+      forward_blocks: "250000"
       output_artifact_name: phase1-pons-skhy-v3-weth-segment-3
     secrets: inherit
 
@@ -98,8 +98,60 @@ jobs:
       route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
       route_audit_filename: ${{ inputs.route_audit_filename }}
       from_block: ${{ needs.segment_3.outputs.next_from_block }}
-      forward_blocks: "500000"
+      forward_blocks: "250000"
       output_artifact_name: phase1-pons-skhy-v3-weth-segment-4
+    secrets: inherit
+
+  segment_5:
+    needs: segment_4
+    if: ${{ needs.segment_4.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_4.outputs.next_from_block }}
+      forward_blocks: "250000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-5
+    secrets: inherit
+
+  segment_6:
+    needs: segment_5
+    if: ${{ needs.segment_5.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_5.outputs.next_from_block }}
+      forward_blocks: "250000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-6
+    secrets: inherit
+
+  segment_7:
+    needs: segment_6
+    if: ${{ needs.segment_6.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_6.outputs.next_from_block }}
+      forward_blocks: "250000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-7
+    secrets: inherit
+
+  segment_8:
+    needs: segment_7
+    if: ${{ needs.segment_7.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_7.outputs.next_from_block }}
+      forward_blocks: "250000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-8
     secrets: inherit
 
   finalize:
@@ -109,6 +161,10 @@ jobs:
       - segment_2
       - segment_3
       - segment_4
+      - segment_5
+      - segment_6
+      - segment_7
+      - segment_8
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -189,7 +245,7 @@ jobs:
               "snapshot_head_block": head,
               "remaining_unsearched_blocks": remaining,
               "continuation_segments_completed": latest_index + 1,
-              "max_blocks_per_segment": 500000,
+              "max_blocks_per_segment": 250000,
               "source_route_audit_run_id": int(
                   "${{ inputs.route_audit_run_id }}"
               ),
