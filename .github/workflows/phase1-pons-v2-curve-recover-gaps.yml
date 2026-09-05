@@ -331,6 +331,7 @@ jobs:
               previous_hi = hi
               expected_records += int(manifest["records"])
               manifests.append({
+                  "source": path.parent.name,
                   "file": path.name,
                   "sha256": manifest["sha256"],
                   "records": int(manifest["records"]),
