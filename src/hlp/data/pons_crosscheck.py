@@ -68,6 +68,8 @@ def build_representative_pool_targets(
                     "token": token,
                     "pons_version": "v1",
                     "quote_token": quote_token,
+                    "supply_raw": int(launch["supply_raw"]),
+                    "token_decimals": int(launch["token_decimals"]),
                     "pool_kind": "uniswap_v3",
                     "pool_identifier": str(pool).lower(),
                     "crosscheck_scope": "canonical_dex_pool",
@@ -86,6 +88,8 @@ def build_representative_pool_targets(
                     "token": token,
                     "pons_version": "v2",
                     "quote_token": quote_token,
+                    "supply_raw": int(launch["supply_raw"]),
+                    "token_decimals": int(launch["token_decimals"]),
                     "pool_kind": None,
                     "pool_identifier": None,
                     "crosscheck_scope": "no_registered_v4_pool",
@@ -101,6 +105,8 @@ def build_representative_pool_targets(
                 "token": token,
                 "pons_version": "v2",
                 "quote_token": quote_token,
+                "supply_raw": int(launch["supply_raw"]),
+                "token_decimals": int(launch["token_decimals"]),
                 "pool_kind": "uniswap_v4",
                 "pool_identifier": registration["pool_id"].lower(),
                 "crosscheck_scope": "canonical_dex_pool",
@@ -108,6 +114,89 @@ def build_representative_pool_targets(
         )
 
     return output
+
+
+
+def build_canonical_dex_price_checkpoint(
+    target: dict,
+    lifecycle_row: dict,
+) -> dict:
+    """Derive one canonical trade-price checkpoint for independent DEX checks."""
+    token = str(target["token"]).lower()
+    observed_token = str(lifecycle_row["token"]).lower()
+    if observed_token != token:
+        raise ValueError(
+            f"lifecycle token mismatch for DEX price checkpoint: "
+            f"{observed_token} != {token}"
+        )
+
+    pool_identifier = target.get("pool_identifier")
+    if pool_identifier is None:
+        return {
+            "price_crosscheck_scope": "not_applicable",
+            "canonical_price_phase": None,
+            "canonical_block_number": None,
+            "canonical_market_cap_proxy_usd": None,
+            "canonical_price_usd": None,
+        }
+
+    version = str(target["pons_version"])
+    if version == "v1":
+        market_cap = lifecycle_row.get(
+            "v3_swap_max_market_cap_proxy_usd"
+        )
+        block_number = lifecycle_row.get("v3_swap_max_market_cap_block")
+        phase = "v3_swap"
+    elif version == "v2":
+        market_cap = lifecycle_row.get(
+            "v4_swap_max_market_cap_proxy_usd"
+        )
+        block_number = lifecycle_row.get("v4_swap_max_market_cap_block")
+        phase = "v4_swap"
+    else:
+        raise ValueError(
+            f"unsupported Pons version for DEX price checkpoint: {version}"
+        )
+
+    if market_cap is None or block_number is None:
+        if market_cap is not None or block_number is not None:
+            raise ValueError(
+                f"incomplete canonical DEX swap checkpoint for {token}"
+            )
+        return {
+            "price_crosscheck_scope": "no_swap_checkpoint",
+            "canonical_price_phase": phase,
+            "canonical_block_number": None,
+            "canonical_market_cap_proxy_usd": None,
+            "canonical_price_usd": None,
+        }
+
+    supply_raw = int(target["supply_raw"])
+    token_decimals = int(target["token_decimals"])
+    if supply_raw <= 0:
+        raise ValueError(f"non-positive representative supply for {token}")
+    if token_decimals < 0:
+        raise ValueError(f"negative representative decimals for {token}")
+
+    supply = Decimal(supply_raw) / (Decimal(10) ** token_decimals)
+    market_cap_value = Decimal(str(market_cap))
+    if market_cap_value <= 0:
+        raise ValueError(
+            f"non-positive canonical DEX market cap checkpoint for {token}"
+        )
+    price = market_cap_value / supply
+    if price <= 0:
+        raise ValueError(
+            f"non-positive canonical DEX price checkpoint for {token}"
+        )
+
+    return {
+        "price_crosscheck_scope": "canonical_dex_swap",
+        "canonical_price_phase": phase,
+        "canonical_block_number": int(block_number),
+        "canonical_market_cap_proxy_usd": str(market_cap_value),
+        "canonical_price_usd": str(price),
+    }
 
 
 def reconcile_external_pool(target: dict, external_pool: dict) -> dict:
