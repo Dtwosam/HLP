@@ -296,6 +296,13 @@ def build_phase1_acceptance_report(
     route_projections = list(viability.get("route_projections") or [])
     if len(route_projections) != len(required_routes):
         raise ValueError("viability projection route detail coverage changed")
+    detail_names = [str(row.get("route")) for row in route_projections]
+    if len(detail_names) != len(set(detail_names)):
+        raise ValueError("viability projection repeats route details")
+    if set(detail_names) != set(required_routes):
+        raise ValueError(
+            "viability projection route details do not match required routes"
+        )
     for row in route_projections:
         name = str(row.get("route"))
         if name not in REQUIRED_PHASE1_ACQUISITION_ROUTES:
@@ -309,6 +316,13 @@ def build_phase1_acceptance_report(
         )
         if not list(row.get("evidence_run_ids") or []):
             raise ValueError(f"viability route has no run evidence: {name}")
+
+    accounting_run_id = _int(
+        viability.get("accounting_run_id"),
+        field="viability.accounting_run_id",
+    )
+    if accounting_run_id <= 0:
+        raise ValueError("viability projection accounting run id is invalid")
 
     return {
         "phase1_acceptance_status": "pass",
@@ -336,7 +350,7 @@ def build_phase1_acceptance_report(
         "representative_validation_sha256": representative_manifest.get(
             "sha256"
         ),
-        "accounting_run_id": viability.get("accounting_run_id"),
+        "accounting_run_id": accounting_run_id,
         "acceptance_note": (
             "PASS means the frozen eligible universe, 10-token end-to-end "
             "validation and complete required acquisition projection agree at "
