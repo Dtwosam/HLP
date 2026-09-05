@@ -355,11 +355,14 @@ research threshold or starting another archive crawl:
   events so an Initialize-only price cannot masquerade as independent trade
   evidence;
 - the manual representative DEX cross-check fails on canonical pool/token-pair
-  disagreement, derives the frozen token/USD price at each available swap-only
-  checkpoint from the lifecycle market-cap proxy and launch supply, resolves
-  the exact block timestamp with the canonical public RPC, and requires that
-  price to fall inside GeckoTerminal's independent hourly OHLCV envelope;
-  tokens with no DEX swap checkpoint or no registered V4 pool stay explicit
+  disagreement and selects deterministic first, maximum-USD and last actual
+  V3/V4 Swap checkpoints from the frozen detailed priced path. Duplicate roles
+  collapse onto one event when a token has fewer than three distinct swaps.
+  Each selected block timestamp is resolved with the canonical public RPC and
+  every checkpoint must independently fall inside GeckoTerminal's hourly
+  OHLCV envelope before the token can be marked matched; the final Phase 1
+  acceptance report also verifies nested checkpoint counts and matches.
+  Tokens with no DEX swap checkpoint or no registered V4 pool stay explicit
   rather than being silently treated as matched;
 - the shared RPC client now measures successful HTTP response bytes and every
   RPC CLI summary reports that egress counter; the manual GitHub-Actions
