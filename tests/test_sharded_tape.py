@@ -91,3 +91,55 @@ def test_iter_sharded_jsonl_rejects_gap(tmp_path):
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="discontinuous"):
         list(iter_sharded_jsonl(tmp_path, path))
+
+def test_iter_sharded_jsonl_resolves_reused_gap_names_by_identity(tmp_path):
+    digest = hashlib.sha256()
+    shards = []
+    for directory, rows, lo, hi in (
+        ("prior", [{"block_number": 10, "value": "a"}], 10, 11),
+        ("current", [{"block_number": 12, "value": "b"}], 12, 12),
+    ):
+        output_dir = tmp_path / directory
+        output_dir.mkdir()
+        name = "events-gap-000.jsonl"
+        shard = write_jsonl_snapshot(
+            rows,
+            output=output_dir / name,
+            provenance={
+                "chain_id": 4663,
+                "from_block": lo,
+                "to_block": hi,
+            },
+        )
+        for row in rows:
+            digest.update(canonical_jsonl_bytes(row))
+        shards.append(
+            {
+                "file": name,
+                "sha256": shard["sha256"],
+                "records": shard["records"],
+                "from_block": lo,
+                "to_block": hi,
+            }
+        )
+
+    write_virtual_jsonl_manifest(
+        manifest_path=tmp_path / "events-full.jsonl.manifest.json",
+        path_name="events-full.jsonl",
+        records=2,
+        sha256=digest.hexdigest(),
+        provenance={
+            "source": "test_reused_gap_names",
+            "chain_id": 4663,
+            "storage_mode": "sharded_artifacts",
+            "shards": shards,
+        },
+    )
+
+    rows = list(
+        iter_sharded_jsonl(
+            tmp_path,
+            tmp_path / "events-full.jsonl.manifest.json",
+        )
+    )
+    assert [row["block_number"] for row in rows] == [10, 12]
