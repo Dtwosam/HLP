@@ -297,7 +297,7 @@ def build_phase1_readiness_report(
     )
 
     if not source_successful:
-        if source_terminal_failure and evidence_valid:
+        if source_requires_recovery and evidence_valid:
             pass
         else:
             if not source_completed:
