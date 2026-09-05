@@ -1,0 +1,370 @@
+name: phase1-pons-recovered-completion-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_eligibility_run_id:
+        description: "Frozen original eligibility parent; must be terminal non-success"
+        required: true
+        default: "33982556591"
+        type: string
+      v1_v3_run_id:
+        description: "Run containing a complete V1/V3 venue artifact"
+        required: true
+        type: string
+      v2_v4_run_id:
+        description: "Optional run containing a complete V2/V4 venue artifact; blank resumes V2/V4 acquisition"
+        required: false
+        default: ""
+        type: string
+      prior_transfer_run_id:
+        description: "Optional prior representative Transfer run to resume"
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        required: true
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: true
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: true
+        default: "33923299711"
+        type: string
+      anchor_run_id:
+        required: true
+        default: "33972109927"
+        type: string
+  workflow_call:
+    inputs:
+      source_eligibility_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      v2_v4_run_id:
+        required: false
+        default: ""
+        type: string
+      prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        required: false
+        default: "33974681334"
+        type: string
+      runner_smoke_run_id:
+        required: false
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: false
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      anchor_run_id:
+        required: false
+        default: "33972109927"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-recovered-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify terminal source parent and recovered venue artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          source_id = int(os.environ["SOURCE_RUN_ID"])
+          v1_id = int(os.environ["V1_V3_RUN_ID"])
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          v2_id = int(v2_text) if v2_text else 0
+          if source_id != 33_982_556_591:
+              raise SystemExit("recovery source eligibility run changed")
+          if v1_id <= 0 or v2_id < 0:
+              raise SystemExit("recovery venue run IDs are invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          def artifacts(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 2000 for run {run_id}"
+                      )
+              return names
+
+          source = get(f"/repos/{repo}/actions/runs/{source_id}")
+          if source.get("status") != "completed":
+              raise SystemExit(
+                  "recovered completion cannot start before source is terminal"
+              )
+          if source.get("conclusion") == "success":
+              raise SystemExit(
+                  "recovered completion is unnecessary after source success"
+              )
+          if str(source.get("path") or "").split("@", 1)[0] != (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          ):
+              raise SystemExit("recovery source workflow path changed")
+          if source.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("recovery source branch changed")
+
+          allowed_v1 = {
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+              ".github/workflows/phase1-pons-v1-v3-recover-gaps.yml",
+          }
+          allowed_v2 = {
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+              ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
+          }
+
+          def verify_venue(run_id, artifact, allowed_paths):
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if run_id != source_id and (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"recovery venue run is not successful: {run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path not in allowed_paths:
+                  raise SystemExit(
+                      f"recovery venue workflow path is not allowed: {path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"recovery venue branch mismatch: {run_id}"
+                  )
+              if artifact not in artifacts(run_id):
+                  raise SystemExit(
+                      f"recovery venue artifact missing: {artifact} run={run_id}"
+                  )
+
+          verify_venue(v1_id, "phase1-pons-v1-v3-full", allowed_v1)
+          if v2_id:
+              verify_venue(v2_id, "phase1-pons-v2-v4-full", allowed_v2)
+
+          print(json.dumps({
+              "source_eligibility_run_id": source_id,
+              "v1_v3_run_id": v1_id,
+              "v2_v4_run_id": v2_id,
+              "resume_v2_v4": v2_id == 0,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  v2_v4:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && inputs.v2_v4_run_id == '' }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  v2_v4_recovery:
+    needs: v2_v4
+    if: ${{ always() && (needs.v2_v4.result == 'failure' || needs.v2_v4.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "100000"
+    secrets: inherit
+
+  pricing:
+    needs:
+      - preflight
+      - v2_v4
+      - v2_v4_recovery
+    if: ${{ always() && needs.preflight.result == 'success' && (inputs.v2_v4_run_id != '' || needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
+    uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
+    with:
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || format('{0}', github.run_id) }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      route_audit_run_id: "33921477647"
+      delayed_probe_run_id: "33923160281"
+      residual_v4_probe_run_id: "33926428274"
+      source_registry_run_id: ${{ inputs.registry_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      v2_registry_run_id: "33912235341"
+      curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  representative:
+    needs: pricing
+    if: ${{ needs.pricing.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
+    with:
+      eligibility_run_id: ${{ format('{0}', github.run_id) }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || format('{0}', github.run_id) }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      prior_transfer_run_id: ${{ inputs.prior_transfer_run_id }}
+      runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+    secrets: inherit
+
+  ready:
+    needs:
+      - pricing
+      - representative
+    if: ${{ always() && needs.pricing.result == 'success' && needs.representative.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative
+      - name: Verify recovered evidence bundle and publish handoff
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          eligible = json.loads(
+              Path("eligible/pons-eligible-universe-summary.json").read_text()
+          )
+          representative = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation-summary.json"
+              ).read_text()
+          )
+          if int(eligible.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit("recovered eligible universe snapshot changed")
+          if int(eligible.get("unknown_tokens", -1)) != 0:
+              raise SystemExit("recovered eligible universe is incomplete")
+          if int(representative.get("tokens", -1)) != 10:
+              raise SystemExit("recovered representative token count changed")
+          if int(representative.get("complete_tokens", -1)) != 10:
+              raise SystemExit("recovered representative evidence is incomplete")
+
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          report = {
+              "status": "ready",
+              "recovery_mode": True,
+              "source_eligibility_run_id": int(os.environ["SOURCE_RUN_ID"]),
+              "lifecycle_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"]),
+              "v2_v4_run_id": (
+                  int(v2_text)
+                  if v2_text
+                  else int(os.environ["GITHUB_RUN_ID"])
+              ),
+              "evidence_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "eligible_universe_artifact": "phase1-pons-eligible-universe",
+              "representative_artifact": "phase1-pons-representative-validation",
+          }
+          Path(
+              "artifacts/phase1-post-eligibility-evidence-ready.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
