@@ -262,6 +262,10 @@ jobs:
           import json
           from pathlib import Path
 
+          from hlp.data.phase1_coverage import (
+              summarize_sharded_manifest_coverage,
+              validate_representative_coverage_report,
+          )
           from hlp.data.pons_representative_validation import (
               build_representative_validation_rows,
               summarize_representative_validation,
@@ -274,6 +278,71 @@ jobs:
                   for line in Path(path).read_text().splitlines()
                   if line.strip()
               ]
+
+          sample = read_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative coverage requires exactly 10 sample tokens"
+              )
+          sample_start = min(int(row["launch_block"]) for row in sample)
+
+          market_coverage = json.loads(
+              Path(
+                  "market-paths/"
+                  "pons-representative-market-source-coverage.json"
+              ).read_text()
+          )
+          pricing_coverage = json.loads(
+              Path(
+                  "priced-paths/"
+                  "pons-representative-pricing-source-coverage.json"
+              ).read_text()
+          )
+          transfer_manifest = json.loads(
+              Path(
+                  "transfers/"
+                  "pons-representative-transfers-full.jsonl.manifest.json"
+              ).read_text()
+          )
+          transfer_coverage = summarize_sharded_manifest_coverage(
+              transfer_manifest,
+              label="representative_transfers",
+              required_start=sample_start,
+              exact_start=True,
+          )
+          coverage_sources = [
+              *list(market_coverage.get("sources") or []),
+              *list(pricing_coverage.get("sources") or []),
+              transfer_coverage,
+          ]
+          coverage = validate_representative_coverage_report(
+              {"sources": coverage_sources},
+              sample_start_block=sample_start,
+          )
+          coverage_snapshot = write_jsonl_snapshot(
+              coverage_sources,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-source-coverage.jsonl"
+              ),
+              provenance={
+                  "source": "representative_upstream_manifest_coverage",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "transfer_run_id": int(
+                      "${{ inputs.transfer_run_id }}"
+                  ),
+                  "market_path_run_id": int(
+                      "${{ inputs.market_path_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ inputs.priced_path_run_id }}"
+                  ),
+              },
+          )
 
           transfer_summary = json.loads(
               Path(
@@ -299,7 +368,7 @@ jobs:
               )
 
           rows = build_representative_validation_rows(
-              read_jsonl("sample/pons-representative-sample.jsonl"),
+              sample,
               v1_lifecycle_rows=read_jsonl(
                   "v1/pons-v1-lifecycle-eligibility.jsonl"
               ),
@@ -326,6 +395,22 @@ jobs:
               ),
           )
           summary = summarize_representative_validation(rows)
+          summary.update({
+              "coverage_sources": coverage["sources"],
+              "continuous_sharded_sources": (
+                  coverage["continuous_sharded_sources"]
+              ),
+              "snapshot_pinned_sources": (
+                  coverage["snapshot_pinned_sources"]
+              ),
+              "coverage_sample_start_block": (
+                  coverage["sample_start_block"]
+              ),
+              "no_unexplained_block_gaps": (
+                  coverage["no_unexplained_block_gaps"]
+              ),
+              "source_coverage_sha256": coverage_snapshot["sha256"],
+          })
           if summary["tokens"] != 10 or summary["complete_tokens"] != 10:
               raise SystemExit(
                   "representative validation must contain exactly 10 "
@@ -363,6 +448,7 @@ jobs:
                   "explorer_crosscheck_run_id": int(
                       "${{ inputs.explorer_crosscheck_run_id }}"
                   ),
+                  "source_coverage_sha256": coverage_snapshot["sha256"],
               },
           )
           summary["validation_sha256"] = snapshot["sha256"]
