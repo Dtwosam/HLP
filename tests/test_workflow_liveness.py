@@ -1394,7 +1394,7 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "\n  push:" not in trigger_block
     assert "phase1-pons-viability-ready.json" in content
     assert "phase1-pons-viability-runs.json" in content
-    assert "phase1-pons-readiness-report.json" in content
+    assert "phase1-readiness-report.json" in content
     assert "phase1-pons-readiness-audit" in content
     assert "build_phase1_readiness_report" in content
     assert '"path": run.get("path")' in content
