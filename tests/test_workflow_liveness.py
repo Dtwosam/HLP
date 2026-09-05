@@ -678,6 +678,31 @@ def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     assert "max-parallel:" not in content
     assert "time.sleep(" not in content
 
+def test_skhy_v3_weth_continuation_is_manual_known_pool_and_bounded():
+    content = _workflow(
+        "phase1-pons-skhy-v3-weth-continuation.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33921477647"' in content
+    assert "0x84cab63bc87912e71ad199ff14a0ba45de68fef8" in content
+    assert "0x13f78b235d19141f572986afcaab66ce7744b4ef" in content
+    assert "SKHY_WETH_FEE: '3000'" in content
+    assert "SKHY_FIRST_PONS_USE: '52263525'" in content
+    assert "forward_blocks must be between 1 and 500000" in content
+    assert 'deployment-block "$SKHY_WETH_POOL"' in content
+    assert "--archive" in content
+    assert "rpc-pons-delayed-v3-weth-routes" in content
+    assert '--quote-token "$SKHY_TOKEN"' in content
+    assert "first_observed_usd_price" in content
+    assert "deferred to event-ordered WETH/USD anchor replay" in content
+    assert "timeout-minutes: 20" in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+
 def test_representative_explorer_crosscheck_is_manual_public_and_bounded():
     content = _workflow(
         "phase1-pons-representative-explorer-crosscheck.yml"
