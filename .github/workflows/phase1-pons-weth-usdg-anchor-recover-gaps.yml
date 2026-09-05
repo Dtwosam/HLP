@@ -149,6 +149,11 @@ jobs:
               covered,
               max_blocks=max_blocks,
           )
+          if len(gaps) > 240:
+              raise SystemExit(
+                  "anchor gap plan exceeds 240 matrix jobs; recover a "
+                  "bounded range first, then rerun manifest gap recovery"
+              )
           include = [
               {
                   "id": f"{index:03d}",
