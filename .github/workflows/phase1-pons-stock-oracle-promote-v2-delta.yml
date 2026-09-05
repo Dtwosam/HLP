@@ -18,6 +18,11 @@ on:
         required: true
         default: "33912985322"
         type: string
+      prior_delta_run_id:
+        description: "Optional interrupted promotion run with successful DELL delta shards to reuse"
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       full_quote_audit_run_id:
@@ -28,6 +33,10 @@ on:
         type: string
       v2_oracle_run_id:
         required: true
+        type: string
+      prior_delta_run_id:
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -48,6 +57,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       delta_count: ${{ steps.plan.outputs.delta_count }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +78,14 @@ jobs:
           path: v2-oracle
           run-id: ${{ inputs.v2_oracle_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_delta_run_id != '' }}
+        with:
+          pattern: phase1-pons-stock-oracle-delta-*
+          path: prior-delta
+          merge-multiple: true
+          run-id: ${{ inputs.prior_delta_run_id }}
+          github-token: ${{ github.token }}
       - id: plan
         name: Prove and freeze only missing full-Pons stock feeds
         run: |
@@ -77,7 +95,7 @@ jobs:
           import os
           from pathlib import Path
 
-          from hlp.data.ranges import split_range
+          from hlp.data.ranges import plan_missing_subranges
 
           quotes = [
               json.loads(line)
@@ -138,9 +156,46 @@ jobs:
           delta_start = min(
               int(row["first_launch_block"]) for row in missing_rows
           )
-          ranges = split_range(
+          covered = []
+          prior_sources = []
+          for path in sorted(
+              Path("prior-delta").glob(
+                  "delta-oracle-updates-*.jsonl.manifest.json"
+              )
+          ):
+              manifest = json.loads(path.read_text())
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"prior DELL delta chain mismatch: {path}"
+                  )
+              if prov.get("source") != (
+                  "shared_staggered_chainlink_answer_updated_tape"
+              ):
+                  raise SystemExit(
+                      f"prior DELL delta source changed: {path}"
+                  )
+              if prov.get("quote_registry") != (
+                  "pons-stock-oracle-delta-quotes.jsonl"
+              ):
+                  raise SystemExit(
+                      f"prior DELL delta quote registry changed: {path}"
+                  )
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              covered.append((lo, hi))
+              prior_sources.append({
+                  "manifest": path.name,
+                  "from_block": lo,
+                  "to_block": hi,
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+              })
+
+          ranges = plan_missing_subranges(
               delta_start,
               head,
+              covered,
               max_blocks=max_blocks,
           )
           if len(ranges) > 240:
@@ -167,6 +222,15 @@ jobs:
                   int(row["first_launch_block"]) for row in missing_rows
               ],
               "max_delta_blocks": max_blocks,
+              "prior_delta_run_id": (
+                  int("${{ inputs.prior_delta_run_id }}")
+                  if "${{ inputs.prior_delta_run_id }}"
+                  else None
+              ),
+              "prior_successful_ranges": prior_sources,
+              "prior_covered_blocks": sum(
+                  hi - lo + 1 for lo, hi in covered
+              ),
               "delta_range_jobs": include,
               "delta_range_job_count": len(include),
               "delta_blocks": sum(
@@ -183,6 +247,7 @@ jobs:
           )
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"delta_count={len(missing_rows)}\n")
+              handle.write(f"gap_count={len(include)}\n")
               handle.write(
                   "matrix="
                   + json.dumps(
@@ -201,7 +266,7 @@ jobs:
 
   delta:
     needs: plan
-    if: ${{ needs.plan.outputs.delta_count != '0' }}
+    if: ${{ needs.plan.outputs.gap_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -271,7 +336,15 @@ jobs:
           name: phase1-pons-stock-oracle-delta-plan
           path: plan
       - uses: actions/download-artifact@v4
-        if: ${{ needs.plan.outputs.delta_count != '0' }}
+        if: ${{ inputs.prior_delta_run_id != '' }}
+        with:
+          pattern: phase1-pons-stock-oracle-delta-*
+          path: prior-delta
+          merge-multiple: true
+          run-id: ${{ inputs.prior_delta_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.gap_count != '0' }}
         with:
           pattern: phase1-pons-stock-oracle-delta-*
           path: delta
@@ -284,6 +357,7 @@ jobs:
           import json
           from pathlib import Path
 
+          from hlp.data.ranges import missing_ranges
           from hlp.data.reconstruct import event_order
           from hlp.data.snapshot import write_jsonl_snapshot
 
@@ -308,13 +382,14 @@ jobs:
               if line.strip()
           ]
           delta_states = []
-          for path in sorted(
-              Path("delta").glob("delta-oracle-state-*.jsonl")
-          ):
-              with path.open() as handle:
-                  for line in handle:
-                      if line.strip():
-                          delta_states.append(json.loads(line))
+          for root in (Path("prior-delta"), Path("delta")):
+              for path in sorted(
+                  root.glob("delta-oracle-state-*.jsonl")
+              ):
+                  with path.open() as handle:
+                      for line in handle:
+                          if line.strip():
+                              delta_states.append(json.loads(line))
 
           all_states = [*existing_states, *delta_states]
           all_states.sort(
@@ -368,13 +443,14 @@ jobs:
               for line in handle:
                   if line.strip():
                       updates.append(json.loads(line))
-          for path in sorted(
-              Path("delta").glob("delta-oracle-updates-*.jsonl")
-          ):
-              with path.open() as handle:
-                  for line in handle:
-                      if line.strip():
-                          updates.append(json.loads(line))
+          for root in (Path("prior-delta"), Path("delta")):
+              for path in sorted(
+                  root.glob("delta-oracle-updates-*.jsonl")
+              ):
+                  with path.open() as handle:
+                      for line in handle:
+                          if line.strip():
+                              updates.append(json.loads(line))
           updates.sort(key=event_order)
 
           prior = None
@@ -392,6 +468,45 @@ jobs:
               seen.add(key)
               assert row["quote_token"].lower() in expected_tokens
 
+          plan = json.loads(
+              Path(
+                  "plan/pons-stock-oracle-delta-plan.json"
+              ).read_text()
+          )
+          delta_start = int(plan["delta_first_launch_blocks"][0])
+          covered_ranges = []
+          for root in (Path("prior-delta"), Path("delta")):
+              for path in sorted(
+                  root.glob(
+                      "delta-oracle-updates-*.jsonl.manifest.json"
+                  )
+              ):
+                  manifest = json.loads(path.read_text())
+                  prov = manifest.get("provenance") or {}
+                  if int(prov.get("chain_id", -1)) != 4663:
+                      raise SystemExit(
+                          f"merged DELL delta chain mismatch: {path}"
+                      )
+                  if prov.get("quote_registry") != (
+                      "pons-stock-oracle-delta-quotes.jsonl"
+                  ):
+                      raise SystemExit(
+                          f"merged DELL delta quote registry changed: {path}"
+                      )
+                  covered_ranges.append((
+                      int(prov["from_block"]),
+                      int(prov["to_block"]),
+                  ))
+          gaps = missing_ranges(
+              delta_start,
+              54_486_035,
+              covered_ranges,
+          )
+          if gaps:
+              raise SystemExit(
+                  f"canonical DELL oracle delta still has gaps: {gaps}"
+              )
+
           state_snapshot = write_jsonl_snapshot(
               initial_states,
               output=Path("artifacts/pons-stock-oracle-initial.jsonl"),
@@ -404,6 +519,11 @@ jobs:
                   ),
                   "v2_oracle_run_id": int(
                       "${{ inputs.v2_oracle_run_id }}"
+                  ),
+                  "prior_delta_run_id": (
+                      int("${{ inputs.prior_delta_run_id }}")
+                      if "${{ inputs.prior_delta_run_id }}"
+                      else None
                   ),
               },
           )
@@ -420,14 +540,14 @@ jobs:
                   "v2_oracle_run_id": int(
                       "${{ inputs.v2_oracle_run_id }}"
                   ),
+                  "prior_delta_run_id": (
+                      int("${{ inputs.prior_delta_run_id }}")
+                      if "${{ inputs.prior_delta_run_id }}"
+                      else None
+                  ),
               },
           )
 
-          plan = json.loads(
-              Path(
-                  "plan/pons-stock-oracle-delta-plan.json"
-              ).read_text()
-          )
           summary = {
               "snapshot_head_block": 54_486_035,
               "stock_quote_assets": len(initial_states),
@@ -437,6 +557,8 @@ jobs:
               ),
               "delta_quote_tokens": plan["delta_quote_tokens"],
               "delta_symbols": plan["delta_symbols"],
+              "prior_delta_run_id": plan["prior_delta_run_id"],
+              "delta_source_ranges": len(covered_ranges),
               "oracle_updates": len(updates),
               "initial_sha256": state_snapshot["sha256"],
               "updates_sha256": update_snapshot["sha256"],

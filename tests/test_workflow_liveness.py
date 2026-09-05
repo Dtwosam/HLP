@@ -379,7 +379,10 @@ def test_stock_oracle_delta_promotion_is_manual_bounded_and_fail_closed():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "MAX_DELTA_BLOCKS: '100000'" in content
-    assert "split_range" in content
+    assert "prior_delta_run_id" in content
+    assert "plan_missing_subranges" in content
+    assert "prior_successful_ranges" in content
+    assert "gap_count" in content
     assert "oracle delta plan exceeds 240 matrix jobs" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "max-parallel: 2" in content
