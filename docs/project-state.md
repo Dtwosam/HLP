@@ -702,8 +702,16 @@ their `partial_run_id` / `prior_gap_run_id` shard provenance. The guarded
 launcher is backed by
 `.github/phase1-pons-recovered-completion.json`, remains generation **0**
 and therefore unarmed; inert graph-validation run **33994104743** skipped
-cleanly. Viability readiness and finalization accept evidence only from the
-normal post-eligibility wrapper or this recovered-completion wrapper, on
+cleanly. The recovery config also carries an optional `pricing_run_id`: when
+an earlier terminal source/recovery run already produced both lifecycle
+artifacts and all three quote-fallback artifacts before failing later in
+representative work, a retry can reuse those pricing artifacts, repromote the
+eligible universe on current code, and rerun only representative evidence.
+Reused pricing requires an explicit V2/V4 venue run ID and an approved
+source/recovery workflow path, so the retry cannot guess venue provenance.
+Inert resume-graph validation run **33994927060** skipped cleanly. Viability
+readiness and finalization accept evidence only from the normal
+post-eligibility wrapper or this recovered-completion wrapper, on
 `phase1/data-acquisition-spike`.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
