@@ -15,6 +15,11 @@ on:
         description: "Successful representative priced-path replay run"
         required: true
         type: string
+      access_reverified:
+        description: "Confirm Blockscout API access from GitHub runners was reverified after the known 403"
+        required: true
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       sample_run_id:
@@ -26,6 +31,10 @@ on:
       priced_path_run_id:
         required: true
         type: string
+      access_reverified:
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -37,6 +46,7 @@ concurrency:
 
 jobs:
   crosscheck:
+    if: ${{ inputs.access_reverified == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
