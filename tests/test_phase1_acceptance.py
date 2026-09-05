@@ -81,6 +81,7 @@ def _fixtures():
             "all_observed_rpc_routes_free": True,
             "required_blocks": REQUIRED_PHASE1_ROUTE_BLOCKS[route],
             "evidence_processed_blocks": 100_000,
+            "evidence_runs": 1,
             "evidence_run_ids": [1000 + index],
         }
         for index, route in enumerate(REQUIRED_PHASE1_ACQUISITION_ROUTES)
@@ -301,4 +302,23 @@ def test_phase1_acceptance_rejects_unknown_eligible_tokens():
     fixtures[0]["unknown_tokens"] = 1
 
     with pytest.raises(ValueError, match="still contains unknown"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_reused_evidence_run_across_routes():
+    fixtures = list(_fixtures())
+    projections = fixtures[4]["route_projections"]
+    projections[1]["evidence_run_ids"] = list(
+        projections[0]["evidence_run_ids"]
+    )
+
+    with pytest.raises(ValueError, match="reused across routes"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_evidence_run_count_drift():
+    fixtures = list(_fixtures())
+    fixtures[4]["route_projections"][0]["evidence_runs"] = 2
+
+    with pytest.raises(ValueError, match="evidence-run count disagrees"):
         build_phase1_acceptance_report(*fixtures)
