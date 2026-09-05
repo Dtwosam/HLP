@@ -476,6 +476,7 @@ def build_phase1_acceptance_report(
             "viability projection route details do not match required routes"
         )
     used_evidence_run_ids: set[int] = set()
+    route_evidence_run_ids: dict[str, list[int]] = {}
     for row in route_projections:
         name = str(row.get("route"))
         if name not in REQUIRED_PHASE1_ACQUISITION_ROUTES:
@@ -519,6 +520,7 @@ def build_phase1_acceptance_report(
                 f"{sorted(overlap)}"
             )
         used_evidence_run_ids.update(evidence_run_ids)
+        route_evidence_run_ids[name] = evidence_run_ids
 
     accounting_run_id = _int(
         viability.get("accounting_run_id"),
@@ -570,6 +572,7 @@ def build_phase1_acceptance_report(
         "representative_source_coverage_sha256": coverage_sha,
         "required_acquisition_routes": required_routes,
         "required_route_blocks": expected_route_blocks,
+        "route_evidence_run_ids": route_evidence_run_ids,
         "required_work_blocks": sum(expected_route_blocks.values()),
         "projected_requests": int(projected_requests),
         "projected_response_bytes": int(projected_response_bytes),
