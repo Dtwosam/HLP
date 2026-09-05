@@ -1,0 +1,503 @@
+name: phase1-pons-v2-transition-recover-gaps
+
+on:
+  workflow_dispatch:
+    inputs:
+      v2_registry_run_id:
+        description: "Run containing phase1-pons-v2-full-registry"
+        required: true
+        default: "33912235341"
+        type: string
+      partial_run_id:
+        description: "Interrupted phase1-pons-v2-transition-full run with successful shard artifacts"
+        required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier transition gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        default: "150000"
+        type: string
+  workflow_call:
+    inputs:
+      v2_registry_run_id:
+        description: "Run containing phase1-pons-v2-full-registry"
+        required: true
+        type: string
+      partial_run_id:
+        description: "Interrupted phase1-pons-v2-transition-full run with successful shard artifacts"
+        required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier transition gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-transition-recover-gaps-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GENERATION_START: '26841846'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-transition-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-v2-transition-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - id: plan
+        name: Derive only missing transition ranges
+        env:
+          MAX_GAP_BLOCKS: ${{ inputs.max_gap_blocks }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import plan_missing_subranges
+
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
+          if not 1 <= max_blocks <= 150_000:
+              raise SystemExit(
+                  "max_gap_blocks must be between 1 and 150000"
+              )
+
+          def family_ranges(root: Path, prefix: str):
+              output = {}
+              for path in sorted(
+                  root.glob(f"{prefix}-*.jsonl.manifest.json")
+              ):
+                  manifest = json.loads(path.read_text())
+                  prov = manifest["provenance"]
+                  key = (
+                      int(prov["from_block"]),
+                      int(prov["to_block"]),
+                  )
+                  if key in output:
+                      raise SystemExit(
+                          f"duplicate {prefix} coverage {key} in {root}"
+                      )
+                  output[key] = {
+                      "manifest": path.name,
+                      "records": int(manifest["records"]),
+                      "sha256": manifest["sha256"],
+                  }
+              return output
+
+          sources = []
+          covered = []
+          for root, grad_prefix, reg_prefix in (
+              (
+                  Path("partial"),
+                  "graduations-shard",
+                  "registrations-shard",
+              ),
+              (
+                  Path("prior-gaps"),
+                  "graduations-gap",
+                  "registrations-gap",
+              ),
+          ):
+              grads = family_ranges(root, grad_prefix)
+              regs = family_ranges(root, reg_prefix)
+              if set(grads) != set(regs):
+                  raise SystemExit(
+                      f"transition artifact families disagree in {root}: "
+                      f"graduation_only={sorted(set(grads) - set(regs))[:5]} "
+                      f"registration_only={sorted(set(regs) - set(grads))[:5]}"
+                  )
+              for lo, hi in sorted(grads):
+                  covered.append((lo, hi))
+                  sources.append({
+                      "source": root.name,
+                      "from_block": lo,
+                      "to_block": hi,
+                      "graduations": grads[(lo, hi)],
+                      "registrations": regs[(lo, hi)],
+                  })
+
+          if not covered:
+              raise SystemExit(
+                  "recovery sources have no successful transition artifacts"
+              )
+
+          gaps = plan_missing_subranges(
+              start,
+              head,
+              covered,
+              max_blocks=max_blocks,
+          )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(gaps)
+          ]
+          report = {
+              "generation_start": start,
+              "snapshot_head": head,
+              "max_gap_blocks": max_blocks,
+              "successful_sources": sources,
+              "gap_jobs": include,
+              "gap_job_count": len(include),
+              "gap_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
+          }
+          Path("artifacts/transition-gap-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "matrix="
+                  + json.dumps({"include": include}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(f"gap_count={len(include)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  recover:
+    needs: plan
+    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing transition interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-transition-tape \
+            --registry registry/pons-v2-full-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --graduations-out "artifacts/graduations-gap-${GAP_ID}.jsonl" \
+            --registrations-out "artifacts/registrations-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, recover]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover.result == 'success' || needs.recover.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-transition-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-v2-transition-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.gap_count != '0' }}
+        with:
+          pattern: phase1-pons-v2-transition-gap-*
+          path: gaps
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-gap-plan
+          path: plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Merge recovered transition tape
+        run: |
+          mkdir -p artifacts
+          cp plan/transition-gap-plan.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["GENERATION_START"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+
+          roots = [Path("partial"), Path("prior-gaps"), Path("gaps")]
+
+          def entries(prefixes):
+              found = []
+              for root in roots:
+                  for prefix in prefixes:
+                      for path in root.glob(f"{prefix}-*.jsonl"):
+                          manifest = json.loads(
+                              path.with_suffix(
+                                  path.suffix + ".manifest.json"
+                              ).read_text()
+                          )
+                          prov = manifest["provenance"]
+                          found.append((
+                              int(prov["from_block"]),
+                              int(prov["to_block"]),
+                              path,
+                              manifest,
+                          ))
+              found.sort(key=lambda item: item[0])
+              return found
+
+          graduations = entries(("graduations-shard", "graduations-gap"))
+          registrations = entries(
+              ("registrations-shard", "registrations-gap")
+          )
+          if not graduations or not registrations:
+              raise SystemExit("missing recovered transition artifact family")
+
+          def validate_coverage(name, rows):
+              previous_hi = None
+              ranges = []
+              for lo, hi, path, manifest in rows:
+                  if previous_hi is None:
+                      assert lo == START, (name, lo, START, path.name)
+                  else:
+                      assert lo == previous_hi + 1, (
+                          name, previous_hi, lo, path.name
+                      )
+                  previous_hi = hi
+                  ranges.append((lo, hi))
+              assert previous_hi == HEAD, (name, previous_hi, HEAD)
+              return ranges
+
+          grad_ranges = validate_coverage("graduations", graduations)
+          reg_ranges = validate_coverage("registrations", registrations)
+          assert grad_ranges == reg_ranges, (
+              "transition family coverage mismatch",
+              grad_ranges[:5],
+              reg_ranges[:5],
+          )
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-v2-full-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          tokens = {row["token"].lower() for row in registry}
+
+          def read_rows(name, source_entries):
+              output = []
+              manifests = []
+              for lo, hi, path, manifest in source_entries:
+                  local = [
+                      json.loads(line)
+                      for line in path.read_text().splitlines()
+                      if line.strip()
+                  ]
+                  assert len(local) == int(manifest["records"]), (
+                      path.name, len(local), manifest["records"]
+                  )
+                  output.extend(local)
+                  manifests.append({
+                      "source": path.parent.name,
+                      "file": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              return output, manifests
+
+          grad_rows, grad_manifests = read_rows(
+              "graduations", graduations
+          )
+          reg_rows, reg_manifests = read_rows(
+              "registrations", registrations
+          )
+
+          assert all(
+              row["token"].lower() in tokens for row in grad_rows
+          )
+          assert all(
+              row["token"].lower() in tokens for row in reg_rows
+          )
+
+          grad_keys = [
+              (
+                  row["token"].lower(),
+                  row["transaction_hash"].lower(),
+                  int(row["log_index"]),
+              )
+              for row in grad_rows
+          ]
+          reg_keys = [
+              (
+                  row["pool_id"].lower(),
+                  row["transaction_hash"].lower(),
+                  int(row["log_index"]),
+              )
+              for row in reg_rows
+          ]
+          assert len(set(grad_keys)) == len(grad_keys), (
+              "duplicate graduation event"
+          )
+          assert len(set(reg_keys)) == len(reg_keys), (
+              "duplicate registration event"
+          )
+
+          def order(row):
+              return (
+                  int(row["block_number"]),
+                  -1 if row.get("transaction_index") is None
+                  else int(row["transaction_index"]),
+                  int(row["log_index"]),
+              )
+
+          grad_rows.sort(key=order)
+          reg_rows.sort(key=order)
+
+          common_provenance = {
+              "source": "manifest_gap_aware_transition_recovery",
+              "chain_id": 4663,
+              "snapshot_head_block": HEAD,
+              "v2_registry_run_id": int(
+                  "${{ inputs.v2_registry_run_id }}"
+              ),
+              "partial_run_id": int("${{ inputs.partial_run_id }}"),
+              "prior_gap_run_id": (
+                  int("${{ inputs.prior_gap_run_id }}")
+                  if "${{ inputs.prior_gap_run_id }}"
+                  else None
+              ),
+          }
+          g_snapshot = write_jsonl_snapshot(
+              grad_rows,
+              output=Path("artifacts/pons-v2-graduations-full.jsonl"),
+              provenance={
+                  **common_provenance,
+                  "shards": grad_manifests,
+              },
+          )
+          r_snapshot = write_jsonl_snapshot(
+              reg_rows,
+              output=Path("artifacts/pons-v2-registrations-full.jsonl"),
+              provenance={
+                  **common_provenance,
+                  "shards": reg_manifests,
+              },
+          )
+
+          grad_set = {row["token"].lower() for row in grad_rows}
+          reg_set = {row["token"].lower() for row in reg_rows}
+          report = {
+              "snapshot_head_block": HEAD,
+              "registry_tokens": len(tokens),
+              "graduations": len(grad_rows),
+              "graduated_tokens": len(grad_set),
+              "registrations": len(reg_rows),
+              "registered_tokens": len(reg_set),
+              "graduated_without_registration": sorted(
+                  grad_set - reg_set
+              ),
+              "registered_without_graduation": sorted(
+                  reg_set - grad_set
+              ),
+              "graduation_sha256": g_snapshot["sha256"],
+              "registration_sha256": r_snapshot["sha256"],
+              "source_ranges": len(grad_ranges),
+          }
+          Path("artifacts/pons-v2-transition-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: artifacts/
+          if-no-files-found: error
