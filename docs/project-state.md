@@ -610,6 +610,22 @@ current, partial and prior-recovery shard files by manifest identity
 (block range, record count and SHA), not basename alone, because successive
 gap-recovery generations may legitimately reuse compact names such as
 `*-gap-000.jsonl`.
+The live eligibility parent is pinned to launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`, so later branch hardening cannot
+change the eligible-universe manifest that parent will eventually emit. Current
+code therefore carries an artifact-only
+`phase1-pons-eligible-universe-promote` workflow plus a guarded one-shot pinned
+to source parent **33982556591**. After the parent completes, promotion
+re-downloads its V1/V2 lifecycle artifacts and re-runs only the universe freeze
+on current code; it does not issue RPC requests. The promoted universe manifest
+cryptographically binds the exact V1 and V2 lifecycle artifact SHA256 values,
+and the final acceptance function requires those hashes to agree with the
+freeze summary before PASS. Inert launcher run **33987410394** skipped cleanly,
+proving the reusable promotion graph compiles without touching the archive
+lane. Final acceptance may consume this promoted universe run while
+representative reconstruction continues to use the original full eligibility
+parent for lifecycle, venue and quote artifacts.
+
 The egress projection additionally needs instrumented measured runs;
 older completed runs cannot retroactively provide response-byte counters. No
 representative validation, viability projection or acceptance artifact should
