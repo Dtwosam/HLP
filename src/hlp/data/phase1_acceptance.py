@@ -14,12 +14,22 @@ EXPECTED_V2_LAUNCHES = 225_951
 FREE_DAILY_METHOD_CALLS = 10_000
 
 REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS = {
+    "runner_smoke_run_id": 33_920_762_592,
     "registry_run_id": 33_911_022_718,
     "v2_curve_run_id": 33_936_232_604,
     "transition_run_id": 33_912_452_330,
     "quote_audit_run_id": 33_923_299_711,
     "anchor_run_id": 33_972_109_927,
     "oracle_run_id": 33_974_681_334,
+}
+
+REPRESENTATIVE_RUNNER_SMOKE_SHA256 = {
+    "runner_smoke_universe_sha256": (
+        "4861b2af1d549eb41c53341a07f6de71dce4d9486b769543c1376beab9c19ab9"
+    ),
+    "runner_smoke_outcomes_sha256": (
+        "6fb40693b77d7434d4e579a2225fed2c65061841a5ea9d0ba56f785071fc6ef2"
+    ),
 }
 
 REQUIRED_PHASE1_ACQUISITION_ROUTES = tuple(
@@ -451,6 +461,26 @@ def build_phase1_acceptance_report(
             "representative and universe V2 lifecycle artifact SHA disagree"
         )
 
+    representative_runner_smoke_sha256 = {}
+    for field, expected in REPRESENTATIVE_RUNNER_SMOKE_SHA256.items():
+        observed = _sha256(
+            representative_provenance.get(field),
+            field=f"representative.{field}",
+        )
+        if observed != expected:
+            raise ValueError(
+                f"representative runner smoke SHA changed: "
+                f"{field}={observed} != {expected}"
+            )
+        if _sha256(
+            representative.get(field),
+            field=f"representative.summary.{field}",
+        ) != observed:
+            raise ValueError(
+                f"representative runner smoke SHA summary disagrees: {field}"
+            )
+        representative_runner_smoke_sha256[field] = observed
+
     representative_source_run_ids = {}
     for field, expected in REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS.items():
         observed = _int(
@@ -673,6 +703,7 @@ def build_phase1_acceptance_report(
         "representative_no_unexplained_block_gaps": True,
         "representative_source_coverage_sha256": coverage_sha,
         "representative_source_run_ids": representative_source_run_ids,
+        "representative_runner_smoke_sha256": representative_runner_smoke_sha256,
         "required_acquisition_routes": required_routes,
         "required_route_blocks": expected_route_blocks,
         "route_evidence_run_ids": route_evidence_run_ids,
