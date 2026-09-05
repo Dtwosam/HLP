@@ -333,6 +333,7 @@ jobs:
                       GECKOTERMINAL_API_VERSION
                   ),
                   "network": "robinhood",
+                  "chain_id": 4663,
                   "ohlcv_timeframe": "hour",
                   "ohlcv_aggregate": 1,
                   "ohlcv_tolerance_bps": "0",
