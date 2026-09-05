@@ -7,6 +7,14 @@ on:
         description: "Successful phase1-pons-representative-sample-freeze run"
         required: true
         type: string
+      v1_eligibility_run_id:
+        description: "V1 lifecycle run used by the representative sample"
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        description: "V2 lifecycle run used by the representative sample"
+        required: true
+        type: string
       registry_run_id:
         description: "Canonical full Pons registry run"
         required: true
@@ -20,6 +28,12 @@ on:
   workflow_call:
     inputs:
       sample_run_id:
+        required: true
+        type: string
+      v1_eligibility_run_id:
+        required: true
+        type: string
+      v2_eligibility_run_id:
         required: true
         type: string
       registry_run_id:
@@ -58,6 +72,18 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
           name: phase1-pons-full-registry-recovered
           path: registry
           run-id: ${{ inputs.registry_run_id }}
@@ -68,21 +94,26 @@ jobs:
           path: transition
           run-id: ${{ inputs.transition_run_id }}
           github-token: ${{ github.token }}
-      - name: Reconcile frozen representative pools against GeckoTerminal
+      - name: Reconcile representative pool identity and swap prices
         run: |
           mkdir -p artifacts
           python - <<'PY'
           import json
           from pathlib import Path
 
+          from hlp.config import DEFAULT_RPC_URL
           from hlp.data.geckoterminal import (
               GECKOTERMINAL_API_VERSION,
               GeckoTerminalClient,
           )
           from hlp.data.pons_crosscheck import (
+              build_canonical_dex_price_checkpoint,
               build_representative_pool_targets,
               reconcile_external_pool,
+              reconcile_price_against_ohlcv,
           )
+          from hlp.data.pons_time import fetch_block_timestamp_rows
+          from hlp.data.rpc import RpcClient
           from hlp.data.snapshot import write_jsonl_snapshot
 
           def read_jsonl(path):
@@ -100,31 +131,157 @@ jobs:
                   "representative DEX cross-check requires exactly 10 "
                   f"sample tokens, got {len(sample)}"
               )
+
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          expected_v1_run = int("${{ inputs.v1_eligibility_run_id }}")
+          expected_v2_run = int("${{ inputs.v2_eligibility_run_id }}")
+          if int(sample_summary["v1_eligibility_run_id"]) != expected_v1_run:
+              raise SystemExit(
+                  "representative sample V1 lifecycle run does not match "
+                  "DEX cross-check input"
+              )
+          if int(sample_summary["v2_eligibility_run_id"]) != expected_v2_run:
+              raise SystemExit(
+                  "representative sample V2 lifecycle run does not match "
+                  "DEX cross-check input"
+              )
+
           registry = read_jsonl(
               "registry/pons-full-launch-registry.jsonl"
           )
           registrations = read_jsonl(
               "transition/pons-v2-registrations-full.jsonl"
           )
+          v1_lifecycle = {
+              row["token"].lower(): row
+              for row in read_jsonl(
+                  "v1/pons-v1-lifecycle-eligibility.jsonl"
+              )
+          }
+          v2_lifecycle = {
+              row["token"].lower(): row
+              for row in read_jsonl(
+                  "v2/pons-v2-lifecycle-eligibility.jsonl"
+              )
+          }
           targets = build_representative_pool_targets(
               sample,
               registry,
               registrations,
           )
 
+          checkpoints = {}
+          for target in targets:
+              token = target["token"]
+              lifecycle = (
+                  v1_lifecycle.get(token)
+                  if target["pons_version"] == "v1"
+                  else v2_lifecycle.get(token)
+              )
+              if lifecycle is None:
+                  raise SystemExit(
+                      f"representative lifecycle missing for {token}"
+                  )
+              checkpoints[token] = build_canonical_dex_price_checkpoint(
+                  target,
+                  lifecycle,
+              )
+
+          checkpoint_blocks = sorted({
+              int(row["canonical_block_number"])
+              for row in checkpoints.values()
+              if row["canonical_block_number"] is not None
+          })
+          timestamp_by_block = {}
+          block_rpc_requests = 0
+          if checkpoint_blocks:
+              rpc = RpcClient(DEFAULT_RPC_URL)
+              rpc.assert_robinhood()
+              timestamp_rows = fetch_block_timestamp_rows(
+                  rpc,
+                  checkpoint_blocks,
+                  batch_size=10,
+              )
+              timestamp_by_block = {
+                  int(row["block_number"]): int(row["block_timestamp"])
+                  for row in timestamp_rows
+              }
+              block_rpc_requests = rpc.requests_made
+
           client = GeckoTerminalClient()
           rows = []
           for target in targets:
+              token = target["token"]
+              checkpoint = checkpoints[token]
               pool_identifier = target.get("pool_identifier")
               if pool_identifier is None:
-                  rows.append(
-                      reconcile_external_pool(target, {})
-                  )
+                  row = reconcile_external_pool(target, {})
+                  row.update(checkpoint)
+                  row.update({
+                      "canonical_timestamp": None,
+                      "price_match": None,
+                      "price_crosscheck_status": "not_applicable",
+                  })
+                  rows.append(row)
                   continue
+
               external = client.pool(pool_identifier)
-              rows.append(
-                  reconcile_external_pool(target, external)
-              )
+              row = reconcile_external_pool(target, external)
+              row.update(checkpoint)
+
+              if (
+                  checkpoint["price_crosscheck_scope"]
+                  == "canonical_dex_swap"
+              ):
+                  block_number = int(
+                      checkpoint["canonical_block_number"]
+                  )
+                  timestamp = timestamp_by_block[block_number]
+                  candles = client.ohlcv(
+                      pool_identifier,
+                      timeframe="hour",
+                      aggregate=1,
+                      before_timestamp=timestamp + 3600,
+                      limit=3,
+                      currency="usd",
+                      token=token,
+                  )
+                  price = reconcile_price_against_ohlcv(
+                      canonical_price_usd=(
+                          checkpoint["canonical_price_usd"]
+                      ),
+                      canonical_timestamp=timestamp,
+                      candles=candles,
+                      candle_seconds=3600,
+                  )
+                  row.update({
+                      "canonical_timestamp": timestamp,
+                      "price_match": price["price_match"],
+                      "price_crosscheck_status": price["status"],
+                      "independent_candle_timestamp": (
+                          price.get("candle_timestamp")
+                      ),
+                      "independent_candle_low_usd": (
+                          price.get("candle_low_usd")
+                      ),
+                      "independent_candle_high_usd": (
+                          price.get("candle_high_usd")
+                      ),
+                      "outside_candle_bps": (
+                          price.get("outside_candle_bps")
+                      ),
+                  })
+              else:
+                  row.update({
+                      "canonical_timestamp": None,
+                      "price_match": None,
+                      "price_crosscheck_status": "no_swap_checkpoint",
+                  })
+              rows.append(row)
 
           mismatches = [
               row for row in rows
@@ -133,6 +290,14 @@ jobs:
           targeted = [
               row for row in rows
               if row.get("external_match") is not None
+          ]
+          price_targeted = [
+              row for row in rows
+              if row.get("price_crosscheck_scope") == "canonical_dex_swap"
+          ]
+          price_failures = [
+              row for row in price_targeted
+              if row.get("price_match") is not True
           ]
           if not targeted:
               raise SystemExit(
@@ -145,6 +310,12 @@ jobs:
                   f"{len(mismatches)} representative tokens: "
                   f"{[row['token'] for row in mismatches]}"
               )
+          if price_failures:
+              raise SystemExit(
+                  "independent DEX swap-price reconciliation failed for "
+                  f"{len(price_failures)} representative tokens: "
+                  f"{[row['token'] for row in price_failures]}"
+              )
 
           snapshot = write_jsonl_snapshot(
               rows,
@@ -154,14 +325,20 @@ jobs:
               provenance={
                   "source": "geckoterminal_public_api",
                   "purpose": (
-                      "independent representative pool identity "
-                      "cross-check; not canonical historical truth"
+                      "independent representative pool identity and "
+                      "historical swap-price cross-check; not canonical "
+                      "historical truth"
                   ),
                   "geckoterminal_api_version": (
                       GECKOTERMINAL_API_VERSION
                   ),
                   "network": "robinhood",
+                  "ohlcv_timeframe": "hour",
+                  "ohlcv_aggregate": 1,
+                  "ohlcv_tolerance_bps": "0",
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "v1_eligibility_run_id": expected_v1_run,
+                  "v2_eligibility_run_id": expected_v2_run,
                   "registry_run_id": int(
                       "${{ inputs.registry_run_id }}"
                   ),
@@ -176,11 +353,22 @@ jobs:
               "matched_canonical_dex_pools": sum(
                   row.get("external_match") is True for row in rows
               ),
+              "targeted_swap_price_checkpoints": len(price_targeted),
+              "matched_swap_price_checkpoints": sum(
+                  row.get("price_match") is True for row in rows
+              ),
+              "no_swap_checkpoint": sum(
+                  row.get("price_crosscheck_scope")
+                  == "no_swap_checkpoint"
+                  for row in rows
+              ),
               "no_registered_v4_pool": sum(
                   row["crosscheck_scope"] == "no_registered_v4_pool"
                   for row in rows
               ),
-              "mismatches": len(mismatches),
+              "pool_mismatches": len(mismatches),
+              "price_failures": len(price_failures),
+              "canonical_block_rpc_requests": block_rpc_requests,
               "geckoterminal_requests": client.requests_made,
               "geckoterminal_bytes": client.bytes_received,
               "crosscheck_sha256": snapshot["sha256"],
