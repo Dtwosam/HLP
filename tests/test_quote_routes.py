@@ -76,6 +76,126 @@ def test_v3_route_audit_skips_weth_after_causal_usdg_route(monkeypatch):
 
 
 
+def test_delayed_weth_route_discovers_first_known_pool_swap(monkeypatch):
+    calls = []
+
+    class DelayedRpc:
+        def iter_logs_chunked(
+            self,
+            start,
+            end,
+            *,
+            address,
+            topics,
+            chunk_size,
+            min_chunk_size,
+        ):
+            calls.append(
+                {
+                    "start": start,
+                    "end": end,
+                    "address": address,
+                    "topics": topics,
+                    "chunk_size": chunk_size,
+                    "min_chunk_size": min_chunk_size,
+                }
+            )
+            return iter([object()])
+
+    audit = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "first_launch_block": 100,
+        "launches": 5,
+        "versions": {"v2": 5},
+        "v3_causal_ready": False,
+        "v3_candidates": [{
+            "anchor_token": ROBINHOOD_WETH.lower(),
+            "pool": POOL,
+            "fee": 3000,
+        }],
+    }]
+    monkeypatch.setattr(
+        routes,
+        "decode_v3_swap",
+        lambda raw: SimpleNamespace(
+            pool=POOL,
+            liquidity=123,
+            sqrt_price_x96=2**96,
+            block_number=150,
+            transaction_index=2,
+            log_index=3,
+        ),
+    )
+    monkeypatch.setattr(
+        routes,
+        "read_v3_pool_static",
+        lambda rpc, pool, block: SimpleNamespace(
+            token0=TOKEN,
+            token1=ROBINHOOD_WETH.lower(),
+        ),
+    )
+
+    rows = routes.discover_delayed_v3_weth_routes(
+        DelayedRpc(),
+        audit,
+        from_block=120,
+        to_block=999,
+        max_forward_blocks=200,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["searched_from_block"] == 120
+    assert rows[0]["searched_to_block"] == 319
+    assert rows[0]["candidate_pools"] == [POOL]
+    assert rows[0]["delayed_route_ready"] is True
+    route = rows[0]["route"]
+    assert route["activation_block"] == 150
+    assert route["activation_transaction_index"] == 2
+    assert route["activation_log_index"] == 3
+    assert route["anchor_token"] == ROBINHOOD_WETH.lower()
+    assert route["route_type"] == "uniswap_v3_direct_weth_delayed"
+    assert route["first_observed_quote_per_token"] == "1"
+    assert route["first_observed_usd_price"] is None
+    assert calls == [{
+        "start": 120,
+        "end": 319,
+        "address": [POOL],
+        "topics": [routes.V3_SWAP_TOPIC],
+        "chunk_size": 2_000,
+        "min_chunk_size": 25,
+    }]
+
+
+def test_delayed_weth_route_skips_assets_without_weth_candidates():
+    audit = [{
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "first_launch_block": 100,
+        "launches": 5,
+        "versions": {"v2": 5},
+        "v3_causal_ready": False,
+        "v3_candidates": [{
+            "anchor_token": ROBINHOOD_USDG.lower(),
+            "pool": POOL,
+            "fee": 3000,
+        }],
+    }]
+
+    rows = routes.discover_delayed_v3_weth_routes(
+        object(),
+        audit,
+        from_block=100,
+        to_block=200,
+    )
+
+    assert rows[0]["candidate_pools"] == []
+    assert rows[0]["delayed_route_ready"] is False
+    assert rows[0]["route"] is None
+
+
 def test_select_v3_route_prefers_usdg_then_highest_liquidity():
     audit = [{
         "quote_token": TOKEN,
