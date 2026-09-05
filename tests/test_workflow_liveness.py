@@ -147,6 +147,17 @@ def test_viability_route_measurement_is_manual_bounded_and_canonical():
     assert '"evidence_run_id": evidence_run_id' in content
     assert '"source_eligibility_run_id": source_run_id' in content
     assert '"fallback_artifact_run_id": fallback_run_id' in content
+    assert '"registry_generation": (' in content
+    assert '"v1" if route == "pons_registry" else None' in content
+    assert '"registry_generation": "v2"' in content
+    assert "pons_registry V2 measurement source run changed" in content
+    assert "pons_registry V2 evidence run ID cannot be negative" in content
+    assert content.count(
+        '"measurement_run_id": int('
+    ) >= 2
+    assert content.count(
+        '"measurement_head_sha": os.environ["GITHUB_SHA"]'
+    ) >= 2
     assert "viability measurement source eligibility run changed" in content
     assert "viability measurement evidence run ID cannot be negative" in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
