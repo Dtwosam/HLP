@@ -61,6 +61,9 @@ def _fixtures():
         "dex_price_checkpoints_matched": 20,
         "dex_price_multi_checkpoint_tokens": 6,
         "dex_price_no_swap_checkpoint": 1,
+        "explorer_verified_transactions": 30,
+        "explorer_verified_launch_transactions": 10,
+        "explorer_verified_dex_swap_transactions": 20,
         "validation_sha256": "representative-sha",
     }
     route_projections = [
@@ -115,6 +118,13 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["representative_dex_price_checkpoints_targeted"] == 20
     assert report["representative_dex_price_checkpoints_matched"] == 20
     assert report["representative_dex_multi_checkpoint_tokens"] == 6
+    assert report["representative_explorer_verified_transactions"] == 30
+    assert report[
+        "representative_explorer_verified_launch_transactions"
+    ] == 10
+    assert report[
+        "representative_explorer_verified_dex_swap_transactions"
+    ] == 20
     assert report["projected_free_quota_days"] == 100
     assert report["required_acquisition_routes"] == list(
         REQUIRED_PHASE1_ACQUISITION_ROUTES
@@ -173,6 +183,24 @@ def test_phase1_acceptance_rejects_incomplete_checkpoint_coverage():
     fixtures[2]["dex_price_checkpoints_matched"] = 7
 
     with pytest.raises(ValueError, match="below targeted token coverage"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_missing_explorer_launch():
+    fixtures = list(_fixtures())
+    fixtures[2]["explorer_verified_launch_transactions"] = 9
+    fixtures[2]["explorer_verified_transactions"] = 29
+
+    with pytest.raises(ValueError, match="all 10 launches"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_explorer_dex_coverage_drift():
+    fixtures = list(_fixtures())
+    fixtures[2]["explorer_verified_dex_swap_transactions"] = 19
+    fixtures[2]["explorer_verified_transactions"] = 29
+
+    with pytest.raises(ValueError, match="explorer/DEX checkpoint coverage"):
         build_phase1_acceptance_report(*fixtures)
 
 
