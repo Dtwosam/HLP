@@ -417,18 +417,26 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v4-events-gap" in content
     assert "manifest_gap_aware_v4_recovery" in content
-    assert 'default: "100000"' in content
+    assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
-    assert "V4 gap plan exceeds two serialized 240-job waves" in content
-    assert content.count("max-parallel: 2") == 2
-    assert content.count("timeout-minutes: 30") >= 2
-    assert "matrix_1: ${{ steps.plan.outputs.matrix_1 }}" in content
-    assert "matrix_2: ${{ steps.plan.outputs.matrix_2 }}" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}" in content
+    assert "V4 gap plan exceeds four serialized 240-job waves" in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") >= 4
+    for index in range(1, 5):
+        assert (
+            f"matrix_{index}: ${{ steps.plan.outputs.matrix_{index} }}"
+            in content
+        )
+        assert (
+            f"matrix: ${{ fromJSON(needs.plan.outputs.matrix_{index}) }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
     assert "gap_wave_job_counts" in content
     assert "needs: [plan, recover_1]" in content
-    assert "needs: [plan, recover_1, recover_2]" in content
+    assert "needs: [plan, recover_2]" in content
+    assert "needs: [plan, recover_3]" in content
+    assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
     assert "time.sleep(" not in content
 
 
@@ -578,19 +586,27 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v1-v3-events-gap" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
-    assert 'default: "100000"' in content
+    assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
-    assert "V1 V3 gap plan exceeds two serialized 240-job waves" in content
+    assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
     assert "Pons V1 pools missing V3 Initialize" in content
-    assert content.count("max-parallel: 2") == 2
-    assert content.count("timeout-minutes: 30") >= 2
-    assert "matrix_1: ${{ steps.plan.outputs.matrix_1 }}" in content
-    assert "matrix_2: ${{ steps.plan.outputs.matrix_2 }}" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}" in content
-    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}" in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") >= 4
+    for index in range(1, 5):
+        assert (
+            f"matrix_{index}: ${{ steps.plan.outputs.matrix_{index} }}"
+            in content
+        )
+        assert (
+            f"matrix: ${{ fromJSON(needs.plan.outputs.matrix_{index}) }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
     assert "gap_wave_job_counts" in content
     assert "needs: [plan, recover_1]" in content
-    assert "needs: [plan, recover_1, recover_2]" in content
+    assert "needs: [plan, recover_2]" in content
+    assert "needs: [plan, recover_3]" in content
+    assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
     assert "time.sleep(" not in content
 
 
@@ -790,7 +806,7 @@ def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     assert "needs.v2_v4.result == 'failure'" in content
     assert "needs.v2_v4_recovery.result == 'success'" in content
     assert content.count('partial_run_id: ${{ format(\'{0}\', github.run_id) }}') == 2
-    assert content.count('max_gap_blocks: "100000"') == 2
+    assert content.count('max_gap_blocks: "50000"') == 2
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
     assert content.count("format('{0}', github.run_id)") == 4
     assert "cancel-in-progress: false" in content
@@ -1299,7 +1315,7 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert content.count('partial_run_id: "33982556591"') == 2
     assert 'source_registry_run_id: "33911022718"' in content
     assert 'transition_run_id: "33912452330"' in content
-    assert content.count('max_gap_blocks: "100000"') == 2
+    assert content.count('max_gap_blocks: "50000"') == 2
     assert "phase1-pons-v1-v3-recover-gaps.yml" in content
     assert "phase1-pons-v2-v4-recover-gaps.yml" in content
     assert "time.sleep(" not in content
