@@ -429,6 +429,9 @@ def test_quote_fallback_merge_is_reusable_without_network_trigger():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "pons-merge-quote-usd-tapes" in content
+    assert "merged quote fallback must have exactly 25 causal initial" in content
+    assert "merged quote fallback must own exactly 30 feedless quote" in content
+    assert "owned_quote_assets" in content
 
 
 def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
