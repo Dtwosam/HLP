@@ -79,6 +79,9 @@ def summarize_sharded_manifest_coverage(
         "shards": len(shards),
         "covered_blocks": last_block - first_block + 1,
         "continuous": True,
+        "required_start_block": (
+            None if required_start is None else int(required_start)
+        ),
         "snapshot_head_block": snapshot_head,
     }
 
@@ -160,9 +163,19 @@ def validate_representative_coverage_report(
             raise ValueError(
                 f"representative source does not reach snapshot head: {label}"
             )
-        if int(row.get("first_block", snapshot_head + 1)) > sample_start_block:
+        required_start = row.get("required_start_block")
+        if required_start is None:
             raise ValueError(
-                f"representative source starts after sample window: {label}"
+                f"representative source has no required start: {label}"
+            )
+        required_start = int(required_start)
+        if int(row.get("first_block", snapshot_head + 1)) > required_start:
+            raise ValueError(
+                f"representative source starts after required window: {label}"
+            )
+        if required_start > snapshot_head:
+            raise ValueError(
+                f"representative source required start exceeds snapshot: {label}"
             )
         if int(row.get("shards", 0)) <= 0:
             raise ValueError(
@@ -181,7 +194,10 @@ def validate_representative_coverage_report(
             )
 
     transfers = by_label["representative_transfers"]
-    if int(transfers["first_block"]) != int(sample_start_block):
+    if (
+        int(transfers["first_block"]) != int(sample_start_block)
+        or int(transfers["required_start_block"]) != int(sample_start_block)
+    ):
         raise ValueError(
             "representative transfer coverage does not start at earliest sample"
         )
