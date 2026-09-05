@@ -404,12 +404,15 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert 'default: "33926428274"' in content
     assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
     assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
-    assert "pons-select-v4-quote-routes" in content
+    assert "select_v4_quote_routes" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
     assert "v3_run_id" in content
-    assert "only SKHY may remain unresolved in the V4 fallback" in content
-    assert "V4 fallback must select four unique routes" in content
-    assert "SKHY cannot be owned by both V3 and V4" in content
+    assert "skhy_v4_run_id" in content
+    assert "phase1-pons-skhy-v4-known-pool-segmented" in content
+    assert "25-route V3 fallback requires resolved SKHY V4" in content
+    assert "V4 fallback must select four or five unique routes" in content
+    assert "SKHY must be owned by exactly one of canonical V3 or V4" in content
+    assert '"ownership_mode": ownership_mode' in content
     assert "externally_resolved_assets" in content
     assert "residual_quote_assets" in content
     assert "SHARD_COUNT: '64'" in content
@@ -448,8 +451,10 @@ def test_generic_quote_fallback_owns_exact_26_v3_plus_4_v4():
     assert "\n  push:" not in trigger_block
     assert "phase1-pons-v3-quote-fallback-full" in content
     assert "phase1-pons-v4-quote-fallback-full" in content
-    assert "generic fallback requires 26 unique promoted V3 routes" in content
-    assert "generic fallback requires four unique V4 routes" in content
+    assert "generic fallback requires exact 26/4 or 25/5 V3/V4" in content
+    assert "generic fallback requires exactly one SKHY venue owner" in content
+    assert "26/4 generic fallback requires SKHY ownership in V3" in content
+    assert "25/5 generic fallback requires SKHY ownership in V4" in content
     assert "V3/V4 fallback ownership overlaps" in content
     assert "route ownership and merged quote/USD ownership disagree" in content
     assert "merged quote fallback must own exactly 30 feedless quote" in content

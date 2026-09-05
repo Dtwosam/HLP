@@ -205,27 +205,34 @@ sequential <=250k-block segments** with early stopping. If it resolves, USD
 conversion is deferred until replay and composes each SKHY/WETH swap with the
 event-ordered canonical WETH/USDG anchor, avoiding end-of-block lookahead.
 
-A resolved SKHY/WETH route is folded directly into the canonical V3 fallback
-route set: **25 direct-USDG routes + 1 delayed SKHY/WETH route = 26 V3-owned
-feedless assets**, leaving exactly **4** assets for V4. V4 then fails closed
-unless its one non-V4 residual is exactly SKHY and the canonical 26-route V3
-manifest proves that ownership. The generic fallback requires disjoint
-**26 V3 + 4 V4 = 30** assets. This does **not** add another V3 full-history
-block scan: SKHY becomes a 26th address in the same single full-history V3
-route scan, so the frozen **total processed-block geometry** remains unchanged;
-only response volume can change. After the measured keyless DELL oracle
-500k-block timeout, the execution partition was tightened to **64 V3 shards**
-and **64 V4 quote-fallback shards** with max-parallel 2. This changes only
-per-job span and retry safety, not the canonical full-history block workload.
+SKHY ownership is now fully fail-closed across both possible venues. If the
+SKHY/WETH continuation resolves, the canonical split is **25 direct-USDG V3 +
+1 delayed SKHY/WETH V3 = 26 V3**, plus **4 V4** routes. If the V3 continuation
+instead proves an exhaustive no-route result through snapshot head, the staged
+known-pool V4 continuation can promote the frozen SKHY/USDG pool and the
+canonical split becomes **25 V3 + 5 V4**. The generic fallback accepts only
+those two disjoint ownership modes, requires exactly **30** feedless assets,
+requires exactly one SKHY owner, and still requires exactly **25 causal initial
+states**. If neither SKHY route resolves, pricing remains incomplete and the
+lifecycle universe freeze stays blocked.
 
-The original V4 continuation path remains available and supports fail-closed
-`known_pool_only` mode. For SKHY it skips redundant Initialize discovery and
-scans only Swap logs for the already-frozen candidate pool ID. The primitive is
-capped at **500k blocks per 20-minute job**, while the canonical segmented
-wrapper now uses **seven <=250k-block segments** after the measured keyless
-timeout and stops as soon as a segment resolves the frozen route. Finalization
-selects the latest completed segment and publishes an artifact only if SKHY
-resolved or the scan reached snapshot head with zero unsearched blocks. A separate archive deployment-boundary probe
+Neither ownership mode adds another full-history venue scan: SKHY is simply an
+additional address/pool in the already-required V3 or V4 quote scan, so the
+frozen **total processed-block geometry** remains unchanged; only response
+volume can change. After the measured keyless DELL oracle 500k-block timeout,
+the execution partition was tightened to **64 V3 shards** and **64 V4
+quote-fallback shards** with max-parallel 2. This changes only per-job span and
+retry safety, not the canonical full-history block workload.
+
+The V4 continuation path supports fail-closed `known_pool_only` mode. For
+SKHY it skips redundant Initialize discovery and scans only Swap logs for the
+already-frozen candidate pool ID. The primitive is capped at **500k blocks per
+20-minute job**, while the canonical segmented wrapper uses **seven
+<=250k-block segments**, stops as soon as a segment resolves the frozen route,
+and can now be promoted directly into the alternate 25/5 canonical ownership
+path. Finalization selects the latest completed segment and publishes an
+artifact only if SKHY resolved or the scan reached snapshot head with zero
+unsearched blocks. A separate archive deployment-boundary probe
 proved the SKHY token contract already existed from block **8,691,227**, so
 the missing price history is a liquidity/venue-coverage problem rather than a
 token-deployment gap. The official Chainlink directory inventory also has no

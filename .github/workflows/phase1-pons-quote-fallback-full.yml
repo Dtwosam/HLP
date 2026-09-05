@@ -32,6 +32,7 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
 
 jobs:
   merge:
@@ -69,6 +70,7 @@ jobs:
             --snapshot-head "$SNAPSHOT_HEAD"
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           states = [
@@ -113,13 +115,19 @@ jobs:
           v4_tokens = {
               row["quote_token"].lower() for row in v4_routes
           }
-          if len(v3_routes) != 26 or len(v3_tokens) != 26:
+          split = (len(v3_routes), len(v4_routes))
+          if split not in {(26, 4), (25, 5)}:
               raise SystemExit(
-                  "generic fallback requires 26 unique promoted V3 routes"
+                  "generic fallback requires exact 26/4 or 25/5 V3/V4 "
+                  f"ownership, got {split[0]}/{split[1]}"
               )
-          if len(v4_routes) != 4 or len(v4_tokens) != 4:
+          if len(v3_tokens) != len(v3_routes):
               raise SystemExit(
-                  "generic fallback requires four unique V4 routes"
+                  "generic fallback V3 routes contain duplicate quote ownership"
+              )
+          if len(v4_tokens) != len(v4_routes):
+              raise SystemExit(
+                  "generic fallback V4 routes contain duplicate quote ownership"
               )
           overlap = sorted(v3_tokens & v4_tokens)
           if overlap:
@@ -129,6 +137,19 @@ jobs:
           if v3_tokens | v4_tokens != owned_tokens:
               raise SystemExit(
                   "route ownership and merged quote/USD ownership disagree"
+              )
+          skhy = os.environ["SKHY_TOKEN"].lower()
+          if (skhy in v3_tokens) == (skhy in v4_tokens):
+              raise SystemExit(
+                  "generic fallback requires exactly one SKHY venue owner"
+              )
+          if split == (26, 4) and skhy not in v3_tokens:
+              raise SystemExit(
+                  "26/4 generic fallback requires SKHY ownership in V3"
+              )
+          if split == (25, 5) and skhy not in v4_tokens:
+              raise SystemExit(
+                  "25/5 generic fallback requires SKHY ownership in V4"
               )
           if len(state_tokens) != 25:
               raise SystemExit(
@@ -147,6 +168,11 @@ jobs:
               "owned_quote_assets": len(owned_tokens),
               "v3_routes": len(v3_routes),
               "v4_routes": len(v4_routes),
+              "ownership_mode": (
+                  "26_v3_4_v4" if split == (26, 4)
+                  else "25_v3_5_v4"
+              ),
+              "skhy_owner": "v3" if skhy in v3_tokens else "v4",
               "v3_v4_overlap_assets": 0,
               "updates": len(updates),
               "v3_run_id": int("${{ inputs.v3_run_id }}"),

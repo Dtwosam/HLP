@@ -19,8 +19,13 @@ on:
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
       v3_run_id:
-        description: "Successful canonical 26-route V3 fallback run proving SKHY/WETH ownership"
+        description: "Successful canonical 25- or 26-route V3 fallback run"
         required: true
+        type: string
+      skhy_v4_run_id:
+        description: "Optional resolved SKHY V4 segmented continuation when V3 leaves SKHY unresolved"
+        required: false
+        default: ""
         type: string
   workflow_call:
     inputs:
@@ -37,8 +42,13 @@ on:
         required: true
         type: string
       v3_run_id:
-        description: "Canonical 26-route V3 fallback run proving SKHY/WETH ownership"
+        description: "Canonical 25- or 26-route V3 fallback run"
         required: true
+        type: string
+      skhy_v4_run_id:
+        description: "Optional resolved SKHY V4 segmented continuation"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -78,16 +88,23 @@ jobs:
           path: canonical-v3
           run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.skhy_v4_run_id != '' }}
+        with:
+          name: phase1-pons-skhy-v4-known-pool-segmented
+          path: skhy-v4
+          run-id: ${{ inputs.skhy_v4_run_id }}
+          github-token: ${{ github.token }}
       - name: Freeze deterministic V4 fallback routes
         run: |
           mkdir -p artifacts
-          hlp pons-select-v4-quote-routes \
-            --probe "probe/${{ inputs.probe_filename }}" \
-            --out artifacts/pons-v4-quote-routes.jsonl
           python - <<'PY'
           import json
           import os
           from pathlib import Path
+
+          from hlp.data.quote_v4_routes import select_v4_quote_routes
+          from hlp.data.snapshot import write_jsonl_snapshot
 
           probe_rows = [
               json.loads(line)
@@ -96,19 +113,19 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
-          routes = [
-              json.loads(line)
-              for line in Path(
-                  "artifacts/pons-v4-quote-routes.jsonl"
-              ).read_text().splitlines()
-              if line.strip()
-          ]
-          assert routes, "probe selected no V4 fallback routes"
-          unresolved = [
-              row for row in probe_rows
-              if not row.get("causal_route_ready")
-              and not row.get("delayed_route_ready")
-          ]
+          if len(probe_rows) != 5:
+              raise SystemExit(
+                  "frozen residual V4 probe must contain exactly five "
+                  f"V3-miss quote assets, got {len(probe_rows)}"
+              )
+          probe_tokens = {
+              row["quote_token"].lower() for row in probe_rows
+          }
+          if len(probe_tokens) != 5:
+              raise SystemExit(
+                  "frozen residual V4 probe must contain five unique assets"
+              )
+
           promoted_v3 = [
               json.loads(line)
               for line in Path(
@@ -116,6 +133,9 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          v3_tokens = {
+              row["quote_token"].lower() for row in promoted_v3
+          }
           v3_manifest = json.loads(
               Path(
                   "canonical-v3/pons-v3-quote-routes.jsonl.manifest.json"
@@ -127,91 +147,195 @@ jobs:
               or int(v3_provenance.get("snapshot_head_block", -1))
               != int(os.environ["SNAPSHOT_HEAD"])
               or v3_provenance.get("source")
-              != "causal_v3_routes_plus_delayed_skhy_weth"
-              or int(v3_provenance.get("routes", -1)) != 26
+              != "causal_v3_routes_with_optional_delayed_skhy_weth"
           ):
               raise SystemExit(
                   "canonical V3 route-manifest provenance changed"
               )
-          if len(probe_rows) != 5:
+          if len(promoted_v3) not in {25, 26}:
               raise SystemExit(
-                  "frozen residual V4 probe must contain exactly five "
-                  f"V3-miss quote assets, got {len(probe_rows)}"
+                  "canonical V3 fallback must contain 25 or 26 routes"
               )
-          if len(promoted_v3) != 26:
+          if len(v3_tokens) != len(promoted_v3):
               raise SystemExit(
-                  "canonical V3 fallback must contain exactly 26 routes"
+                  "canonical V3 fallback contains duplicate quote ownership"
               )
-          skhy_v3 = [
-              row for row in promoted_v3
-              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
-          ]
-          if len(skhy_v3) != 1:
+          if int(v3_provenance.get("routes", -1)) != len(promoted_v3):
               raise SystemExit(
-                  "canonical V3 fallback must contain exactly one SKHY route"
-              )
-          if (
-              skhy_v3[0]["anchor_token"].lower()
-              != os.environ["WETH"].lower()
-              or skhy_v3[0]["route_type"]
-              != "uniswap_v3_direct_weth_delayed"
-          ):
-              raise SystemExit(
-                  "canonical SKHY V3 ownership is not the frozen WETH route"
+                  "canonical V3 manifest route count disagrees with artifact"
               )
 
-          if len(unresolved) != 1:
-              raise SystemExit(
-                  "V4 fallback must leave exactly one externally-owned "
-                  f"residual, got {len(unresolved)}"
+          skhy = os.environ["SKHY_TOKEN"].lower()
+          residual_v3_owned = probe_tokens & v3_tokens
+          skhy_v4_run = "${{ inputs.skhy_v4_run_id }}".strip()
+          if len(promoted_v3) == 26:
+              if residual_v3_owned != {skhy}:
+                  raise SystemExit(
+                      "26-route V3 ownership must own exactly SKHY among "
+                      "the five residual assets"
+                  )
+              if (
+                  v3_provenance.get("skhy_v3_completion_status")
+                  != "route_resolved"
+                  or v3_provenance.get("skhy_owned_by_v3") is not True
+              ):
+                  raise SystemExit(
+                      "26-route V3 manifest does not prove resolved SKHY"
+                  )
+              ownership_mode = "26_v3_4_v4"
+          else:
+              if residual_v3_owned:
+                  raise SystemExit(
+                      "25-route V3 fallback must own none of the five "
+                      "residual assets"
+                  )
+              if (
+                  v3_provenance.get("skhy_v3_completion_status")
+                  != "searched_to_snapshot_head"
+                  or v3_provenance.get("skhy_owned_by_v3") is not False
+              ):
+                  raise SystemExit(
+                      "25-route V3 manifest does not prove exhaustive "
+                      "unresolved SKHY/WETH search"
+                  )
+              if not skhy_v4_run:
+                  raise SystemExit(
+                      "25-route V3 fallback requires resolved SKHY V4 "
+                      "segmented continuation"
+                  )
+              summary = json.loads(
+                  Path(
+                      "skhy-v4/"
+                      "pons-skhy-v4-known-pool-segmented-summary.json"
+                  ).read_text()
               )
-          external = unresolved[0]
-          if external["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
-              raise SystemExit(
-                  "only SKHY may remain unresolved in the V4 fallback"
-              )
+              if (
+                  int(summary.get("snapshot_head_block", -1))
+                  != int(os.environ["SNAPSHOT_HEAD"])
+                  or int(summary.get("source_probe_run_id", -1))
+                  != int("${{ inputs.probe_run_id }}")
+                  or summary.get("quote_token", "").lower() != skhy
+                  or summary.get("route_ready") is not True
+              ):
+                  raise SystemExit(
+                      "SKHY V4 continuation provenance or resolution changed"
+                  )
+              skhy_rows = [
+                  json.loads(line)
+                  for line in Path(
+                      "skhy-v4/"
+                      "pons-skhy-v4-known-pool-segmented.jsonl"
+                  ).read_text().splitlines()
+                  if line.strip()
+              ]
+              skhy_rows = [
+                  row for row in skhy_rows
+                  if row["quote_token"].lower() == skhy
+              ]
+              if len(skhy_rows) != 1:
+                  raise SystemExit(
+                      "resolved SKHY V4 artifact must contain exactly one "
+                      "SKHY row"
+                  )
+              skhy_row = skhy_rows[0]
+              if not (
+                  skhy_row.get("causal_route_ready")
+                  or skhy_row.get("delayed_route_ready")
+              ):
+                  raise SystemExit(
+                      "resolved SKHY V4 row is not route-ready"
+                  )
+              replaced = 0
+              promoted_probe = []
+              for row in probe_rows:
+                  if row["quote_token"].lower() == skhy:
+                      if (
+                          int(row["first_launch_block"])
+                          != int(skhy_row["first_launch_block"])
+                          or int(row["launches"]) != int(skhy_row["launches"])
+                      ):
+                          raise SystemExit(
+                              "SKHY V4 continuation identity disagrees with "
+                              "frozen residual probe"
+                          )
+                      promoted_probe.append(skhy_row)
+                      replaced += 1
+                  else:
+                      promoted_probe.append(row)
+              if replaced != 1:
+                  raise SystemExit(
+                      "frozen residual V4 probe does not contain exactly one "
+                      "SKHY row"
+                  )
+              probe_rows = promoted_probe
+              ownership_mode = "25_v3_5_v4"
 
-          residual_tokens = {
-              row["quote_token"].lower() for row in probe_rows
-          }
+          routes = select_v4_quote_routes(probe_rows)
           route_tokens = {
               row["quote_token"].lower() for row in routes
           }
-          if len(routes) != 4 or len(route_tokens) != 4:
-              raise SystemExit(
-                  f"V4 fallback must select four unique routes, got {len(routes)}"
-              )
-          if (
-              route_tokens | {os.environ["SKHY_TOKEN"].lower()}
-              != residual_tokens
-          ):
+          expected_v4_tokens = probe_tokens - v3_tokens
+          if route_tokens != expected_v4_tokens:
               raise SystemExit(
                   "V3/V4 residual ownership does not cover the five frozen "
                   "V3 misses exactly"
               )
-          if os.environ["SKHY_TOKEN"].lower() in route_tokens:
-              raise SystemExit("SKHY cannot be owned by both V3 and V4")
-          assert all(
+          if len(routes) != len(expected_v4_tokens):
+              raise SystemExit(
+                  "V4 fallback route count disagrees with expected ownership"
+              )
+          if len(routes) not in {4, 5}:
+              raise SystemExit(
+                  "V4 fallback must select four or five unique routes"
+              )
+          if bool(skhy in v3_tokens) == bool(skhy in route_tokens):
+              raise SystemExit(
+                  "SKHY must be owned by exactly one of canonical V3 or V4"
+              )
+          if not all(
               row["anchor_token"].lower()
               == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
               for row in routes
-          )
+          ):
+              raise SystemExit(
+                  "canonical V4 fallback must use direct USDG routes"
+              )
+
           earliest = min(int(row["activation_block"]) for row in routes)
           configured = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
-          assert earliest >= configured, (earliest, configured)
+          if earliest < configured:
+              raise SystemExit(
+                  "canonical V4 route activates before frozen scan start"
+              )
+
+          write_jsonl_snapshot(
+              routes,
+              output=Path("artifacts/pons-v4-quote-routes.jsonl"),
+              provenance={
+                  "source": "v3_aware_v4_quote_route_selection",
+                  "chain_id": 4663,
+                  "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+                  "probe_run_id": int("${{ inputs.probe_run_id }}"),
+                  "v3_run_id": int("${{ inputs.v3_run_id }}"),
+                  "skhy_v4_run_id": (
+                      int(skhy_v4_run) if skhy_v4_run else None
+                  ),
+                  "ownership_mode": ownership_mode,
+                  "routes": len(routes),
+              },
+          )
           report = {
               "residual_quote_assets": len(probe_rows),
-              "v4_unresolved_assets": 1,
-              "externally_resolved_assets": 1,
-              "externally_resolved_quote_token": (
-                  os.environ["SKHY_TOKEN"].lower()
-              ),
+              "externally_resolved_assets": len(residual_v3_owned),
+              "externally_resolved_quote_tokens": sorted(residual_v3_owned),
               "unresolved_assets": 0,
               "selected_routes": len(routes),
               "covered_launches": sum(int(row["launches"]) for row in routes),
-              "v3_run_id": int(
-                  "${{ inputs.v3_run_id }}"
+              "v3_run_id": int("${{ inputs.v3_run_id }}"),
+              "skhy_v4_run_id": (
+                  int(skhy_v4_run) if skhy_v4_run else None
               ),
+              "ownership_mode": ownership_mode,
               "earliest_activation_block": earliest,
               "routes": [
                   {
@@ -230,6 +354,7 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
+      - uses: actions/upload-artifact@v4
       - uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v4-quote-routes-selected
@@ -398,6 +523,11 @@ jobs:
                   "probe_run_id": int("${{ inputs.probe_run_id }}"),
                   "v3_run_id": int(
                       "${{ inputs.v3_run_id }}"
+                  ),
+                  "skhy_v4_run_id": (
+                      int("${{ inputs.skhy_v4_run_id }}")
+                      if "${{ inputs.skhy_v4_run_id }}"
+                      else None
                   ),
                   "shards": manifests,
               },
