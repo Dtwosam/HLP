@@ -10,8 +10,62 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    if: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') || contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse rescue while frozen parent is active or successful
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          run_id = 33_982_556_591
+          request = urllib.request.Request(
+              (
+                  f"{os.environ['GITHUB_API_URL']}/repos/"
+                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}"
+              ),
+              headers={
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              run = json.load(response)
+
+          if run.get("status") != "completed":
+              raise SystemExit(
+                  "live venue rescue is blocked while source parent is active"
+              )
+          if run.get("conclusion") == "success":
+              raise SystemExit(
+                  "live venue rescue is unnecessary after source success"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          ):
+              raise SystemExit("live venue rescue source workflow path changed")
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("live venue rescue source branch changed")
+
+          print(json.dumps({
+              "source_run_id": run_id,
+              "status": run.get("status"),
+              "conclusion": run.get("conclusion"),
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
   v1_v3_rescue:
-    if: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
     uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
     with:
       source_registry_run_id: "33911022718"
@@ -21,7 +75,8 @@ jobs:
     secrets: inherit
 
   v2_v4_rescue:
-    if: ${{ contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
     uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
     with:
       transition_run_id: "33912452330"
