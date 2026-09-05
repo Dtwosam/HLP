@@ -8,6 +8,12 @@ on:
         required: true
         default: "33911022718"
         type: string
+  workflow_call:
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        type: string
 
 permissions:
   contents: read
