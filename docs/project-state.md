@@ -174,12 +174,23 @@ Pons use, so the earlier intervals remain explicitly partial. A non-overlapping
 fallback now covers **3,870 launches across 4 of the 5 original V3 misses**.
 
 Only **SKHY / 129 launches** remains unresolved. Its bounded V4 search is
-complete through block **52,863,525**, leaving 1,622,510 blocks to the frozen
-snapshot head. A separate archive deployment-boundary probe proved the SKHY
-token contract already existed from block **8,691,227**, so the missing price
-history is a liquidity/venue-coverage problem rather than a token-deployment
-gap. The official Chainlink directory inventory also has no SKHY/SK hynix
-near-match, so no feed alias is assumed.
+complete through block **52,863,525**, leaving **1,622,510** blocks to the
+frozen snapshot head. The cumulative probe already found one exact SKHY/USDG
+PoolManager candidate: pool id
+`0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601`,
+initialized at block **52,798,959** with fee **10,000**, tick spacing **200**
+and no hooks. No positive-liquidity swap was observed through the prior search
+end.
+
+The V4 continuation path now supports a fail-closed `known_pool_only` mode.
+For SKHY this skips redundant future Initialize discovery and scans only Swap
+logs for already-frozen candidate pool IDs, roughly halving the remaining
+log-query shape versus the generic discovery continuation. It refuses that
+mode when an unresolved row has no existing candidate. A separate archive
+deployment-boundary probe proved the SKHY token contract already existed from
+block **8,691,227**, so the missing price history is a liquidity/venue-coverage
+problem rather than a token-deployment gap. The official Chainlink directory
+inventory also has no SKHY/SK hynix near-match, so no feed alias is assumed.
 
 V3 and V4 fallback tapes remain venue-specific for provenance, then merge into
 one disjoint generic quote/USD fallback artifact before both V1 and V2
