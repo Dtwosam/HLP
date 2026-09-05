@@ -103,6 +103,130 @@ jobs:
           path: oracle
           run-id: ${{ inputs.oracle_run_id }}
           github-token: ${{ github.token }}
+      - name: Validate frozen V1 lifecycle input manifests
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          CHAIN_ID = 4663
+
+          specs = [
+              (
+                  Path(
+                      "registry/pons-full-launch-registry.jsonl.manifest.json"
+                  ),
+                  494_639,
+                  "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed",
+                  True,
+              ),
+              (
+                  Path(
+                      "quotes/pons-quote-registry.jsonl.manifest.json"
+                  ),
+                  57,
+                  "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc",
+                  False,
+              ),
+              (
+                  Path("v3/pons-v1-v3-full.jsonl.manifest.json"),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+          ]
+
+          validated = []
+          for (
+              path,
+              expected_records,
+              expected_sha,
+              require_snapshot,
+          ) in specs:
+              if not path.exists():
+                  raise SystemExit(
+                      f"required V1 lifecycle manifest is missing: {path}"
+                  )
+              manifest = json.loads(path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if require_snapshot and int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if (
+                  expected_records is not None
+                  and int(manifest["records"]) != expected_records
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle record count changed: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              if (
+                  expected_sha is not None
+                  and manifest["sha256"] != expected_sha
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle SHA changed: {path} "
+                      f"expected={expected_sha} "
+                      f"actual={manifest['sha256']}"
+                  )
+              validated.append({
+                  "manifest": str(path),
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+                  "snapshot_required": require_snapshot,
+              })
+
+          report = {
+              "chain_id": CHAIN_ID,
+              "snapshot_head_block": HEAD,
+              "validated_manifests": validated,
+              "validated_manifest_count": len(validated),
+          }
+          Path(
+              "artifacts/pons-v1-input-manifest-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
       - name: Validate complete direct-USD coverage for V1 quotes
         run: |
           python - <<'PY'
