@@ -166,6 +166,19 @@ jobs:
               raw = base64.b64decode(payload.get("content") or "")
               return json.loads(raw)
 
+          def require_ancestor(label, sha):
+              if len(sha) != 40:
+                  raise SystemExit(f"{label} head SHA is invalid")
+              comparison = get(
+                  f"/repos/{repo}/compare/{sha}..."
+                  f"{os.environ['GITHUB_SHA']}"
+              )
+              if comparison.get("status") not in {"ahead", "identical"}:
+                  raise SystemExit(
+                      f"{label} head is not an ancestor of finalizer HEAD: "
+                      f"status={comparison.get('status')} sha={sha}"
+                  )
+
           def artifact_names(run_id):
               names = set()
               page = 1
@@ -217,6 +230,10 @@ jobs:
               raise SystemExit(
                   "viability ledger evidence branch changed"
               )
+          require_ancestor(
+              "viability evidence",
+              str(evidence.get("head_sha") or ""),
+          )
 
           evidence_artifacts = artifact_names(evidence_run_id)
           required_evidence = {
@@ -254,10 +271,10 @@ jobs:
                       f"viability route branch mismatch: {route}"
                   )
               route_head_sha = str(run.get("head_sha") or "")
-              if len(route_head_sha) != 40:
-                  raise SystemExit(
-                      f"viability route head SHA is invalid: {route}"
-                  )
+              require_ancestor(
+                  f"viability route {route}",
+                  route_head_sha,
+              )
               launch_readiness = json_file_at_ref(
                   ".github/phase1-pons-viability-ready.json",
                   route_head_sha,
@@ -321,6 +338,7 @@ jobs:
               "route_run_ids": route_run_ids,
               "distinct_route_run_ids": len(set(route_run_ids.values())),
               "route_launch_evidence_bound": True,
+              "evidence_and_routes_are_ancestors": True,
               "status": "ready_for_final_acceptance",
           }, sort_keys=True))
           PY
