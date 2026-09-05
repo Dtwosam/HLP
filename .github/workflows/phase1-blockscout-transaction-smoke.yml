@@ -21,7 +21,7 @@ jobs:
           import urllib.request
           from pathlib import Path
 
-          RPC = "https://rpc.testnet.chain.robinhood.com"
+          RPC = "https://rpc.mainnet.chain.robinhood.com"
           BLOCKSCOUT = "https://robinhoodchain.blockscout.com"
           HEAD = 54_486_035
           MAX_BLOCK_LOOKBACK = 20
@@ -53,6 +53,15 @@ jobs:
 
           rpc_requests = 0
           rpc_bytes = 0
+
+          chain_id, size = rpc("eth_chainId", [])
+          rpc_requests += 1
+          rpc_bytes += size
+          if int(chain_id, 16) != 4663:
+              raise SystemExit(
+                  f"Robinhood RPC chain id changed: {chain_id}"
+              )
+
           selected = None
           for block in range(HEAD, HEAD - MAX_BLOCK_LOOKBACK, -1):
               result, size = rpc(
