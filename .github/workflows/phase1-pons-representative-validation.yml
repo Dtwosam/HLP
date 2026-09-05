@@ -31,6 +31,34 @@ on:
         description: "Successful representative DEX cross-check run"
         required: true
         type: string
+      registry_run_id:
+        description: "Canonical full Pons registry run"
+        required: true
+        type: string
+      v2_curve_run_id:
+        description: "Canonical full Pons V2 curve run"
+        required: true
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Canonical WETH/USDG anchor run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Canonical stock-oracle run"
+        required: true
+        type: string
+      fallback_run_id:
+        description: "Eligibility parent containing quote fallback artifacts"
+        required: true
+        type: string
   workflow_call:
     inputs:
       sample_run_id:
@@ -52,6 +80,27 @@ on:
         required: true
         type: string
       dex_crosscheck_run_id:
+        required: true
+        type: string
+      registry_run_id:
+        required: true
+        type: string
+      v2_curve_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      fallback_run_id:
         required: true
         type: string
 
@@ -127,6 +176,13 @@ jobs:
           v1_run = int("${{ inputs.v1_eligibility_run_id }}")
           v2_run = int("${{ inputs.v2_eligibility_run_id }}")
           market_path_run = int("${{ inputs.market_path_run_id }}")
+          registry_run = int("${{ inputs.registry_run_id }}")
+          v2_curve_run = int("${{ inputs.v2_curve_run_id }}")
+          transition_run = int("${{ inputs.transition_run_id }}")
+          quote_audit_run = int("${{ inputs.quote_audit_run_id }}")
+          anchor_run = int("${{ inputs.anchor_run_id }}")
+          oracle_run = int("${{ inputs.oracle_run_id }}")
+          fallback_run = int("${{ inputs.fallback_run_id }}")
 
           sample_summary = json.loads(
               Path(
@@ -197,6 +253,15 @@ jobs:
               raise SystemExit(
                   "representative market path V2 venue run mismatch"
               )
+          for field, expected in (
+              ("registry_run_id", registry_run),
+              ("v2_curve_run_id", v2_curve_run),
+              ("transition_run_id", transition_run),
+          ):
+              if int(market.get(field, -1)) != expected:
+                  raise SystemExit(
+                      f"representative market path {field} mismatch"
+                  )
           if int(
               priced.get("market_path_run_id", -1)
           ) != market_path_run:
@@ -216,6 +281,24 @@ jobs:
           ) != int("${{ inputs.priced_path_run_id }}"):
               raise SystemExit(
                   "representative DEX priced-path run mismatch"
+              )
+          for field, expected in (
+              ("quote_audit_run_id", quote_audit_run),
+              ("anchor_run_id", anchor_run),
+              ("oracle_run_id", oracle_run),
+              ("fallback_run_id", fallback_run),
+          ):
+              if int(priced.get(field, -1)) != expected:
+                  raise SystemExit(
+                      f"representative priced path {field} mismatch"
+                  )
+          if int(dex.get("registry_run_id", -1)) != registry_run:
+              raise SystemExit(
+                  "representative DEX registry run mismatch"
+              )
+          if int(dex.get("transition_run_id", -1)) != transition_run:
+              raise SystemExit(
+                  "representative DEX transition run mismatch"
               )
           print(json.dumps({
               "sample_run_id": sample_run,
