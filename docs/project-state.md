@@ -337,6 +337,10 @@ research threshold or starting another archive crawl:
 
 - a deterministic freeze selects exactly five measured >=5x runners and five
   lifecycle failures, with both Pons generations represented;
+- an artifact-only market-path freeze stream-filters the already-frozen V1
+  V3, V2 curve, graduation/registration and V4 tapes down to the exact
+  representative cohort, preserving each token's launch-to-market event path
+  without issuing new provider requests;
 - a resumable Transfer backfill reconstructs exact holder balances/counts and
   fails closed unless every sampled token begins with a launch-time mint;
 - GeckoTerminal is used only as independent DEX evidence, never canonical
@@ -354,9 +358,9 @@ research threshold or starting another archive crawl:
 - a manual GitHub-Actions accounting workflow measures reported request
   counters and artifact bytes rather than estimating provider usage;
 - an artifact-only representative validation join requires all 10 tokens to
-  have consistent lifecycle pricing evidence, holder replay, pool identity
-  reconciliation and explicit DEX price-cross-check state before it can
-  publish a complete validation bundle.
+  have consistent lifecycle pricing evidence, detailed launch/trade path
+  coverage, holder replay, pool identity reconciliation and explicit DEX
+  price-cross-check state before it can publish a complete validation bundle.
 
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
