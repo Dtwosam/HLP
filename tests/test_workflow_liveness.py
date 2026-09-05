@@ -432,6 +432,8 @@ def test_quote_fallback_merge_is_reusable_without_network_trigger():
     assert "merged quote fallback must have exactly 25 causal initial" in content
     assert "merged quote fallback must own exactly 30 feedless quote" in content
     assert "owned_quote_assets" in content
+    assert "SNAPSHOT_HEAD: '54486035'" in content
+    assert '--snapshot-head "$SNAPSHOT_HEAD"' in content
 
 
 def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
