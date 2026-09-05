@@ -284,9 +284,12 @@ def build_phase1_readiness_report(
     source_terminal_failure = bool(
         source_completed and source_run.get("conclusion") != "success"
     )
+    source_requires_recovery = bool(
+        source_completed and not source_successful
+    )
     source_recovery_plan = (
         _source_recovery_plan(source_artifacts)
-        if source_terminal_failure
+        if source_requires_recovery
         else None
     )
 
