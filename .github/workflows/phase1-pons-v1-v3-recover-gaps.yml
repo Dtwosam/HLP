@@ -53,7 +53,7 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     outputs:
       matrix_1: ${{ steps.plan.outputs.matrix_1 }}
       matrix_2: ${{ steps.plan.outputs.matrix_2 }}
@@ -403,7 +403,7 @@ jobs:
     needs: [plan, recover_1, recover_2, recover_3, recover_4]
     if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') && (needs.recover_3.result == 'success' || needs.recover_3.result == 'skipped') && (needs.recover_4.result == 'success' || needs.recover_4.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
