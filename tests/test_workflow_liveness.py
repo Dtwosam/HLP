@@ -1409,6 +1409,10 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert "phase1-pons-eligible-universe-promote.yml" in chain
     assert "phase1-pons-representative-evidence-chain.yml" in chain
     assert "phase1-pons-post-eligibility-evidence-ready" in chain
+    assert '"recovery_mode": False' in chain
+    assert '"lifecycle_run_id": source_run_id' in chain
+    assert '"v1_v3_run_id": source_run_id' in chain
+    assert '"v2_v4_run_id": source_run_id' in chain
 
     launcher = _workflow(
         "phase1-pons-post-eligibility-evidence-one-shot.yml"
@@ -1436,6 +1440,23 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "ROUTE: ${{ inputs.route }}" in content
     assert "33_982_556_591" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-post-eligibility-evidence-ready.json" in content
+    assert "evidence handoff lifecycle run ID must be positive" in content
+    assert "normal evidence handoff routing changed" in content
+    assert "evidence lifecycle/pricing workflow path is not allowed" in content
+    assert "evidence lifecycle/pricing run is missing fallback" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "phase1-pons-quote-fallback-full" in content
+    assert "quote_fallback_run_id" in content
+    assert (
+        "eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}"
+        in content
+    )
+    assert (
+        "eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}"
+        not in content
+    )
     assert "phase1-pons-representative-validation" in content
     assert "phase1-pons-viability-route-measurement.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
