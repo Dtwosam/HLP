@@ -303,7 +303,11 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
-          pool_ids = {row["pool_id"].lower() for row in routes}
+          activation_by_pool = {
+              row["pool_id"].lower(): int(row["activation_block"])
+              for row in routes
+          }
+          pool_ids = set(activation_by_pool)
 
           files = (
               list(Path("partial").glob("v4-quote-events-shard-*.jsonl"))
@@ -367,7 +371,15 @@ jobs:
                               )
                           nonlocal_state["prior"] = order
                           assert row["event_type"] == "v4_swap"
-                          assert row["pool_id"].lower() in pool_ids
+                          pool_id = row["pool_id"].lower()
+                          assert pool_id in pool_ids
+                          assert int(row["block_number"]) >= (
+                              activation_by_pool[pool_id]
+                          ), (
+                              pool_id,
+                              row["block_number"],
+                              activation_by_pool[pool_id],
+                          )
                           nonlocal_state["records"] += 1
                           local += 1
                           yield row
