@@ -24,6 +24,7 @@ WORKFLOWS = [
     "phase1-pons-representative-transfers-full.yml",
     "phase1-pons-representative-evidence-chain.yml",
     "phase1-pons-acquisition-accounting.yml",
+    "phase1-pons-viability-route-measurement.yml",
 ]
 
 MATRIX_WORKFLOWS = {
@@ -99,6 +100,46 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         assert "max-parallel: 4" not in content, name
 
 
+def test_viability_route_measurement_is_manual_bounded_and_canonical():
+    content = _workflow("phase1-pons-viability-route-measurement.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    for route in (
+        "pons_registry",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    ):
+        assert f"          - {route}" in content
+    assert 'default: "54436036"' in content
+    assert 'default: "54486035"' in content
+    assert "viability measurement exceeds 50000-block ceiling" in content
+    assert "hi - lo + 1 > 50_000" in content
+    assert "rpc-v1-registry-window" in content
+    assert "rpc-v2-registry-window" in content
+    assert "rpc-v3-pons-tape" in content
+    assert "rpc-v2-curve-tape" in content
+    assert "rpc-v2-transition-tape" in content
+    assert "rpc-v2-v4-tape" in content
+    assert "rpc-v1-price-path" in content
+    assert "rpc-pons-stock-oracle-lifecycle" in content
+    assert "rpc-v3-quote-route-tape" in content
+    assert "rpc-v4-quote-route-tape" in content
+    assert "registry_v2:" in content
+    assert "if: ${{ inputs.route == 'pons_registry' }}" in content
+    assert "shared measurement range must postdate V2 deployment" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "quote fallback measurement requires eligibility_run_id" in content
+    assert "timeout-minutes: 30" in content
+
 def test_full_quote_audit_has_short_fail_fast_bound():
     content = _workflow("phase1-pons-full-quote-audit.yml")
     assert "timeout-minutes: 20" in content
@@ -139,6 +180,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-stock-oracle-promote-v2-delta.yml",
     "phase1-pons-representative-transfers-full.yml",
     "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-viability-route-measurement.yml",
 }
 
 
