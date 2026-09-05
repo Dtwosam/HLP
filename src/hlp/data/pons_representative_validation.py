@@ -27,13 +27,14 @@ def build_representative_validation_rows(
     holder_summary_rows: Iterable[dict],
     dex_crosscheck_rows: Iterable[dict],
     market_path_summary_rows: Iterable[dict],
+    priced_path_summary_rows: Iterable[dict],
 ) -> list[dict]:
     """Join the frozen 10-token sample to independent Phase 1 evidence.
 
     This function does not create new labels or infer missing history. It only
     proves that every sampled token has the already-required launch/lifecycle
-    price evidence, a frozen detailed market path, complete transfer/holder
-    replay, and an explicit DEX reconciliation result.
+    price evidence, a frozen detailed market path plus per-event USD replay,
+    complete transfer/holder replay, and an explicit DEX reconciliation result.
     """
     sample = [dict(row) for row in sample_rows]
     if len(sample) != 10:
@@ -102,6 +103,18 @@ def build_representative_validation_rows(
             f"missing={missing} extra={extra}"
         )
 
+    priced_paths = _token_index(
+        priced_path_summary_rows,
+        label="representative priced-path summary",
+    )
+    if set(priced_paths) != set(sample_by_token):
+        missing = sorted(set(sample_by_token) - set(priced_paths))
+        extra = sorted(set(priced_paths) - set(sample_by_token))
+        raise ValueError(
+            "representative priced-path summary coverage mismatch: "
+            f"missing={missing} extra={extra}"
+        )
+
     output = []
     for token, sample_row in sample_by_token.items():
         version = str(sample_row.get("pons_version"))
@@ -152,12 +165,61 @@ def build_representative_validation_rows(
                 f"representative token has no positive market-cap evidence: {token}"
             )
 
+        priced_path = priced_paths[token]
+        if str(priced_path.get("pons_version")) != version:
+            raise ValueError(
+                f"representative priced-path version mismatch for {token}"
+            )
+        if str(priced_path.get("sample_group")) != str(
+            sample_row.get("sample_group")
+        ):
+            raise ValueError(
+                f"representative priced-path sample-group mismatch for {token}"
+            )
+        if int(priced_path.get("launch_block", -1)) != launch_block:
+            raise ValueError(
+                f"representative priced-path launch mismatch for {token}"
+            )
+        detailed_price_points = int(priced_path.get("price_points", -1))
+        detailed_priced_points = int(priced_path.get("priced_points", -1))
+        detailed_unpriced_points = int(priced_path.get("unpriced_points", -1))
+        if (
+            detailed_price_points != price_points
+            or detailed_priced_points != priced_points
+            or detailed_unpriced_points != unpriced_points
+        ):
+            raise ValueError(
+                f"representative detailed price-point accounting mismatch "
+                f"for {token}: lifecycle=({price_points},{priced_points},"
+                f"{unpriced_points}) detailed=({detailed_price_points},"
+                f"{detailed_priced_points},{detailed_unpriced_points})"
+            )
+        detailed_max = priced_path.get("max_market_cap_proxy_usd")
+        if detailed_max is None or Decimal(str(detailed_max)) != Decimal(
+            str(max_market_cap)
+        ):
+            raise ValueError(
+                f"representative detailed max market cap mismatch for {token}"
+            )
+        lifecycle_max_block = lifecycle.get("max_market_cap_block")
+        if lifecycle_max_block is not None and int(
+            priced_path.get("max_market_cap_block", -1)
+        ) != int(lifecycle_max_block):
+            raise ValueError(
+                f"representative detailed max block mismatch for {token}"
+            )
+
         pricing_complete = bool(
             lifecycle.get("pricing_complete", unpriced_points == 0)
         )
         if pricing_complete != (unpriced_points == 0):
             raise ValueError(
                 f"lifecycle pricing-completeness mismatch for {token}"
+            )
+        if bool(priced_path.get("pricing_complete")) != pricing_complete:
+            raise ValueError(
+                f"representative detailed pricing-completeness mismatch for "
+                f"{token}"
             )
         if lifecycle_status == "ineligible" and not pricing_complete:
             raise ValueError(
@@ -305,6 +367,10 @@ def build_representative_validation_rows(
                 "unpriced_points": unpriced_points,
                 "pricing_complete": pricing_complete,
                 "max_market_cap_proxy_usd": str(max_market_cap),
+                "detailed_price_points": detailed_price_points,
+                "detailed_priced_points": detailed_priced_points,
+                "detailed_unpriced_points": detailed_unpriced_points,
+                "detailed_price_path_complete": pricing_complete,
                 "market_path_rows": path_rows,
                 "market_path_first_block": first_path_block,
                 "market_path_last_block": last_path_block,
@@ -359,6 +425,18 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         "price_points": sum(int(row["price_points"]) for row in values),
         "priced_points": sum(int(row["priced_points"]) for row in values),
         "unpriced_points": sum(int(row["unpriced_points"]) for row in values),
+        "detailed_price_points": sum(
+            int(row["detailed_price_points"]) for row in values
+        ),
+        "detailed_priced_points": sum(
+            int(row["detailed_priced_points"]) for row in values
+        ),
+        "detailed_unpriced_points": sum(
+            int(row["detailed_unpriced_points"]) for row in values
+        ),
+        "detailed_price_path_complete_tokens": sum(
+            bool(row["detailed_price_path_complete"]) for row in values
+        ),
         "market_path_rows": sum(
             int(row["market_path_rows"]) for row in values
         ),
