@@ -4,8 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       eligibility_run_id:
-        description: "Successful full eligibility acquisition-chain run"
+        description: "Run containing V1/V2 lifecycle and fallback artifacts"
         required: true
+        type: string
+      v1_v3_run_id:
+        description: "Optional separate V1/V3 full/recovery run; defaults to eligibility run"
+        required: false
+        default: ""
+        type: string
+      v2_v4_run_id:
+        description: "Optional separate V2/V4 full/recovery run; defaults to eligibility run"
+        required: false
+        default: ""
         type: string
       oracle_run_id:
         description: "Successful canonical phase1-pons-stock-oracle-full run"
@@ -55,6 +65,14 @@ on:
     inputs:
       eligibility_run_id:
         required: true
+        type: string
+      v1_v3_run_id:
+        required: false
+        default: ""
+        type: string
+      v2_v4_run_id:
+        required: false
+        default: ""
         type: string
       oracle_run_id:
         required: true
@@ -116,10 +134,10 @@ jobs:
     with:
       sample_run_id: ${{ format('{0}', github.run_id) }}
       registry_run_id: ${{ inputs.registry_run_id }}
-      v1_v3_run_id: ${{ inputs.eligibility_run_id }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || inputs.eligibility_run_id }}
       v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
       transition_run_id: ${{ inputs.transition_run_id }}
-      v2_v4_run_id: ${{ inputs.eligibility_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || inputs.eligibility_run_id }}
     secrets: inherit
 
   transfers:
@@ -170,6 +188,8 @@ jobs:
       sample_run_id: ${{ format('{0}', github.run_id) }}
       v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
       v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || inputs.eligibility_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || inputs.eligibility_run_id }}
       transfer_run_id: ${{ format('{0}', github.run_id) }}
       market_path_run_id: ${{ format('{0}', github.run_id) }}
       priced_path_run_id: ${{ format('{0}', github.run_id) }}
