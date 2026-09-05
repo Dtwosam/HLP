@@ -1326,7 +1326,7 @@ def test_phase1_completion_chain_is_guarded_resumable_and_distinct_run_safe():
     assert "len(set(run_ids)) != 9" in content
     assert "phase1-pons-viability-route-sequence-state" in content
     assert "prior_completion_run_id" in content
-    assert "source": "prior_completion" in content
+    assert '"source": "prior_completion"' in content
     assert "timeout-minutes: 360" in content
     assert "time.sleep(5)" in content
     assert "time.sleep(15)" in content
