@@ -1381,3 +1381,26 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
     assert "phase1-pons-final-acceptance-chain.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
+
+
+def test_phase1_readiness_audit_is_artifact_only_and_guarded():
+    content = _workflow("phase1-pons-readiness-audit.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-viability-ready.json" in content
+    assert "phase1-pons-viability-runs.json" in content
+    assert "phase1-pons-readiness-report.json" in content
+    assert "phase1-pons-readiness-audit" in content
+    assert "build_phase1_readiness_report" in content
+    assert "33982556591" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+    launcher = _workflow("phase1-pons-readiness-audit-one-shot.yml")
+    assert "launch Phase 1 readiness audit" in launcher
+    assert 'source_eligibility_run_id: "33982556591"' in launcher
+    assert "phase1-pons-readiness-audit.yml" in launcher
+    assert "workflow_dispatch:" not in launcher
