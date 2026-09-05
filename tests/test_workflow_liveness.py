@@ -252,7 +252,9 @@ def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "\n  push:" not in trigger_block
     assert "plan_missing_subranges" in content
     assert "prior_gap_run_id" in content
+    assert "prior_gap_run_id_2" in content
     assert 'Path("prior-gaps").glob("anchor-gap-*.jsonl")' in content
+    assert 'Path("prior-gaps-2").glob("anchor-gap-*.jsonl")' in content
     assert '"source": path.parent.name' in content
     assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 50000" in content
