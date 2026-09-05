@@ -1341,11 +1341,11 @@ def test_viability_batch_has_nine_distinct_serialized_workflows():
         content = _workflow(workflow)
         assert ".github/phase1-pons-viability-batch.json" in content
         assert "launch Phase 1 viability batch" in content
-        assert "group: phase1-pons-viability-batch-\${{ github.ref }}" in content
+        assert "group: phase1-pons-viability-batch-${{ github.ref }}" in content
         assert "cancel-in-progress: false" in content
         assert "phase1-pons-viability-batch-route.yml" in content
         assert f'route: "{route}"' in content
-        assert "sequence_id: \${{ github.sha }}" in content
+        assert "sequence_id: ${{ github.sha }}" in content
 
 
 def test_viability_batch_finalizer_maps_nine_runs_into_acceptance():
