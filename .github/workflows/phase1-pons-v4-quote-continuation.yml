@@ -27,6 +27,11 @@ on:
         required: true
         default: "500000"
         type: string
+      known_pool_only:
+        description: "Skip Initialize discovery and scan only candidates already frozen in the prior probe"
+        required: true
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       prior_probe_run_id:
@@ -49,6 +54,11 @@ on:
         description: "Maximum non-overlapping blocks to scan per unresolved quote"
         required: true
         type: string
+      known_pool_only:
+        description: "Skip Initialize discovery and scan only candidates already frozen in the prior probe"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -78,13 +88,20 @@ jobs:
           run-id: ${{ inputs.prior_probe_run_id }}
           github-token: ${{ github.token }}
       - name: Continue unresolved V4 routes without overlap
+        env:
+          KNOWN_POOL_ONLY: ${{ inputs.known_pool_only }}
         run: |
           mkdir -p artifacts
+          EXTRA=()
+          if [ "$KNOWN_POOL_ONLY" = "true" ]; then
+            EXTRA+=(--known-pool-only)
+          fi
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             rpc-pons-extend-v4-quote-routes \
             --probe "prior/${{ inputs.prior_filename }}" \
             --snapshot-head "${{ inputs.snapshot_head }}" \
             --forward-blocks "${{ inputs.forward_blocks }}" \
+            "${EXTRA[@]}" \
             --chunk-size 2000 --min-chunk-size 25 \
             --out artifacts/pons-v4-quote-continuation.jsonl
       - name: Summarize continuation boundary
@@ -113,6 +130,9 @@ jobs:
                   for row in rows
                   if row.get("causal_route_ready")
                   or row.get("delayed_route_ready")
+              ),
+              "known_pool_only": (
+                  "${{ inputs.known_pool_only }}".lower() == "true"
               ),
               "unresolved_assets": len(unresolved),
               "unresolved_launches": sum(
