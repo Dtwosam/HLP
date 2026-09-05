@@ -18,6 +18,11 @@ on:
         required: false
         default: ""
         type: string
+      prior_gap_run_id_2:
+        description: "Optional second earlier gap-recovery run to reuse after another interrupted retry"
+        required: false
+        default: ""
+        type: string
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
@@ -35,6 +40,11 @@ on:
         type: string
       prior_gap_run_id:
         description: "Optional earlier anchor gap-recovery run whose successful gap artifacts must be reused"
+        required: false
+        default: ""
+        type: string
+      prior_gap_run_id_2:
+        description: "Optional second earlier gap-recovery run to reuse after another interrupted retry"
         required: false
         default: ""
         type: string
@@ -88,6 +98,14 @@ jobs:
           merge-multiple: true
           run-id: ${{ inputs.prior_gap_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id_2 != '' }}
+        with:
+          pattern: phase1-pons-anchor-gap-*
+          path: prior-gaps-2
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id_2 }}
+          github-token: ${{ github.token }}
       - id: plan
         name: Derive only missing anchor tail ranges
         env:
@@ -117,6 +135,11 @@ jobs:
               )
               + sorted(
                   Path("prior-gaps").glob(
+                      "anchor-gap-*.jsonl.manifest.json"
+                  )
+              )
+              + sorted(
+                  Path("prior-gaps-2").glob(
                       "anchor-gap-*.jsonl.manifest.json"
                   )
               )
@@ -268,6 +291,14 @@ jobs:
           run-id: ${{ inputs.prior_gap_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id_2 != '' }}
+        with:
+          pattern: phase1-pons-anchor-gap-*
+          path: prior-gaps-2
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id_2 }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
         if: ${{ needs.plan.outputs.gap_count != '0' }}
         with:
           pattern: phase1-pons-anchor-gap-*
@@ -297,6 +328,7 @@ jobs:
               list(Path("preserved").glob("anchor-shard-*.jsonl"))
               + list(Path("partial").glob("anchor-recovery-*.jsonl"))
               + list(Path("prior-gaps").glob("anchor-gap-*.jsonl"))
+              + list(Path("prior-gaps-2").glob("anchor-gap-*.jsonl"))
               + list(Path("gaps").glob("anchor-gap-*.jsonl"))
           )
           if not files:
