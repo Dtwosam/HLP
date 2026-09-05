@@ -402,6 +402,25 @@ def test_deployment_block_parser_accepts_archive_route():
 
 
 
+def test_known_v4_quote_pool_validator_parses():
+    parser = build_parser()
+    quote_token = "0x" + "11" * 20
+    pool_id = "0x" + "22" * 32
+    args = parser.parse_args([
+        "rpc-pons-validate-v4-quote-pool",
+        "--quote-registry", "quotes.jsonl",
+        "--quote-token", quote_token,
+        "--pool-id", pool_id,
+        "--from-block", "100",
+        "--to-block", "200",
+        "--out", "candidate.jsonl",
+    ])
+    assert args.quote_token == quote_token
+    assert args.pool_id == pool_id
+    assert args.from_block == 100
+    assert args.to_block == 200
+
+
 def test_extend_v4_quote_route_probe_parses():
     parser = build_parser()
     args = parser.parse_args([
