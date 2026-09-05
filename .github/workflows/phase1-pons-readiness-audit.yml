@@ -173,7 +173,7 @@ jobs:
                   if route_run_ids[route] > 0
                   else None
               )
-              for route in VIABILITY_ROUTE_WORKFLOWS
+              for route in VIABILITY_ROUTE_WORKFLOW_PATHS
           }
 
           finalizer_runs = []
