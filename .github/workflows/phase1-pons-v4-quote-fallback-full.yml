@@ -18,6 +18,20 @@ on:
         required: true
         default: "pons-residual-v4-forward-probe.jsonl"
         type: string
+  workflow_call:
+    inputs:
+      probe_run_id:
+        description: "Successful cumulative residual V4 quote probe run"
+        required: true
+        type: string
+      probe_artifact_name:
+        description: "Artifact containing the cumulative V4 quote probe JSONL"
+        required: true
+        type: string
+      probe_filename:
+        description: "Cumulative V4 quote probe JSONL filename"
+        required: true
+        type: string
 
 permissions:
   contents: read
