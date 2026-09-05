@@ -1,0 +1,199 @@
+name: phase1-pons-representative-dex-crosscheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful phase1-pons-representative-sample-freeze run"
+        required: true
+        type: string
+      registry_run_id:
+        description: "Canonical full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        description: "Canonical V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-dex-crosscheck-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reconcile frozen representative pools against GeckoTerminal
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.geckoterminal import (
+              GECKOTERMINAL_API_VERSION,
+              GeckoTerminalClient,
+          )
+          from hlp.data.pons_crosscheck import (
+              build_representative_pool_targets,
+              reconcile_external_pool,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          sample = read_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative DEX cross-check requires exactly 10 "
+                  f"sample tokens, got {len(sample)}"
+              )
+          registry = read_jsonl(
+              "registry/pons-full-launch-registry.jsonl"
+          )
+          registrations = read_jsonl(
+              "transition/pons-v2-registrations-full.jsonl"
+          )
+          targets = build_representative_pool_targets(
+              sample,
+              registry,
+              registrations,
+          )
+
+          client = GeckoTerminalClient()
+          rows = []
+          for target in targets:
+              pool_identifier = target.get("pool_identifier")
+              if pool_identifier is None:
+                  rows.append(
+                      reconcile_external_pool(target, {})
+                  )
+                  continue
+              external = client.pool(pool_identifier)
+              rows.append(
+                  reconcile_external_pool(target, external)
+              )
+
+          mismatches = [
+              row for row in rows
+              if row.get("external_match") is False
+          ]
+          targeted = [
+              row for row in rows
+              if row.get("external_match") is not None
+          ]
+          if not targeted:
+              raise SystemExit(
+                  "representative sample has no canonical DEX pools to "
+                  "cross-check"
+              )
+          if mismatches:
+              raise SystemExit(
+                  "independent DEX pool reconciliation failed for "
+                  f"{len(mismatches)} representative tokens: "
+                  f"{[row['token'] for row in mismatches]}"
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/pons-representative-dex-crosscheck.jsonl"
+              ),
+              provenance={
+                  "source": "geckoterminal_public_api",
+                  "purpose": (
+                      "independent representative pool identity "
+                      "cross-check; not canonical historical truth"
+                  ),
+                  "geckoterminal_api_version": (
+                      GECKOTERMINAL_API_VERSION
+                  ),
+                  "network": "robinhood",
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "registry_run_id": int(
+                      "${{ inputs.registry_run_id }}"
+                  ),
+                  "transition_run_id": int(
+                      "${{ inputs.transition_run_id }}"
+                  ),
+              },
+          )
+          summary = {
+              "sample_tokens": len(rows),
+              "targeted_canonical_dex_pools": len(targeted),
+              "matched_canonical_dex_pools": sum(
+                  row.get("external_match") is True for row in rows
+              ),
+              "no_registered_v4_pool": sum(
+                  row["crosscheck_scope"] == "no_registered_v4_pool"
+                  for row in rows
+              ),
+              "mismatches": len(mismatches),
+              "geckoterminal_requests": client.requests_made,
+              "geckoterminal_bytes": client.bytes_received,
+              "crosscheck_sha256": snapshot["sha256"],
+          }
+          Path(
+              "artifacts/pons-representative-dex-crosscheck-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-crosscheck
+          path: artifacts/
+          if-no-files-found: error
