@@ -147,6 +147,10 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         REQUIRED_PHASE1_ACQUISITION_ROUTES
     )
     assert report["required_route_blocks"] == REQUIRED_PHASE1_ROUTE_BLOCKS
+    assert report["route_evidence_run_ids"] == {
+        route: [1000 + index]
+        for index, route in enumerate(REQUIRED_PHASE1_ACQUISITION_ROUTES)
+    }
     assert report["required_work_blocks"] == sum(
         REQUIRED_PHASE1_ROUTE_BLOCKS.values()
     )
