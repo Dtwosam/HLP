@@ -1,0 +1,30 @@
+name: phase1-pons-viability-route-measurement-one-shot
+# staged-route: pons_registry
+# staged-range: 54436036-54486035
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-viability-route-measurement-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  measure:
+    if: ${{ contains(github.event.head_commit.message, 'launch viability route measurement') }}
+    uses: ./.github/workflows/phase1-pons-viability-route-measurement.yml
+    with:
+      route: "pons_registry"
+      from_block: "54436036"
+      to_block: "54486035"
+      eligibility_run_id: "33982556591"
+      registry_run_id: "33911022718"
+      v2_registry_run_id: "33912235341"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+    secrets: inherit
