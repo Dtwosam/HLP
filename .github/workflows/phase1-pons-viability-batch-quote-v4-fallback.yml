@@ -1,0 +1,26 @@
+name: phase1-pons-viability-batch-quote-v4-fallback
+run-name: phase1 viability batch quote_v4_fallback ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-viability-batch.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-batch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 viability batch') }}
+    uses: ./.github/workflows/phase1-pons-viability-batch-route.yml
+    with:
+      route: "quote_v4_fallback"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit
