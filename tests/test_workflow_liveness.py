@@ -313,6 +313,47 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "pons-select-v3-quote-routes" in content
 
 
+def test_v2_v4_full_is_reusable_with_frozen_transition():
+    content = _workflow("phase1-pons-v2-v4-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912452330"' in content
+    assert "max-parallel: 2" in content
+    assert "SHARD_COUNT: '64'" in content
+
+
+def test_quote_fallback_merge_is_reusable_without_network_trigger():
+    content = _workflow("phase1-pons-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "pons-merge-quote-usd-tapes" in content
+
+
+def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
+    content = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912235341"' in content
+    assert 'default: "33936232604"' in content
+    assert 'default: "33912452330"' in content
+    assert "cannot replay V2 lifecycle with uncovered quote assets" in content
+
+
+def test_eligible_universe_freeze_is_reusable_and_fails_closed():
+    content = _workflow("phase1-pons-eligible-universe-freeze.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cannot freeze complete $100k universe while eligibility" in content
+
+
 def test_v4_quote_continuation_is_reusable_without_push_trigger():
     content = _workflow("phase1-pons-v4-quote-continuation.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
