@@ -355,7 +355,6 @@ jobs:
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
-      - uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v4-quote-routes-selected
           path: artifacts/
