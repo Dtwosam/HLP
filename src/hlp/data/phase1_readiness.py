@@ -324,6 +324,82 @@ def build_phase1_readiness_report(
                 }
             )
             continue
+        launch_routes = set(run.get("launch_ledger_routes") or [])
+        if int(run.get("launch_readiness_generation", 0)) <= 0:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_readiness_unarmed",
+                }
+            )
+            continue
+        if int(
+            run.get("launch_readiness_source_run_id", 0)
+        ) != SOURCE_ELIGIBILITY_RUN_ID:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_source_run_mismatch",
+                    "observed": int(
+                        run.get("launch_readiness_source_run_id", 0)
+                    ),
+                }
+            )
+            continue
+        if int(
+            run.get("launch_readiness_evidence_run_id", 0)
+        ) != evidence_id:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_readiness_evidence_mismatch",
+                    "expected": evidence_id,
+                    "observed": int(
+                        run.get("launch_readiness_evidence_run_id", 0)
+                    ),
+                }
+            )
+            continue
+        if int(run.get("launch_ledger_generation", 0)) <= 0:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_ledger_unarmed",
+                }
+            )
+            continue
+        if int(
+            run.get("launch_ledger_evidence_run_id", 0)
+        ) != evidence_id:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_ledger_evidence_mismatch",
+                    "expected": evidence_id,
+                    "observed": int(
+                        run.get("launch_ledger_evidence_run_id", 0)
+                    ),
+                }
+            )
+            continue
+        if launch_routes != set(route_names):
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_ledger_route_set_mismatch",
+                    "observed": sorted(launch_routes),
+                }
+            )
+            continue
+        if int(run.get("launch_route_slot", -1)) != 0:
+            invalid.append(
+                {
+                    "route": route,
+                    "reason": "launch_route_slot_not_empty",
+                    "observed": int(run.get("launch_route_slot", -1)),
+                }
+            )
+            continue
         completed.append(route)
 
     pending = [route for route in route_names if route not in completed]
