@@ -140,6 +140,15 @@ def test_viability_route_measurement_is_manual_bounded_and_canonical():
     assert "quote fallback measurement requires fallback artifact run ID" in content
     assert "run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}" in content
     assert 'sequence_id:' in content
+    assert 'evidence_run_id:' in content
+    assert 'source_eligibility_run_id:' in content
+    assert '"measurement_run_id": int(' in content
+    assert '"measurement_head_sha": os.environ["GITHUB_SHA"]' in content
+    assert '"evidence_run_id": evidence_run_id' in content
+    assert '"source_eligibility_run_id": source_run_id' in content
+    assert '"fallback_artifact_run_id": fallback_run_id' in content
+    assert "viability measurement source eligibility run changed" in content
+    assert "viability measurement evidence run ID cannot be negative" in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
     assert "timeout-minutes: 30" in content
 
@@ -1464,8 +1473,18 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "phase1-pons-v4-quote-fallback-full" in content
     assert "phase1-pons-quote-fallback-full" in content
     assert "quote_fallback_run_id" in content
+    assert "evidence_run_id: ${{ steps.check.outputs.evidence_run_id }}" in content
     assert (
         "eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}"
+        in content
+    )
+    assert (
+        "evidence_run_id: ${{ needs.preflight.outputs.evidence_run_id }}"
+        in content
+    )
+    assert (
+        "source_eligibility_run_id: "
+        "${{ needs.preflight.outputs.source_eligibility_run_id }}"
         in content
     )
     assert (
