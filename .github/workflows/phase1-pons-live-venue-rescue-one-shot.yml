@@ -71,7 +71,7 @@ jobs:
       source_registry_run_id: "33911022718"
       partial_run_id: "33982556591"
       prior_gap_run_id: ""
-      max_gap_blocks: "100000"
+      max_gap_blocks: "50000"
     secrets: inherit
 
   v2_v4_rescue:
@@ -82,5 +82,5 @@ jobs:
       transition_run_id: "33912452330"
       partial_run_id: "33982556591"
       prior_gap_run_id: ""
-      max_gap_blocks: "100000"
+      max_gap_blocks: "50000"
     secrets: inherit
