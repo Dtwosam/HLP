@@ -101,6 +101,41 @@ def _run_id(run: Mapping[str, Any] | None) -> int:
         return 0
 
 
+def _source_recovery_plan(
+    source_artifacts: set[str],
+) -> dict[str, Any]:
+    has_v1_v3 = "phase1-pons-v1-v3-full" in source_artifacts
+    has_v2_v4 = "phase1-pons-v2-v4-full" in source_artifacts
+    pricing_artifacts = {
+        "phase1-pons-v1-lifecycle-eligibility",
+        "phase1-pons-v2-lifecycle-eligibility",
+        "phase1-pons-v3-quote-fallback-full",
+        "phase1-pons-v4-quote-fallback-full",
+        "phase1-pons-quote-fallback-full",
+    }
+    has_pricing = pricing_artifacts <= source_artifacts
+    reusable_pricing = bool(has_pricing and has_v1_v3 and has_v2_v4)
+    return {
+        "source_has_v1_v3_full": has_v1_v3,
+        "source_has_v2_v4_full": has_v2_v4,
+        "source_has_complete_pricing": has_pricing,
+        "recommended_v1_v3_run_id": (
+            SOURCE_ELIGIBILITY_RUN_ID if has_v1_v3 else 0
+        ),
+        "recommended_v2_v4_run_id": (
+            SOURCE_ELIGIBILITY_RUN_ID if has_v2_v4 else 0
+        ),
+        "recommended_pricing_run_id": (
+            SOURCE_ELIGIBILITY_RUN_ID if reusable_pricing else 0
+        ),
+        "next_action": (
+            "launch_v1_v3_rescue"
+            if not has_v1_v3
+            else "launch_recovered_phase1_completion"
+        ),
+    }
+
+
 def _evidence_handoff_errors(
     handoff: Mapping[str, Any] | None,
     *,
@@ -249,6 +284,11 @@ def build_phase1_readiness_report(
     source_terminal_failure = bool(
         source_completed and source_run.get("conclusion") != "success"
     )
+    source_recovery_plan = (
+        _source_recovery_plan(source_artifacts)
+        if source_terminal_failure
+        else None
+    )
 
     if not source_successful:
         if source_terminal_failure and evidence_valid:
@@ -256,10 +296,10 @@ def build_phase1_readiness_report(
         else:
             if not source_completed:
                 next_action = "wait_for_full_eligibility_acquisition"
+            elif evidence_id > 0:
+                next_action = "recover_or_rerun_post_eligibility_evidence"
             else:
-                next_action = "recover_full_eligibility_acquisition"
-                if evidence_id > 0:
-                    next_action = "recover_or_rerun_post_eligibility_evidence"
+                next_action = str(source_recovery_plan["next_action"])
             return {
                 "phase1_ready": False,
                 "stage": (
@@ -274,6 +314,7 @@ def build_phase1_readiness_report(
                 "source_job_counts": source_job_counts,
                 "source_failed_jobs": source_failed_jobs,
                 "source_missing_artifacts": source_missing,
+                "source_recovery_plan": source_recovery_plan,
                 "evidence_run_id": evidence_id,
                 "evidence_status": (
                     evidence_run.get("status") if evidence_run else None
