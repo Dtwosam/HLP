@@ -196,6 +196,7 @@ def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'Path("prior-gaps").glob("curve-gap-*.jsonl")' in content
     assert '"source": path.parent.name' in content
     assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 50000" in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
@@ -214,6 +215,7 @@ def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'Path("prior-gaps").glob("anchor-gap-*.jsonl")' in content
     assert '"source": path.parent.name' in content
     assert 'default: "150000"' in content
+    assert "max_gap_blocks must be between 1 and 150000" in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
