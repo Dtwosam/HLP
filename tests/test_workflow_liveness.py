@@ -1378,6 +1378,9 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
         "phase1-pons-viability-quote-v4-fallback-one-shot",
     ):
         assert workflow_name in content
+    assert 'run.get("path")' in content
+    assert "viability route workflow path mismatch" in content
+    assert 'run.get("name") != expected[route]' not in content
     assert "phase1-pons-final-acceptance-chain.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
@@ -1394,6 +1397,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "phase1-pons-readiness-report.json" in content
     assert "phase1-pons-readiness-audit" in content
     assert "build_phase1_readiness_report" in content
+    assert '"path": run.get("path")' in content
+    assert "job_counts(run_id)" in content
     assert "33982556591" in content
     assert '"&per_page=100&page=1"' in content
     assert "finalizer run pagination exceeded" not in content
