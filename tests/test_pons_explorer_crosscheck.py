@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.pons_explorer_crosscheck import (
     build_representative_explorer_targets,
+    build_representative_explorer_token_summaries,
     reconcile_blockscout_transaction,
     summarize_representative_explorer_crosscheck,
 )
@@ -134,6 +135,37 @@ def test_reconcile_blockscout_transaction_reports_mismatches():
 
     assert result["external_match"] is False
     assert result["mismatches"] == ["transaction_hash", "block_number"]
+
+
+def test_explorer_token_summaries_reconcile_launch_and_dex_roles():
+    targets = build_representative_explorer_targets(
+        _sample(),
+        _market_paths(),
+        _priced_paths(),
+    )
+    rows = [
+        reconcile_blockscout_transaction(
+            target,
+            {
+                "hash": target["transaction_hash"],
+                "block": target["block_number"],
+            },
+        )
+        for target in targets
+    ]
+    summaries = build_representative_explorer_token_summaries(
+        rows,
+        _sample(),
+    )
+
+    assert len(summaries) == 10
+    assert all(row["verified_launch_transactions"] == 1 for row in summaries)
+    assert all(row["verified_dex_swap_transactions"] == 1 for row in summaries)
+    assert all(
+        row["checkpoint_role_counts"]
+        == {"first": 1, "last": 1, "max": 1}
+        for row in summaries
+    )
 
 
 def test_explorer_summary_requires_all_transactions_matched():
