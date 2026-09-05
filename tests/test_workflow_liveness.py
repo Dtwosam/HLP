@@ -639,6 +639,25 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
+def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
+    content = _workflow("phase1-pons-pricing-eligibility-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "needs.skhy_v3.outputs.completion_status" in content
+    assert "searched_to_snapshot_head" in content
+    assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
+    assert "phase1-pons-v3-quote-fallback-full.yml" in content
+    assert "phase1-pons-v4-quote-fallback-full.yml" in content
+    assert "phase1-pons-quote-fallback-full.yml" in content
+    assert "phase1-pons-v1-lifecycle-eligibility.yml" in content
+    assert "phase1-pons-v2-lifecycle-eligibility.yml" in content
+    assert "phase1-pons-eligible-universe-freeze.yml" in content
+    assert "format('{0}', github.run_id)" in content
+    assert "cancel-in-progress: false" in content
+
+
 def test_skhy_v4_one_shot_launcher_is_explicit_and_guarded():
     content = _workflow(
         "phase1-pons-skhy-v4-known-pool-segmented-one-shot.yml"
