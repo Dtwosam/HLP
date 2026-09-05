@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_eligibility_run_id:
-        description: "Frozen original eligibility parent; must be terminal non-success"
+        description: "Frozen original eligibility parent; must be terminal and require recovery"
         required: true
         default: "33982556591"
         type: string
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Verify terminal source parent and recovered venue artifacts
+      - name: Verify terminal recoverable source and venue artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
@@ -189,9 +189,26 @@ jobs:
               raise SystemExit(
                   "recovered completion cannot start before source is terminal"
               )
-          if source.get("conclusion") == "success":
+          source_artifacts = artifacts(source_id)
+          required_source_artifacts = {
+              "phase1-pons-v1-v3-full",
+              "phase1-pons-v2-v4-full",
+              "phase1-pons-v1-lifecycle-eligibility",
+              "phase1-pons-v2-lifecycle-eligibility",
+              "phase1-pons-v3-quote-fallback-full",
+              "phase1-pons-v4-quote-fallback-full",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing_source_artifacts = sorted(
+              required_source_artifacts - source_artifacts
+          )
+          if (
+              source.get("conclusion") == "success"
+              and not missing_source_artifacts
+          ):
               raise SystemExit(
-                  "recovered completion is unnecessary after source success"
+                  "recovered completion is unnecessary after complete "
+                  "source success"
               )
           if str(source.get("path") or "").split("@", 1)[0] != (
               ".github/workflows/"
@@ -288,6 +305,7 @@ jobs:
               "v1_v3_run_id": v1_id,
               "v2_v4_run_id": v2_id,
               "pricing_run_id": pricing_id,
+              "source_missing_artifacts": missing_source_artifacts,
               "resume_v2_v4": v2_id == 0 and pricing_id == 0,
               "reuse_pricing": pricing_id > 0,
               "preflight": "pass",
