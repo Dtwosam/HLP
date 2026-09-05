@@ -1,4 +1,5 @@
 name: phase1-pons-viability-route-measurement
+run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}
 
 on:
   workflow_dispatch:
@@ -29,6 +30,11 @@ on:
         type: string
       eligibility_run_id:
         description: "Completed eligibility parent run; required for quote fallback route files"
+        required: false
+        default: ""
+        type: string
+      sequence_id:
+        description: "Optional parent completion-sequence identity for exact run discovery"
         required: false
         default: ""
         type: string
@@ -71,6 +77,10 @@ on:
         default: "54486035"
         type: string
       eligibility_run_id:
+        required: false
+        default: ""
+        type: string
+      sequence_id:
         required: false
         default: ""
         type: string
@@ -126,6 +136,7 @@ jobs:
           FROM_BLOCK: ${{ inputs.from_block }}
           TO_BLOCK: ${{ inputs.to_block }}
           ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          SEQUENCE_ID: ${{ inputs.sequence_id }}
         run: |
           python - <<'PY'
           import json
@@ -170,6 +181,7 @@ jobs:
                       "to_block": hi,
                       "processed_block_span": span,
                       "snapshot_head_block": 54_486_035,
+                      "sequence_id": os.environ.get("SEQUENCE_ID", ""),
                   },
                   indent=2,
                   sort_keys=True,
