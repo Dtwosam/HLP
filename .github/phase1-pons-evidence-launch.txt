@@ -1,0 +1,3 @@
+# Phase 1 post-eligibility evidence launch marker.
+# Keep generation at 0 until source eligibility run 33982556591 is complete.
+generation=0
