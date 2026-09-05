@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       v3_run_id:
-        description: "Successful phase1-pons-v3-quote-fallback-full run"
+        description: "Successful phase1-pons-v3-quote-fallback-promote-skhy-weth run"
         required: true
         type: string
       v4_run_id:
@@ -14,7 +14,7 @@ on:
   workflow_call:
     inputs:
       v3_run_id:
-        description: "Successful phase1-pons-v3-quote-fallback-full run"
+        description: "Successful phase1-pons-v3-quote-fallback-promote-skhy-weth run"
         required: true
         type: string
       v4_run_id:
@@ -46,7 +46,7 @@ jobs:
         run: python -m pip install -e .
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-v3-quote-fallback-full
+          name: phase1-pons-v3-quote-fallback-promoted
           path: v3
           run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
@@ -92,6 +92,44 @@ jobs:
               row["quote_token"].lower() for row in updates
           }
           owned_tokens = state_tokens | update_tokens
+
+          v3_routes = [
+              json.loads(line)
+              for line in Path(
+                  "v3/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v4_routes = [
+              json.loads(line)
+              for line in Path(
+                  "v4/pons-v4-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v3_tokens = {
+              row["quote_token"].lower() for row in v3_routes
+          }
+          v4_tokens = {
+              row["quote_token"].lower() for row in v4_routes
+          }
+          if len(v3_routes) != 26 or len(v3_tokens) != 26:
+              raise SystemExit(
+                  "generic fallback requires 26 unique promoted V3 routes"
+              )
+          if len(v4_routes) != 4 or len(v4_tokens) != 4:
+              raise SystemExit(
+                  "generic fallback requires four unique V4 routes"
+              )
+          overlap = sorted(v3_tokens & v4_tokens)
+          if overlap:
+              raise SystemExit(
+                  f"V3/V4 fallback ownership overlaps: {overlap}"
+              )
+          if v3_tokens | v4_tokens != owned_tokens:
+              raise SystemExit(
+                  "route ownership and merged quote/USD ownership disagree"
+              )
           if len(state_tokens) != 25:
               raise SystemExit(
                   "merged quote fallback must have exactly 25 causal initial "
@@ -107,6 +145,9 @@ jobs:
               "initial_state_assets": len(state_tokens),
               "update_assets": len(update_tokens),
               "owned_quote_assets": len(owned_tokens),
+              "v3_routes": len(v3_routes),
+              "v4_routes": len(v4_routes),
+              "v3_v4_overlap_assets": 0,
               "updates": len(updates),
               "v3_run_id": int("${{ inputs.v3_run_id }}"),
               "v4_run_id": int("${{ inputs.v4_run_id }}"),
