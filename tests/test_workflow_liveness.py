@@ -878,7 +878,7 @@ def test_v4_quote_continuation_is_reusable_without_push_trigger():
     assert "known_pool_only" in content
     assert "EXTRA+=(--known-pool-only)" in content
 
-def test_representative_evidence_chain_threads_one_parent_run_and_retries_transfers():
+def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transfers():
     content = _workflow("phase1-pons-representative-evidence-chain.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
     assert "workflow_dispatch:" in trigger_block
@@ -887,7 +887,7 @@ def test_representative_evidence_chain_threads_one_parent_run_and_retries_transf
     assert "cancel-in-progress: false" in content
     assert "phase1-pons-representative-sample-freeze.yml" in content
     assert "phase1-pons-representative-market-paths.yml" in content
-    assert content.count("phase1-pons-representative-transfers-full.yml") == 2
+    assert content.count("phase1-pons-representative-transfers-full.yml") == 1
     assert "phase1-pons-representative-priced-paths.yml" in content
     assert "phase1-pons-representative-dex-crosscheck.yml" in content
     assert "phase1-pons-representative-validation.yml" in content
@@ -897,10 +897,9 @@ def test_representative_evidence_chain_threads_one_parent_run_and_retries_transf
     assert "v2_v4_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "prior_run_id: ${{ inputs.prior_transfer_run_id }}" in content
-    assert "prior_run_id: ${{ format('{0}', github.run_id) }}" in content
-    assert "needs.transfers.result == 'failure'" in content
-    assert "needs.transfers_retry.result == 'success'" in content
-    assert content.count("format('{0}', github.run_id)") >= 12
+    assert "transfers_retry:" not in content
+    assert "needs.transfers.result == 'success'" in content
+    assert content.count("format('{0}', github.run_id)") >= 10
 
 def test_representative_sample_freeze_is_reusable_and_pinned():
     content = _workflow("phase1-pons-representative-sample-freeze.yml")
