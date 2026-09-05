@@ -138,8 +138,10 @@ jobs:
     secrets: inherit
 
   v3_fallback:
-    needs: skhy_v3
-    if: ${{ needs.skhy_v3.result == 'success' }}
+    needs:
+      - skhy_v3
+      - skhy_v4
+    if: ${{ always() && needs.skhy_v3.result == 'success' && (needs.skhy_v3.outputs.completion_status == 'route_resolved' || (needs.skhy_v4.result == 'success' && needs.skhy_v4.outputs.route_ready == 'true')) }}
     uses: ./.github/workflows/phase1-pons-v3-quote-fallback-full.yml
     with:
       route_audit_run_id: ${{ inputs.route_audit_run_id }}

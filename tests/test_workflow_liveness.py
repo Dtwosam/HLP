@@ -683,6 +683,8 @@ def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
     assert "\n  push:" not in trigger_block
     assert "needs.skhy_v3.outputs.completion_status" in content
     assert "searched_to_snapshot_head" in content
+    assert "needs.skhy_v4.outputs.route_ready == 'true'" in content
+    assert "needs.skhy_v3.outputs.completion_status == 'route_resolved'" in content
     assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
     assert "phase1-pons-v3-quote-fallback-full.yml" in content
     assert "phase1-pons-v4-quote-fallback-full.yml" in content
