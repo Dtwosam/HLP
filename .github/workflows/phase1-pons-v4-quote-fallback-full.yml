@@ -6,17 +6,17 @@ on:
       probe_run_id:
         description: "Successful residual V4 quote probe/continuation run"
         required: true
-        default: "33925011975"
+        default: "33926428274"
         type: string
       probe_artifact_name:
         description: "Artifact containing the V4 quote probe JSONL"
         required: true
-        default: "phase1-pons-residual-v4-route-probe"
+        default: "phase1-pons-residual-v4-forward-probe"
         type: string
       probe_filename:
         description: "V4 quote probe JSONL filename"
         required: true
-        default: "pons-residual-v4-route-probe.jsonl"
+        default: "pons-residual-v4-forward-probe.jsonl"
         type: string
 
 permissions:
