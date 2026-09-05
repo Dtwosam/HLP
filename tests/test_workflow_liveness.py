@@ -319,6 +319,11 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert 'default: "33921477647"' in content
     assert 'default: "33923160281"' in content
     assert "pons-select-v3-quote-routes" in content
+    assert "frozen V3 fallback audit must contain 30 unique feedless" in content
+    assert "frozen V3 fallback must select exactly 25 unique causal" in content
+    assert "frozen V3 fallback must leave exactly five residual" in content
+    assert "delayed V3 probe does not exactly cover the five residual" in content
+    assert "frozen delayed V3 probe unexpectedly resolves a residual" in content
 
 
 def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
