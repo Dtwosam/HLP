@@ -282,6 +282,7 @@ def test_representative_validation_fails_closed_on_missing_market_path():
             v2_lifecycle_rows=v2,
             holder_summary_rows=holders,
             dex_crosscheck_rows=dex,
+            explorer_summary_rows=explorer,
             market_path_summary_rows=market_paths[:-1],
             priced_path_summary_rows=priced_paths,
         )
