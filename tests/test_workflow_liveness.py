@@ -430,9 +430,10 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "skhy_weth_run_id" in content
     assert "anchor_run_id" in content
     assert "merge_v3_quote_routes" in content
-    assert "canonical V3 fallback must select exactly 26 unique routes" in content
-    assert "canonical V3 fallback must leave exactly four residual" in content
-    assert "canonical V3 ownership must be 25 USDG + SKHY/WETH" in content
+    assert "searched_to_snapshot_head" in content
+    assert "canonical V3 fallback must select 25 or 26 unique routes" in content
+    assert "SKHY must be owned by exactly one of V3 or the residual set" in content
+    assert "causal_v3_routes_with_optional_delayed_skhy_weth" in content
     assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
     assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
     assert "SHARD_COUNT: '64'" in content
