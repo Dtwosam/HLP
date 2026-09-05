@@ -57,9 +57,13 @@ jobs:
     outputs:
       matrix_1: ${{ steps.plan.outputs.matrix_1 }}
       matrix_2: ${{ steps.plan.outputs.matrix_2 }}
+      matrix_3: ${{ steps.plan.outputs.matrix_3 }}
+      matrix_4: ${{ steps.plan.outputs.matrix_4 }}
       gap_count: ${{ steps.plan.outputs.gap_count }}
       gap_count_1: ${{ steps.plan.outputs.gap_count_1 }}
       gap_count_2: ${{ steps.plan.outputs.gap_count_2 }}
+      gap_count_3: ${{ steps.plan.outputs.gap_count_3 }}
+      gap_count_4: ${{ steps.plan.outputs.gap_count_4 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -144,9 +148,9 @@ jobs:
               covered,
               max_blocks=max_blocks,
           )
-          if len(gaps) > 480:
+          if len(gaps) > 960:
               raise SystemExit(
-                  "V1 V3 gap plan exceeds two serialized 240-job waves"
+                  "V1 V3 gap plan exceeds four serialized 240-job waves"
               )
           include = [
               {
@@ -157,7 +161,9 @@ jobs:
               for index, (lo, hi) in enumerate(gaps)
           ]
           wave_1 = include[:240]
-          wave_2 = include[240:]
+          wave_2 = include[240:480]
+          wave_3 = include[480:720]
+          wave_4 = include[720:]
           report = {
               "first_v1_launch": start,
               "snapshot_head": head,
@@ -165,7 +171,12 @@ jobs:
               "successful_sources": sources,
               "gap_jobs": include,
               "gap_job_count": len(include),
-              "gap_wave_job_counts": [len(wave_1), len(wave_2)],
+              "gap_wave_job_counts": [
+                  len(wave_1),
+                  len(wave_2),
+                  len(wave_3),
+                  len(wave_4),
+              ],
               "gap_blocks": sum(
                   row["to_block"] - row["from_block"] + 1
                   for row in include
@@ -185,9 +196,21 @@ jobs:
                   + json.dumps({"include": wave_2}, separators=(",", ":"))
                   + "\n"
               )
+              handle.write(
+                  "matrix_3="
+                  + json.dumps({"include": wave_3}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(
+                  "matrix_4="
+                  + json.dumps({"include": wave_4}, separators=(",", ":"))
+                  + "\n"
+              )
               handle.write(f"gap_count={len(include)}\n")
               handle.write(f"gap_count_1={len(wave_1)}\n")
               handle.write(f"gap_count_2={len(wave_2)}\n")
+              handle.write(f"gap_count_3={len(wave_3)}\n")
+              handle.write(f"gap_count_4={len(wave_4)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
@@ -286,9 +309,99 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
+  recover_3:
+    needs: [plan, recover_2]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_3) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V1 V3 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-pons-tape \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-topic-scan \
+            --out "artifacts/v1-v3-events-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  recover_4:
+    needs: [plan, recover_3]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_3.result == 'success' || needs.recover_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_4) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V1 V3 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-pons-tape \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-topic-scan \
+            --out "artifacts/v1-v3-events-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
   merge:
-    needs: [plan, recover_1, recover_2]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') }}
+    needs: [plan, recover_1, recover_2, recover_3, recover_4]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') && (needs.recover_3.result == 'success' || needs.recover_3.result == 'skipped') && (needs.recover_4.result == 'success' || needs.recover_4.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
