@@ -1375,7 +1375,11 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "launch V1 V3 rescue" in content
     assert "launch V2 V4 rescue" in content
     assert "live venue rescue is blocked while source parent is active" in content
-    assert "live venue rescue is unnecessary after source success" in content
+    assert "live venue rescue is unnecessary for complete source " in content
+    assert "requested_artifacts" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "missing_requested_artifacts" in content
     assert "live venue rescue source workflow path changed" in content
     assert "live venue rescue source branch changed" in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
@@ -1610,6 +1614,10 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "launch_ledger_evidence_run_id" in content
     assert "launch_route_slot" in content
     assert "launch_ledger_routes" in content
+    assert "invalid_finalizers" in content
+    assert "finalizer_head_sha" in content
+    assert "launch_readiness_source_run_id" in content
+    assert "launch_ledger_generation" in content
     assert "VIABILITY_ROUTE_WORKFLOW_PATHS" in content
     assert "VIABILITY_ROUTE_WORKFLOWS" not in content
     assert "job_counts(run_id)" in content
@@ -1669,7 +1677,9 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "\n  push:" not in trigger_block
     assert "33982556591" in content
     assert "recovered completion cannot start before source is terminal" in content
-    assert "recovered completion is unnecessary after source success" in content
+    assert "recovered completion is unnecessary after complete " in content
+    assert "missing_source_artifacts" in content
+    assert "required_source_artifacts" in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
     assert "phase1-pons-v1-v3-recover-gaps.yml" in content
