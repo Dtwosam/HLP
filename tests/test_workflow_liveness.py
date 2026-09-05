@@ -290,6 +290,14 @@ def test_stock_oracle_delta_promotion_is_manual_bounded_and_fail_closed():
     assert "time.sleep(" not in content
 
 
+def test_v4_quote_fallback_uses_cumulative_forward_probe():
+    content = _workflow("phase1-pons-v4-quote-fallback-full.yml")
+    assert 'default: "33926428274"' in content
+    assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
+    assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
+    assert "pons-select-v4-quote-routes" in content
+
+
 def test_v4_quote_continuation_is_reusable_without_push_trigger():
     content = _workflow("phase1-pons-v4-quote-continuation.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
