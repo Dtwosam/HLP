@@ -1410,9 +1410,11 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert "phase1-pons-representative-evidence-chain.yml" in chain
     assert "phase1-pons-post-eligibility-evidence-ready" in chain
     assert '"recovery_mode": False' in chain
-    assert '"lifecycle_run_id": source_run_id' in chain
-    assert '"v1_v3_run_id": source_run_id' in chain
-    assert '"v2_v4_run_id": source_run_id' in chain
+    assert "validate_post_eligibility_evidence_bundle" in chain
+    assert "expected_lifecycle_run_id=source_run_id" in chain
+    assert "expected_v1_v3_run_id=source_run_id" in chain
+    assert "expected_v2_v4_run_id=source_run_id" in chain
+    assert "**validation" in chain
 
     launcher = _workflow(
         "phase1-pons-post-eligibility-evidence-one-shot.yml"
