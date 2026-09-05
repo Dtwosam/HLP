@@ -26,6 +26,7 @@ jobs:
         name: Verify completed evidence handoff before any route RPC
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ROUTE: ${{ inputs.route }}
         run: |
           python - <<'PY'
           import json
@@ -45,6 +46,43 @@ jobs:
               raise SystemExit("viability readiness run IDs must be positive")
           if source_run_id != 33_982_556_591:
               raise SystemExit("viability source eligibility run changed")
+
+          ledger = json.loads(
+              Path(".github/phase1-pons-viability-runs.json").read_text()
+          )
+          if int(ledger.get("generation", 0)) <= 0:
+              raise SystemExit("viability run ledger is not armed")
+          if int(ledger.get("evidence_run_id", 0)) != evidence_run_id:
+              raise SystemExit(
+                  "viability run ledger evidence does not match readiness"
+              )
+          routes = dict(ledger.get("routes") or {})
+          route = os.environ["ROUTE"]
+          expected_routes = {
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          }
+          if set(routes) != expected_routes:
+              raise SystemExit("viability run ledger route set changed")
+          if route not in routes:
+              raise SystemExit(f"viability route is not in ledger: {route}")
+          recorded_run_id = int(routes[route])
+          if recorded_run_id > 0:
+              raise SystemExit(
+                  f"viability route already recorded in ledger: "
+                  f"{route} run={recorded_run_id}"
+              )
+          if recorded_run_id < 0:
+              raise SystemExit(
+                  f"viability route ledger run ID cannot be negative: {route}"
+              )
 
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -105,6 +143,8 @@ jobs:
               "generation": generation,
               "evidence_run_id": evidence_run_id,
               "source_eligibility_run_id": source_run_id,
+              "route": route,
+              "ledger_recorded_run_id": recorded_run_id,
               "preflight": "pass",
           }, sort_keys=True))
           PY
