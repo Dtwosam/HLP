@@ -14,6 +14,7 @@ WORKFLOWS = [
     "phase1-pons-v1-v3-full.yml",
     "phase1-pons-v1-lifecycle-eligibility.yml",
     "phase1-pons-eligible-universe-freeze.yml",
+    "phase1-pons-representative-sample-freeze.yml",
     "phase1-pons-v3-quote-fallback-full.yml",
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
@@ -110,6 +111,7 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v1-v3-full.yml",
     "phase1-pons-v1-lifecycle-eligibility.yml",
     "phase1-pons-eligible-universe-freeze.yml",
+    "phase1-pons-representative-sample-freeze.yml",
     "phase1-pons-v3-quote-fallback-full.yml",
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
@@ -501,3 +503,19 @@ def test_v4_quote_continuation_is_reusable_without_push_trigger():
     assert "\n  push:" not in trigger_block
     assert "known_pool_only" in content
     assert "EXTRA+=(--known-pool-only)" in content
+
+def test_representative_sample_freeze_is_reusable_and_pinned():
+    content = _workflow("phase1-pons-representative-sample-freeze.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33920762592"' in content
+    assert "4861b2af1d549eb41c53341a07f6de71dce4d9486b769543c1376beab9c19ab9" in content
+    assert "6fb40693b77d7434d4e579a2225fed2c65061841a5ea9d0ba56f785071fc6ef2" in content
+    assert "frozen runner smoke must contain exactly five eligible" in content
+    assert 'versions != {"v1": 4, "v2": 1}' in content
+    assert "--runners 5 --failures 5" in content
+    assert "representative sample must freeze exactly five runners" in content
+    assert "representative sample must contain both Pons generations" in content
+    assert "time.sleep(" not in content
