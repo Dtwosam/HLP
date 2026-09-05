@@ -1,6 +1,6 @@
 # HLP Project State
 
-Updated: 2026-09-04
+Updated: 2026-09-05
 Repository: Dtwosam/HLP
 Current phase: Phase 1 — Historical/Live Data Acquisition Spike
 Status: ACTIVE
@@ -194,10 +194,18 @@ Two reusable manual-only range recovery workflows split any exact failed curve
 or anchor interval into four smaller subshards and merge only that interval.
 On top of those primitives, manifest-driven gap recovery now reads every
 successful partial-run manifest, derives the exact uncovered block intervals,
-and creates only bounded retry jobs. A live recovery measurement on 2026-09-05
-showed that 200k-block V2 tail jobs at the first two missing ranges both reached
-the 20-minute job cap, so V2 curve gaps are now capped at **50k blocks**. Anchor
-gaps remain capped at 150k blocks until that path is measured separately.
+and creates only bounded retry jobs. Both V2 curve and WETH/USDG anchor gap
+recovery can also reuse successful gap artifacts from one earlier interrupted
+gap-recovery run, so completed retry work survives another cancellation. A live
+recovery measurement on 2026-09-05 showed that 200k-block V2 tail jobs at the
+first two missing ranges both reached the 20-minute job cap, so V2 curve gaps
+are now capped at **50k blocks**.
+
+The cancelled anchor tail recovery preserved one successful **716,631-block**
+shard (48,752,988-49,469,618) containing **607,932** price events. It completed
+in **1,514.118 seconds** with **1,070** RPC requests. The anchor gap workflow
+keeps the more conservative **150k-block** retry cap for its first manifest-gap
+recovery pass; the stabilized adaptive log scanner is shared by this path too.
 
 The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
 scanning: after shrinking a rejected window, the iterator immediately doubled
