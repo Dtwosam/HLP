@@ -1,0 +1,192 @@
+name: phase1-pons-viability-ledger-finalize-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-viability-runs.json
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 final acceptance') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      evidence_run_id: ${{ steps.check.outputs.evidence_run_id }}
+      pons_registry_run_id: ${{ steps.check.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ steps.check.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ steps.check.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ steps.check.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ steps.check.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ steps.check.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ steps.check.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ steps.check.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ steps.check.outputs.quote_v4_fallback_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        name: Validate frozen evidence and nine route run IDs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          expected = {
+              "pons_registry": "phase1-pons-viability-pons-registry-one-shot",
+              "pons_v1_v3": "phase1-pons-viability-pons-v1-v3-one-shot",
+              "pons_v2_curve": "phase1-pons-viability-pons-v2-curve-one-shot",
+              "pons_v2_transition": (
+                  "phase1-pons-viability-pons-v2-transition-one-shot"
+              ),
+              "pons_v2_v4": "phase1-pons-viability-pons-v2-v4-one-shot",
+              "weth_usdg_anchor": (
+                  "phase1-pons-viability-weth-usdg-anchor-one-shot"
+              ),
+              "stock_oracle": "phase1-pons-viability-stock-oracle-one-shot",
+              "quote_v3_fallback": (
+                  "phase1-pons-viability-quote-v3-fallback-one-shot"
+              ),
+              "quote_v4_fallback": (
+                  "phase1-pons-viability-quote-v4-fallback-one-shot"
+              ),
+          }
+
+          ledger = json.loads(
+              Path(".github/phase1-pons-viability-runs.json").read_text()
+          )
+          if int(ledger.get("generation", 0)) <= 0:
+              raise SystemExit("viability run ledger is not armed")
+          evidence_run_id = int(ledger.get("evidence_run_id", 0))
+          if evidence_run_id <= 0:
+              raise SystemExit("viability ledger evidence run ID must be positive")
+
+          routes = dict(ledger.get("routes") or {})
+          if set(routes) != set(expected):
+              raise SystemExit(
+                  "viability run ledger route set changed: "
+                  f"expected={sorted(expected)} actual={sorted(routes)}"
+              )
+          route_run_ids = {
+              route: int(routes[route])
+              for route in expected
+          }
+          if min(route_run_ids.values()) <= 0:
+              raise SystemExit("viability run ledger contains non-positive run ID")
+          if len(set(route_run_ids.values())) != 9:
+              raise SystemExit(
+                  "viability run ledger requires nine distinct route run IDs"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          if (
+              evidence.get("status") != "completed"
+              or evidence.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "viability ledger evidence run is not successful"
+              )
+
+          evidence_artifacts = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              evidence_artifacts.update(
+                  str(a.get("name"))
+                  for a in artifacts
+                  if not a.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+          required_evidence = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(required_evidence - evidence_artifacts)
+          if missing:
+              raise SystemExit(
+                  f"viability ledger evidence artifacts missing: {missing}"
+              )
+
+          for route, run_id in route_run_ids.items():
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"viability route run is not successful: "
+                      f"{route} run={run_id} status={run.get('status')} "
+                      f"conclusion={run.get('conclusion')}"
+                  )
+              if run.get("name") != expected[route]:
+                  raise SystemExit(
+                      f"viability route workflow mismatch: {route} "
+                      f"expected={expected[route]} actual={run.get('name')}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"viability route branch mismatch: {route}"
+                  )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"evidence_run_id={evidence_run_id}\n")
+              for route, run_id in route_run_ids.items():
+                  output.write(f"{route}_run_id={run_id}\n")
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "route_run_ids": route_run_ids,
+              "distinct_route_run_ids": len(set(route_run_ids.values())),
+              "status": "ready_for_final_acceptance",
+          }, sort_keys=True))
+          PY
+
+  acceptance:
+    needs: validate
+    if: ${{ needs.validate.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-final-acceptance-chain.yml
+    with:
+      eligibility_run_id: ${{ needs.validate.outputs.evidence_run_id }}
+      representative_run_id: ${{ needs.validate.outputs.evidence_run_id }}
+      pons_registry_run_id: ${{ needs.validate.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ needs.validate.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ needs.validate.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ needs.validate.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ needs.validate.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ needs.validate.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ needs.validate.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ needs.validate.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ needs.validate.outputs.quote_v4_fallback_run_id }}
+    secrets: inherit
