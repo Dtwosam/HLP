@@ -362,12 +362,14 @@ research threshold or starting another archive crawl:
   fails closed unless every sampled token begins with a launch-time mint;
 - GeckoTerminal is used only as independent DEX evidence, never canonical
   history; the client supports pool identity and bounded OHLCV reads;
-- a separate bounded Blockscout cross-check verifies the exact transaction
-  identity and mined block for every representative launch plus each distinct
-  first/max/last DEX price checkpoint. It is explicitly explorer evidence, not
-  canonical event truth, is capped at 40 targets, and reports request/egress
-  counters; final representative validation requires its DEX transaction count
-  to equal the nested GeckoTerminal checkpoint count exactly;
+- a separate bounded Blockscout cross-check can verify exact transaction
+  identity and mined block for representative launches plus each distinct
+  first/max/last DEX price checkpoint, but it is **supplementary only** while
+  GitHub-hosted runners remain known to receive HTTP 403 from Blockscout APIs.
+  Its workflow is gated behind an explicit access-reverified input, is capped
+  at 40 targets, and reports request/egress counters. If explorer evidence is
+  supplied later, representative validation and Phase 1 PASS require complete
+  10-token coverage and exact agreement with the GeckoTerminal checkpoint set;
 - V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
   events so an Initialize-only price cannot masquerade as independent trade
   evidence;
@@ -391,9 +393,10 @@ research threshold or starting another archive crawl:
 - an artifact-only representative validation join requires all 10 tokens to
   have consistent lifecycle pricing evidence, detailed launch/trade paths,
   detailed per-event USD price replay, holder replay, pool identity
-  reconciliation, multi-point DEX price evidence and matching independent
-  Blockscout transaction verification before it can publish a complete
-  validation bundle.
+  reconciliation and multi-point independent DEX price evidence before it can
+  publish a complete validation bundle. Blockscout explorer verification is
+  accepted as supplementary evidence when access is reverified, but is not a
+  required GitHub-hosted dependency while the documented HTTP 403 persists.
 
 The final Phase 1 viability path is also staged fail-closed:
 
