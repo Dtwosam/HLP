@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 
 from hlp.data.pons_representative_prices import (
+    select_representative_dex_price_checkpoints,
     summarize_representative_priced_paths,
     validate_representative_priced_path_rows,
 )
@@ -128,3 +129,157 @@ def test_representative_priced_path_rejects_unpriced_row_with_usd_price():
 
     with pytest.raises(ValueError, match="has token USD price"):
         validate_representative_priced_path_rows(rows, sample)
+
+def test_dex_price_checkpoints_select_first_max_and_last_swaps():
+    sample = _sample()
+    token = _token(1)
+    rows = [
+        {
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_initialize",
+            "block_number": 1002,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "9",
+        },
+        {
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_swap",
+            "block_number": 1003,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "2",
+        },
+        {
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_swap",
+            "block_number": 1004,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "5",
+        },
+        {
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_swap",
+            "block_number": 1005,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "3",
+        },
+    ]
+    checkpoints = select_representative_dex_price_checkpoints(
+        rows,
+        sample,
+    )[token]
+
+    assert [row["block_number"] for row in checkpoints] == [1003, 1004, 1005]
+    assert [row["checkpoint_roles"] for row in checkpoints] == [
+        ["first"],
+        ["max"],
+        ["last"],
+    ]
+
+
+def test_dex_price_checkpoints_deduplicate_one_swap_roles():
+    sample = _sample()
+    token = _token(1)
+    checkpoints = select_representative_dex_price_checkpoints(
+        [{
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_swap",
+            "block_number": 1002,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "2",
+        }],
+        sample,
+    )[token]
+
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["checkpoint_roles"] == ["first", "max", "last"]
+
+
+def test_dex_price_checkpoints_use_only_v2_v4_swaps():
+    sample = _sample()
+    token = _token(6)
+    rows = [
+        {
+            "token": token,
+            "pons_version": "v2",
+            "price_path_phase": "v2_curve",
+            "event_type": "curve_buy",
+            "block_number": 1007,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "99",
+        },
+        {
+            "token": token,
+            "pons_version": "v2",
+            "price_path_phase": "v2_seed",
+            "event_type": "pool_graduated",
+            "block_number": 1008,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "88",
+        },
+        {
+            "token": token,
+            "pons_version": "v2",
+            "price_path_phase": "v2_v4",
+            "event_type": "v4_initialize",
+            "block_number": 1009,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "77",
+        },
+        {
+            "token": token,
+            "pons_version": "v2",
+            "price_path_phase": "v2_v4",
+            "event_type": "v4_swap",
+            "block_number": 1010,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": "4",
+        },
+    ]
+    checkpoints = select_representative_dex_price_checkpoints(
+        rows,
+        sample,
+    )[token]
+
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["block_number"] == 1010
+    assert checkpoints[0]["checkpoint_roles"] == ["first", "max", "last"]
+
+
+def test_dex_price_checkpoints_ignore_unpriced_swaps():
+    sample = _sample()
+    token = _token(1)
+    checkpoints = select_representative_dex_price_checkpoints(
+        [{
+            "token": token,
+            "pons_version": "v1",
+            "price_path_phase": "v1_v3",
+            "event_type": "v3_swap",
+            "block_number": 1002,
+            "transaction_index": 1,
+            "log_index": 0,
+            "token_price_usd": None,
+        }],
+        sample,
+    )
+
+    assert checkpoints[token] == []
+
