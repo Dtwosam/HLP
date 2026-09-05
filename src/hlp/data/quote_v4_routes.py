@@ -492,6 +492,7 @@ def extend_v4_usdg_routes(
     chunk_size: int = 2_000,
     min_chunk_size: int = 25,
     pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+    known_pool_only: bool = False,
 ) -> list[dict]:
     """Continue only unresolved V4 route searches after prior search bounds."""
     if forward_blocks <= 0:
@@ -514,34 +515,45 @@ def extend_v4_usdg_routes(
             output.append(source)
             continue
 
-        currency0, currency1 = sorted(
-            (token, usdg),
-            key=lambda value: int(value, 16),
-        )
-        init_logs = rpc.iter_logs_chunked(
-            start,
-            end,
-            address=pool_manager,
-            topics=[
-                V4_INITIALIZE_TOPIC,
-                None,
-                _address_topic(currency0),
-                _address_topic(currency1),
-            ],
-            chunk_size=chunk_size,
-            min_chunk_size=min_chunk_size,
-        )
-        new_initializes = []
-        for raw in init_logs:
-            event = decode_v4_pool_initialized(raw)
-            if {
-                event.currency0.lower(),
-                event.currency1.lower(),
-            } != {token, usdg}:
-                raise ValueError("continued V4 Initialize currency mismatch")
-            new_initializes.append(_record_dict(event))
-
         candidates = [dict(row) for row in source.get("v4_candidates", [])]
+        if known_pool_only:
+            if not candidates:
+                raise ValueError(
+                    "known_pool_only requires an existing V4 candidate"
+                )
+            new_initializes = []
+            source["continuation_mode"] = "known_pool_only"
+        else:
+            currency0, currency1 = sorted(
+                (token, usdg),
+                key=lambda value: int(value, 16),
+            )
+            init_logs = rpc.iter_logs_chunked(
+                start,
+                end,
+                address=pool_manager,
+                topics=[
+                    V4_INITIALIZE_TOPIC,
+                    None,
+                    _address_topic(currency0),
+                    _address_topic(currency1),
+                ],
+                chunk_size=chunk_size,
+                min_chunk_size=min_chunk_size,
+            )
+            new_initializes = []
+            for raw in init_logs:
+                event = decode_v4_pool_initialized(raw)
+                if {
+                    event.currency0.lower(),
+                    event.currency1.lower(),
+                } != {token, usdg}:
+                    raise ValueError(
+                        "continued V4 Initialize currency mismatch"
+                    )
+                new_initializes.append(_record_dict(event))
+            source["continuation_mode"] = "discover_and_scan"
+
         known_ids = {row["pool_id"].lower() for row in candidates}
         for initialized in new_initializes:
             pool_id = initialized["pool_id"].lower()
