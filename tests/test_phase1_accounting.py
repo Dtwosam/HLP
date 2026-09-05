@@ -54,6 +54,8 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
     logs = {
         1: (
             'x {"requests_made": 5, "rhj_requests": 2, '
+            '"rhj_bytes": 200, "chainlink_directory_requests": 1, '
+            '"chainlink_directory_bytes": 300, '
             '"response_bytes_received": 1000, "rpc_route": '
             '"solidrpc_keyless_public", "elapsed_seconds": 12.5, '
             '"provenance": {"from_block": 10, "to_block": 19}}\n'
@@ -68,14 +70,17 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
     result = summarize_action_run(run, jobs, artifacts, logs)
     assert result["request_counters"] == {
         "archive_rpc_requests": 7,
+        "chainlink_directory_requests": 1,
         "requests_made": 5,
         "rhj_requests": 2,
     }
-    assert result["request_counter_total"] == 14
+    assert result["request_counter_total"] == 15
     assert result["response_byte_counters"] == {
-        "response_bytes_received": 3500
+        "chainlink_directory_bytes": 300,
+        "response_bytes_received": 3500,
+        "rhj_bytes": 200,
     }
-    assert result["counted_response_bytes"] == 3500
+    assert result["counted_response_bytes"] == 4000
     assert result["rpc_route_counts"] == {"solidrpc_keyless_public": 2}
     assert result["reported_rpc_routes"] == ["solidrpc_keyless_public"]
     assert result["reported_block_ranges"] == [[10, 29]]
