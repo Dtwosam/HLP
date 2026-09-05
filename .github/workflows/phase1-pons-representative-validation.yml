@@ -198,7 +198,7 @@ jobs:
                   "representative validation sample V2 run mismatch"
               )
 
-          def provenance(path, *, snapshot=True):
+          def manifest_and_provenance(path, *, snapshot=True):
               manifest = json.loads(Path(path).read_text())
               prov = manifest.get("provenance") or {}
               if int(prov.get("chain_id", -1)) != 4663:
@@ -211,21 +211,27 @@ jobs:
                   raise SystemExit(
                       f"representative evidence snapshot mismatch: {path}"
                   )
-              return prov
+              return manifest, prov
 
-          transfer = provenance(
+          v1_lifecycle_manifest, _v1_lifecycle = manifest_and_provenance(
+              "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          v2_lifecycle_manifest, _v2_lifecycle = manifest_and_provenance(
+              "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          transfer_manifest, transfer = manifest_and_provenance(
               "transfers/"
               "pons-representative-transfers-full.jsonl.manifest.json"
           )
-          market = provenance(
+          market_manifest, market = manifest_and_provenance(
               "market-paths/"
               "pons-representative-market-paths.jsonl.manifest.json"
           )
-          priced = provenance(
+          priced_manifest, priced = manifest_and_provenance(
               "priced-paths/"
               "pons-representative-priced-paths.jsonl.manifest.json"
           )
-          dex = provenance(
+          dex_manifest, dex = manifest_and_provenance(
               "dex/"
               "pons-representative-dex-crosscheck.jsonl.manifest.json",
               snapshot=False,
@@ -312,6 +318,8 @@ jobs:
               "dex_crosscheck_run_id": int(
                   "${{ inputs.dex_crosscheck_run_id }}"
               ),
+              "v1_eligibility_sha256": v1_lifecycle_manifest["sha256"],
+              "v2_eligibility_sha256": v2_lifecycle_manifest["sha256"],
               "provenance_consistent": True,
           }, sort_keys=True))
           PY
@@ -522,6 +530,16 @@ jobs:
                   "fallback_run_id": int(
                       "${{ inputs.fallback_run_id }}"
                   ),
+                  "v1_eligibility_sha256": json.loads(
+                      Path(
+                          "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+                      ).read_text()
+                  )["sha256"],
+                  "v2_eligibility_sha256": json.loads(
+                      Path(
+                          "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+                      ).read_text()
+                  )["sha256"],
                   "source_coverage_sha256": coverage_snapshot["sha256"],
               },
           )
