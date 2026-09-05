@@ -194,6 +194,7 @@ def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "plan_missing_subranges" in content
     assert "prior_gap_run_id" in content
     assert 'Path("prior-gaps").glob("curve-gap-*.jsonl")' in content
+    assert '"source": path.parent.name' in content
     assert 'default: "50000"' in content
     assert "max-parallel: 2" in content
     assert "timeout-minutes: 20" in content
