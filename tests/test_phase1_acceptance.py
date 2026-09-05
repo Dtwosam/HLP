@@ -43,6 +43,8 @@ def _fixtures():
             "v1_eligibility_sha256": "a" * 64,
             "v2_eligibility_sha256": "b" * 64,
             "sample_run_id": 404,
+            "v1_v3_run_id": 101,
+            "v2_v4_run_id": 202,
             "runner_smoke_run_id": 33_920_762_592,
             "runner_smoke_universe_sha256": (
                 "4861b2af1d549eb41c53341a07f6de71dce4d9486"
@@ -189,6 +191,8 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         "anchor_run_id": 33_972_109_927,
         "oracle_run_id": 33_974_681_334,
         "sample_run_id": 404,
+        "v1_v3_run_id": 101,
+        "v2_v4_run_id": 202,
         "transfer_run_id": 405,
         "market_path_run_id": 406,
         "priced_path_run_id": 407,
@@ -460,4 +464,23 @@ def test_phase1_acceptance_rejects_runner_smoke_summary_hash_drift():
     fixtures[2]["runner_smoke_universe_sha256"] = "d" * 64
 
     with pytest.raises(ValueError, match="runner smoke SHA summary disagrees"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_allows_explicit_recovered_venue_run_ids():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["v1_v3_run_id"] = 901
+    fixtures[3]["provenance"]["v2_v4_run_id"] = 902
+
+    report = build_phase1_acceptance_report(*fixtures)
+
+    assert report["representative_source_run_ids"]["v1_v3_run_id"] == 901
+    assert report["representative_source_run_ids"]["v2_v4_run_id"] == 902
+
+
+def test_phase1_acceptance_rejects_invalid_recovered_venue_run_id():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["v1_v3_run_id"] = 0
+
+    with pytest.raises(ValueError, match="upstream run provenance is invalid"):
         build_phase1_acceptance_report(*fixtures)
