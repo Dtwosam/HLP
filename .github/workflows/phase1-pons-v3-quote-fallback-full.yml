@@ -77,6 +77,13 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          delayed = [
+              json.loads(line)
+              for line in Path(
+                  "delayed/pons-delayed-v3-usdg-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
           selected = [
               json.loads(line)
               for line in Path(
@@ -84,7 +91,48 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
-          selected_tokens = {row["quote_token"] for row in selected}
+          selected_tokens = {
+              row["quote_token"].lower() for row in selected
+          }
+          audit_tokens = {
+              row["quote_token"].lower() for row in audit
+          }
+          unresolved = [
+              row for row in audit
+              if row["quote_token"].lower() not in selected_tokens
+          ]
+          unresolved_tokens = {
+              row["quote_token"].lower() for row in unresolved
+          }
+          delayed_tokens = {
+              row["quote_token"].lower() for row in delayed
+          }
+          if len(audit) != 30 or len(audit_tokens) != 30:
+              raise SystemExit(
+                  "frozen V3 fallback audit must contain 30 unique feedless "
+                  f"assets, got rows={len(audit)} unique={len(audit_tokens)}"
+              )
+          if len(selected) != 25 or len(selected_tokens) != 25:
+              raise SystemExit(
+                  "frozen V3 fallback must select exactly 25 unique causal "
+                  f"routes, got rows={len(selected)} unique={len(selected_tokens)}"
+              )
+          if len(unresolved) != 5:
+              raise SystemExit(
+                  "frozen V3 fallback must leave exactly five residual "
+                  f"assets for V4, got {len(unresolved)}"
+              )
+          if delayed_tokens != unresolved_tokens:
+              raise SystemExit(
+                  "delayed V3 probe does not exactly cover the five residual "
+                  f"assets: missing={sorted(unresolved_tokens - delayed_tokens)} "
+                  f"extra={sorted(delayed_tokens - unresolved_tokens)}"
+              )
+          if any(row.get("delayed_route_ready") for row in delayed):
+              raise SystemExit(
+                  "frozen delayed V3 probe unexpectedly resolves a residual "
+                  "asset; refresh the deterministic route selection baseline"
+              )
           non_usdg = [
               row for row in selected
               if row["anchor_token"].lower()
@@ -105,8 +153,7 @@ jobs:
                       "launches": row["launches"],
                       "first_launch_block": row["first_launch_block"],
                   }
-                  for row in audit
-                  if row["quote_token"] not in selected_tokens
+                  for row in unresolved
               ],
           }
           Path("artifacts/pons-v3-quote-route-selection-summary.json").write_text(
