@@ -268,6 +268,20 @@ The promotion accepts an optional prior interrupted delta run, validates its
 successful shard manifests, and plans only exact uncovered subranges before
 emitting the canonical `phase1-pons-stock-oracle-full` artifact.
 
+Resumable promotion run **33974681334** completed successfully on 2026-09-05.
+It reused the 22-feed V2 tape plus preserved delta evidence, filled the DELL
+tail with **23 exact source ranges**, and published the canonical full-Pons
+stock-oracle artifact with:
+
+- **23** stock quote assets total;
+- **22** promoted V2 assets + exactly **1** delta asset (**DELL**);
+- **9,734** oracle updates;
+- initial-state SHA-256
+  `9d49662fcbf052cf6165ce0cb9943bc32ea4efb543cfd3d21cbd0c1956623355`;
+- update-tape SHA-256
+  `1584526e894e3ba343abb906e7ebeac14de548578b44ae7a7eb352bcd31fe944`;
+- exact snapshot head **54,486,035**.
+
 A separate causality fix activates staggered quote-source state only at each
 asset's first Pons use. Future oracle availability is never active from the
 beginning of a historical replay. Lifecycle summaries distinguish
@@ -527,12 +541,16 @@ or V4 full quote scan then fails after preserving successful shards, the same
 pricing run invokes its manifest-gap recovery and continues only from a
 recovered canonical artifact. If neither venue resolves SKHY, the chain stops
 before the full fallback scans.
-A guarded one-shot launcher is staged against resumable oracle promotion run
-**33974681334**; its initial creation is intentionally skipped. The full chain
-now preflights that run's canonical stock-oracle artifact—23 feeds, the single
-DELL delta, matching summary/manifests/checksums, chain 4663 and the frozen
-snapshot head—before V1/V3 acquisition can start. The launcher must not be
-fired unless the oracle run succeeds and the archive lane is otherwise clear.
+The guarded one-shot launcher remained pinned to oracle promotion run
+**33974681334** until that run completed successfully and the archive lane was
+clear. It was then fired once at commit
+`c53b3a63156976a5873752c332fa7578011249b0`, creating full eligibility
+acquisition run **33982556591**. Its stock-oracle preflight passed before any
+archive crawl began, proving 23 feeds, the single DELL delta, matching
+summary/manifests/checksums, chain 4663 and snapshot head **54,486,035**.
+The run has now entered the 240-shard V1/V3 stage with max-parallel 2. V2/V4,
+pricing/fallback resolution and lifecycle eligibility remain serialized behind
+that stage and its automatic manifest-gap recovery path.
  Both lifecycle jobs stream the immutable full-history tapes rather than
 materializing them in memory, and their artifact-only replay ceiling is **60
 minutes** so multi-GB downloads plus causal replay are not killed by the former
