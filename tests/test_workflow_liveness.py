@@ -412,6 +412,8 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert "SKHY cannot be owned by both V3 and V4" in content
     assert "externally_resolved_assets" in content
     assert "residual_quote_assets" in content
+    assert "SHARD_COUNT: '64'" in content
+    assert "max-parallel: 2" in content
 
 
 def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
@@ -433,7 +435,7 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "canonical V3 ownership must be 25 USDG + SKHY/WETH" in content
     assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
     assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
-    assert "SHARD_COUNT: '16'" in content
+    assert "SHARD_COUNT: '64'" in content
     assert "max-parallel: 2" in content
 
 

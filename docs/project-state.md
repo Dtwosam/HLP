@@ -209,9 +209,12 @@ feedless assets**, leaving exactly **4** assets for V4. V4 then fails closed
 unless its one non-V4 residual is exactly SKHY and the canonical 26-route V3
 manifest proves that ownership. The generic fallback requires disjoint
 **26 V3 + 4 V4 = 30** assets. This does **not** add another V3 full-history
-block scan: SKHY becomes a 26th address in the existing 16-shard V3 route scan,
-so the frozen V3 processed-block geometry remains unchanged; only response
-volume can change.
+block scan: SKHY becomes a 26th address in the same single full-history V3
+route scan, so the frozen **total processed-block geometry** remains unchanged;
+only response volume can change. After the measured keyless DELL oracle
+500k-block timeout, the execution partition was tightened to **64 V3 shards**
+and **64 V4 quote-fallback shards** with max-parallel 2. This changes only
+per-job span and retry safety, not the canonical full-history block workload.
 
 The original V4 continuation path remains available and supports fail-closed
 `known_pool_only` mode. For SKHY it skips redundant Initialize discovery and
