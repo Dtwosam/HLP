@@ -653,6 +653,8 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert "phase1-pons-v2-v4-full" in content
     assert "build_representative_market_path_rows" in content
     assert "summarize_representative_market_paths" in content
+    assert "summarize_sharded_manifest_coverage" in content
+    assert "pons-representative-market-source-coverage.json" in content
     assert "no provider requests" in content
     assert 'default: "33911022718"' in content
     assert 'default: "33936232604"' in content
@@ -680,6 +682,9 @@ def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
     assert "build_v2_v4_market_cap_points" in content
     assert "validate_representative_priced_path_rows" in content
     assert "summarize_representative_priced_paths" in content
+    assert "summarize_sharded_manifest_coverage" in content
+    assert "summarize_snapshot_manifest_coverage" in content
+    assert "pons-representative-pricing-source-coverage.json" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
@@ -707,6 +712,9 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "pons-representative-explorer-token-summary.jsonl" in content
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
+    assert "validate_representative_coverage_report" in content
+    assert "pons-representative-source-coverage.jsonl" in content
+    assert "source_coverage_sha256" in content
     assert "representative validation must contain exactly 10" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
