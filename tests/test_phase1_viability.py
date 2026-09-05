@@ -1,6 +1,7 @@
 import pytest
 
 from hlp.data.phase1_viability import (
+    REQUIRED_PHASE1_ROUTE_BLOCKS,
     project_phase1_acquisition_plan,
     project_route_requirements,
 )
@@ -29,6 +30,53 @@ def _run(
         "job_runtime_seconds": job_runtime,
         "rpc_route_counts": {route: 1},
     }
+
+
+def _full_plan(*, missing_run_route=None, reused_run_routes=()):
+    plans = []
+    run_ids = {}
+    next_run_id = 100
+    shared_run_id = 999
+    reused = set(reused_run_routes)
+    for route, required_blocks in REQUIRED_PHASE1_ROUTE_BLOCKS.items():
+        if route == missing_run_route:
+            run_id = 9999
+        elif route in reused:
+            run_id = shared_run_id
+        else:
+            run_id = next_run_id
+            next_run_id += 1
+        run_ids[route] = run_id
+        plans.append(
+            {
+                "route": route,
+                "run_ids": [run_id],
+                "required_blocks": required_blocks,
+            }
+        )
+    return plans, run_ids
+
+
+def _full_runs(run_ids, *, exclude=()):
+    excluded = set(exclude)
+    rows = []
+    seen = set()
+    for route, run_id in run_ids.items():
+        if route in excluded or run_id in seen:
+            continue
+        seen.add(run_id)
+        rows.append(
+            _run(
+                run_id,
+                blocks=100,
+                requests=100,
+                response_bytes=1_000,
+                artifact_bytes=500,
+                elapsed=100,
+                job_runtime=200,
+            )
+        )
+    return rows
 
 
 def test_route_projection_uses_worst_observed_per_block_rates():
@@ -117,105 +165,48 @@ def test_route_projection_requires_response_egress_measurement():
 
 
 def test_phase1_plan_aggregates_routes_and_free_quota_days():
-    rows = [
-        _run(
-            11,
-            blocks=100,
-            requests=10,
-            response_bytes=1_000,
-            artifact_bytes=500,
-            elapsed=10,
-            job_runtime=20,
-        ),
-        _run(
-            12,
-            blocks=50,
-            requests=20,
-            response_bytes=2_000,
-            artifact_bytes=1_000,
-            elapsed=20,
-            job_runtime=30,
-            route="robinhood_public",
-        ),
-    ]
+    plans, run_ids = _full_plan()
+    rows = _full_runs(run_ids)
+    required_work = sum(REQUIRED_PHASE1_ROUTE_BLOCKS.values())
+
     result = project_phase1_acquisition_plan(
-        [
-            {
-                "route": "registry",
-                "run_ids": [11],
-                "required_blocks": 1_000,
-            },
-            {
-                "route": "anchor",
-                "run_ids": [12],
-                "required_blocks": 500,
-            },
-        ],
+        plans,
         rows,
         free_daily_method_calls=100,
     )
 
-    assert result["routes"] == 2
-    assert result["route_names"] == ["registry", "anchor"]
-    assert result["projected_requests"] == 300
-    assert result["projected_response_bytes"] == 30_000
-    assert result["projected_artifact_bytes"] == 15_000
-    assert result["projected_elapsed_seconds"] == 300
-    assert result["projected_job_runtime_seconds"] == 500
-    assert result["projected_free_quota_days"] == 3
+    assert result["routes"] == len(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    assert result["route_names"] == list(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    assert result["required_route_blocks"] == REQUIRED_PHASE1_ROUTE_BLOCKS
+    assert result["required_work_blocks"] == required_work
+    assert result["projected_requests"] == required_work
+    assert result["projected_response_bytes"] == required_work * 10
+    assert result["projected_artifact_bytes"] == required_work * 5
+    assert result["projected_elapsed_seconds"] == required_work
+    assert result["projected_job_runtime_seconds"] == required_work * 2
+    assert result["projected_free_quota_days"] == (
+        required_work + 99
+    ) // 100
     assert result["all_routes_instrumented"] is True
     assert result["zero_cost_route_evidence"] is True
 
 
 def test_phase1_plan_rejects_reused_evidence_run():
-    rows = [
-        _run(
-            11,
-            blocks=100,
-            requests=10,
-            response_bytes=1_000,
-            artifact_bytes=500,
-            elapsed=10,
-            job_runtime=20,
-        )
-    ]
+    routes = list(REQUIRED_PHASE1_ROUTE_BLOCKS)
+    plans, run_ids = _full_plan(
+        reused_run_routes=(routes[0], routes[1]),
+    )
+    rows = _full_runs(run_ids)
+
     with pytest.raises(ValueError, match="reused across routes"):
-        project_phase1_acquisition_plan(
-            [
-                {
-                    "route": "registry",
-                    "run_ids": [11],
-                    "required_blocks": 1_000,
-                },
-                {
-                    "route": "v1_v3",
-                    "run_ids": [11],
-                    "required_blocks": 1_000,
-                },
-            ],
-            rows,
-        )
+        project_phase1_acquisition_plan(plans, rows)
 
 
 def test_phase1_plan_rejects_missing_accounting_run():
+    first_route = next(iter(REQUIRED_PHASE1_ROUTE_BLOCKS))
+    plans, run_ids = _full_plan(missing_run_route=first_route)
+    rows = _full_runs(run_ids, exclude=(first_route,))
+
     with pytest.raises(ValueError, match="missing accounting runs"):
-        project_phase1_acquisition_plan(
-            [
-                {
-                    "route": "registry",
-                    "run_ids": [99],
-                    "required_blocks": 1_000,
-                }
-            ],
-            [
-                _run(
-                    11,
-                    blocks=100,
-                    requests=10,
-                    response_bytes=1_000,
-                    artifact_bytes=500,
-                    elapsed=10,
-                    job_runtime=20,
-                )
-            ],
-        )
+        project_phase1_acquisition_plan(plans, rows)
+
