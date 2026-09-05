@@ -1485,3 +1485,62 @@ def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "time.sleep(" not in content
+
+
+def test_recovered_completion_chain_is_terminal_gated_and_resumable():
+    content = _workflow("phase1-pons-recovered-completion-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "33982556591" in content
+    assert "recovered completion cannot start before source is terminal" in content
+    assert "recovered completion is unnecessary after source success" in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "inputs.v2_v4_run_id == ''" in content
+    assert "phase1-pons-pricing-eligibility-chain.yml" in content
+    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "v1_v3_run_id: ${{ inputs.v1_v3_run_id }}" in content
+    assert (
+        "inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || "
+        "format('{0}', github.run_id)"
+    ) in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert '"recovery_mode": True' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+
+def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
+    content = _workflow("phase1-pons-recovered-completion-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-recovered-completion.json" in content
+    assert "launch recovered Phase 1 completion" in content
+    assert "recovered completion config is not armed" in content
+    assert "source_id != 33_982_556_591" in content
+    assert "v1_id <= 0" in content
+    assert "phase1-pons-recovered-completion-chain.yml" in content
+
+
+def test_viability_accepts_only_approved_evidence_workflow_paths():
+    guard = _workflow("phase1-pons-viability-guarded-route.yml")
+    finalizer = _workflow(
+        "phase1-pons-viability-ledger-finalize-one-shot.yml"
+    )
+    for content in (guard, finalizer):
+        assert (
+            "phase1-pons-post-eligibility-evidence-one-shot.yml"
+            in content
+        )
+        assert "phase1-pons-recovered-completion-one-shot.yml" in content
+        assert "phase1/data-acquisition-spike" in content
+    assert "evidence handoff workflow path is not allowed" in guard
+    assert "viability ledger evidence workflow path is not allowed" in finalizer
