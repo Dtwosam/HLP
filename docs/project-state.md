@@ -486,7 +486,12 @@ research threshold or starting another archive crawl:
   fails or is cancelled after preserving successful shards, a later
   representative-chain run resumes only missing ranges by supplying the earlier
   parent run as `prior_transfer_run_id`; this avoids discarding completed
-  holder work while keeping the reusable-workflow graph fail-closed.
+  holder work while keeping the reusable-workflow graph fail-closed. The
+  reusable Transfer workflow's `workflow_call` contract now carries the same
+  frozen **200k-block** default as manual dispatch; an inert caller probe caught
+  the previous missing required-input default, and the staged representative
+  one-shot now passes GitHub graph validation and skips cleanly until its
+  explicit launch phrase is committed.
 
 The final Phase 1 viability path is also staged fail-closed:
 
@@ -521,7 +526,11 @@ The final Phase 1 viability path is also staged fail-closed:
   `hlp-v1-phase1-data-viability` PASS only when the complete eligible universe,
   the 10-token end-to-end validation and all nine instrumented zero-cost route
   projections agree at snapshot head **54,486,035** and share the same V1/V2
-  lifecycle evidence.
+  lifecycle evidence. The reusable
+  `phase1-pons-final-acceptance-chain` graph has also been validated through
+  an inert caller, so its nine distinct measurement IDs can later flow through
+  accounting -> viability projection -> acceptance without another reusable-
+  workflow contract discovery.
 
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
