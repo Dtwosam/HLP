@@ -574,16 +574,19 @@ The run has now entered the 240-shard V1/V3 stage with max-parallel 2. V2/V4,
 pricing/fallback resolution and lifecycle eligibility remain serialized behind
 that stage and its automatic manifest-gap recovery path. The first two V1/V3
 shards completed successfully in about 26 minutes each. Artifact/log-only
-checkpoint run **33984605170** accounted those completed jobs without issuing
-provider requests: **382,203 processed blocks**, **3,590 RPC requests**,
-**998,686,641 response bytes (0.9301 GiB)**, **313,821 artifact bytes** and
-**3,084.999 seconds** of reported acquisition time, all through
-`solidrpc_keyless_public`. A simple same-density operational extrapolation is
-about **430.8k requests**, **111.6 GiB response egress** and **51.4 hours of
-two-way-parallel wall time** for the complete V1/V3 route. This checkpoint is
-explicitly non-acceptance evidence because the parent acquisition is still
-incomplete; frozen viability still requires its separate bounded route
-measurement run and worst-observed-per-block projection.
+checkpoint run **33984605170** first accounted those two jobs without issuing
+provider requests. A stronger artifact/log-only checkpoint,
+**33987497436**, later captured the first **7 successful shards**:
+**1,337,711 processed blocks**, **12,360 RPC requests**,
+**3,066,837,229 response bytes (2.8562 GiB)**, **9,969,790 artifact bytes**
+and **10,436.062 seconds** of reported acquisition time, all through
+`solidrpc_keyless_public`. A simple same-density operational extrapolation from
+that larger sample is about **423.8k requests**, **97.9 GiB response egress**,
+**0.318 GiB compressed artifact storage** and **49.7 hours of two-way-parallel
+wall time** for the complete V1/V3 route. These checkpoints are explicitly
+non-acceptance evidence because the parent acquisition is still incomplete;
+frozen viability still requires its separate bounded route measurement run and
+worst-observed-per-block projection.
 
 The current branch also hardens manual rescue beyond the launch commit's
 single-wave recovery implementation: V1/V3 and V2/V4 gap recovery now split up
