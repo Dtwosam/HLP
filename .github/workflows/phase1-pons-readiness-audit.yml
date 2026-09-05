@@ -98,9 +98,34 @@ jobs:
                       )
               return sorted(names)
 
-          def run_payload(run_id):
+          def job_counts(run_id):
+              counts = {}
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  jobs = list(payload.get("jobs") or [])
+                  for job in jobs:
+                      key = str(
+                          job.get("conclusion")
+                          or job.get("status")
+                          or "unknown"
+                      )
+                      counts[key] = counts.get(key, 0) + 1
+                  if len(jobs) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          f"job pagination exceeded 1000 for run {run_id}"
+                      )
+              return counts
+
+          def run_payload(run_id, *, include_jobs=False):
               run = get(f"/repos/{repo}/actions/runs/{run_id}")
-              return {
+              payload = {
                   "id": int(run["id"]),
                   "name": run.get("name"),
                   "status": run.get("status"),
@@ -109,6 +134,9 @@ jobs:
                   "head_sha": run.get("head_sha"),
                   "artifacts": artifact_names(run_id),
               }
+              if include_jobs:
+                  payload["job_counts"] = job_counts(run_id)
+              return payload
 
           ready_config = json.loads(
               Path(".github/phase1-pons-viability-ready.json").read_text()
@@ -132,7 +160,7 @@ jobs:
               for route in VIABILITY_ROUTE_WORKFLOWS
           }
 
-          source_run = run_payload(source_run_id)
+          source_run = run_payload(source_run_id, include_jobs=True)
           evidence_run = (
               run_payload(evidence_run_id)
               if evidence_run_id > 0
@@ -225,6 +253,16 @@ jobs:
                   summary.write(
                       "- Pending routes: "
                       + ", ".join(pending)
+                      + "\n"
+                  )
+              if report.get("source_job_counts"):
+                  counts = report["source_job_counts"]
+                  summary.write(
+                      "- Source jobs: "
+                      + ", ".join(
+                          f"{key}={value}"
+                          for key, value in sorted(counts.items())
+                      )
                       + "\n"
                   )
               if report.get("source_missing_artifacts"):
