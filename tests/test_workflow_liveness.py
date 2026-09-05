@@ -366,8 +366,12 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
     assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
     assert "pons-select-v4-quote-routes" in content
-    assert "cannot freeze V4 quote fallback with unresolved residual" in content
-    assert "selected V4 routes do not exactly cover residual probe" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "v3_run_id" in content
+    assert "only SKHY may remain unresolved in the V4 fallback" in content
+    assert "V4 fallback must select four unique routes" in content
+    assert "SKHY cannot be owned by both V3 and V4" in content
+    assert "externally_resolved_assets" in content
     assert "residual_quote_assets" in content
 
 
@@ -380,11 +384,33 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert 'default: "33921477647"' in content
     assert 'default: "33923160281"' in content
     assert "pons-select-v3-quote-routes" in content
-    assert "frozen V3 fallback audit must contain 30 unique feedless" in content
-    assert "frozen V3 fallback must select exactly 25 unique causal" in content
-    assert "frozen V3 fallback must leave exactly five residual" in content
-    assert "delayed V3 probe does not exactly cover the five residual" in content
-    assert "frozen delayed V3 probe unexpectedly resolves a residual" in content
+    assert "phase1-pons-skhy-v3-weth-segmented" in content
+    assert "phase1-pons-weth-usdg-anchor-full" in content
+    assert "skhy_weth_run_id" in content
+    assert "anchor_run_id" in content
+    assert "merge_v3_quote_routes" in content
+    assert "canonical V3 fallback must select exactly 26 unique routes" in content
+    assert "canonical V3 fallback must leave exactly four residual" in content
+    assert "canonical V3 ownership must be 25 USDG + SKHY/WETH" in content
+    assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
+    assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
+    assert "SHARD_COUNT: '16'" in content
+    assert "max-parallel: 2" in content
+
+
+def test_generic_quote_fallback_owns_exact_26_v3_plus_4_v4():
+    content = _workflow("phase1-pons-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "generic fallback requires 26 unique promoted V3 routes" in content
+    assert "generic fallback requires four unique V4 routes" in content
+    assert "V3/V4 fallback ownership overlaps" in content
+    assert "route ownership and merged quote/USD ownership disagree" in content
+    assert "merged quote fallback must own exactly 30 feedless quote" in content
 
 
 def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
