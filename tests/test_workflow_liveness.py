@@ -1525,6 +1525,16 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
     assert "phase1-pons-eligible-universe-promote.yml" in content
     assert "promote_reused_universe" in content
+    assert "verify_reused_pricing" in content
+    assert "reused pricing V1/V3 provenance mismatch" in content
+    assert "reused pricing V2/V4 provenance mismatch" in content
+    assert "reused pricing eligible universe remains incomplete" in content
+    assert '"validated_v1_v3_run_id"' in content
+    assert '"validated_v2_v4_run_id"' in content
+    assert (
+        "needs.verify_reused_pricing.result == 'success'"
+        in content
+    )
     assert (
         "inputs.pricing_run_id != '' && inputs.pricing_run_id || "
         "format('{0}', github.run_id)"
