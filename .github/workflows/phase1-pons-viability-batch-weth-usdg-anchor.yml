@@ -1,0 +1,26 @@
+name: phase1-pons-viability-batch-weth-usdg-anchor
+run-name: phase1 viability batch weth_usdg_anchor ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-viability-batch.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-batch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 viability batch') }}
+    uses: ./.github/workflows/phase1-pons-viability-batch-route.yml
+    with:
+      route: "weth_usdg_anchor"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit
