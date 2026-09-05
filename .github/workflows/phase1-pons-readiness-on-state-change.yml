@@ -1,0 +1,24 @@
+name: phase1-pons-readiness-on-state-change
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-viability-ready.json
+      - .github/phase1-pons-viability-runs.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-readiness-state-change-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    uses: ./.github/workflows/phase1-pons-readiness-audit.yml
+    with:
+      source_eligibility_run_id: "33982556591"
+    secrets: inherit
