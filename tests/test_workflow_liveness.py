@@ -138,6 +138,9 @@ def test_viability_route_measurement_is_manual_bounded_and_canonical():
     assert "phase1-pons-v3-quote-fallback-full" in content
     assert "phase1-pons-v4-quote-fallback-full" in content
     assert "quote fallback measurement requires eligibility_run_id" in content
+    assert "run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}" in content
+    assert 'sequence_id:' in content
+    assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
     assert "timeout-minutes: 30" in content
 
 def test_full_quote_audit_has_short_fail_fast_bound():
@@ -1280,3 +1283,66 @@ def test_eligible_universe_promotion_launcher_is_pinned_and_guarded():
     assert 'source_eligibility_run_id: "33982556591"' in content
     assert "phase1-pons-eligible-universe-promote.yml" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+
+def test_phase1_completion_chain_is_guarded_resumable_and_distinct_run_safe():
+    content = _workflow("phase1-pons-completion-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "actions: write" in content
+    assert "source eligibility parent is not completed successfully" in content
+    for artifact in (
+        "phase1-pons-v1-v3-full",
+        "phase1-pons-v2-v4-full",
+        "phase1-pons-v1-lifecycle-eligibility",
+        "phase1-pons-v2-lifecycle-eligibility",
+        "phase1-pons-v3-quote-fallback-full",
+        "phase1-pons-v4-quote-fallback-full",
+        "phase1-pons-quote-fallback-full",
+    ):
+        assert artifact in content
+    assert "phase1-pons-eligible-universe-promote.yml" in content
+    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "phase1-pons-final-acceptance-chain.yml" in content
+    for route in (
+        "pons_registry",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    ):
+        assert f'"{route}"' in content
+        assert f"{route}_run_id:" in content
+    assert "phase1-pons-viability-route-measurement.yml" in content
+    assert "/dispatches" in content
+    assert "event=workflow_dispatch" in content
+    assert "display_title" in content
+    assert "len(set(run_ids)) != 9" in content
+    assert "phase1-pons-viability-route-sequence-state" in content
+    assert "prior_completion_run_id" in content
+    assert "source": "prior_completion" in content
+    assert "timeout-minutes: 360" in content
+    assert "time.sleep(5)" in content
+    assert "time.sleep(15)" in content
+
+
+def test_phase1_completion_launcher_is_pinned_and_inert_until_exact_phrase():
+    content = _workflow("phase1-pons-completion-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch Phase 1 completion" in content
+    assert 'source_eligibility_run_id: "33982556591"' in content
+    assert 'oracle_run_id: "33974681334"' in content
+    assert 'registry_run_id: "33911022718"' in content
+    assert 'v2_curve_run_id: "33936232604"' in content
+    assert 'transition_run_id: "33912452330"' in content
+    assert 'anchor_run_id: "33972109927"' in content
+    assert "phase1-pons-completion-chain.yml" in content
+    assert "actions: write" in content
