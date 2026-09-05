@@ -633,6 +633,29 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert "time.sleep(" not in content
 
 
+def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
+    content = _workflow("phase1-pons-representative-priced-paths.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "phase1-pons-weth-usdg-anchor-full" in content
+    assert "phase1-pons-stock-oracle-full" in content
+    assert "phase1-pons-quote-fallback-full" in content
+    assert "build_v1_market_cap_points" in content
+    assert "build_v2_curve_market_cap_points" in content
+    assert "build_v2_graduation_seed_points" in content
+    assert "build_v2_v4_market_cap_points" in content
+    assert "validate_representative_priced_path_rows" in content
+    assert "summarize_representative_priced_paths" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
 def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     content = _workflow("phase1-pons-representative-validation.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
@@ -645,6 +668,9 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "phase1-pons-representative-transfers-full" in content
     assert "phase1-pons-representative-market-paths" in content
     assert "market_path_run_id" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "priced_path_run_id" in content
+    assert "pons-representative-priced-path-summary.jsonl" in content
     assert "phase1-pons-representative-dex-crosscheck" in content
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
