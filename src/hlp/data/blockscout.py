@@ -117,6 +117,15 @@ class BlockscoutClient:
         payload = self._get(f"{self.base_url}/api/v2/transactions/{tx_hash}")
         if not isinstance(payload, dict) or "hash" not in payload:
             raise BlockscoutError(f"transaction lookup failed: {tx_hash}")
+        observed = str(payload["hash"]).lower()
+        if observed != tx_hash:
+            raise BlockscoutError(
+                f"transaction lookup hash mismatch: {observed} != {tx_hash}"
+            )
+        if payload.get("block") is None:
+            raise BlockscoutError(
+                f"transaction lookup has no mined block: {tx_hash}"
+            )
         return payload
 
     def contract_deployment(self, address: str) -> dict[str, Any]:
