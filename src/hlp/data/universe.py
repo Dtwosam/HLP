@@ -156,6 +156,8 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
                 "last_unpriced_block": None,
                 "max_market_cap_proxy_usd": None,
                 "max_market_cap_block": None,
+                "v3_swap_max_market_cap_proxy_usd": None,
+                "v3_swap_max_market_cap_block": None,
                 "crossed_100k": False,
             }
             summary[token] = current
@@ -176,6 +178,11 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
         if previous is None or mcap > previous:
             current["max_market_cap_proxy_usd"] = mcap
             current["max_market_cap_block"] = row["block_number"]
+        if row.get("event_type") == "v3_swap":
+            previous_swap = current["v3_swap_max_market_cap_proxy_usd"]
+            if previous_swap is None or mcap > previous_swap:
+                current["v3_swap_max_market_cap_proxy_usd"] = mcap
+                current["v3_swap_max_market_cap_block"] = row["block_number"]
         if mcap >= Decimal("100000"):
             current["crossed_100k"] = True
 
@@ -185,6 +192,10 @@ def summarize_v1_market_caps(rows: Iterable[dict]) -> list[dict]:
         row["pricing_statuses"] = sorted(row["pricing_statuses"])
         if row["max_market_cap_proxy_usd"] is not None:
             row["max_market_cap_proxy_usd"] = str(row["max_market_cap_proxy_usd"])
+        if row["v3_swap_max_market_cap_proxy_usd"] is not None:
+            row["v3_swap_max_market_cap_proxy_usd"] = str(
+                row["v3_swap_max_market_cap_proxy_usd"]
+            )
         row["pricing_complete"] = row["unpriced_points"] == 0
         row["eligibility_status"] = (
             "eligible"
