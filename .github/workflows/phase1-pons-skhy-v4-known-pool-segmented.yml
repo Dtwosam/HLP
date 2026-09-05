@@ -39,7 +39,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  segment-0:
+  segment_0:
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ inputs.prior_probe_run_id }}
@@ -50,8 +50,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-0
     secrets: inherit
 
-  segment-1:
-    needs: segment-0
+  segment_1:
+    needs: segment_0
+    if: ${{ needs.segment_0.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -62,8 +63,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-1
     secrets: inherit
 
-  segment-2:
-    needs: segment-1
+  segment_2:
+    needs: segment_1
+    if: ${{ needs.segment_1.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -74,8 +76,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-2
     secrets: inherit
 
-  segment-3:
-    needs: segment-2
+  segment_3:
+    needs: segment_2
+    if: ${{ needs.segment_2.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -86,8 +89,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-3
     secrets: inherit
 
-  segment-4:
-    needs: segment-3
+  segment_4:
+    needs: segment_3
+    if: ${{ needs.segment_3.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -98,8 +102,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-4
     secrets: inherit
 
-  segment-5:
-    needs: segment-4
+  segment_5:
+    needs: segment_4
+    if: ${{ needs.segment_4.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -110,8 +115,9 @@ jobs:
       output_artifact_name: phase1-pons-skhy-v4-segment-5
     secrets: inherit
 
-  segment-6:
-    needs: segment-5
+  segment_6:
+    needs: segment_5
+    if: ${{ needs.segment_5.outputs.continue_needed == 'true' }}
     uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
     with:
       prior_probe_run_id: ${{ format('{0}', github.run_id) }}
@@ -123,7 +129,15 @@ jobs:
     secrets: inherit
 
   finalize:
-    needs: segment-6
+    needs:
+      - segment_0
+      - segment_1
+      - segment_2
+      - segment_3
+      - segment_4
+      - segment_5
+      - segment_6
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -133,19 +147,47 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-skhy-v4-segment-6
-          path: final-segment
+          pattern: phase1-pons-skhy-v4-segment-*
+          path: segments
       - name: Freeze completed SKHY continuation
         run: |
           mkdir -p artifacts
           python - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
 
-          source = Path(
-              "final-segment/pons-skhy-v4-known-pool-continuation.jsonl"
+          summaries = list(
+              Path("segments").glob(
+                  "phase1-pons-skhy-v4-segment-*/"
+                  "pons-skhy-v4-known-pool-summary.json"
+              )
           )
+          if not summaries:
+              raise SystemExit(
+                  "segmented SKHY V4 continuation produced no segment artifact"
+              )
+
+          def segment_index(path):
+              match = re.search(
+                  r"phase1-pons-skhy-v4-segment-(\d+)",
+                  str(path),
+              )
+              if not match:
+                  raise SystemExit(
+                      f"cannot parse SKHY V4 segment index: {path}"
+                  )
+              return int(match.group(1))
+
+          latest_summary_path = max(summaries, key=segment_index)
+          latest_index = segment_index(latest_summary_path)
+          source_dir = latest_summary_path.parent
+          source = source_dir / "pons-skhy-v4-known-pool-continuation.jsonl"
+          if not source.exists():
+              raise SystemExit(
+                  "final SKHY V4 segment is missing continuation JSONL"
+              )
           rows = [
               json.loads(line)
               for line in source.read_text().splitlines()
@@ -202,7 +244,7 @@ jobs:
               "causal_route_ready": bool(row.get("causal_route_ready")),
               "delayed_route_ready": bool(row.get("delayed_route_ready")),
               "remaining_unsearched_blocks": remaining,
-              "continuation_segments": 7,
+              "continuation_segments": latest_index + 1,
               "max_blocks_per_segment": 250000,
               "source_probe_run_id": int(
                   "${{ inputs.prior_probe_run_id }}"

@@ -619,6 +619,10 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert 'default: "52863525"' in content
     assert "--known-pool-only" in content
     assert 'row.get("continuation_mode") != "known_pool_only"' in content
+    assert "continue_needed" in content
+    assert "route_ready" in content
+    assert "search_to_block" in content
+    assert "GITHUB_OUTPUT" in content
     assert "timeout-minutes: 20" in content
     assert "time.sleep(" not in content
 
@@ -637,10 +641,15 @@ def test_skhy_segmented_continuation_is_manual_sequential_and_complete():
     ) == 7
     assert content.count('forward_blocks: "250000"') == 7
     for index in range(6):
-        assert f"needs: segment-{index}" in content
+        assert f"needs: segment_{index}" in content
+        assert (
+            f"needs.segment_{index}.outputs.continue_needed == 'true'"
+            in content
+        )
         assert f"phase1-pons-skhy-v4-segment-{index}" in content
     assert "phase1-pons-skhy-v4-segment-6" in content
-    assert '"continuation_segments": 7' in content
+    assert "pattern: phase1-pons-skhy-v4-segment-*" in content
+    assert '"continuation_segments": latest_index + 1' in content
     assert '"max_blocks_per_segment": 250000' in content
     assert "phase1-pons-skhy-v4-known-pool-segmented" in content
     assert "segmented SKHY continuation ended before snapshot head" in content
