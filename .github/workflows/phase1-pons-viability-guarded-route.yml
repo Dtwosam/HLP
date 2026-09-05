@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       source_eligibility_run_id: ${{ steps.check.outputs.source_eligibility_run_id }}
+      quote_fallback_run_id: ${{ steps.routing.outputs.lifecycle_run_id }}
     steps:
       - uses: actions/checkout@v4
       - id: check
@@ -153,6 +154,7 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"source_eligibility_run_id={source_run_id}\n")
+              output.write(f"evidence_run_id={evidence_run_id}\n")
           print(json.dumps({
               "generation": generation,
               "evidence_run_id": evidence_run_id,
@@ -160,6 +162,149 @@ jobs:
               "route": route,
               "ledger_recorded_run_id": recorded_run_id,
               "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - id: routing
+        name: Resolve quote-fallback artifact source from evidence handoff
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ steps.check.outputs.evidence_run_id }}
+          SOURCE_RUN_ID: ${{ steps.check.outputs.source_eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          source_run_id = int(os.environ["SOURCE_RUN_ID"])
+          report = json.loads(
+              Path(
+                  "handoff/"
+                  "phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          if report.get("status") != "ready":
+              raise SystemExit("evidence handoff status is not ready")
+          if int(report.get("evidence_run_id", 0)) != evidence_run_id:
+              raise SystemExit("evidence handoff run ID mismatch")
+          if int(report.get("source_eligibility_run_id", 0)) != source_run_id:
+              raise SystemExit("evidence handoff source run mismatch")
+
+          lifecycle_run_id = int(report.get("lifecycle_run_id", 0))
+          if lifecycle_run_id <= 0:
+              raise SystemExit(
+                  "evidence handoff lifecycle run ID must be positive"
+              )
+          for field in ("v1_v3_run_id", "v2_v4_run_id"):
+              if int(report.get(field, 0)) <= 0:
+                  raise SystemExit(
+                      f"evidence handoff venue run ID is invalid: {field}"
+                  )
+          recovery_mode = report.get("recovery_mode")
+          if not isinstance(recovery_mode, bool):
+              raise SystemExit(
+                  "evidence handoff recovery mode must be boolean"
+              )
+          if not recovery_mode and (
+              lifecycle_run_id != source_run_id
+              or int(report["v1_v3_run_id"]) != source_run_id
+              or int(report["v2_v4_run_id"]) != source_run_id
+          ):
+              raise SystemExit(
+                  "normal evidence handoff routing changed"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          lifecycle = get(
+              f"/repos/{repo}/actions/runs/{lifecycle_run_id}"
+          )
+          if lifecycle.get("status") != "completed":
+              raise SystemExit(
+                  "evidence lifecycle/pricing run is not terminal"
+              )
+          allowed_paths = {
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          lifecycle_path = str(
+              lifecycle.get("path") or ""
+          ).split("@", 1)[0]
+          if lifecycle_path not in allowed_paths:
+              raise SystemExit(
+                  "evidence lifecycle/pricing workflow path is not allowed: "
+                  f"{lifecycle_path}"
+              )
+          if lifecycle.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "evidence lifecycle/pricing branch changed"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{lifecycle_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              names.update(
+                  str(row.get("name"))
+                  for row in rows
+                  if not row.get("expired")
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "lifecycle artifact pagination exceeded 2000"
+                  )
+          required = {
+              "phase1-pons-v3-quote-fallback-full",
+              "phase1-pons-v4-quote-fallback-full",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  "evidence lifecycle/pricing run is missing fallback "
+                  f"artifacts: {missing}"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"lifecycle_run_id={lifecycle_run_id}\n")
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "source_eligibility_run_id": source_run_id,
+              "lifecycle_run_id": lifecycle_run_id,
+              "recovery_mode": recovery_mode,
+              "required_fallback_artifacts": sorted(required),
+              "routing": "pass",
           }, sort_keys=True))
           PY
 
@@ -171,7 +316,7 @@ jobs:
       route: ${{ inputs.route }}
       from_block: "54436036"
       to_block: "54486035"
-      eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}
+      eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}
       sequence_id: ${{ inputs.sequence_id }}
       registry_run_id: "33911022718"
       v2_registry_run_id: "33912235341"
