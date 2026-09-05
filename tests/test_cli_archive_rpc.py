@@ -369,9 +369,11 @@ def test_quote_usd_merge_parser_accepts_repeated_source_pairs():
         "--events", "v4-events.jsonl",
         "--state-out", "fallback-state.jsonl",
         "--out", "fallback-events.jsonl",
+        "--snapshot-head", "200",
     ])
     assert args.state == ["v3-state.jsonl", "v4-state.jsonl"]
     assert args.events == ["v3-events.jsonl", "v4-events.jsonl"]
+    assert args.snapshot_head == 200
 
 
 
