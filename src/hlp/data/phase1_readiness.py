@@ -72,6 +72,9 @@ VIABILITY_ROUTE_REQUIRED_ARTIFACTS["pons_registry"] = (
 )
 
 FINAL_ACCEPTANCE_ARTIFACT = "phase1-pons-acceptance-gate"
+FINALIZER_WORKFLOW_PATH = (
+    ".github/workflows/phase1-pons-viability-ledger-finalize-one-shot.yml"
+)
 
 
 def _artifact_names(run: Mapping[str, Any] | None) -> set[str]:
@@ -543,13 +546,57 @@ def build_phase1_readiness_report(
             "final_acceptance_run_id": 0,
         }
 
-    successful_finalizers = [
-        run
-        for run in finalizer_runs
-        if _successful(run)
-        and FINAL_ACCEPTANCE_ARTIFACT in _artifact_names(run)
-    ]
-    if not successful_finalizers:
+    valid_finalizers: list[Mapping[str, Any]] = []
+    invalid_finalizers: list[dict[str, Any]] = []
+    expected_route_ids = {
+        route: int(ledger_route_run_ids[route])
+        for route in route_names
+    }
+    for run in finalizer_runs:
+        if not _successful(run):
+            continue
+        if FINAL_ACCEPTANCE_ARTIFACT not in _artifact_names(run):
+            continue
+
+        reason = ""
+        observed_path = str(run.get("path") or "").split("@", 1)[0]
+        if observed_path != FINALIZER_WORKFLOW_PATH:
+            reason = "workflow_path_mismatch"
+        elif run.get("head_branch") != "phase1/data-acquisition-spike":
+            reason = "branch_mismatch"
+        elif int(run.get("launch_readiness_source_run_id", 0)) != (
+            SOURCE_ELIGIBILITY_RUN_ID
+        ):
+            reason = "source_run_mismatch"
+        elif int(run.get("launch_readiness_evidence_run_id", 0)) != evidence_id:
+            reason = "readiness_evidence_mismatch"
+        elif int(run.get("launch_ledger_generation", 0)) != int(
+            ledger_generation
+        ):
+            reason = "ledger_generation_mismatch"
+        elif int(run.get("launch_ledger_evidence_run_id", 0)) != evidence_id:
+            reason = "ledger_evidence_mismatch"
+        else:
+            launch_routes = {
+                str(route): int(run_id)
+                for route, run_id in dict(
+                    run.get("launch_ledger_routes") or {}
+                ).items()
+            }
+            if launch_routes != expected_route_ids:
+                reason = "ledger_routes_mismatch"
+
+        if reason:
+            invalid_finalizers.append(
+                {
+                    "run_id": _run_id(run),
+                    "reason": reason,
+                }
+            )
+            continue
+        valid_finalizers.append(run)
+
+    if not valid_finalizers:
         return {
             "phase1_ready": False,
             "stage": "final_acceptance",
@@ -559,11 +606,12 @@ def build_phase1_readiness_report(
             "completed_viability_routes": completed,
             "pending_viability_routes": [],
             "invalid_viability_routes": [],
+            "invalid_finalizers": invalid_finalizers,
             "final_acceptance_run_id": 0,
         }
 
     finalizer = max(
-        successful_finalizers,
+        valid_finalizers,
         key=lambda run: _run_id(run),
     )
     return {
@@ -575,5 +623,6 @@ def build_phase1_readiness_report(
         "completed_viability_routes": completed,
         "pending_viability_routes": [],
         "invalid_viability_routes": [],
+        "invalid_finalizers": invalid_finalizers,
         "final_acceptance_run_id": _run_id(finalizer),
     }
