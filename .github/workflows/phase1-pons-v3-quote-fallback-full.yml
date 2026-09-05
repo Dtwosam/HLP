@@ -147,6 +147,13 @@ jobs:
               os.environ["SNAPSHOT_HEAD"]
           ):
               raise SystemExit("SKHY/WETH snapshot head changed")
+          if int(
+              skhy_summary.get("source_route_audit_run_id", -1)
+          ) != int("${{ inputs.route_audit_run_id }}"):
+              raise SystemExit(
+                  "SKHY/WETH route-audit provenance disagrees with canonical "
+                  "V3 route audit"
+              )
           skhy_rows = [
               json.loads(line)
               for line in Path(
