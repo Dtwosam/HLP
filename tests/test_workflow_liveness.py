@@ -424,11 +424,17 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("timeout-minutes: 30") >= 4
     for index in range(1, 5):
         assert (
-            f"matrix_{index}: ${{ steps.plan.outputs.matrix_{index} }}"
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
             in content
         )
         assert (
-            f"matrix: ${{ fromJSON(needs.plan.outputs.matrix_{index}) }}"
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
             in content
         )
         assert f"gap_count_{index}" in content
@@ -594,11 +600,17 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("timeout-minutes: 30") >= 4
     for index in range(1, 5):
         assert (
-            f"matrix_{index}: ${{ steps.plan.outputs.matrix_{index} }}"
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
             in content
         )
         assert (
-            f"matrix: ${{ fromJSON(needs.plan.outputs.matrix_{index}) }}"
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
             in content
         )
         assert f"gap_count_{index}" in content
