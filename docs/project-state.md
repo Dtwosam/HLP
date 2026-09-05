@@ -700,6 +700,19 @@ finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
 runs.
 
+A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
+unarmed. After the ledger finalizer produces a real PASS artifact and that run
+is recorded in `docs/project-state.md`, closeout verifies the exact
+`phase1-pons-acceptance-gate` report, frozen snapshot/route/work-block
+contract, successful ledger-finalizer workflow path, git ancestry, and PR #3
+identity (`phase1/data-acquisition-spike` -> `main`). It fails if code changed
+after the PASS-producing commit; only the project-state PASS record and the
+closeout config are allowed post-PASS changes. It also requires every Phase 1
+gate checkbox to be complete and PR #3 to remain open/draft at audit time.
+Only a successful closeout artifact can declare it safe to mark the PR ready
+and merge after required checks. Inert graph-validation run **33991433159**
+skipped cleanly, so no closeout or merge action has been taken.
+
 The egress projection additionally needs instrumented measured runs;
 older completed runs cannot retroactively provide response-byte counters. No
 representative validation, viability projection or acceptance artifact should
