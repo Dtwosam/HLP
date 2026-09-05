@@ -551,3 +551,52 @@ def test_readiness_rejects_normal_handoff_marked_recovered():
     assert "normal evidence handoff is marked recovered" in (
         report["evidence_handoff_errors"]
     )
+
+
+def test_readiness_terminal_failure_requires_v1_rescue_when_tape_missing():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-v3-full"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        )
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "launch_v1_v3_rescue"
+    assert report["source_recovery_plan"] == {
+        "source_has_v1_v3_full": False,
+        "source_has_v2_v4_full": True,
+        "source_has_complete_pricing": True,
+        "recommended_v1_v3_run_id": 0,
+        "recommended_v2_v4_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_pricing_run_id": 0,
+        "next_action": "launch_v1_v3_rescue",
+    }
+
+
+def test_readiness_terminal_failure_reuses_complete_source_pricing():
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=SOURCE_REQUIRED_ARTIFACTS,
+        )
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "launch_recovered_phase1_completion"
+    assert report["source_recovery_plan"] == {
+        "source_has_v1_v3_full": True,
+        "source_has_v2_v4_full": True,
+        "source_has_complete_pricing": True,
+        "recommended_v1_v3_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_v2_v4_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_pricing_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "next_action": "launch_recovered_phase1_completion",
+    }
