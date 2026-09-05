@@ -297,6 +297,31 @@ def build_phase1_acceptance_report(
             "representative multi-checkpoint token count is invalid"
         )
 
+    explorer_launches = _int(
+        representative.get("explorer_verified_launch_transactions"),
+        field="representative.explorer_verified_launch_transactions",
+    )
+    explorer_dex_transactions = _int(
+        representative.get("explorer_verified_dex_swap_transactions"),
+        field="representative.explorer_verified_dex_swap_transactions",
+    )
+    explorer_transactions = _int(
+        representative.get("explorer_verified_transactions"),
+        field="representative.explorer_verified_transactions",
+    )
+    if explorer_launches != 10:
+        raise ValueError(
+            "representative explorer does not verify all 10 launches"
+        )
+    if explorer_dex_transactions != checkpoint_targeted:
+        raise ValueError(
+            "representative explorer/DEX checkpoint coverage mismatch"
+        )
+    if explorer_transactions != explorer_launches + explorer_dex_transactions:
+        raise ValueError(
+            "representative explorer transaction accounting is invalid"
+        )
+
     representative_provenance = _manifest_provenance(
         representative_manifest,
         label="representative validation",
@@ -431,6 +456,15 @@ def build_phase1_acceptance_report(
         "representative_dex_price_checkpoints_matched": checkpoint_matched,
         "representative_dex_multi_checkpoint_tokens": (
             multi_checkpoint_tokens
+        ),
+        "representative_explorer_verified_transactions": (
+            explorer_transactions
+        ),
+        "representative_explorer_verified_launch_transactions": (
+            explorer_launches
+        ),
+        "representative_explorer_verified_dex_swap_transactions": (
+            explorer_dex_transactions
         ),
         "required_acquisition_routes": required_routes,
         "projected_requests": int(projected_requests),
