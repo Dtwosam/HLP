@@ -21,7 +21,7 @@ on:
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
-        default: "150000"
+        default: "50000"
         type: string
   workflow_call:
     inputs:
@@ -104,9 +104,9 @@ jobs:
           tail_start = int(os.environ["TAIL_START"])
           head = int(os.environ["SNAPSHOT_HEAD"])
           max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
-          if not 1 <= max_blocks <= 150_000:
+          if not 1 <= max_blocks <= 50_000:
               raise SystemExit(
-                  "max_gap_blocks must be between 1 and 150000"
+                  "max_gap_blocks must be between 1 and 50000"
               )
 
           manifests = (
