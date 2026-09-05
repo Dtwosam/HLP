@@ -560,6 +560,13 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert "Validate frozen V1 lifecycle input manifests" in content
     assert "required V1 lifecycle manifest is missing" in content
     assert "timeout-minutes: 60" in content
+    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
+    assert 'for key in ("partial_run_id", "prior_gap_run_id")' in content
+    assert "v3-shards/current" in content
+    assert "v3-shards/partial" in content
+    assert "v3-shards/prior" in content
+    assert "--v3-events-dir v3-shards" in content
+    assert "--v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json" in content
     assert "V1 lifecycle manifest snapshot mismatch" in content
     assert "frozen V1 lifecycle SHA changed" in content
     assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
@@ -605,6 +612,13 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "Validate frozen V2 lifecycle input manifests" in content
     assert "required lifecycle manifest is missing" in content
     assert "timeout-minutes: 60" in content
+    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
+    assert 'for key in ("partial_run_id", "prior_gap_run_id")' in content
+    assert "v4-shards/current" in content
+    assert "v4-shards/partial" in content
+    assert "v4-shards/prior" in content
+    assert "--v4-events-dir v4-shards" in content
+    assert "--v4-events-manifest v4/pons-v2-v4-full.jsonl.manifest.json" in content
     assert "lifecycle manifest snapshot mismatch" in content
     assert "frozen lifecycle SHA changed" in content
     assert "validated_manifest_count" in content
