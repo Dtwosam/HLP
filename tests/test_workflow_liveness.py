@@ -483,12 +483,12 @@ def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "manifest_gap_aware_v4_quote_recovery" in content
     assert "activation_by_pool" in content
     assert 'int(row["block_number"]) >= (' in content
-    assert 'default: "150000"' in content
-    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 quote gap plan exceeds 240 matrix jobs" in content
     assert "phase1-pons-v4-quote-routes-selected" in content
     assert "max-parallel: 2" in content
-    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 30" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
 
@@ -503,12 +503,12 @@ def test_v3_quote_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "prior_gap_run_id" in content
     assert "v3-quote-events-gap" in content
     assert "manifest_gap_aware_v3_quote_recovery" in content
-    assert 'default: "150000"' in content
-    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V3 quote gap plan exceeds 240 matrix jobs" in content
     assert "phase1-pons-v3-quote-routes-selected" in content
     assert "max-parallel: 2" in content
-    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 30" in content
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
     assert "time.sleep(" not in content
 
@@ -699,7 +699,12 @@ def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
     assert "needs.skhy_v3.outputs.completion_status == 'route_resolved'" in content
     assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
     assert "phase1-pons-v3-quote-fallback-full.yml" in content
+    assert "phase1-pons-v3-quote-fallback-recover-gaps.yml" in content
+    assert "needs.v3_fallback_recovery.result == 'success'" in content
     assert "phase1-pons-v4-quote-fallback-full.yml" in content
+    assert "phase1-pons-v4-quote-fallback-recover-gaps.yml" in content
+    assert "needs.v4_fallback_recovery.result == 'success'" in content
+    assert content.count('max_gap_blocks: "100000"') == 2
     assert "phase1-pons-quote-fallback-full.yml" in content
     assert "phase1-pons-v1-lifecycle-eligibility.yml" in content
     assert "phase1-pons-v2-lifecycle-eligibility.yml" in content

@@ -321,10 +321,10 @@ initially tested at 150k, but live gap 018 (52,169,619-52,319,618) hit the
 20-minute runner cap before artifact upload. Future anchor manifest-gap jobs
 are therefore capped at **50k blocks**, and the four-way exact anchor range
 helper now rejects ranges above 200k so each subshard is at most 50k.
-Transition and quote-fallback gap workflows remain at the separately bounded
-**150k** ceiling. The unrun full-venue V1/V3 and V2/V4 recoveries instead use
-**100k-block** retry jobs with **30-minute** ceilings, matching the stronger DELL
-timing evidence while retaining max-parallel 2.
+Transition gap recovery remains at the separately bounded **150k** ceiling.
+The unrun full-venue V1/V3, V2/V4 and V3/V4 quote-fallback recoveries instead
+use **100k-block** retry jobs with **30-minute** ceilings, matching the stronger
+DELL timing evidence while retaining max-parallel 2.
 
 The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed
@@ -499,8 +499,11 @@ intervals before continuing. A systemic failure with no reusable artifacts still
 stops fail-closed. Within pricing, SKHY V3 runs before the optional SKHY V4
 continuation. The
 64-shard V3 quote fallback does not start until V3 has resolved SKHY or an
-exhaustive V3 miss has been followed by a route-ready V4 result. If neither
-venue resolves SKHY, the chain stops before the full fallback scans.
+exhaustive V3 miss has been followed by a route-ready V4 result. If either V3
+or V4 full quote scan then fails after preserving successful shards, the same
+pricing run invokes its manifest-gap recovery and continues only from a
+recovered canonical artifact. If neither venue resolves SKHY, the chain stops
+before the full fallback scans.
 A guarded one-shot launcher is staged against resumable oracle promotion run
 **33974681334**; its initial creation is intentionally skipped. The full chain
 now preflights that run's canonical stock-oracle artifact—23 feeds, the single

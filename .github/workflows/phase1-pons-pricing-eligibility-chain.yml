@@ -150,12 +150,23 @@ jobs:
       anchor_run_id: ${{ inputs.anchor_run_id }}
     secrets: inherit
 
+  v3_fallback_recovery:
+    needs: v3_fallback
+    if: ${{ always() && (needs.v3_fallback.result == 'failure' || needs.v3_fallback.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v3-quote-fallback-recover-gaps.yml
+    with:
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "100000"
+    secrets: inherit
+
   v4_fallback:
     needs:
       - skhy_v3
       - skhy_v4
       - v3_fallback
-    if: ${{ always() && needs.v3_fallback.result == 'success' && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped') }}
+      - v3_fallback_recovery
+    if: ${{ always() && (needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped') }}
     uses: ./.github/workflows/phase1-pons-v4-quote-fallback-full.yml
     with:
       probe_run_id: ${{ inputs.residual_v4_probe_run_id }}
@@ -165,11 +176,23 @@ jobs:
       skhy_v4_run_id: ${{ needs.skhy_v4.result == 'success' && format('{0}', github.run_id) || '' }}
     secrets: inherit
 
+  v4_fallback_recovery:
+    needs: v4_fallback
+    if: ${{ always() && (needs.v4_fallback.result == 'failure' || needs.v4_fallback.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v4-quote-fallback-recover-gaps.yml
+    with:
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "100000"
+    secrets: inherit
+
   quote_fallback:
     needs:
       - v3_fallback
+      - v3_fallback_recovery
       - v4_fallback
-    if: ${{ needs.v3_fallback.result == 'success' && needs.v4_fallback.result == 'success' }}
+      - v4_fallback_recovery
+    if: ${{ always() && (needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.v4_fallback.result == 'success' || needs.v4_fallback_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-quote-fallback-full.yml
     with:
       v3_run_id: ${{ format('{0}', github.run_id) }}
