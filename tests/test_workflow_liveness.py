@@ -1220,6 +1220,10 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative priced path {field} mismatch" in content
     assert "representative DEX registry run mismatch" in content
     assert "representative DEX transition run mismatch" in content
+    assert "v1_eligibility_sha256" in content
+    assert "v2_eligibility_sha256" in content
+    assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
+    assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "representative validation must contain exactly 10" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
@@ -1285,64 +1289,82 @@ def test_eligible_universe_promotion_launcher_is_pinned_and_guarded():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
 
 
-def test_phase1_completion_chain_is_guarded_resumable_and_distinct_run_safe():
-    content = _workflow("phase1-pons-completion-chain.yml")
+
+def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
+    chain = _workflow("phase1-pons-post-eligibility-evidence-chain.yml")
+    trigger_block = chain.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "source eligibility parent is not completed successfully" in chain
+    assert "phase1-pons-eligible-universe-promote.yml" in chain
+    assert "phase1-pons-representative-evidence-chain.yml" in chain
+    assert "phase1-pons-post-eligibility-evidence-ready" in chain
+
+    launcher = _workflow(
+        "phase1-pons-post-eligibility-evidence-one-shot.yml"
+    )
+    assert ".github/phase1-pons-evidence-launch.txt" in launcher
+    assert "launch Phase 1 evidence handoff" in launcher
+    assert 'source_eligibility_run_id: "33982556591"' in launcher
+
+
+def test_viability_batch_route_is_evidence_gated_before_rpc():
+    content = _workflow("phase1-pons-viability-batch-route.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_call:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert ".github/phase1-pons-viability-batch.json" in content
+    assert "viability batch generation is not armed" in content
+    assert "33_982_556_591" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-viability-route-measurement.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+
+def test_viability_batch_has_nine_distinct_serialized_workflows():
+    wrappers = {
+        "pons_registry": "phase1-pons-viability-batch-pons-registry.yml",
+        "pons_v1_v3": "phase1-pons-viability-batch-pons-v1-v3.yml",
+        "pons_v2_curve": "phase1-pons-viability-batch-pons-v2-curve.yml",
+        "pons_v2_transition": "phase1-pons-viability-batch-pons-v2-transition.yml",
+        "pons_v2_v4": "phase1-pons-viability-batch-pons-v2-v4.yml",
+        "weth_usdg_anchor": "phase1-pons-viability-batch-weth-usdg-anchor.yml",
+        "stock_oracle": "phase1-pons-viability-batch-stock-oracle.yml",
+        "quote_v3_fallback": "phase1-pons-viability-batch-quote-v3-fallback.yml",
+        "quote_v4_fallback": "phase1-pons-viability-batch-quote-v4-fallback.yml",
+    }
+    assert len(wrappers) == 9
+    for route, workflow in wrappers.items():
+        content = _workflow(workflow)
+        assert ".github/phase1-pons-viability-batch.json" in content
+        assert "launch Phase 1 viability batch" in content
+        assert "group: phase1-pons-viability-batch-\${{ github.ref }}" in content
+        assert "cancel-in-progress: false" in content
+        assert "phase1-pons-viability-batch-route.yml" in content
+        assert f'route: "{route}"' in content
+        assert "sequence_id: \${{ github.sha }}" in content
+
+
+def test_viability_batch_finalizer_maps_nine_runs_into_acceptance():
+    content = _workflow("phase1-pons-viability-batch-finalize.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
     assert "workflow_dispatch:" in trigger_block
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
-    assert "actions: write" in content
-    assert "source eligibility parent is not completed successfully" in content
-    for artifact in (
-        "phase1-pons-v1-v3-full",
-        "phase1-pons-v2-v4-full",
-        "phase1-pons-v1-lifecycle-eligibility",
-        "phase1-pons-v2-lifecycle-eligibility",
-        "phase1-pons-v3-quote-fallback-full",
-        "phase1-pons-v4-quote-fallback-full",
-        "phase1-pons-quote-fallback-full",
-    ):
-        assert artifact in content
-    assert "phase1-pons-eligible-universe-promote.yml" in content
-    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert content.count("phase1-pons-viability-batch-") >= 9
+    assert "expected exactly one" in content
+    assert "nine distinct run IDs" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-pons-final-acceptance-chain.yml" in content
-    for route in (
-        "pons_registry",
-        "pons_v1_v3",
-        "pons_v2_curve",
-        "pons_v2_transition",
-        "pons_v2_v4",
-        "weth_usdg_anchor",
-        "stock_oracle",
-        "quote_v3_fallback",
-        "quote_v4_fallback",
-    ):
-        assert f'"{route}"' in content
-        assert f"{route}_run_id:" in content
-    assert "phase1-pons-viability-route-measurement.yml" in content
-    assert "/dispatches" in content
-    assert "event=workflow_dispatch" in content
-    assert "display_title" in content
-    assert "len(set(run_ids)) != 9" in content
-    assert "phase1-pons-viability-route-sequence-state" in content
-    assert "prior_completion_run_id" in content
-    assert '"source": "prior_completion"' in content
-    assert "timeout-minutes: 360" in content
-    assert "time.sleep(5)" in content
-    assert "time.sleep(15)" in content
+    assert "time.sleep(" not in content
 
-
-def test_phase1_completion_launcher_is_pinned_and_inert_until_exact_phrase():
-    content = _workflow("phase1-pons-completion-one-shot.yml")
-    trigger_block = content.split("\npermissions:", 1)[0]
-    assert "push:" in trigger_block
-    assert "workflow_dispatch:" not in trigger_block
-    assert "launch Phase 1 completion" in content
-    assert 'source_eligibility_run_id: "33982556591"' in content
-    assert 'oracle_run_id: "33974681334"' in content
-    assert 'registry_run_id: "33911022718"' in content
-    assert 'v2_curve_run_id: "33936232604"' in content
-    assert 'transition_run_id: "33912452330"' in content
-    assert 'anchor_run_id: "33972109927"' in content
-    assert "phase1-pons-completion-chain.yml" in content
-    assert "actions: write" in content
+    launcher = _workflow(
+        "phase1-pons-viability-batch-finalize-one-shot.yml"
+    )
+    assert ".github/phase1-pons-viability-finalize.json" in launcher
+    assert "launch Phase 1 final acceptance" in launcher
+    assert "finalizer generation is not armed" in launcher
+    assert "phase1-pons-viability-batch-finalize.yml" in launcher
