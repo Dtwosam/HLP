@@ -197,12 +197,17 @@ the anchor, keeping their four subshards within the same 50k/150k retry
 ceilings used by manifest-gap recovery.
 On top of those primitives, manifest-driven gap recovery now reads every
 successful partial-run manifest, derives the exact uncovered block intervals,
-and creates only bounded retry jobs. Both V2 curve and WETH/USDG anchor gap
-recovery can also reuse successful gap artifacts from one earlier interrupted
-gap-recovery run, so completed retry work survives another cancellation. A live
-recovery measurement on 2026-09-05 showed that 200k-block V2 tail jobs at the
-first two missing ranges both reached the 20-minute job cap, so V2 curve gaps
-are now capped at **50k blocks**.
+and creates only bounded retry jobs. V2 curve, WETH/USDG anchor, V2 transition
+and V2 PoolManager V4 recovery all have reusable gap-aware workflows. Each can
+reuse successful gap artifacts from one earlier interrupted gap-recovery run,
+so completed retry work survives another cancellation. Recovery planners also
+fail fast above **240 matrix jobs**, below GitHub Actions' matrix ceiling, rather
+than generating an invalid oversized matrix from an excessively small manual
+gap size. A live recovery measurement on 2026-09-05 showed that 200k-block V2
+tail jobs at the first two missing ranges both reached the 20-minute job cap, so
+V2 curve gaps are now capped at **50k blocks**. Anchor, transition and V4 gap
+workflows currently use a conservative **150k-block** ceiling until separately
+measured.
 
 The cancelled anchor tail recovery preserved one successful **716,631-block**
 shard (48,752,988-49,469,618) containing **607,932** price events. It completed
