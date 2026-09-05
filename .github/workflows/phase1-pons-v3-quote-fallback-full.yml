@@ -375,6 +375,12 @@ jobs:
         with:
           name: phase1-pons-v3-quote-routes-selected
           path: routes
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
       - name: Merge exact route-event shards
         run: |
           mkdir -p artifacts
@@ -397,10 +403,18 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          if len(routes) != 26:
+              raise SystemExit(
+                  f"canonical V3 fallback must merge 26 routes, got {len(routes)}"
+              )
           activation = {
               row["pool"].lower(): int(row["activation_block"])
               for row in routes
           }
+          if len(activation) != 26:
+              raise SystemExit(
+                  "canonical V3 fallback contains duplicate route pools"
+              )
           files = sorted(
               Path("downloads").glob("v3-quote-events-shard-*.jsonl")
           )
@@ -471,6 +485,12 @@ jobs:
                   "route_audit_run_id": int(
                       "${{ inputs.route_audit_run_id }}"
                   ),
+                  "skhy_weth_run_id": int(
+                      "${{ inputs.skhy_weth_run_id }}"
+                  ),
+                  "anchor_run_id": int(
+                      "${{ inputs.anchor_run_id }}"
+                  ),
                   "routes": len(routes),
                   "shards": manifests,
               },
@@ -491,6 +511,8 @@ jobs:
           hlp pons-v3-quote-usd-tape \
             --routes artifacts/pons-v3-quote-routes.jsonl \
             --v3-events artifacts/pons-v3-quote-fallback-events-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
             --state-out artifacts/pons-v3-quote-fallback-initial.jsonl \
             --out artifacts/pons-v3-quote-fallback-updates.jsonl
       - uses: actions/upload-artifact@v4
