@@ -445,7 +445,15 @@ research threshold or starting another archive crawl:
   actual HTTP attempt is now rate-paced, transient 429/5xx responses alone are
   retried, `Retry-After` is honored, permanent HTTP errors fail immediately,
   and the request counter includes retry attempts rather than only successes.
-  Rechecked against the live GeckoTerminal API documentation on **2026-09-05**:
+  Representative cross-check selection is first/max/last DEX swap per token,
+  so ten tokens can create at most **40 logical GeckoTerminal requests**
+  (10 pool identities + <=30 OHLCV reads). The workflow now fail-closes above
+  that logical budget, caps HTTP attempts at logical requests x the client's
+  three-attempt ceiling (**<=120**), and uses a 30-minute job timeout so correct
+  6.1-second pacing plus transient retries are not killed by the former
+  10-minute ceiling. Canonical block timestamps cover <=30 checkpoint blocks
+  through the Robinhood public RPC route. Rechecked against the live
+  GeckoTerminal API documentation on **2026-09-05**:
   API version `20230203` remains current, the public limit remains approximately
   **10 calls/minute**, and Robinhood network pool pages are currently indexed.
   The client freezes that contract at a 6.1-second minimum request interval;
