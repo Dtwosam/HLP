@@ -16,6 +16,8 @@ def _fixtures():
             "eligibility_threshold_usd": "100000",
             "v1_eligibility_run_id": 101,
             "v2_eligibility_run_id": 202,
+            "v1_v3_run_id": 101,
+            "v2_v4_run_id": 202,
             "v1_eligibility_sha256": "a" * 64,
             "v2_eligibility_sha256": "b" * 64,
         },
@@ -31,6 +33,8 @@ def _fixtures():
         "unknown_tokens": 0,
         "validated_v1_input_sha256": "a" * 64,
         "validated_v2_input_sha256": "b" * 64,
+        "validated_v1_v3_run_id": 101,
+        "validated_v2_v4_run_id": 202,
         "universe_sha256": "eligible-sha",
     }
     representative_manifest = {
@@ -160,6 +164,8 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
     assert report["all_pons_launches"] == 494_639
     assert report["v1_eligibility_sha256"] == "a" * 64
     assert report["v2_eligibility_sha256"] == "b" * 64
+    assert report["v1_v3_run_id"] == 101
+    assert report["v2_v4_run_id"] == 202
     assert report["representative_tokens"] == 10
     assert report["representative_price_points"] == 1100
     assert report["representative_detailed_price_points"] == 1100
@@ -483,4 +489,26 @@ def test_phase1_acceptance_rejects_invalid_recovered_venue_run_id():
     fixtures[3]["provenance"]["v1_v3_run_id"] = 0
 
     with pytest.raises(ValueError, match="upstream run provenance is invalid"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_eligible_venue_summary_drift():
+    fixtures = list(_fixtures())
+    fixtures[0]["validated_v1_v3_run_id"] = 999
+
+    with pytest.raises(
+        ValueError,
+        match="eligible universe V1/V3 run disagrees",
+    ):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_representative_venue_drift():
+    fixtures = list(_fixtures())
+    fixtures[3]["provenance"]["v2_v4_run_id"] = 999
+
+    with pytest.raises(
+        ValueError,
+        match="representative and universe V2/V4 venue evidence disagree",
+    ):
         build_phase1_acceptance_report(*fixtures)
