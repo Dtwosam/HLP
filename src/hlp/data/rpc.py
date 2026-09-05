@@ -43,6 +43,7 @@ class RpcClient:
     extra_headers: dict[str, str] | None = None
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
     requests_made: int = field(default=0, init=False)
+    response_bytes_received: int = field(default=0, init=False)
     _last_request_at: float | None = field(default=None, init=False, repr=False)
 
     def _post(self, request: urllib.request.Request, timeout: float) -> bytes:
@@ -92,7 +93,9 @@ class RpcClient:
             try:
                 self._pace()
                 self.requests_made += 1
-                payload = json.loads(self._post(request, self.timeout))
+                response_bytes = self._post(request, self.timeout)
+                self.response_bytes_received += len(response_bytes)
+                payload = json.loads(response_bytes)
                 if "error" in payload:
                     raise RpcError(f"{method}: {payload['error']}")
                 if "result" not in payload:
@@ -154,7 +157,9 @@ class RpcClient:
             try:
                 self._pace()
                 self.requests_made += 1
-                payload = json.loads(self._post(request, self.timeout))
+                response_bytes = self._post(request, self.timeout)
+                self.response_bytes_received += len(response_bytes)
+                payload = json.loads(response_bytes)
                 if not isinstance(payload, list):
                     raise RpcError("batch JSON-RPC response is not a list")
                 by_id = {}
