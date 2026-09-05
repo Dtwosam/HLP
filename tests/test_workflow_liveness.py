@@ -747,6 +747,36 @@ def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
     assert "cancel-in-progress: false" in content
 
 
+def test_final_acceptance_chain_requires_nine_distinct_route_runs():
+    content = _workflow("phase1-pons-final-acceptance-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cancel-in-progress: false" in content
+    for route in (
+        "pons_registry",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    ):
+        assert f"{route}_run_id:" in content
+    assert "build_phase1_route_plan" in content
+    assert "final acceptance route order changed" in content
+    assert "nine distinct evidence run IDs" in content
+    assert "phase1-pons-acquisition-accounting.yml" in content
+    assert "phase1-pons-acquisition-viability-projection.yml" in content
+    assert "phase1-pons-acceptance-gate.yml" in content
+    assert "accounting_run_id: ${{ format('{0}', github.run_id) }}" in content
+    assert "viability_projection_run_id: ${{ format('{0}', github.run_id) }}" in content
+    assert "eligible_universe_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "representative_validation_run_id: ${{ inputs.representative_run_id }}" in content
+
 def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
     content = _workflow("phase1-pons-pricing-eligibility-chain.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
