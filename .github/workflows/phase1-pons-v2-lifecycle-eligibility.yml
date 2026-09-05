@@ -6,14 +6,17 @@ on:
       v2_registry_run_id:
         description: "Successful phase1-pons-v2-registry-freeze run"
         required: true
+        default: "33912235341"
         type: string
       curve_run_id:
         description: "Successful phase1-pons-v2-curve-full run"
         required: true
+        default: "33936232604"
         type: string
       transition_run_id:
         description: "Successful phase1-pons-v2-transition-full run"
         required: true
+        default: "33912452330"
         type: string
       v4_run_id:
         description: "Successful phase1-pons-v2-v4-full run"
@@ -29,6 +32,29 @@ on:
         type: string
       fallback_run_id:
         description: "Successful phase1-pons-quote-fallback-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      v2_registry_run_id:
+        required: true
+        type: string
+      curve_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      v4_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      fallback_run_id:
         required: true
         type: string
 
