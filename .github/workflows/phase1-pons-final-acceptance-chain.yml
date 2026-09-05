@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       eligibility_run_id:
-        description: "Successful full eligibility acquisition-chain run"
+        description: "Run containing canonical phase1-pons-eligible-universe artifact; promotion run is allowed"
         required: true
         type: string
       representative_run_id:
