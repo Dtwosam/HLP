@@ -58,8 +58,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
+      matrix_1: ${{ steps.plan.outputs.matrix_1 }}
+      matrix_2: ${{ steps.plan.outputs.matrix_2 }}
       gap_count: ${{ steps.plan.outputs.gap_count }}
+      gap_count_1: ${{ steps.plan.outputs.gap_count_1 }}
+      gap_count_2: ${{ steps.plan.outputs.gap_count_2 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -144,10 +147,9 @@ jobs:
               covered,
               max_blocks=max_blocks,
           )
-          if len(gaps) > 240:
+          if len(gaps) > 480:
               raise SystemExit(
-                  "V4 gap plan exceeds 240 matrix jobs; recover a bounded "
-                  "range first, then rerun manifest gap recovery"
+                  "V4 gap plan exceeds two serialized 240-job waves"
               )
           include = [
               {
@@ -157,6 +159,8 @@ jobs:
               }
               for index, (lo, hi) in enumerate(gaps)
           ]
+          wave_1 = include[:240]
+          wave_2 = include[240:]
           report = {
               "generation_start": start,
               "snapshot_head": head,
@@ -164,6 +168,7 @@ jobs:
               "successful_sources": sources,
               "gap_jobs": include,
               "gap_job_count": len(include),
+              "gap_wave_job_counts": [len(wave_1), len(wave_2)],
               "gap_blocks": sum(
                   row["to_block"] - row["from_block"] + 1
                   for row in include
@@ -174,11 +179,18 @@ jobs:
           )
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(
-                  "matrix="
-                  + json.dumps({"include": include}, separators=(",", ":"))
+                  "matrix_1="
+                  + json.dumps({"include": wave_1}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(
+                  "matrix_2="
+                  + json.dumps({"include": wave_2}, separators=(",", ":"))
                   + "\n"
               )
               handle.write(f"gap_count={len(include)}\n")
+              handle.write(f"gap_count_1={len(wave_1)}\n")
+              handle.write(f"gap_count_2={len(wave_2)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
@@ -187,15 +199,60 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
-  recover:
+  recover_1:
     needs: plan
-    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    if: ${{ needs.plan.outputs.gap_count_1 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 2
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V4 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-pool-scan \
+            --out "artifacts/v4-events-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  recover_2:
+    needs: [plan, recover_1]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
@@ -233,8 +290,8 @@ jobs:
           if-no-files-found: error
 
   merge:
-    needs: [plan, recover]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.recover.result == 'success' || needs.recover.result == 'skipped') }}
+    needs: [plan, recover_1, recover_2]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
