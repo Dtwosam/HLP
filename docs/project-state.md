@@ -586,6 +586,17 @@ The final Phase 1 viability path is also staged fail-closed:
   `.github/phase1-pons-viability-runs.json` must be armed to that same
   evidence run. Each route-specific one-shot then calls
   `phase1-pons-viability-guarded-route` -> the canonical bounded measurement.
+  Any change to either readiness/ledger state file now automatically invokes
+  the artifact-only `phase1-pons-readiness-on-state-change` watcher, so
+  partial route IDs are validated immediately rather than only at final
+  acceptance. For every positive route ID, the readiness audit reopens both
+  state files at that route run's exact `head_sha` and requires readiness plus
+  ledger to have been armed to the **same evidence run**, with the route slot
+  still zero at launch. The finalizer independently repeats that launch-state
+  binding, requires all evidence/route commits to be ancestors of its current
+  branch HEAD, and only then permits the final acceptance chain. This prevents
+  stale route measurements from a prior evidence generation or orphaned branch
+  history from being recycled into a later PASS.
   The guard refuses RPC work if the ledger is unarmed, names a different
   evidence run, has a changed route set, or already contains a positive run ID
   for that route; intentional reruns therefore require explicitly clearing the
