@@ -111,6 +111,10 @@ def test_rpc_counts_transport_attempts():
     )
     assert rpc.chain_id() == 4663
     assert rpc.requests_made == 1
+    expected = json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "result": hex(4663)}
+    ).encode()
+    assert rpc.response_bytes_received == len(expected)
 
 
 def test_retry_after_header_is_parsed_for_429():
@@ -209,6 +213,13 @@ def test_batch_call_preserves_request_order():
     rows = rpc.get_blocks_batched([10, 11], batch_size=2)
     assert [int(row["number"], 16) for row in rows] == [10, 11]
     assert rpc.requests_made == 1
+    expected = json.dumps(
+        [
+            {"jsonrpc": "2.0", "id": 2, "result": {"number": hex(11)}},
+            {"jsonrpc": "2.0", "id": 1, "result": {"number": hex(10)}},
+        ]
+    ).encode()
+    assert rpc.response_bytes_received == len(expected)
 
 
 def test_batched_blocks_fall_back_to_single_rpc_if_batch_unsupported():
