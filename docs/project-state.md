@@ -462,7 +462,16 @@ research threshold or starting another archive crawl:
   reconciliation and multi-point independent DEX price evidence before it can
   publish a complete validation bundle. Blockscout explorer verification is
   accepted as supplementary evidence when access is reverified, but is not a
-  required GitHub-hosted dependency while the documented HTTP 403 persists.
+  required GitHub-hosted dependency while the documented HTTP 403 persists;
+- a reusable manual-only `phase1-pons-representative-evidence-chain` now threads
+  one completed eligibility parent run through sample freeze, market-path
+  extraction, priced-path replay, Transfer/holder reconstruction, the bounded
+  GeckoTerminal DEX cross-check and final representative validation. Market-path
+  extraction and Transfer acquisition start in parallel after the sample freeze.
+  If the Transfer matrix fails or is cancelled after preserving successful
+  shards, the same parent run automatically retries only missing ranges by
+  passing its own run ID back as `prior_run_id`. A later rerun may also reuse
+  Transfer shards from an explicitly supplied earlier representative run.
 
 The final Phase 1 viability path is also staged fail-closed:
 
