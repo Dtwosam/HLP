@@ -600,6 +600,11 @@ def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
     assert "GeckoTerminalClient" in content
     assert "geckoterminal_public_api" in content
     assert "not canonical historical truth" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "priced_path_run_id" in content
+    assert "select_representative_dex_price_checkpoints" in content
+    assert "targeted_swap_price_tokens" in content
+    assert "targeted_swap_price_checkpoints" in content
     assert "representative DEX cross-check requires exactly 10" in content
     assert "independent DEX pool reconciliation failed" in content
     assert 'default: "33911022718"' in content
