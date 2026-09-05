@@ -27,7 +27,8 @@ on:
         default: ""
         type: string
       max_blocks:
-        required: true
+        required: false
+        default: "200000"
         type: string
 
 permissions:
