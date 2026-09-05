@@ -259,6 +259,37 @@ def test_cancelled_anchor_gap_repair_is_manual_sequential_and_exact():
     )
 
 
+def test_anchor_recovered_promotion_is_manual_exact_and_streaming():
+    content = _workflow(
+        "phase1-pons-weth-usdg-anchor-promote-recovered.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912536839"' in content
+    assert 'default: "33925648293"' in content
+    assert 'default: "33957294304"' in content
+    assert 'default: "33970898635"' in content
+    assert "phase1-pons-anchor-recovered-range-*" in content
+    assert "select_anchor_source_ranges" in content
+    assert '"preserved": 14' in content
+    assert '"partial_recovery": 1' in content
+    assert '"gap_recovery": 32' in content
+    assert '"range_repair": 2' in content
+    assert "(52_169_619, 52_319_618)" in content
+    assert "(53_219_619, 53_369_618)" in content
+    assert "promoted_recovered_weth_usdg_anchor" in content
+    assert "pons-weth-usdg-anchor-full.jsonl" in content
+    assert "pons-weth-usdg-anchor-initial.json" in content
+    assert "pons-weth-usdg-anchor-summary.json" in content
+    assert "no_unexplained_block_gaps" in content
+    assert "state_rpc_response_bytes" in content
+    assert "state_rpc_route" in content
+    assert "rows = []" not in content
+    assert "time.sleep(" not in content
+
+
 def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
     content = _workflow("phase1-pons-v2-curve-recover-gaps.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
