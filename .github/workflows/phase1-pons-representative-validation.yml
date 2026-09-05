@@ -253,6 +253,43 @@ jobs:
           v2_lifecycle_manifest, _v2_lifecycle = manifest_and_provenance(
               "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
           )
+
+          def lifecycle_venue_run_id(provenance, field, lifecycle_run_id):
+              value = provenance.get(field)
+              if value is None:
+                  if lifecycle_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          "representative lifecycle venue provenance missing: "
+                          f"{field} run={lifecycle_run_id}"
+                      )
+                  return lifecycle_run_id
+              run_id = int(value)
+              if run_id <= 0:
+                  raise SystemExit(
+                      "representative lifecycle venue run is invalid: "
+                      f"{field}={run_id}"
+                  )
+              return run_id
+
+          lifecycle_v1_v3_run = lifecycle_venue_run_id(
+              _v1_lifecycle,
+              "v1_v3_run_id",
+              v1_run,
+          )
+          lifecycle_v2_v4_run = lifecycle_venue_run_id(
+              _v2_lifecycle,
+              "v4_run_id",
+              v2_run,
+          )
+          if lifecycle_v1_v3_run != v1_v3_run:
+              raise SystemExit(
+                  "representative V1 lifecycle/market venue run mismatch"
+              )
+          if lifecycle_v2_v4_run != v2_v4_run:
+              raise SystemExit(
+                  "representative V2 lifecycle/market venue run mismatch"
+              )
+
           transfer_manifest, transfer = manifest_and_provenance(
               "transfers/"
               "pons-representative-transfers-full.jsonl.manifest.json"
@@ -346,6 +383,8 @@ jobs:
               "v2_eligibility_run_id": v2_run,
               "v1_v3_run_id": v1_v3_run,
               "v2_v4_run_id": v2_v4_run,
+              "lifecycle_v1_v3_run_id": lifecycle_v1_v3_run,
+              "lifecycle_v2_v4_run_id": lifecycle_v2_v4_run,
               "transfer_run_id": int("${{ inputs.transfer_run_id }}"),
               "market_path_run_id": market_path_run,
               "priced_path_run_id": int(
