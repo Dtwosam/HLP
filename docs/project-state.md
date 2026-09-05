@@ -341,13 +341,22 @@ research threshold or starting another archive crawl:
   fails closed unless every sampled token begins with a launch-time mint;
 - GeckoTerminal is used only as independent DEX evidence, never canonical
   history; the client supports pool identity and bounded OHLCV reads;
-- a manual representative DEX cross-check fails on canonical pool/token-pair
-  disagreement and records explicit V2 tokens that never registered a V4 pool;
+- V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
+  events so an Initialize-only price cannot masquerade as independent trade
+  evidence;
+- the manual representative DEX cross-check fails on canonical pool/token-pair
+  disagreement, derives the frozen token/USD price at each available swap-only
+  checkpoint from the lifecycle market-cap proxy and launch supply, resolves
+  the exact block timestamp with the canonical public RPC, and requires that
+  price to fall inside GeckoTerminal's independent hourly OHLCV envelope;
+  tokens with no DEX swap checkpoint or no registered V4 pool stay explicit
+  rather than being silently treated as matched;
 - a manual GitHub-Actions accounting workflow measures reported request
   counters and artifact bytes rather than estimating provider usage;
 - an artifact-only representative validation join requires all 10 tokens to
-  have consistent lifecycle pricing evidence, holder replay and DEX
-  reconciliation before it can publish a complete validation bundle.
+  have consistent lifecycle pricing evidence, holder replay, pool identity
+  reconciliation and explicit DEX price-cross-check state before it can
+  publish a complete validation bundle.
 
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
