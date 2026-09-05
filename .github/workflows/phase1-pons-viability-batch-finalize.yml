@@ -1,0 +1,226 @@
+name: phase1-pons-viability-batch-finalize
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_head_sha:
+        description: "Commit SHA that launched the nine viability batch workflows"
+        required: true
+        type: string
+      evidence_run_id:
+        description: "Successful post-eligibility evidence handoff run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      batch_head_sha:
+        required: true
+        type: string
+      evidence_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      pons_registry_run_id: ${{ steps.collect.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ steps.collect.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ steps.collect.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ steps.collect.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ steps.collect.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ steps.collect.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ steps.collect.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ steps.collect.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ steps.collect.outputs.quote_v4_fallback_run_id }}
+    steps:
+      - id: collect
+        name: Collect exact nine-route batch run IDs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BATCH_HEAD_SHA: ${{ inputs.batch_head_sha }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          expected = {
+              "pons_registry": "phase1-pons-viability-batch-pons-registry",
+              "pons_v1_v3": "phase1-pons-viability-batch-pons-v1-v3",
+              "pons_v2_curve": "phase1-pons-viability-batch-pons-v2-curve",
+              "pons_v2_transition": (
+                  "phase1-pons-viability-batch-pons-v2-transition"
+              ),
+              "pons_v2_v4": "phase1-pons-viability-batch-pons-v2-v4",
+              "weth_usdg_anchor": (
+                  "phase1-pons-viability-batch-weth-usdg-anchor"
+              ),
+              "stock_oracle": "phase1-pons-viability-batch-stock-oracle",
+              "quote_v3_fallback": (
+                  "phase1-pons-viability-batch-quote-v3-fallback"
+              ),
+              "quote_v4_fallback": (
+                  "phase1-pons-viability-batch-quote-v4-fallback"
+              ),
+          }
+
+          batch_sha = os.environ["BATCH_HEAD_SHA"].strip().lower()
+          if len(batch_sha) != 40 or any(
+              c not in "0123456789abcdef" for c in batch_sha
+          ):
+              raise SystemExit("viability batch head SHA must be 40 hex chars")
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          if evidence_run_id <= 0:
+              raise SystemExit("evidence run ID must be positive")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          if (
+              evidence.get("status") != "completed"
+              or evidence.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "evidence run is not completed successfully"
+              )
+
+          evidence_names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              evidence_names.update(
+                  str(a.get("name"))
+                  for a in artifacts
+                  if not a.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+          required_evidence = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing_evidence = sorted(
+              required_evidence - evidence_names
+          )
+          if missing_evidence:
+              raise SystemExit(
+                  "finalizer evidence run is missing artifacts: "
+                  f"{missing_evidence}"
+              )
+
+          payload = get(
+              f"/repos/{repo}/actions/runs"
+              f"?head_sha={urllib.parse.quote(batch_sha)}"
+              "&event=push&per_page=100"
+          )
+          runs = list(payload.get("workflow_runs") or [])
+          route_run_ids = {}
+          route_details = {}
+          for route, workflow_name in expected.items():
+              matches = [
+                  row for row in runs
+                  if row.get("name") == workflow_name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected exactly one {workflow_name} run for "
+                      f"batch {batch_sha}; found {len(matches)}"
+                  )
+              row = matches[0]
+              if (
+                  row.get("status") != "completed"
+                  or row.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"viability batch route is not successful: "
+                      f"{route} status={row.get('status')} "
+                      f"conclusion={row.get('conclusion')}"
+                  )
+              child_id = int(row["id"])
+              route_run_ids[route] = child_id
+              route_details[route] = {
+                  "run_id": child_id,
+                  "workflow_name": workflow_name,
+                  "status": row.get("status"),
+                  "conclusion": row.get("conclusion"),
+              }
+
+          values = list(route_run_ids.values())
+          if len(values) != 9 or len(set(values)) != 9:
+              raise SystemExit(
+                  "viability batch did not produce nine distinct run IDs"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for route, child_id in route_run_ids.items():
+                  output.write(f"{route}_run_id={child_id}\n")
+
+          report = {
+              "batch_head_sha": batch_sha,
+              "evidence_run_id": evidence_run_id,
+              "routes": route_details,
+              "distinct_route_run_ids": len(set(values)),
+              "status": "ready_for_final_acceptance",
+          }
+          Path(
+              "artifacts/phase1-viability-batch-finalize-plan.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-batch-finalize-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  acceptance:
+    needs: collect
+    if: ${{ needs.collect.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-final-acceptance-chain.yml
+    with:
+      eligibility_run_id: ${{ inputs.evidence_run_id }}
+      representative_run_id: ${{ inputs.evidence_run_id }}
+      pons_registry_run_id: ${{ needs.collect.outputs.pons_registry_run_id }}
+      pons_v1_v3_run_id: ${{ needs.collect.outputs.pons_v1_v3_run_id }}
+      pons_v2_curve_run_id: ${{ needs.collect.outputs.pons_v2_curve_run_id }}
+      pons_v2_transition_run_id: ${{ needs.collect.outputs.pons_v2_transition_run_id }}
+      pons_v2_v4_run_id: ${{ needs.collect.outputs.pons_v2_v4_run_id }}
+      weth_usdg_anchor_run_id: ${{ needs.collect.outputs.weth_usdg_anchor_run_id }}
+      stock_oracle_run_id: ${{ needs.collect.outputs.stock_oracle_run_id }}
+      quote_v3_fallback_run_id: ${{ needs.collect.outputs.quote_v3_fallback_run_id }}
+      quote_v4_fallback_run_id: ${{ needs.collect.outputs.quote_v4_fallback_run_id }}
+    secrets: inherit
