@@ -186,6 +186,23 @@ one disjoint generic quote/USD fallback artifact before both V1 and V2
 lifecycle replay. Chainlink and DEX fallback ownership is also checked for
 overlap and fails closed.
 
+The frozen full-Pons quote audit in run **33923299711** contains **23**
+Chainlink-priced stock quote assets. The earlier successful V2 oracle tape in
+run **33912985322** already covers **22** of those assets and 9,530 oracle
+updates. Artifact-level comparison proves the only missing current full-Pons
+stock feed is **DELL** quote token
+`0x941ae714ec6d8130c7b75d67160ca08f1e7d11dd`, used by **223** Pons launches
+from block **52,263,453**. Its Chainlink feed
+`0x1c6c8cadbe02e19129c39ddb92281ce4c0bf206b` resolves to aggregator
+`0xd6ed4e7d4aba1111eb42a349899b5c72ee1c9fef` and is causally ready at block
+**52,263,452**. The reusable
+`phase1-pons-stock-oracle-promote-v2-delta` workflow therefore promotes the
+22-asset V2 oracle tape and scans only DELL's missing tail, split into
+**<=500k-block** jobs, before emitting the canonical
+`phase1-pons-stock-oracle-full` artifact. It fails closed unless the frozen
+23-vs-22 coverage relationship and exact merged stock-feed ownership still
+hold.
+
 A separate causality fix activates staggered quote-source state only at each
 asset's first Pons use. Future oracle availability is never active from the
 beginning of a historical replay. Lifecycle summaries distinguish
