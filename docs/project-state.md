@@ -484,6 +484,17 @@ The final Phase 1 viability path is also staged fail-closed:
   Repeated ranges inside one job are deduplicated, while overlapping ranges in
   distinct jobs/scans remain separate work units; a global unique-block metric
   is retained separately for audit;
+- because the frozen route plan forbids reusing one workflow run ID across
+  multiple acquisition routes, the multi-route eligibility parent run is not
+  treated as route-separated accounting evidence. A reusable manual-only
+  `phase1-pons-viability-route-measurement` workflow now runs exactly one of
+  the nine canonical production CLI paths per invocation over an operator-
+  supplied **<=50k-block** range, producing one distinct run ID for that route.
+  The `pons_registry` measurement is the deliberate exception inside one run:
+  it executes V1 and V2 registry scans as two separate jobs over the same
+  bounded range so accounting preserves the frozen overlapping-generation
+  work geometry instead of deduplicating it. Quote-fallback measurements reuse
+  only the canonical V3/V4 route files from a completed eligibility run;
 - the frozen heavy-acquisition contract requires exact full-history work-block
   floors for exactly nine routes, totaling **331,011,903 processed
   work-blocks**. The Pons registry floor intentionally counts its overlapping
