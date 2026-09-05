@@ -313,6 +313,29 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "pons-select-v3-quote-routes" in content
 
 
+def test_v1_v3_full_is_reusable_with_frozen_registry():
+    content = _workflow("phase1-pons-v1-v3-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33911022718"' in content
+    assert "SHARD_COUNT: '128'" in content
+    assert "max-parallel: 2" in content
+
+
+def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
+    content = _workflow("phase1-pons-v1-lifecycle-eligibility.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33911022718"' in content
+    assert 'default: "33923299711"' in content
+    assert 'default: "phase1-pons-full-quote-audit-current"' in content
+    assert "V1 quote coverage is not complete" in content
+
+
 def test_v2_v4_full_is_reusable_with_frozen_transition():
     content = _workflow("phase1-pons-v2-v4-full.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
