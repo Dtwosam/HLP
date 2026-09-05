@@ -367,11 +367,31 @@ research threshold or starting another archive crawl:
   coverage, holder replay, pool identity reconciliation and explicit DEX
   price-cross-check state before it can publish a complete validation bundle.
 
+The final Phase 1 viability path is also staged fail-closed:
+
+- every RPC acquisition summary reports both response-byte egress and a route
+  label; only the canonical Robinhood public RPC and the SolidRPC keyless or
+  authenticated-Free routes are accepted as proven-free acquisition evidence;
+- a manual artifact-only viability projection consumes measured accounting
+  runs and an explicit route plan, then uses the worst observed per-processed-
+  block request, egress, artifact-storage and runtime rate for each route;
+- the frozen heavy-acquisition contract requires exactly nine routes:
+  Pons registry, V1 V3, V2 curve, V2 transition, V2 V4, WETH/USDG anchor,
+  stock oracle, V3 quote fallback and V4 quote fallback;
+- a final manual artifact-only acceptance gate can return
+  `hlp-v1-phase1-data-viability` PASS only when the complete eligible universe,
+  the 10-token end-to-end validation and all nine instrumented zero-cost route
+  projections agree at snapshot head **54,486,035** and share the same V1/V2
+  lifecycle evidence.
+
 These are tooling completions, **not Phase 1 acceptance evidence yet**. The
 representative sample freeze still waits on canonical V1/V2 lifecycle
 eligibility artifacts, which in turn remain blocked on the unfinished pricing
-inputs. No representative transfer backfill or DEX validation artifact should
-be counted as complete until those upstream frozen inputs exist.
+inputs. The egress projection additionally needs instrumented measured runs;
+older completed runs cannot retroactively provide response-byte counters. No
+representative validation, viability projection or acceptance artifact should
+be counted as complete until those upstream frozen inputs and measurements
+exist.
 
 ## Phase 1 remaining gates
 
