@@ -127,6 +127,9 @@ from hlp.data.pons_research import (
     extract_pons_drawdown_episodes,
     summarize_pons_eligibility,
 )
+from hlp.data.pons_representative import (
+    select_representative_pons_tokens,
+)
 from hlp.data.robinhood_assets import RobinhoodAssetsClient
 from hlp.data.rpc import RpcClient
 from hlp.data.reconstruct import (
@@ -3515,6 +3518,64 @@ def cmd_rpc_v1_registry_window(args: argparse.Namespace) -> int:
 
 
 
+def cmd_pons_representative_sample(args: argparse.Namespace) -> int:
+    """Freeze a deterministic runner/failure Phase 1 validation cohort."""
+    v1 = _load_jsonl(args.v1_lifecycle)
+    v2 = _load_jsonl(args.v2_lifecycle)
+    outcomes = _load_jsonl(args.outcomes)
+    rows = select_representative_pons_tokens(
+        v1,
+        v2,
+        outcomes,
+        runner_count=args.runners,
+        failure_count=args.failures,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "deterministic_phase1_representative_selection",
+            "chain_id": 4663,
+            "v1_lifecycle": Path(args.v1_lifecycle).name,
+            "v2_lifecycle": Path(args.v2_lifecycle).name,
+            "outcomes": Path(args.outcomes).name,
+            "runner_count": args.runners,
+            "failure_count": args.failures,
+            "runner_semantics": (
+                "lifecycle eligible with measured strictly-later >=5x "
+                "market-cap multiple"
+            ),
+            "failure_semantics": (
+                "lifecycle ineligible, ranked by maximum observed market cap "
+                "to prefer informative near-misses"
+            ),
+            "generation_semantics": (
+                "reserve one V1 and one V2 slot per group when both are "
+                "available, then fill by deterministic ranking"
+            ),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                **manifest,
+                "tokens": len(rows),
+                "runners": sum(
+                    row["sample_group"] == "runner" for row in rows
+                ),
+                "failures": sum(
+                    row["sample_group"] == "failure" for row in rows
+                ),
+                "versions": sorted({
+                    row["pons_version"] for row in rows
+                }),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_rpc_pons_transfer_tape(args: argparse.Namespace) -> int:
     """Acquire ERC-20 Transfer logs for a bounded representative Pons set."""
     token_rows = _load_jsonl(args.tokens)
@@ -4649,6 +4710,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+    pons_representative = sub.add_parser(
+        "pons-representative-sample"
+    )
+    pons_representative.add_argument("--v1-lifecycle", required=True)
+    pons_representative.add_argument("--v2-lifecycle", required=True)
+    pons_representative.add_argument("--outcomes", required=True)
+    pons_representative.add_argument("--runners", type=int, default=5)
+    pons_representative.add_argument("--failures", type=int, default=5)
+    pons_representative.add_argument("--out", required=True)
+    pons_representative.set_defaults(
+        func=cmd_pons_representative_sample
+    )
 
     pons_transfers = sub.add_parser("rpc-pons-transfer-tape")
     pons_transfers.add_argument("--tokens", required=True)
