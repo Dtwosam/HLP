@@ -439,6 +439,44 @@ def test_direct_usdg_route_updates_do_not_require_weth_anchor():
     assert Decimal(rows[0]["anchor_usd"]) == Decimal(1)
 
 
+def test_delayed_weth_route_composes_with_event_ordered_usd_anchor():
+    from decimal import Decimal
+
+    route = {
+        "quote_token": TOKEN,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "activation_block": 100,
+        "activation_transaction_index": 1,
+        "activation_log_index": 0,
+        "pool": POOL,
+        "anchor_token": ROBINHOOD_WETH.lower(),
+        "anchor_decimals": 18,
+        "route_type": "uniswap_v3_direct_weth_delayed",
+    }
+    rows = list(
+        routes.build_v3_route_usd_updates(
+            [route],
+            [{
+                "pool": POOL,
+                "sqrt_price_x96": 2**96,
+                "block_number": 100,
+                "transaction_hash": "0x" + "88" * 32,
+                "transaction_index": 1,
+                "log_index": 0,
+            }],
+            [],
+            initial_weth_usd=Decimal("2000"),
+        )
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["pricing_source"] == "uniswap_v3_direct_weth_delayed"
+    assert Decimal(rows[0]["quote_per_token"]) == Decimal(1)
+    assert Decimal(rows[0]["anchor_usd"]) == Decimal(2000)
+    assert Decimal(rows[0]["usd_price"]) == Decimal(2000)
+
+
 def test_weth_route_still_requires_anchor():
     route = {
         "quote_token": TOKEN,
