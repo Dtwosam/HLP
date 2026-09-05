@@ -909,6 +909,13 @@ def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transf
     assert "v2_v4_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "prior_run_id: ${{ inputs.prior_transfer_run_id }}" in content
+    assert "registry_run_id: ${{ inputs.registry_run_id }}" in content
+    assert "v2_curve_run_id: ${{ inputs.v2_curve_run_id }}" in content
+    assert "transition_run_id: ${{ inputs.transition_run_id }}" in content
+    assert "quote_audit_run_id: ${{ inputs.quote_audit_run_id }}" in content
+    assert "anchor_run_id: ${{ inputs.anchor_run_id }}" in content
+    assert "oracle_run_id: ${{ inputs.oracle_run_id }}" in content
+    assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
     assert "transfers_retry:" not in content
     assert "needs.transfers.result == 'success'" in content
     assert content.count("format('{0}', github.run_id)") >= 10
@@ -1194,6 +1201,20 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "source_coverage_sha256" in content
     assert "representative market path V1 venue run mismatch" in content
     assert "representative market path V2 venue run mismatch" in content
+    for source_input in (
+        "registry_run_id:",
+        "v2_curve_run_id:",
+        "transition_run_id:",
+        "quote_audit_run_id:",
+        "anchor_run_id:",
+        "oracle_run_id:",
+        "fallback_run_id:",
+    ):
+        assert source_input in content
+    assert "representative market path registry_run_id mismatch" in content
+    assert "representative priced path oracle_run_id mismatch" in content
+    assert "representative DEX registry run mismatch" in content
+    assert "representative DEX transition run mismatch" in content
     assert "representative validation must contain exactly 10" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
