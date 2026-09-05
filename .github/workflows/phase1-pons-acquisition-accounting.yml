@@ -1,0 +1,207 @@
+name: phase1-pons-acquisition-accounting
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ids_json:
+        description: "JSON array of completed Phase 1 workflow run IDs to account"
+        required: true
+        type: string
+      free_daily_method_calls:
+        description: "Reference free-plan daily method-call allowance"
+        required: true
+        default: "10000"
+        type: string
+      require_successful_runs:
+        description: "Fail if any supplied run is incomplete or unsuccessful"
+        required: true
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      run_ids_json:
+        description: "JSON array of completed Phase 1 workflow run IDs to account"
+        required: true
+        type: string
+      free_daily_method_calls:
+        description: "Reference free-plan daily method-call allowance"
+        required: true
+        default: "10000"
+        type: string
+      require_successful_runs:
+        description: "Fail if any supplied run is incomplete or unsuccessful"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-acquisition-accounting-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  accounting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUN_IDS_JSON: ${{ inputs.run_ids_json }}
+      FREE_DAILY_METHOD_CALLS: ${{ inputs.free_daily_method_calls }}
+      REQUIRE_SUCCESSFUL_RUNS: ${{ inputs.require_successful_runs }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Collect measured run evidence from GitHub Actions
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          from hlp.data.phase1_accounting import (
+              summarize_action_run,
+              summarize_phase1_runs,
+          )
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          run_ids = json.loads(os.environ["RUN_IDS_JSON"])
+          if (
+              not isinstance(run_ids, list)
+              or not run_ids
+              or len(run_ids) > 50
+              or any(
+                  isinstance(run_id, bool)
+                  or not isinstance(run_id, int)
+                  or run_id <= 0
+                  for run_id in run_ids
+              )
+          ):
+              raise SystemExit(
+                  "run_ids_json must be a non-empty JSON array of at most "
+                  "50 positive integer run IDs"
+              )
+          if len(run_ids) != len(set(run_ids)):
+              raise SystemExit("run_ids_json contains duplicate run IDs")
+
+          base = f"https://api.github.com/repos/{repository}"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "User-Agent": "hlp-phase1-accounting",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          def request(path, *, decode_json=True):
+              req = urllib.request.Request(base + path, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as response:
+                      payload = response.read()
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode(errors="replace")
+                  raise SystemExit(
+                      f"GitHub API failed for {path}: HTTP {exc.code}: "
+                      f"{body[:500]}"
+                  ) from exc
+              if not decode_json:
+                  return payload.decode(errors="replace")
+              return json.loads(payload)
+
+          def paginated(path, key):
+              output = []
+              page = 1
+              while True:
+                  separator = "&" if "?" in path else "?"
+                  payload = request(
+                      f"{path}{separator}per_page=100&page={page}"
+                  )
+                  rows = payload.get(key)
+                  if not isinstance(rows, list):
+                      raise SystemExit(
+                          f"GitHub API response for {path} lacks {key}"
+                      )
+                  output.extend(rows)
+                  if len(rows) < 100:
+                      return output
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          f"pagination exceeded safety bound for {path}"
+                      )
+
+          summaries = []
+          for run_id in run_ids:
+              run = request(f"/actions/runs/{run_id}")
+              if int(run["id"]) != run_id:
+                  raise SystemExit(
+                      f"GitHub returned unexpected run id for {run_id}"
+                  )
+              jobs = paginated(
+                  f"/actions/runs/{run_id}/jobs",
+                  "jobs",
+              )
+              artifacts = paginated(
+                  f"/actions/runs/{run_id}/artifacts",
+                  "artifacts",
+              )
+              logs = {}
+              for job in jobs:
+                  job_id = int(job["id"])
+                  if job.get("status") != "completed":
+                      continue
+                  logs[job_id] = request(
+                      f"/actions/jobs/{job_id}/logs",
+                      decode_json=False,
+                  )
+
+              summary = summarize_action_run(
+                  run,
+                  jobs,
+                  artifacts,
+                  logs,
+              )
+              summaries.append(summary)
+              Path(
+                  f"artifacts/run-{run_id}-accounting.json"
+              ).write_text(
+                  json.dumps(summary, indent=2, sort_keys=True) + "\n"
+              )
+
+          combined = summarize_phase1_runs(
+              summaries,
+              free_daily_method_calls=int(
+                  os.environ["FREE_DAILY_METHOD_CALLS"]
+              ),
+          )
+          Path(
+              "artifacts/phase1-acquisition-accounting.json"
+          ).write_text(
+              json.dumps(combined, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(combined, sort_keys=True))
+
+          require_success = (
+              os.environ["REQUIRE_SUCCESSFUL_RUNS"].lower() == "true"
+          )
+          if require_success and not combined["all_runs_successful"]:
+              raise SystemExit(
+                  "Phase 1 accounting input includes incomplete or "
+                  "unsuccessful runs"
+              )
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-pons-acquisition-accounting
+          path: artifacts/
+          if-no-files-found: error
