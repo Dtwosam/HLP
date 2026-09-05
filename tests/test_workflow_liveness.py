@@ -935,7 +935,8 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "frozen runner smoke must contain exactly five eligible" in content
     assert "runner_smoke_universe_sha256" in content
     assert "runner_smoke_outcomes_sha256" in content
-    assert "representative runner cohort drifted from frozen smoke evidence" in content
+    assert "representative runner cohort drifted from frozen smoke " in content
+    assert "evidence: expected=" in content
     assert '"runner_tokens": sorted(sample_runner_tokens)' in content
     assert '"failure_tokens": failure_tokens' in content
     assert 'versions != {"v1": 4, "v2": 1}' in content
