@@ -1,5 +1,5 @@
 name: phase1-pons-representative-evidence-one-shot
-# validation-generation: 1
+# validation-generation: 2
 
 on:
   push:
@@ -19,7 +19,6 @@ jobs:
     with:
       eligibility_run_id: "33982556591"
       oracle_run_id: "33974681334"
-      prior_transfer_run_id: ""
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
       v2_curve_run_id: "33936232604"
