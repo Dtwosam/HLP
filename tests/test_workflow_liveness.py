@@ -691,6 +691,8 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "required eligibility manifest is missing" in content
     assert "eligibility manifest snapshot mismatch" in content
     assert "eligibility manifest record mismatch" in content
+    assert '"v1_eligibility_sha256": v1_manifest["sha256"]' in content
+    assert '"v2_eligibility_sha256": v2_manifest["sha256"]' in content
     assert "268_688" in content
     assert "225_951" in content
     assert "eligibility artifact has invalid status values" in content
