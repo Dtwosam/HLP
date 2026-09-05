@@ -409,6 +409,12 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert 'default: "33923299711"' in content
     assert 'default: "phase1-pons-full-quote-audit-current"' in content
     assert "V1 quote coverage is not complete" in content
+    assert "Validate frozen V1 lifecycle input manifests" in content
+    assert "required V1 lifecycle manifest is missing" in content
+    assert "V1 lifecycle manifest snapshot mismatch" in content
+    assert "frozen V1 lifecycle SHA changed" in content
+    assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
+    assert "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc" in content
 
 
 def test_v2_v4_full_is_reusable_with_frozen_transition():
