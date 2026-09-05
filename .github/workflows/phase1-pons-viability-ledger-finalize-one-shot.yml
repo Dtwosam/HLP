@@ -41,22 +41,41 @@ jobs:
           from pathlib import Path
 
           expected = {
-              "pons_registry": "phase1-pons-viability-pons-registry-one-shot",
-              "pons_v1_v3": "phase1-pons-viability-pons-v1-v3-one-shot",
-              "pons_v2_curve": "phase1-pons-viability-pons-v2-curve-one-shot",
+              "pons_registry": (
+                  ".github/workflows/"
+                  "phase1-pons-viability-pons-registry-one-shot.yml"
+              ),
+              "pons_v1_v3": (
+                  ".github/workflows/"
+                  "phase1-pons-viability-pons-v1-v3-one-shot.yml"
+              ),
+              "pons_v2_curve": (
+                  ".github/workflows/"
+                  "phase1-pons-viability-pons-v2-curve-one-shot.yml"
+              ),
               "pons_v2_transition": (
-                  "phase1-pons-viability-pons-v2-transition-one-shot"
+                  ".github/workflows/"
+                  "phase1-pons-viability-pons-v2-transition-one-shot.yml"
               ),
-              "pons_v2_v4": "phase1-pons-viability-pons-v2-v4-one-shot",
+              "pons_v2_v4": (
+                  ".github/workflows/"
+                  "phase1-pons-viability-pons-v2-v4-one-shot.yml"
+              ),
               "weth_usdg_anchor": (
-                  "phase1-pons-viability-weth-usdg-anchor-one-shot"
+                  ".github/workflows/"
+                  "phase1-pons-viability-weth-usdg-anchor-one-shot.yml"
               ),
-              "stock_oracle": "phase1-pons-viability-stock-oracle-one-shot",
+              "stock_oracle": (
+                  ".github/workflows/"
+                  "phase1-pons-viability-stock-oracle-one-shot.yml"
+              ),
               "quote_v3_fallback": (
-                  "phase1-pons-viability-quote-v3-fallback-one-shot"
+                  ".github/workflows/"
+                  "phase1-pons-viability-quote-v3-fallback-one-shot.yml"
               ),
               "quote_v4_fallback": (
-                  "phase1-pons-viability-quote-v4-fallback-one-shot"
+                  ".github/workflows/"
+                  "phase1-pons-viability-quote-v4-fallback-one-shot.yml"
               ),
           }
 
@@ -151,10 +170,13 @@ jobs:
                       f"{route} run={run_id} status={run.get('status')} "
                       f"conclusion={run.get('conclusion')}"
                   )
-              if run.get("name") != expected[route]:
+              observed_path = str(
+                  run.get("path") or ""
+              ).split("@", 1)[0]
+              if observed_path != expected[route]:
                   raise SystemExit(
-                      f"viability route workflow mismatch: {route} "
-                      f"expected={expected[route]} actual={run.get('name')}"
+                      f"viability route workflow path mismatch: {route} "
+                      f"expected={expected[route]} actual={observed_path}"
                   )
               if run.get("head_branch") != "phase1/data-acquisition-spike":
                   raise SystemExit(
