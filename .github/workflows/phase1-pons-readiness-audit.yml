@@ -1,0 +1,258 @@
+name: phase1-pons-readiness-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_eligibility_run_id:
+        description: "Frozen full eligibility acquisition parent"
+        required: false
+        default: "33982556591"
+        type: string
+  workflow_call:
+    inputs:
+      source_eligibility_run_id:
+        required: false
+        default: "33982556591"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-readiness-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build Phase 1 readiness report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          from hlp.data.phase1_readiness import (
+              VIABILITY_ROUTE_WORKFLOWS,
+              build_phase1_readiness_report,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          source_run_id = int(os.environ["SOURCE_RUN_ID"])
+          branch = os.environ["GITHUB_REF_NAME"]
+
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "readiness audit source must remain 33982556591"
+              )
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          def artifact_names(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  artifacts = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(artifact.get("name"))
+                      for artifact in artifacts
+                      if not artifact.get("expired")
+                  )
+                  if len(artifacts) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 2000 for run {run_id}"
+                      )
+              return sorted(names)
+
+          def run_payload(run_id):
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              return {
+                  "id": int(run["id"]),
+                  "name": run.get("name"),
+                  "status": run.get("status"),
+                  "conclusion": run.get("conclusion"),
+                  "head_branch": run.get("head_branch"),
+                  "head_sha": run.get("head_sha"),
+                  "artifacts": artifact_names(run_id),
+              }
+
+          ready_config = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          ledger = json.loads(
+              Path(".github/phase1-pons-viability-runs.json").read_text()
+          )
+
+          configured_source = int(
+              ready_config.get("source_eligibility_run_id", 0)
+          )
+          evidence_run_id = int(
+              ready_config.get("evidence_run_id", 0)
+          )
+          ledger_generation = int(ledger.get("generation", 0))
+          ledger_evidence_run_id = int(
+              ledger.get("evidence_run_id", 0)
+          )
+          route_run_ids = {
+              route: int((ledger.get("routes") or {}).get(route, 0))
+              for route in VIABILITY_ROUTE_WORKFLOWS
+          }
+
+          source_run = run_payload(source_run_id)
+          evidence_run = (
+              run_payload(evidence_run_id)
+              if evidence_run_id > 0
+              else None
+          )
+          viability_runs = {
+              route: (
+                  run_payload(route_run_ids[route])
+                  if route_run_ids[route] > 0
+                  else None
+              )
+              for route in VIABILITY_ROUTE_WORKFLOWS
+          }
+
+          finalizer_runs = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs"
+                  f"?branch={urllib.parse.quote(branch)}"
+                  f"&per_page=100&page={page}"
+              )
+              runs = list(payload.get("workflow_runs") or [])
+              for run in runs:
+                  if (
+                      run.get("name")
+                      == "phase1-pons-viability-ledger-finalize-one-shot"
+                  ):
+                      run_id = int(run["id"])
+                      finalizer_runs.append(
+                          {
+                              "id": run_id,
+                              "name": run.get("name"),
+                              "status": run.get("status"),
+                              "conclusion": run.get("conclusion"),
+                              "head_branch": run.get("head_branch"),
+                              "head_sha": run.get("head_sha"),
+                              "artifacts": (
+                                  artifact_names(run_id)
+                                  if run.get("status") == "completed"
+                                  else []
+                              ),
+                          }
+                      )
+              if len(runs) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "finalizer run pagination exceeded 1000 branch runs"
+                  )
+
+          report = build_phase1_readiness_report(
+              source_run=source_run,
+              evidence_run=evidence_run,
+              viability_runs=viability_runs,
+              finalizer_runs=finalizer_runs,
+              configured_source_run_id=configured_source,
+              configured_evidence_run_id=evidence_run_id,
+              ledger_generation=ledger_generation,
+              ledger_evidence_run_id=ledger_evidence_run_id,
+              ledger_route_run_ids=route_run_ids,
+          )
+          report.update(
+              {
+                  "audit_run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "audit_head_sha": os.environ["GITHUB_SHA"],
+                  "audit_branch": branch,
+              }
+          )
+
+          Path(
+              "artifacts/phase1-readiness-report.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          completed = report.get("completed_viability_routes", [])
+          pending = report.get("pending_viability_routes", [])
+          with summary_path.open("a") as summary:
+              summary.write("# Phase 1 readiness\n\n")
+              summary.write(f"- Stage: **{report['stage']}**\n")
+              summary.write(
+                  f"- Next action: **{report['next_action']}**\n"
+              )
+              summary.write(
+                  f"- Phase 1 ready: **{str(report['phase1_ready']).lower()}**\n"
+              )
+              summary.write(
+                  f"- Completed viability routes: **{len(completed)}/9**\n"
+              )
+              if pending:
+                  summary.write(
+                      "- Pending routes: "
+                      + ", ".join(pending)
+                      + "\n"
+                  )
+              if report.get("source_missing_artifacts"):
+                  summary.write(
+                      "- Missing source artifacts: "
+                      + ", ".join(report["source_missing_artifacts"])
+                      + "\n"
+                  )
+              if report.get("invalid_viability_routes"):
+                  summary.write(
+                      "- Invalid viability routes: "
+                      + ", ".join(
+                          row["route"]
+                          for row in report[
+                              "invalid_viability_routes"
+                          ]
+                      )
+                      + "\n"
+                  )
+
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-readiness-audit
+          path: artifacts/
+          if-no-files-found: error
