@@ -55,14 +55,24 @@ def _evidence(run_id=400):
     )
 
 
-def _route_runs(start=1000):
+def _route_runs(start=1000, evidence_run_id=400):
+    routes = list(VIABILITY_ROUTE_WORKFLOW_PATHS)
     return {
-        route: _run(
-            start + index,
-            name=f"phase1 viability {route} custom-run-name",
-            path=workflow_path,
-            artifacts=VIABILITY_ROUTE_REQUIRED_ARTIFACTS[route],
-        )
+        route: {
+            **_run(
+                start + index,
+                name=f"phase1 viability {route} custom-run-name",
+                path=workflow_path,
+                artifacts=VIABILITY_ROUTE_REQUIRED_ARTIFACTS[route],
+            ),
+            "launch_readiness_generation": 1,
+            "launch_readiness_source_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+            "launch_readiness_evidence_run_id": evidence_run_id,
+            "launch_ledger_generation": 1,
+            "launch_ledger_evidence_run_id": evidence_run_id,
+            "launch_route_slot": 0,
+            "launch_ledger_routes": routes,
+        }
         for index, (route, workflow_path) in enumerate(
             VIABILITY_ROUTE_WORKFLOW_PATHS.items()
         )
@@ -422,3 +432,50 @@ def test_readiness_rejects_unapproved_recovery_evidence_workflow():
     assert report["evidence_workflow_path"] == (
         ".github/workflows/unapproved.yml"
     )
+
+
+def test_readiness_rejects_route_launched_for_stale_evidence():
+    runs = _route_runs()
+    runs["pons_v1_v3"]["launch_readiness_evidence_run_id"] = 399
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=runs,
+    )
+
+    assert report["next_action"] == "repair_invalid_viability_routes"
+    assert report["invalid_viability_routes"] == [
+        {
+            "route": "pons_v1_v3",
+            "reason": "launch_readiness_evidence_mismatch",
+            "expected": 400,
+            "observed": 399,
+        }
+    ]
+
+
+def test_readiness_rejects_route_launched_with_nonempty_ledger_slot():
+    runs = _route_runs()
+    runs["quote_v4_fallback"]["launch_route_slot"] = 1234
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=runs,
+    )
+
+    assert report["next_action"] == "repair_invalid_viability_routes"
+    assert report["invalid_viability_routes"] == [
+        {
+            "route": "quote_v4_fallback",
+            "reason": "launch_route_slot_not_empty",
+            "observed": 1234,
+        }
+    ]
