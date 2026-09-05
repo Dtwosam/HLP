@@ -1,5 +1,5 @@
 name: phase1-pons-viability-pons-registry-one-shot
-# validation-generation: 1
+# validation-generation: 2
 run-name: phase1 viability pons_registry ${{ github.sha }}
 
 on:
