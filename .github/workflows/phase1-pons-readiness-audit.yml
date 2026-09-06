@@ -73,6 +73,8 @@ jobs:
           from pathlib import Path
 
           from hlp.data.phase1_readiness import (
+              RECOVERY_VENUE_ARTIFACTS,
+              RECOVERY_VENUE_WORKFLOW_PATHS,
               VIABILITY_ROUTE_WORKFLOW_PATHS,
               build_phase1_readiness_report,
           )
@@ -178,6 +180,44 @@ jobs:
                   payload["job_counts"] = job_counts(run_id)
               return payload
 
+          def latest_recovery_run(venue):
+              artifact = RECOVERY_VENUE_ARTIFACTS[venue]
+              candidates = []
+              for workflow_path in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
+                  workflow_file = workflow_path.rsplit("/", 1)[-1]
+                  encoded_workflow = urllib.parse.quote(
+                      workflow_file,
+                      safe="",
+                  )
+                  encoded_branch = urllib.parse.quote(branch, safe="")
+                  payload = get(
+                      f"/repos/{repo}/actions/workflows/{encoded_workflow}/runs"
+                      f"?branch={encoded_branch}&per_page=20&page=1"
+                  )
+                  for row in list(payload.get("workflow_runs") or []):
+                      if (
+                          row.get("status") != "completed"
+                          or row.get("conclusion") != "success"
+                          or row.get("head_branch") != branch
+                      ):
+                          continue
+                      run_id = int(row["id"])
+                      candidate = run_payload(run_id)
+                      observed_path = str(
+                          candidate.get("path") or ""
+                      ).split("@", 1)[0]
+                      if observed_path != workflow_path:
+                          continue
+                      if artifact not in set(
+                          candidate.get("artifacts") or []
+                      ):
+                          continue
+                      candidates.append(candidate)
+                      break
+              if not candidates:
+                  return None
+              return max(candidates, key=lambda row: int(row["id"]))
+
           def route_run_payload(route, run_id):
               payload = run_payload(run_id)
               head_sha = str(payload.get("head_sha") or "")
@@ -249,6 +289,17 @@ jobs:
           }
 
           source_run = run_payload(source_run_id, include_jobs=True)
+          recovery_runs = {
+              "v1_v3": None,
+              "v2_v4": None,
+          }
+          if source_run.get("status") == "completed":
+              source_artifacts = set(source_run.get("artifacts") or [])
+              if "phase1-pons-v1-v3-full" not in source_artifacts:
+                  recovery_runs["v1_v3"] = latest_recovery_run("v1_v3")
+              if "phase1-pons-v2-v4-full" not in source_artifacts:
+                  recovery_runs["v2_v4"] = latest_recovery_run("v2_v4")
+
           evidence_run = (
               run_payload(evidence_run_id)
               if evidence_run_id > 0
@@ -352,6 +403,7 @@ jobs:
               ledger_evidence_run_id=ledger_evidence_run_id,
               ledger_route_run_ids=route_run_ids,
               evidence_handoff=evidence_handoff,
+              recovery_runs=recovery_runs,
           )
           report.update(
               {
@@ -402,6 +454,15 @@ jobs:
                   summary.write(
                       "- Missing source artifacts: "
                       + ", ".join(report["source_missing_artifacts"])
+                      + "\n"
+                  )
+              recovery_plan = report.get("source_recovery_plan") or {}
+              if recovery_plan:
+                  summary.write(
+                      "- Recovery run IDs: "
+                      f"V1/V3={recovery_plan.get('recommended_v1_v3_run_id', 0)}, "
+                      f"V2/V4={recovery_plan.get('recommended_v2_v4_run_id', 0)}, "
+                      f"pricing={recovery_plan.get('recommended_pricing_run_id', 0)}"
                       + "\n"
                   )
               if report.get("evidence_handoff_errors"):
