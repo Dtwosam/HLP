@@ -134,7 +134,11 @@ def _source_recovery_plan(
         "next_action": (
             "launch_v1_v3_rescue"
             if not has_v1_v3
-            else "launch_recovered_phase1_completion"
+            else (
+                "launch_v2_v4_rescue"
+                if not has_v2_v4
+                else "launch_recovered_phase1_completion"
+            )
         ),
     }
 
