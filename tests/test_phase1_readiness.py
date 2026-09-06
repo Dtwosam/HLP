@@ -770,3 +770,30 @@ def test_readiness_ignores_invalid_v2_rescue_provenance():
     assert report["next_action"] == "launch_v2_v4_rescue"
     assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == 0
 
+def test_readiness_does_not_auto_accept_direct_gap_recovery_run():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v2-v4-full"
+    ]
+    direct = _run(
+        701,
+        path=(
+            ".github/workflows/"
+            "phase1-pons-v2-v4-recover-gaps.yml"
+        ),
+        artifacts=["phase1-pons-v2-v4-full"],
+    )
+
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        recovery_runs={"v1_v3": None, "v2_v4": direct},
+    )
+
+    assert report["next_action"] == "launch_v2_v4_rescue"
+    assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == 0
+
