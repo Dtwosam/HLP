@@ -1809,6 +1809,13 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
         assert "pons-representative-validation.jsonl.manifest.json" in content
         assert '"eligible_universe_sha256"' not in content or "**validation" in content
         assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "post-eligibility source run must match frozen parent" in normal
+    assert "33_982_556_591" in normal
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in normal
+    assert "post-eligibility source workflow path changed" in normal
+    assert "post-eligibility source branch changed" in normal
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in normal
+    assert "post-eligibility source launch commit changed" in normal
     assert "expected_lifecycle_run_id=source_run_id" in normal
     assert "expected_v1_v3_run_id=source_run_id" in normal
     assert "expected_v2_v4_run_id=source_run_id" in normal
