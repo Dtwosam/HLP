@@ -124,6 +124,13 @@ jobs:
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
           PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+          RUNNER_SMOKE_RUN_ID: ${{ inputs.runner_smoke_run_id }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          V2_CURVE_RUN_ID: ${{ inputs.v2_curve_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
         run: |
           python - <<'PY'
           import io
@@ -145,6 +152,33 @@ jobs:
           if pricing_id > 0 and v2_id <= 0:
               raise SystemExit(
                   "reused pricing requires an explicit V2/V4 run ID"
+              )
+
+          expected_support_runs = {
+              "ORACLE_RUN_ID": 33_974_681_334,
+              "RUNNER_SMOKE_RUN_ID": 33_920_762_592,
+              "REGISTRY_RUN_ID": 33_911_022_718,
+              "V2_CURVE_RUN_ID": 33_936_232_604,
+              "TRANSITION_RUN_ID": 33_912_452_330,
+              "QUOTE_AUDIT_RUN_ID": 33_923_299_711,
+              "ANCHOR_RUN_ID": 33_972_109_927,
+          }
+          observed_support_runs = {
+              field: int(os.environ[field])
+              for field in expected_support_runs
+          }
+          mismatched_support_runs = {
+              field: {
+                  "expected": expected_support_runs[field],
+                  "observed": observed_support_runs[field],
+              }
+              for field in expected_support_runs
+              if observed_support_runs[field] != expected_support_runs[field]
+          }
+          if mismatched_support_runs:
+              raise SystemExit(
+                  "recovered completion support run IDs changed: "
+                  f"{mismatched_support_runs}"
               )
 
           api = os.environ["GITHUB_API_URL"]
@@ -434,6 +468,7 @@ jobs:
               "v1_v3_run_id": v1_id,
               "v2_v4_run_id": v2_id,
               "pricing_run_id": pricing_id,
+              "support_run_ids": observed_support_runs,
               "source_missing_artifacts": missing_source_artifacts,
               "source_v2_partial_artifacts": source_v2_shards,
               "source_has_complete_pricing": source_has_complete_pricing,
