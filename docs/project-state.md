@@ -715,23 +715,28 @@ shards**: **5,159,742 processed blocks**, **47,200 RPC requests**,
 **10,208,439,963 response bytes (9.5074 GiB)**, **380,669,336 artifact bytes
 (0.3545 GiB)**, **37,836.375 reported acquisition seconds** and **40,970
 GitHub job-runtime seconds**, all through `solidrpc_keyless_public`.
-Artifact/log-only checkpoint generation 5 run **34002985523** now supersedes
+Artifact/log-only checkpoint generation 5 run **34002985523** superseded
 that operational sample with **33 successful acquisition shards**:
 **6,306,351 processed blocks**, **57,723 RPC requests**, **12,787,966,527
 response bytes (11.9097 GiB)**, **560,184,739 artifact bytes (0.5217 GiB)**,
 **46,326.828 reported acquisition seconds** and **49,602 GitHub job-runtime
-seconds**, still entirely through `solidrpc_keyless_public`. Scaling the
-33-shard aggregate density across the exact **45,864,378-block** V1/V3 range
-gives an operational forecast of about **419.8k requests**, **86.62 GiB
-response egress**, **3.79 GiB artifact storage**, **93.59 serialized
-acquisition hours** (about **46.79 hours** at max-parallel 2), and **100.21
-projected GitHub job-runtime hours** (about **50.10 hours** at max-parallel 2).
-The request and elapsed-time estimates remain very stable as the sample grows,
-while artifact density continues to rise and response density moves modestly;
-measured checkpoints therefore continue to supersede smaller-sample
-extrapolations. These checkpoints are explicitly non-acceptance evidence
-because the parent acquisition is still incomplete; frozen viability still
-requires its separate bounded route measurement run and
+seconds**, all through `solidrpc_keyless_public`. Artifact/log-only checkpoint
+generation 6 run **34024880175** now supersedes it with **78 successful
+acquisition shards**: **14,905,922 processed blocks**, **136,419 RPC
+requests**, **35,445,208,201 response bytes (33.0109 GiB)**,
+**2,382,695,713 artifact bytes (2.2191 GiB)**, **106,096.463 reported
+acquisition seconds** and **110,505 GitHub job-runtime seconds**, still entirely
+through `solidrpc_keyless_public`. Scaling the 78-shard aggregate density
+across the exact **45,864,378-block** V1/V3 range gives an operational
+forecast of about **419.8k requests**, **101.57 GiB response egress**,
+**6.83 GiB artifact storage**, **90.68 serialized acquisition hours** (about
+**45.34 hours** at max-parallel 2), and **94.45 projected GitHub job-runtime
+hours** (about **47.22 hours** at max-parallel 2). Request density remains
+remarkably stable, while later shards are materially denser in response and
+artifact bytes; measured checkpoints therefore continue to supersede
+smaller-sample extrapolations. These checkpoints are explicitly non-acceptance
+evidence because the parent acquisition is still incomplete; frozen viability
+still requires its separate bounded route measurement run and
 worst-observed-per-block projection.
 
 The current branch also hardens manual rescue beyond the launch commit's
@@ -838,7 +843,11 @@ recovery or viability advance. After the evidence/support and direct-rescue
 hardening below, generation 11 run **34002252630** passed the same live state
 machine and reported **33 successful jobs**, **1 cancelled**, **2 in progress**
 and **205 queued**, still with next action
-`wait_for_full_eligibility_acquisition`.
+`wait_for_full_eligibility_acquisition`. After recursive recovery-lineage and
+workflow-heredoc hardening, generation 12 run **34024988902** also passed and
+reported **79 successful jobs**, **1 cancelled**, **2 in progress** and
+**159 queued**, with no evidence run, no recovery plan while the source remains
+active, and the same correct next action.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
@@ -864,7 +873,17 @@ V1/V3 and V2/V4 recovery cannot accidentally double archive concurrency. The
 low-level V1/V3 and V2/V4 gap workflows independently refuse
 `partial_run_id=33982556591` while that frozen parent is active, closing the
 manual-dispatch bypass around the launcher guard while preserving inline
-recovery generations that legitimately use the current run ID.
+recovery generations that legitimately use the current run ID. Multi-generation
+venue recovery is now lineage-bound as well: every current V1/V3 or V2/V4 gap
+plan records its exact `partial_run_id` and `prior_gap_run_id`, and any
+non-empty prior run is recursively verified for allowed workflow family,
+Phase 1 branch, frozen range, same partial source, cycles and bounded depth.
+Recovered completion independently replays that plan chain before accepting a
+non-source final venue artifact, so older direct recovery artifacts that claim
+an unverifiable prior generation fail closed. CI now also compiles the embedded
+Python heredocs in the critical recovery, evidence, viability, readiness and
+acceptance workflows, catching syntax errors that ordinary package compilation
+would miss.
 The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
