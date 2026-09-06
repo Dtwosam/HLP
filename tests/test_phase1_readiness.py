@@ -685,3 +685,29 @@ def test_readiness_accepts_recovered_evidence_after_incomplete_source_success():
     assert report["stage"] == "viability_measurements"
     assert report["next_action"] == "arm_viability_run_ledger"
 
+def test_readiness_terminal_failure_requires_v2_rescue_when_tape_missing():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v2-v4-full"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        )
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "launch_v2_v4_rescue"
+    assert report["source_recovery_plan"] == {
+        "source_has_v1_v3_full": True,
+        "source_has_v2_v4_full": False,
+        "source_has_complete_pricing": True,
+        "recommended_v1_v3_run_id": SOURCE_ELIGIBILITY_RUN_ID,
+        "recommended_v2_v4_run_id": 0,
+        "recommended_pricing_run_id": 0,
+        "next_action": "launch_v2_v4_rescue",
+    }
+
