@@ -823,6 +823,12 @@ jobs and no premature evidence/viability readiness claim. After the shard-15
 timeout, audit run **33994147766** again passed and still returned
 `wait_for_full_eligibility_acquisition` while the parent remained active,
 now explicitly reporting **1 cancelled job** alongside the running matrix.
+After the recovery-discovery and finalizer hardening, live audit generation 10
+run **34000990183** also completed successfully and again classified the
+parent as `eligibility_acquisition` with next action
+`wait_for_full_eligibility_acquisition`: **31 successful jobs**, **1
+cancelled**, **2 in progress**, **207 queued**, no evidence run and no premature
+recovery or viability advance.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
