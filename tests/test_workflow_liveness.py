@@ -1717,6 +1717,10 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "pricing_run_id:" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "recovered completion support run IDs changed" in content
+    assert "recovered completion support run is not successful" in content
+    assert "recovered completion support workflow path changed" in content
+    assert "recovered completion support branch changed" in content
+    assert "recovered completion support artifact missing or" in content
     for run_id in (
         "33_974_681_334",
         "33_920_762_592",
@@ -1836,6 +1840,10 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
     assert "c53b3a63156976a5873752c332fa7578011249b0" in normal
     assert "post-eligibility source launch commit changed" in normal
     assert "post-eligibility support run IDs changed" in normal
+    assert "post-eligibility support run is not successful" in normal
+    assert "post-eligibility support workflow path changed" in normal
+    assert "post-eligibility support branch changed" in normal
+    assert "post-eligibility support artifact missing or expired" in normal
     assert "post-eligibility quote audit artifact changed" in normal
     for run_id in (
         "33_974_681_334",
@@ -1847,6 +1855,24 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
         "33_972_109_927",
     ):
         assert run_id in normal
+    for token in (
+        "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml",
+        "phase1-pons-stock-oracle-full",
+        "phase1-pons-research-smoke.yml",
+        "phase1-pons-research-smoke",
+        "phase1-pons-v1-registry-recovery.yml",
+        "phase1-pons-full-registry-recovered",
+        "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml",
+        "phase1-pons-v2-curve-full",
+        "phase1-pons-v2-transition-full.yml",
+        "phase1-pons-v2-transition-full",
+        "phase1-pons-quote-audit-one-shot.yml",
+        "phase1-pons-full-quote-audit-current",
+        "phase1-pons-anchor-promote-recovered-one-shot.yml",
+        "phase1-pons-weth-usdg-anchor-full",
+    ):
+        assert token in normal
+        assert token in recovered
     assert "expected_lifecycle_run_id=source_run_id" in normal
     assert "expected_v1_v3_run_id=source_run_id" in normal
     assert "expected_v2_v4_run_id=source_run_id" in normal
