@@ -114,8 +114,11 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
           run_id = int(os.environ["SOURCE_RUN_ID"])
-          if run_id <= 0:
-              raise SystemExit("source eligibility run ID must be positive")
+          if run_id != 33_982_556_591:
+              raise SystemExit(
+                  "post-eligibility source run must match frozen parent "
+                  "33982556591"
+              )
 
           def get(path):
               request = urllib.request.Request(
@@ -134,6 +137,26 @@ jobs:
               raise SystemExit(
                   "source eligibility parent is not completed successfully: "
                   f"status={run.get('status')} conclusion={run.get('conclusion')}"
+              )
+          observed_path = str(run.get("path") or "").split("@", 1)[0]
+          expected_path = (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          )
+          if observed_path != expected_path:
+              raise SystemExit(
+                  "post-eligibility source workflow path changed: "
+                  f"{observed_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "post-eligibility source branch changed"
+              )
+          if str(run.get("head_sha") or "") != (
+              "c53b3a63156976a5873752c332fa7578011249b0"
+          ):
+              raise SystemExit(
+                  "post-eligibility source launch commit changed"
               )
 
           names = set()
@@ -171,6 +194,8 @@ jobs:
               )
           print(json.dumps({
               "source_eligibility_run_id": run_id,
+              "source_workflow_path": observed_path,
+              "source_head_sha": run.get("head_sha"),
               "required_artifacts": sorted(required),
               "preflight": "pass",
           }, sort_keys=True))
