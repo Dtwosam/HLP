@@ -1708,6 +1708,14 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "source has reusable V2/V4 shards; recover source gaps" in content
     assert "source already has complete pricing; set pricing_run_id" in content
     assert "source_v2_shards" in content
+    assert "recovery_manifest" in content
+    assert "pons-v1-v3-full.jsonl.manifest.json" in content
+    assert "pons-v2-v4-full.jsonl.manifest.json" in content
+    assert "manifest_gap_aware_v1_v3_recovery" in content
+    assert "manifest_gap_aware_v4_recovery" in content
+    assert "recovery venue partial run does not match frozen" in content
+    assert "source_registry_run_id" in content
+    assert "transition_run_id" in content
     assert "reused pricing run is missing lifecycle/fallback" in content
     assert "inputs.pricing_run_id == ''" in content
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
