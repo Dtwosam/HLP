@@ -1371,6 +1371,37 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "time.sleep(" not in content
 
 
+def test_representative_chain_preflights_frozen_support_before_sample():
+    content = _workflow("phase1-pons-representative-evidence-chain.yml")
+    assert "Verify frozen representative support inputs" in content
+    assert "representative support run IDs changed" in content
+    assert "representative quote audit artifact changed" in content
+    assert "representative support run is not successful" in content
+    assert "representative support workflow path changed" in content
+    assert "representative support branch changed" in content
+    assert "representative support artifact missing or expired" in content
+    assert "sample:" in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
+    for token in (
+        "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml",
+        "phase1-pons-stock-oracle-full",
+        "phase1-pons-research-smoke.yml",
+        "phase1-pons-research-smoke",
+        "phase1-pons-v1-registry-recovery.yml",
+        "phase1-pons-full-registry-recovered",
+        "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml",
+        "phase1-pons-v2-curve-full",
+        "phase1-pons-v2-transition-full.yml",
+        "phase1-pons-v2-transition-full",
+        "phase1-pons-quote-audit-one-shot.yml",
+        "phase1-pons-full-quote-audit-current",
+        "phase1-pons-anchor-promote-recovered-one-shot.yml",
+        "phase1-pons-weth-usdg-anchor-full",
+    ):
+        assert token in content
+
+
 def test_live_acquisition_checkpoint_launcher_is_pinned_and_artifact_only():
     content = _workflow(
         "phase1-pons-live-acquisition-checkpoint-one-shot.yml"
