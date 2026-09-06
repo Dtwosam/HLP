@@ -126,9 +126,11 @@ jobs:
           PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
         run: |
           python - <<'PY'
+          import io
           import json
           import os
           import urllib.request
+          import zipfile
 
           source_id = int(os.environ["SOURCE_RUN_ID"])
           v1_id = int(os.environ["V1_V3_RUN_ID"])
@@ -149,8 +151,8 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
 
-          def get(path):
-              request = urllib.request.Request(
+          def request(path, *, decode_json=True):
+              req = urllib.request.Request(
                   api + path,
                   headers={
                       "Authorization": f"Bearer {token}",
@@ -158,11 +160,17 @@ jobs:
                       "X-GitHub-Api-Version": "2022-11-28",
                   },
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = response.read()
+              if not decode_json:
+                  return payload
+              return json.loads(payload)
 
-          def artifacts(run_id):
-              names = set()
+          def get(path):
+              return request(path)
+
+          def artifact_rows(run_id):
+              output = []
               page = 1
               while True:
                   payload = get(
@@ -170,10 +178,8 @@ jobs:
                       f"?per_page=100&page={page}"
                   )
                   rows = list(payload.get("artifacts") or [])
-                  names.update(
-                      str(row.get("name"))
-                      for row in rows
-                      if not row.get("expired")
+                  output.extend(
+                      row for row in rows if not row.get("expired")
                   )
                   if len(rows) < 100:
                       break
@@ -182,7 +188,42 @@ jobs:
                       raise SystemExit(
                           f"artifact pagination exceeded 2000 for run {run_id}"
                       )
-              return names
+              return output
+
+          def artifacts(run_id):
+              return {
+                  str(row.get("name"))
+                  for row in artifact_rows(run_id)
+              }
+
+          def recovery_manifest(run_id, artifact_name, manifest_name):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if str(row.get("name")) == artifact_name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "recovery venue artifact identity is ambiguous: "
+                      f"{artifact_name} run={run_id}"
+                  )
+              artifact_id = int(matches[0]["id"])
+              payload = request(
+                  f"/repos/{repo}/actions/artifacts/{artifact_id}/zip",
+                  decode_json=False,
+              )
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == manifest_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "recovery venue manifest identity is ambiguous: "
+                          f"{manifest_name} run={run_id}"
+                      )
+                  return json.loads(archive.read(names[0]))
 
           source = get(f"/repos/{repo}/actions/runs/{source_id}")
           if source.get("status") != "completed":
@@ -264,7 +305,16 @@ jobs:
               ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
           }
 
-          def verify_venue(run_id, artifact, allowed_paths):
+          def verify_venue(
+              run_id,
+              artifact,
+              allowed_paths,
+              *,
+              manifest_name,
+              expected_source,
+              expected_upstream_field,
+              expected_upstream_run_id,
+          ):
               run = get(f"/repos/{repo}/actions/runs/{run_id}")
               if run_id != source_id and (
                   run.get("status") != "completed"
@@ -287,9 +337,62 @@ jobs:
                       f"recovery venue artifact missing: {artifact} run={run_id}"
                   )
 
-          verify_venue(v1_id, "phase1-pons-v1-v3-full", allowed_v1)
+              if run_id == source_id:
+                  return
+              manifest = recovery_manifest(
+                  run_id,
+                  artifact,
+                  manifest_name,
+              )
+              provenance = dict(manifest.get("provenance") or {})
+              if provenance.get("source") != expected_source:
+                  raise SystemExit(
+                      "recovery venue manifest source changed: "
+                      f"run={run_id}"
+                  )
+              if int(provenance.get("chain_id", 0)) != 4663:
+                  raise SystemExit(
+                      f"recovery venue manifest chain changed: run={run_id}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", 0)
+              ) != 54_486_035:
+                  raise SystemExit(
+                      "recovery venue manifest snapshot changed: "
+                      f"run={run_id}"
+                  )
+              if int(provenance.get("partial_run_id", 0)) != source_id:
+                  raise SystemExit(
+                      "recovery venue partial run does not match frozen "
+                      f"source: run={run_id}"
+                  )
+              if int(
+                  provenance.get(expected_upstream_field, 0)
+              ) != expected_upstream_run_id:
+                  raise SystemExit(
+                      "recovery venue upstream provenance changed: "
+                      f"run={run_id} field={expected_upstream_field}"
+                  )
+
+          verify_venue(
+              v1_id,
+              "phase1-pons-v1-v3-full",
+              allowed_v1,
+              manifest_name="pons-v1-v3-full.jsonl.manifest.json",
+              expected_source="manifest_gap_aware_v1_v3_recovery",
+              expected_upstream_field="source_registry_run_id",
+              expected_upstream_run_id=33_911_022_718,
+          )
           if v2_id:
-              verify_venue(v2_id, "phase1-pons-v2-v4-full", allowed_v2)
+              verify_venue(
+                  v2_id,
+                  "phase1-pons-v2-v4-full",
+                  allowed_v2,
+                  manifest_name="pons-v2-v4-full.jsonl.manifest.json",
+                  expected_source="manifest_gap_aware_v4_recovery",
+                  expected_upstream_field="transition_run_id",
+                  expected_upstream_run_id=33_912_452_330,
+              )
 
           if pricing_id:
               pricing = get(
