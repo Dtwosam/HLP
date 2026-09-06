@@ -100,7 +100,7 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         assert "max-parallel: 4" not in content, name
 
 
-def test_viability_route_measurement_is_manual_bounded_and_canonical():
+def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
     assert "workflow_dispatch:" in trigger_block
@@ -122,6 +122,16 @@ def test_viability_route_measurement_is_manual_bounded_and_canonical():
     assert 'default: "54486035"' in content
     assert "viability measurement exceeds 50000-block ceiling" in content
     assert "hi - lo + 1 > 50_000" in content
+    assert "Verify approved evidence before any viability RPC" in content
+    assert "viability measurement evidence run ID must be positive" in content
+    assert "viability measurement evidence run is not successful" in content
+    assert "viability measurement evidence workflow path is not" in content
+    assert "viability measurement evidence branch changed" in content
+    assert "viability measurement evidence artifacts missing" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert content.count("needs: preflight") == 2
     assert "rpc-v1-registry-window" in content
     assert "rpc-v2-registry-window" in content
     assert "rpc-v3-pons-tape" in content
