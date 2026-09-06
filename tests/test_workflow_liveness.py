@@ -143,7 +143,11 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "rpc-v3-quote-route-tape" in content
     assert "rpc-v4-quote-route-tape" in content
     assert "registry_v2:" in content
-    assert "if: ${{ inputs.route == 'pons_registry' }}" in content
+    assert (
+        "if: ${{ needs.preflight.result == 'success' && "
+        "inputs.route == 'pons_registry' }}"
+        in content
+    )
     assert "shared measurement range must postdate V2 deployment" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
     assert "phase1-pons-v4-quote-fallback-full" in content
