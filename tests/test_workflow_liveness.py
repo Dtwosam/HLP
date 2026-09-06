@@ -45,6 +45,61 @@ def _workflow(name: str) -> str:
     ).read_text()
 
 
+def _embedded_python_blocks(content: str) -> list[str]:
+    lines = content.splitlines()
+    blocks: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() != "python - <<'PY'":
+            index += 1
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        body: list[str] = []
+        index += 1
+        while index < len(lines):
+            current = lines[index]
+            current_indent = len(current) - len(current.lstrip())
+            if current.strip() == "PY" and current_indent == indent:
+                break
+            body.append(
+                current[indent:]
+                if len(current) >= indent
+                else current.lstrip()
+            )
+            index += 1
+        else:
+            raise AssertionError("unterminated embedded Python heredoc")
+
+        blocks.append("\n".join(body) + "\n")
+        index += 1
+    return blocks
+
+
+def test_critical_phase1_workflow_python_heredocs_compile():
+    critical = (
+        "phase1-pons-v1-v3-recover-gaps.yml",
+        "phase1-pons-v2-v4-recover-gaps.yml",
+        "phase1-pons-recovered-completion-chain.yml",
+        "phase1-pons-post-eligibility-evidence-chain.yml",
+        "phase1-pons-representative-evidence-chain.yml",
+        "phase1-pons-viability-route-measurement.yml",
+        "phase1-pons-final-acceptance-chain.yml",
+        "phase1-pons-acceptance-gate.yml",
+        "phase1-pons-readiness-audit.yml",
+    )
+    for name in critical:
+        blocks = _embedded_python_blocks(_workflow(name))
+        assert blocks, name
+        for index, block in enumerate(blocks):
+            compile(
+                block,
+                f"{name}:embedded-python-{index}",
+                "exec",
+            )
+
+
 def test_pons_heavy_workflows_never_poll_other_runs():
     forbidden = (
         "time.sleep(",
