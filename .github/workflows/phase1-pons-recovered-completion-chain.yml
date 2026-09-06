@@ -190,17 +190,26 @@ jobs:
                   "recovered completion cannot start before source is terminal"
               )
           source_artifacts = artifacts(source_id)
-          required_source_artifacts = {
-              "phase1-pons-v1-v3-full",
-              "phase1-pons-v2-v4-full",
+          required_pricing_artifacts = {
               "phase1-pons-v1-lifecycle-eligibility",
               "phase1-pons-v2-lifecycle-eligibility",
               "phase1-pons-v3-quote-fallback-full",
               "phase1-pons-v4-quote-fallback-full",
               "phase1-pons-quote-fallback-full",
           }
+          required_source_artifacts = {
+              "phase1-pons-v1-v3-full",
+              "phase1-pons-v2-v4-full",
+              *required_pricing_artifacts,
+          }
           missing_source_artifacts = sorted(
               required_source_artifacts - source_artifacts
+          )
+          source_v2_shards = sorted(
+              name
+              for name in source_artifacts
+              if name.startswith("phase1-pons-v2-v4-")
+              and name != "phase1-pons-v2-v4-full"
           )
           if (
               source.get("conclusion") == "success"
@@ -217,6 +226,30 @@ jobs:
               raise SystemExit("recovery source workflow path changed")
           if source.get("head_branch") != "phase1/data-acquisition-spike":
               raise SystemExit("recovery source branch changed")
+
+          if v2_id == 0 and "phase1-pons-v2-v4-full" in source_artifacts:
+              raise SystemExit(
+                  "source already has complete V2/V4; set v2_v4_run_id "
+                  f"to {source_id}"
+              )
+          if v2_id == 0 and source_v2_shards:
+              raise SystemExit(
+                  "source has reusable V2/V4 shards; recover source gaps "
+                  "before recovered completion"
+              )
+          source_has_complete_pricing = bool(
+              required_pricing_artifacts <= source_artifacts
+          )
+          if (
+              pricing_id == 0
+              and v1_id == source_id
+              and v2_id == source_id
+              and source_has_complete_pricing
+          ):
+              raise SystemExit(
+                  "source already has complete pricing; set pricing_run_id "
+                  f"to {source_id}"
+              )
 
           allowed_v1 = {
               ".github/workflows/"
@@ -284,13 +317,6 @@ jobs:
                   "phase1/data-acquisition-spike"
               ):
                   raise SystemExit("reused pricing branch changed")
-              required_pricing_artifacts = {
-                  "phase1-pons-v1-lifecycle-eligibility",
-                  "phase1-pons-v2-lifecycle-eligibility",
-                  "phase1-pons-v3-quote-fallback-full",
-                  "phase1-pons-v4-quote-fallback-full",
-                  "phase1-pons-quote-fallback-full",
-              }
               missing_pricing = sorted(
                   required_pricing_artifacts - artifacts(pricing_id)
               )
@@ -306,6 +332,8 @@ jobs:
               "v2_v4_run_id": v2_id,
               "pricing_run_id": pricing_id,
               "source_missing_artifacts": missing_source_artifacts,
+              "source_v2_partial_artifacts": source_v2_shards,
+              "source_has_complete_pricing": source_has_complete_pricing,
               "resume_v2_v4": v2_id == 0 and pricing_id == 0,
               "reuse_pricing": pricing_id > 0,
               "preflight": "pass",
