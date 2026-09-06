@@ -1614,6 +1614,11 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "launch_ledger_evidence_run_id" in content
     assert "launch_route_slot" in content
     assert "launch_ledger_routes" in content
+    assert "latest_recovery_run" in content
+    assert "RECOVERY_VENUE_ARTIFACTS" in content
+    assert "RECOVERY_VENUE_WORKFLOW_PATHS" in content
+    assert "recovery_runs=recovery_runs" in content
+    assert "Recovery run IDs:" in content
     assert "invalid_finalizers" in content
     assert "finalizer_head_sha" in content
     assert "launch_readiness_source_run_id" in content
