@@ -108,13 +108,17 @@ def _successful(run: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _run_id(run: Mapping[str, Any] | None) -> int:
     if not run:
         return 0
-    try:
-        return int(run.get("id", 0))
-    except (TypeError, ValueError):
-        return 0
+    return _safe_int(run.get("id", 0))
 
 
 def _recovered_venue_run_id(
@@ -207,19 +211,43 @@ def _evidence_handoff_errors(
     errors: list[str] = []
     if handoff.get("status") != "ready":
         errors.append("evidence handoff status is not ready")
-    if int(handoff.get("evidence_run_id", 0)) != evidence_run_id:
+
+    handoff_evidence_run_id = _safe_int(
+        handoff.get("evidence_run_id"),
+        default=-1,
+    )
+    source_eligibility_run_id = _safe_int(
+        handoff.get("source_eligibility_run_id"),
+        default=-1,
+    )
+    snapshot_head_block = _safe_int(
+        handoff.get("snapshot_head_block"),
+        default=-1,
+    )
+    all_pons_launches = _safe_int(
+        handoff.get("all_pons_launches"),
+        default=-1,
+    )
+    eligible_tokens = _safe_int(
+        handoff.get("eligible_tokens"),
+        default=0,
+    )
+    representative_tokens = _safe_int(
+        handoff.get("representative_tokens"),
+        default=-1,
+    )
+
+    if handoff_evidence_run_id != evidence_run_id:
         errors.append("evidence handoff run ID mismatch")
-    if int(
-        handoff.get("source_eligibility_run_id", 0)
-    ) != SOURCE_ELIGIBILITY_RUN_ID:
+    if source_eligibility_run_id != SOURCE_ELIGIBILITY_RUN_ID:
         errors.append("evidence handoff source run mismatch")
-    if int(handoff.get("snapshot_head_block", -1)) != 54_486_035:
+    if snapshot_head_block != 54_486_035:
         errors.append("evidence handoff snapshot head changed")
-    if int(handoff.get("all_pons_launches", -1)) != 494_639:
+    if all_pons_launches != 494_639:
         errors.append("evidence handoff Pons launch count changed")
-    if int(handoff.get("eligible_tokens", 0)) <= 0:
+    if eligible_tokens <= 0:
         errors.append("evidence handoff eligible universe is empty")
-    if int(handoff.get("representative_tokens", -1)) != 10:
+    if representative_tokens != 10:
         errors.append("evidence handoff representative token count changed")
 
     for field in (
@@ -237,9 +265,9 @@ def _evidence_handoff_errors(
         except ValueError:
             errors.append(f"evidence handoff hash is invalid: {field}")
 
-    lifecycle_run_id = int(handoff.get("lifecycle_run_id", 0))
-    v1_v3_run_id = int(handoff.get("v1_v3_run_id", 0))
-    v2_v4_run_id = int(handoff.get("v2_v4_run_id", 0))
+    lifecycle_run_id = _safe_int(handoff.get("lifecycle_run_id"))
+    v1_v3_run_id = _safe_int(handoff.get("v1_v3_run_id"))
+    v2_v4_run_id = _safe_int(handoff.get("v2_v4_run_id"))
     if min(lifecycle_run_id, v1_v3_run_id, v2_v4_run_id) <= 0:
         errors.append("evidence handoff routing run ID is invalid")
 
@@ -504,8 +532,35 @@ def build_phase1_readiness_report(
                 }
             )
             continue
-        launch_routes = set(run.get("launch_ledger_routes") or [])
-        if int(run.get("launch_readiness_generation", 0)) <= 0:
+        launch_route_payload = run.get("launch_ledger_routes") or []
+        launch_routes = (
+            set(launch_route_payload)
+            if isinstance(launch_route_payload, (Mapping, list, tuple, set))
+            else set()
+        )
+        launch_readiness_generation = _safe_int(
+            run.get("launch_readiness_generation")
+        )
+        launch_source_run_id = _safe_int(
+            run.get("launch_readiness_source_run_id"),
+            default=-1,
+        )
+        launch_evidence_run_id = _safe_int(
+            run.get("launch_readiness_evidence_run_id"),
+            default=-1,
+        )
+        launch_ledger_generation = _safe_int(
+            run.get("launch_ledger_generation")
+        )
+        launch_ledger_evidence_run_id = _safe_int(
+            run.get("launch_ledger_evidence_run_id"),
+            default=-1,
+        )
+        launch_route_slot = _safe_int(
+            run.get("launch_route_slot"),
+            default=-1,
+        )
+        if launch_readiness_generation <= 0:
             invalid.append(
                 {
                     "route": route,
@@ -513,34 +568,26 @@ def build_phase1_readiness_report(
                 }
             )
             continue
-        if int(
-            run.get("launch_readiness_source_run_id", 0)
-        ) != SOURCE_ELIGIBILITY_RUN_ID:
+        if launch_source_run_id != SOURCE_ELIGIBILITY_RUN_ID:
             invalid.append(
                 {
                     "route": route,
                     "reason": "launch_source_run_mismatch",
-                    "observed": int(
-                        run.get("launch_readiness_source_run_id", 0)
-                    ),
+                    "observed": launch_source_run_id,
                 }
             )
             continue
-        if int(
-            run.get("launch_readiness_evidence_run_id", 0)
-        ) != evidence_id:
+        if launch_evidence_run_id != evidence_id:
             invalid.append(
                 {
                     "route": route,
                     "reason": "launch_readiness_evidence_mismatch",
                     "expected": evidence_id,
-                    "observed": int(
-                        run.get("launch_readiness_evidence_run_id", 0)
-                    ),
+                    "observed": launch_evidence_run_id,
                 }
             )
             continue
-        if int(run.get("launch_ledger_generation", 0)) <= 0:
+        if launch_ledger_generation <= 0:
             invalid.append(
                 {
                     "route": route,
@@ -548,17 +595,13 @@ def build_phase1_readiness_report(
                 }
             )
             continue
-        if int(
-            run.get("launch_ledger_evidence_run_id", 0)
-        ) != evidence_id:
+        if launch_ledger_evidence_run_id != evidence_id:
             invalid.append(
                 {
                     "route": route,
                     "reason": "launch_ledger_evidence_mismatch",
                     "expected": evidence_id,
-                    "observed": int(
-                        run.get("launch_ledger_evidence_run_id", 0)
-                    ),
+                    "observed": launch_ledger_evidence_run_id,
                 }
             )
             continue
@@ -567,16 +610,16 @@ def build_phase1_readiness_report(
                 {
                     "route": route,
                     "reason": "launch_ledger_route_set_mismatch",
-                    "observed": sorted(launch_routes),
+                    "observed": sorted(str(value) for value in launch_routes),
                 }
             )
             continue
-        if int(run.get("launch_route_slot", -1)) != 0:
+        if launch_route_slot != 0:
             invalid.append(
                 {
                     "route": route,
                     "reason": "launch_route_slot_not_empty",
-                    "observed": int(run.get("launch_route_slot", -1)),
+                    "observed": launch_route_slot,
                 }
             )
             continue
@@ -619,25 +662,35 @@ def build_phase1_readiness_report(
             reason = "workflow_path_mismatch"
         elif run.get("head_branch") != "phase1/data-acquisition-spike":
             reason = "branch_mismatch"
-        elif int(run.get("launch_readiness_source_run_id", 0)) != (
-            SOURCE_ELIGIBILITY_RUN_ID
-        ):
+        elif _safe_int(
+            run.get("launch_readiness_source_run_id"),
+            default=-1,
+        ) != SOURCE_ELIGIBILITY_RUN_ID:
             reason = "source_run_mismatch"
-        elif int(run.get("launch_readiness_evidence_run_id", 0)) != evidence_id:
+        elif _safe_int(
+            run.get("launch_readiness_evidence_run_id"),
+            default=-1,
+        ) != evidence_id:
             reason = "readiness_evidence_mismatch"
-        elif int(run.get("launch_ledger_generation", 0)) != int(
-            ledger_generation
-        ):
+        elif _safe_int(
+            run.get("launch_ledger_generation"),
+            default=-1,
+        ) != int(ledger_generation):
             reason = "ledger_generation_mismatch"
-        elif int(run.get("launch_ledger_evidence_run_id", 0)) != evidence_id:
+        elif _safe_int(
+            run.get("launch_ledger_evidence_run_id"),
+            default=-1,
+        ) != evidence_id:
             reason = "ledger_evidence_mismatch"
         else:
-            launch_routes = {
-                str(route): int(run_id)
-                for route, run_id in dict(
-                    run.get("launch_ledger_routes") or {}
-                ).items()
-            }
+            raw_launch_routes = run.get("launch_ledger_routes") or {}
+            if isinstance(raw_launch_routes, Mapping):
+                launch_routes = {
+                    str(route): _safe_int(run_id, default=-1)
+                    for route, run_id in raw_launch_routes.items()
+                }
+            else:
+                launch_routes = {}
             if launch_routes != expected_route_ids:
                 reason = "ledger_routes_mismatch"
 
