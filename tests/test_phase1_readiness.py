@@ -138,6 +138,7 @@ def _report(
     viability_runs=None,
     finalizer_runs=(),
     evidence_handoff=_AUTO_HANDOFF,
+    recovery_runs=None,
 ):
     if evidence_handoff is _AUTO_HANDOFF:
         recovered = bool(
@@ -164,6 +165,7 @@ def _report(
         ledger_route_run_ids=ledger_route_run_ids
         or {route: 0 for route in VIABILITY_ROUTE_WORKFLOW_PATHS},
         evidence_handoff=evidence_handoff,
+        recovery_runs=recovery_runs,
     )
 
 
@@ -710,4 +712,61 @@ def test_readiness_terminal_failure_requires_v2_rescue_when_tape_missing():
         "recommended_pricing_run_id": 0,
         "next_action": "launch_v2_v4_rescue",
     }
+
+def test_readiness_uses_completed_v2_rescue_for_recovered_completion():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v2-v4-full"
+    ]
+    rescue = _run(
+        700,
+        name="phase1-pons-live-venue-rescue-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-live-venue-rescue-one-shot.yml"
+        ),
+        artifacts=["phase1-pons-v2-v4-full"],
+    )
+
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        recovery_runs={"v1_v3": None, "v2_v4": rescue},
+    )
+
+    assert report["next_action"] == "launch_recovered_phase1_completion"
+    assert report["source_recovery_plan"]["recommended_v1_v3_run_id"] == (
+        SOURCE_ELIGIBILITY_RUN_ID
+    )
+    assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == 700
+    assert report["source_recovery_plan"]["recommended_pricing_run_id"] == 0
+
+
+def test_readiness_ignores_invalid_v2_rescue_provenance():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v2-v4-full"
+    ]
+    rescue = _run(
+        700,
+        path=".github/workflows/unapproved.yml",
+        artifacts=["phase1-pons-v2-v4-full"],
+    )
+
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        recovery_runs={"v1_v3": None, "v2_v4": rescue},
+    )
+
+    assert report["next_action"] == "launch_v2_v4_rescue"
+    assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == 0
 
