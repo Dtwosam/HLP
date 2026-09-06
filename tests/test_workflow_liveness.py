@@ -875,6 +875,19 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "cancel-in-progress: false" in content
+    assert "Verify evidence and nine route provenance before acceptance work" in content
+    assert "final acceptance eligible and representative runs must" in content
+    assert "final acceptance evidence workflow path is not allowed" in content
+    assert "final acceptance evidence artifacts missing" in content
+    assert "final acceptance route workflow path mismatch" in content
+    assert "final acceptance route measurement artifacts missing" in content
+    assert "final acceptance route source changed" in content
+    assert "final acceptance route evidence changed" in content
+    assert "final acceptance route launch ledger changed" in content
+    assert "final acceptance route launch slot was not empty" in content
+    assert "source_eligibility_run_id" in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
     for route in (
         "pons_registry",
         "pons_v1_v3",
