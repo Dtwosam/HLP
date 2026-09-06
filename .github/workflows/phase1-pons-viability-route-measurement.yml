@@ -138,7 +138,120 @@ env:
   ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify approved evidence before any viability RPC
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          if evidence_run_id <= 0:
+              raise SystemExit(
+                  "viability measurement evidence run ID must be positive"
+              )
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "viability measurement source eligibility run changed"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          run = get(f"/repos/{repo}/actions/runs/{evidence_run_id}")
+          if (
+              run.get("status") != "completed"
+              or run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "viability measurement evidence run is not successful"
+              )
+          allowed_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          observed_path = str(run.get("path") or "").split("@", 1)[0]
+          if observed_path not in allowed_paths:
+              raise SystemExit(
+                  "viability measurement evidence workflow path is not "
+                  f"allowed: {observed_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "viability measurement evidence branch changed"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              names.update(
+                  str(row.get("name"))
+                  for row in rows
+                  if not row.get("expired")
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "viability measurement evidence artifact pagination "
+                      "exceeded 1000"
+                  )
+          required = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  "viability measurement evidence artifacts missing: "
+                  f"{missing}"
+              )
+
+          print(json.dumps({
+              "source_eligibility_run_id": source_run_id,
+              "evidence_run_id": evidence_run_id,
+              "evidence_workflow_path": observed_path,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
   measure:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -321,7 +434,8 @@ jobs:
           if-no-files-found: error
 
   registry_v2:
-    if: ${{ inputs.route == 'pons_registry' }}
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && inputs.route == 'pons_registry' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
