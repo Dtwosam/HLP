@@ -830,7 +830,20 @@ success but is missing any required Phase 1 artifact is also treated as
 incomplete rather than crashing the audit or being mistaken for PASS. The
 venue-rescue and recovered-completion guards allow that narrow incomplete-
 success case while still rejecting unnecessary recovery when the requested
-source artifacts are already complete. The audit's
+source artifacts are already complete. Recovery planning is now cost-aware:
+missing V1/V3 requires the pinned V1/V3 gap rescue first, and missing V2/V4
+requires the pinned V2/V4 gap rescue before recovered completion can start, so
+successful source shards are not replaced by an unnecessary full venue rerun.
+The readiness audit discovers successful venue artifacts only from the pinned
+`phase1-pons-live-venue-rescue-one-shot` launcher and then publishes those
+exact run IDs in its recovery plan; direct/debug gap workflows are never
+auto-adopted. Recovered completion additionally opens the recovered venue
+manifest itself and verifies chain **4663**, snapshot head **54,486,035**,
+`partial_run_id=33982556591` and the frozen registry/transition upstream run
+before accepting a non-source venue artifact. It also refuses to rerun V2/V4
+or pricing when the source already contains reusable complete artifacts, and
+refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
+The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
 runs. Readiness now also resolves each candidate finalizer's launch-commit
@@ -838,6 +851,16 @@ readiness and ledger files and requires the frozen source run, evidence run,
 ledger generation and exact nine route run IDs to match the current ledger
 before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
 artifact from an older evidence or route ledger therefore cannot close Phase 1.
+
+The shared bounded viability measurement workflow now also carries its own
+evidence preflight in addition to the guarded route launcher. Manual/debug
+dispatch therefore cannot issue route RPC unless the evidence run ID is
+positive, completed successfully, comes from an approved post-eligibility or
+recovered-completion workflow on `phase1/data-acquisition-spike`, and still
+contains the ready handoff, eligible-universe and representative-validation
+artifacts. Both the primary route job and the V2 registry companion job depend
+on that preflight, while the existing global viability concurrency group keeps
+all route measurements serialized.
 
 A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
 unarmed. After the ledger finalizer produces a real PASS artifact and that run
