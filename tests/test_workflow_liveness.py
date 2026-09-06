@@ -1106,6 +1106,15 @@ def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     assert "phase1-pons-eligible-universe" in content
     assert "phase1-pons-representative-validation" in content
     assert "phase1-pons-acquisition-viability-projection" in content
+    assert "Verify acceptance caller and evidence provenance" in content
+    assert "acceptance eligible and representative artifacts must" in content
+    assert "acceptance viability projection must come from the" in content
+    assert "acceptance gate direct caller is not allowed" in content
+    assert "phase1-pons-viability-ledger-finalize-one-shot.yml" in content
+    assert "phase1-pons-final-acceptance-chain.yml" in content
+    assert "acceptance evidence workflow path is not allowed" in content
+    assert "acceptance evidence artifacts missing" in content
+    assert "acceptance current run is missing viability projection" in content
     assert "build_phase1_acceptance_report" in content
     assert "REQUIRED_PHASE1_ACQUISITION_ROUTES" in content
     assert 'phase1_acceptance_status"] != "pass"' in content
