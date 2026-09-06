@@ -83,11 +83,9 @@ RECOVERY_VENUE_ARTIFACTS = {
 RECOVERY_VENUE_WORKFLOW_PATHS = {
     "v1_v3": (
         ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
-        ".github/workflows/phase1-pons-v1-v3-recover-gaps.yml",
     ),
     "v2_v4": (
         ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
-        ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
     ),
 }
 
