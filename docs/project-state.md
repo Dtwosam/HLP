@@ -828,7 +828,11 @@ run **34000990183** also completed successfully and again classified the
 parent as `eligibility_acquisition` with next action
 `wait_for_full_eligibility_acquisition`: **31 successful jobs**, **1
 cancelled**, **2 in progress**, **207 queued**, no evidence run and no premature
-recovery or viability advance.
+recovery or viability advance. After the evidence/support and direct-rescue
+hardening below, generation 11 run **34002252630** passed the same live state
+machine and reported **33 successful jobs**, **1 cancelled**, **2 in progress**
+and **205 queued**, still with next action
+`wait_for_full_eligibility_acquisition`.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
@@ -849,6 +853,12 @@ manifest itself and verifies chain **4663**, snapshot head **54,486,035**,
 before accepting a non-source venue artifact. It also refuses to rerun V2/V4
 or pricing when the source already contains reusable complete artifacts, and
 refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
+The pinned rescue launcher now requires exactly one venue target per launch, so
+V1/V3 and V2/V4 recovery cannot accidentally double archive concurrency. The
+low-level V1/V3 and V2/V4 gap workflows independently refuse
+`partial_run_id=33982556591` while that frozen parent is active, closing the
+manual-dispatch bypass around the launcher guard while preserving inline
+recovery generations that legitimately use the current run ID.
 The audit's
 finalizer lookup is intentionally bounded and skipped until an evidence run
 and all nine route IDs exist, avoiding branch histories with >1,000 workflow
@@ -857,6 +867,20 @@ readiness and ledger files and requires the frozen source run, evidence run,
 ledger generation and exact nine route run IDs to match the current ledger
 before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
 artifact from an older evidence or route ledger therefore cannot close Phase 1.
+
+Evidence handoffs are now guarded before any representative RPC at three
+layers. The normal post-eligibility chain requires source run **33982556591**,
+the exact full-eligibility workflow path, branch
+`phase1/data-acquisition-spike` and launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`. Both the normal and recovered
+chains pin the frozen oracle, runner-smoke, V1 registry, V2 curve, V2
+transition, quote-audit and WETH/USDG anchor run IDs, and verify each support
+run is successful, comes from its exact workflow path on the Phase 1 branch,
+and still exposes its required non-expired canonical artifact. The reusable
+representative chain repeats that immutable support preflight before its sample
+job, so direct/manual entry cannot bypass it and reach Transfer RPC. Readiness
+metadata parsing also fails closed on malformed numeric evidence, route-launch
+or finalizer provenance instead of crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
 evidence preflight in addition to the guarded route launcher. Manual/debug
