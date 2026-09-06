@@ -1806,6 +1806,13 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "manifest_gap_aware_v1_v3_recovery" in content
     assert "manifest_gap_aware_v4_recovery" in content
     assert "recovery venue partial run does not match frozen" in content
+    assert "recovery_lineage plan artifact identity is ambiguous".replace("_", " ") in content
+    assert "recovery venue plan lacks bound lineage metadata" in content
+    assert "recovery venue manifest/plan prior lineage" in content
+    assert "recovery venue prior lineage contains a cycle" in content
+    assert "recovery venue prior lineage exceeds" in content
+    assert "recovery venue prior plan lacks bound" in content
+    assert "recovery venue prior partial run mismatch" in content
     assert "source_registry_run_id" in content
     assert "transition_run_id" in content
     assert "reused pricing run is missing lifecycle/fallback" in content
