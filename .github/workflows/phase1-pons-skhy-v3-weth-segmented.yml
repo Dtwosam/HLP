@@ -1,0 +1,486 @@
+name: phase1-pons-skhy-v3-weth-segmented
+
+on:
+  workflow_dispatch:
+    inputs:
+      route_audit_run_id:
+        description: "Frozen unpriced V3 route-audit run"
+        required: true
+        default: "33921477647"
+        type: string
+      route_audit_artifact_name:
+        description: "Artifact containing the frozen V3 route audit"
+        required: true
+        default: "phase1-pons-unpriced-v3-route-audit"
+        type: string
+      route_audit_filename:
+        description: "Frozen V3 route-audit JSONL filename"
+        required: true
+        default: "pons-unpriced-v3-route-audit.jsonl"
+        type: string
+  workflow_call:
+    inputs:
+      route_audit_run_id:
+        required: true
+        type: string
+      route_audit_artifact_name:
+        required: true
+        type: string
+      route_audit_filename:
+        required: true
+        type: string
+    outputs:
+      completion_status:
+        description: "route_resolved or searched_to_snapshot_head"
+        value: ${{ jobs.finalize.outputs.completion_status }}
+      route_ready:
+        description: "Whether SKHY/WETH resolved"
+        value: ${{ jobs.finalize.outputs.route_ready }}
+      search_to_block:
+        description: "Inclusive final searched block"
+        value: ${{ jobs.finalize.outputs.search_to_block }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-skhy-v3-weth-segmented-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  segment_0:
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ""
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-0
+    secrets: inherit
+
+  segment_1:
+    needs: segment_0
+    if: ${{ needs.segment_0.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_0.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-1
+    secrets: inherit
+
+  segment_2:
+    needs: segment_1
+    if: ${{ needs.segment_1.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_1.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-2
+    secrets: inherit
+
+  segment_3:
+    needs: segment_2
+    if: ${{ needs.segment_2.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_2.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-3
+    secrets: inherit
+
+  segment_4:
+    needs: segment_3
+    if: ${{ needs.segment_3.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_3.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-4
+    secrets: inherit
+
+  segment_5:
+    needs: segment_4
+    if: ${{ needs.segment_4.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_4.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-5
+    secrets: inherit
+
+  segment_6:
+    needs: segment_5
+    if: ${{ needs.segment_5.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_5.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-6
+    secrets: inherit
+
+  segment_7:
+    needs: segment_6
+    if: ${{ needs.segment_6.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_6.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-7
+    secrets: inherit
+
+  segment_8:
+    needs: segment_7
+    if: ${{ needs.segment_7.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_7.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-8
+    secrets: inherit
+
+  segment_9:
+    needs: segment_8
+    if: ${{ needs.segment_8.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_8.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-9
+    secrets: inherit
+
+  segment_10:
+    needs: segment_9
+    if: ${{ needs.segment_9.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_9.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-10
+    secrets: inherit
+
+  segment_11:
+    needs: segment_10
+    if: ${{ needs.segment_10.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_10.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-11
+    secrets: inherit
+
+  segment_12:
+    needs: segment_11
+    if: ${{ needs.segment_11.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_11.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-12
+    secrets: inherit
+
+  segment_13:
+    needs: segment_12
+    if: ${{ needs.segment_12.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_12.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-13
+    secrets: inherit
+
+  segment_14:
+    needs: segment_13
+    if: ${{ needs.segment_13.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_13.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-14
+    secrets: inherit
+
+  segment_15:
+    needs: segment_14
+    if: ${{ needs.segment_14.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_14.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-15
+    secrets: inherit
+
+  segment_16:
+    needs: segment_15
+    if: ${{ needs.segment_15.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_15.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-16
+    secrets: inherit
+
+  segment_17:
+    needs: segment_16
+    if: ${{ needs.segment_16.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_16.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-17
+    secrets: inherit
+
+  segment_18:
+    needs: segment_17
+    if: ${{ needs.segment_17.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_17.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-18
+    secrets: inherit
+
+  segment_19:
+    needs: segment_18
+    if: ${{ needs.segment_18.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_18.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-19
+    secrets: inherit
+
+  segment_20:
+    needs: segment_19
+    if: ${{ needs.segment_19.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_19.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-20
+    secrets: inherit
+
+  segment_21:
+    needs: segment_20
+    if: ${{ needs.segment_20.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_20.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-21
+    secrets: inherit
+
+  segment_22:
+    needs: segment_21
+    if: ${{ needs.segment_21.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-continuation.yml
+    with:
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      route_audit_artifact_name: ${{ inputs.route_audit_artifact_name }}
+      route_audit_filename: ${{ inputs.route_audit_filename }}
+      from_block: ${{ needs.segment_21.outputs.next_from_block }}
+      forward_blocks: "100000"
+      output_artifact_name: phase1-pons-skhy-v3-weth-segment-22
+    secrets: inherit
+
+  finalize:
+    needs:
+      - segment_0
+      - segment_1
+      - segment_2
+      - segment_3
+      - segment_4
+      - segment_5
+      - segment_6
+      - segment_7
+      - segment_8
+      - segment_9
+      - segment_10
+      - segment_11
+      - segment_12
+      - segment_13
+      - segment_14
+      - segment_15
+      - segment_16
+      - segment_17
+      - segment_18
+      - segment_19
+      - segment_20
+      - segment_21
+      - segment_22
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      completion_status: ${{ steps.freeze.outputs.completion_status }}
+      route_ready: ${{ steps.freeze.outputs.route_ready }}
+      search_to_block: ${{ steps.freeze.outputs.search_to_block }}
+    env:
+      SNAPSHOT_HEAD: '54486035'
+      SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+      SKHY_WETH_POOL: '0x13f78b235d19141f572986afcaab66ce7744b4ef'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v3-weth-segment-*
+          path: segments
+      - id: freeze
+        name: Freeze completed SKHY/WETH continuation
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import shutil
+          from pathlib import Path
+
+          summaries = list(
+              Path("segments").glob(
+                  "phase1-pons-skhy-v3-weth-segment-*/"
+                  "pons-skhy-v3-weth-continuation-summary.json"
+              )
+          )
+          if not summaries:
+              raise SystemExit(
+                  "segmented SKHY/WETH continuation produced no segment artifact"
+              )
+
+          def segment_index(path):
+              match = re.search(
+                  r"phase1-pons-skhy-v3-weth-segment-(\d+)",
+                  str(path),
+              )
+              if not match:
+                  raise SystemExit(
+                      f"cannot parse SKHY/WETH segment index: {path}"
+                  )
+              return int(match.group(1))
+
+          latest_summary_path = max(summaries, key=segment_index)
+          latest_index = segment_index(latest_summary_path)
+          report = json.loads(latest_summary_path.read_text())
+
+          if report["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
+              raise SystemExit("final SKHY/WETH token changed")
+          if report["pool"].lower() != os.environ["SKHY_WETH_POOL"]:
+              raise SystemExit("final SKHY/WETH pool changed")
+
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          search_to = int(report["searched_to_block"])
+          ready = bool(report["route_ready"])
+          remaining = max(0, head - search_to)
+          if not ready and search_to != head:
+              raise SystemExit(
+                  "segmented SKHY/WETH continuation ended before snapshot "
+                  f"head: search_to={search_to} remaining={remaining}"
+              )
+
+          source_dir = latest_summary_path.parent
+          for name in (
+              "pons-skhy-v3-weth-continuation.jsonl",
+              "pons-skhy-v3-weth-continuation.jsonl.manifest.json",
+          ):
+              source = source_dir / name
+              if not source.exists():
+                  raise SystemExit(
+                      f"final SKHY/WETH segment is missing {name}"
+                  )
+              shutil.copy2(source, Path("artifacts") / name)
+
+          final = {
+              **report,
+              "snapshot_head_block": head,
+              "remaining_unsearched_blocks": remaining,
+              "continuation_segments_completed": latest_index + 1,
+              "max_blocks_per_segment": 100000,
+              "source_route_audit_run_id": int(
+                  "${{ inputs.route_audit_run_id }}"
+              ),
+              "completion_status": (
+                  "route_resolved" if ready else "searched_to_snapshot_head"
+              ),
+          }
+          Path(
+              "artifacts/pons-skhy-v3-weth-segmented-summary.json"
+          ).write_text(
+              json.dumps(final, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"completion_status={final['completion_status']}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(f"search_to_block={search_to}\n")
+          print(json.dumps(final, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-skhy-v3-weth-segmented
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,151 @@
+name: phase1-pons-acquisition-viability-projection
+
+on:
+  workflow_dispatch:
+    inputs:
+      accounting_run_id:
+        description: "Successful phase1-pons-acquisition-accounting run"
+        required: true
+        type: string
+      route_plan_json:
+        description: "JSON object route -> evidence run IDs; legacy full array also accepted"
+        required: true
+        type: string
+      free_daily_method_calls:
+        description: "Reference authenticated Free daily method-call allowance"
+        required: true
+        default: "10000"
+        type: string
+  workflow_call:
+    inputs:
+      accounting_run_id:
+        required: true
+        type: string
+      route_plan_json:
+        required: true
+        type: string
+      free_daily_method_calls:
+        required: true
+        default: "10000"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-acquisition-viability-projection-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-acquisition-accounting
+          path: accounting
+          run-id: ${{ inputs.accounting_run_id }}
+          github-token: ${{ github.token }}
+      - name: Project full-history requirements from measured evidence
+        env:
+          ROUTE_PLAN_JSON: ${{ inputs.route_plan_json }}
+          FREE_DAILY_METHOD_CALLS: ${{ inputs.free_daily_method_calls }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase1_viability import (
+              build_phase1_route_plan,
+              project_phase1_acquisition_plan,
+          )
+
+          try:
+              raw_plan = json.loads(os.environ["ROUTE_PLAN_JSON"])
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  f"route_plan_json must be valid JSON: {exc}"
+              ) from exc
+          if isinstance(raw_plan, dict):
+              plan = build_phase1_route_plan(raw_plan)
+          elif isinstance(raw_plan, list) and raw_plan:
+              # Backward-compatible path for an already-expanded frozen plan.
+              plan = raw_plan
+          else:
+              raise SystemExit(
+                  "route_plan_json must be a non-empty route->run_ids object "
+                  "or a non-empty expanded JSON array"
+              )
+
+          summaries = []
+          for path in sorted(
+              Path("accounting").glob("run-*-accounting.json")
+          ):
+              row = json.loads(path.read_text())
+              summaries.append(row)
+          if not summaries:
+              raise SystemExit(
+                  "acquisition accounting artifact contains no per-run evidence"
+              )
+
+          combined = json.loads(
+              Path(
+                  "accounting/phase1-acquisition-accounting.json"
+              ).read_text()
+          )
+          accounted_ids = {
+              int(value) for value in combined.get("run_ids", [])
+          }
+          artifact_ids = {
+              int(row["run_id"]) for row in summaries
+          }
+          if accounted_ids != artifact_ids:
+              raise SystemExit(
+                  "acquisition accounting per-run coverage mismatch: "
+                  f"combined={sorted(accounted_ids)} "
+                  f"artifacts={sorted(artifact_ids)}"
+              )
+
+          result = project_phase1_acquisition_plan(
+              plan,
+              summaries,
+              free_daily_method_calls=int(
+                  os.environ["FREE_DAILY_METHOD_CALLS"]
+              ),
+          )
+          result["accounting_run_id"] = int(
+              "${{ inputs.accounting_run_id }}"
+          )
+          result["accounting_run_ids"] = sorted(accounted_ids)
+          result["route_plan"] = plan
+          result["phase1_acceptance_interpretation"] = (
+              "zero_cost_route_evidence proves that every selected measured "
+              "RPC route is an approved public/free route. The projected "
+              "request, egress, storage and runtime totals quantify the "
+              "full-history plan; this artifact does not mark Phase 1 PASS "
+              "until the complete required route plan and other acceptance "
+              "artifacts are present."
+          )
+
+          Path(
+              "artifacts/phase1-acquisition-viability-projection.json"
+          ).write_text(
+              json.dumps(result, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acquisition-viability-projection
+          path: artifacts/
+          if-no-files-found: error

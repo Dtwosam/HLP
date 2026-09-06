@@ -1,0 +1,533 @@
+name: phase1-pons-representative-dex-crosscheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful phase1-pons-representative-sample-freeze run"
+        required: true
+        type: string
+      v1_eligibility_run_id:
+        description: "V1 lifecycle run used by the representative sample"
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        description: "V2 lifecycle run used by the representative sample"
+        required: true
+        type: string
+      priced_path_run_id:
+        description: "Successful representative priced-path replay run"
+        required: true
+        type: string
+      registry_run_id:
+        description: "Canonical full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        description: "Canonical V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      v1_eligibility_run_id:
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        required: true
+        type: string
+      priced_path_run_id:
+        required: true
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-dex-crosscheck-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reconcile representative pool identity and swap prices
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.config import DEFAULT_RPC_URL
+          from hlp.data.geckoterminal import (
+              GECKOTERMINAL_API_VERSION,
+              GeckoTerminalClient,
+          )
+          from hlp.data.pons_crosscheck import (
+              build_representative_pool_targets,
+              reconcile_external_pool,
+              reconcile_price_against_ohlcv,
+          )
+          from hlp.data.pons_representative_prices import (
+              select_representative_dex_price_checkpoints,
+          )
+          from hlp.data.pons_time import fetch_block_timestamp_rows
+          from hlp.data.rpc import RpcClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          sample = read_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative DEX cross-check requires exactly 10 "
+                  f"sample tokens, got {len(sample)}"
+              )
+
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          expected_v1_run = int("${{ inputs.v1_eligibility_run_id }}")
+          expected_v2_run = int("${{ inputs.v2_eligibility_run_id }}")
+          if int(sample_summary["v1_eligibility_run_id"]) != expected_v1_run:
+              raise SystemExit(
+                  "representative sample V1 lifecycle run does not match "
+                  "DEX cross-check input"
+              )
+          if int(sample_summary["v2_eligibility_run_id"]) != expected_v2_run:
+              raise SystemExit(
+                  "representative sample V2 lifecycle run does not match "
+                  "DEX cross-check input"
+              )
+
+          registry = read_jsonl(
+              "registry/pons-full-launch-registry.jsonl"
+          )
+          registrations = read_jsonl(
+              "transition/pons-v2-registrations-full.jsonl"
+          )
+          # Keep lifecycle artifacts in the workflow inputs so the sample's
+          # frozen V1/V2 provenance remains verified above. Detailed DEX price
+          # checkpoints come from the exact per-event representative replay.
+          v1_tokens = {
+              row["token"].lower()
+              for row in read_jsonl(
+                  "v1/pons-v1-lifecycle-eligibility.jsonl"
+              )
+          }
+          v2_tokens = {
+              row["token"].lower()
+              for row in read_jsonl(
+                  "v2/pons-v2-lifecycle-eligibility.jsonl"
+              )
+          }
+          for row in sample:
+              token = row["token"].lower()
+              expected = v1_tokens if row["pons_version"] == "v1" else v2_tokens
+              if token not in expected:
+                  raise SystemExit(
+                      f"representative lifecycle missing for {token}"
+                  )
+
+          priced_manifest = json.loads(
+              Path(
+                  "priced-paths/"
+                  "pons-representative-priced-paths.jsonl.manifest.json"
+              ).read_text()
+          )
+          priced_provenance = priced_manifest.get("provenance") or {}
+          if int(priced_provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit(
+                  "representative priced-path chain mismatch"
+              )
+          if int(
+              priced_provenance.get("snapshot_head_block", -1)
+          ) != 54_486_035:
+              raise SystemExit(
+                  "representative priced-path snapshot mismatch"
+              )
+          if int(
+              priced_provenance.get("sample_run_id", -1)
+          ) != int("${{ inputs.sample_run_id }}"):
+              raise SystemExit(
+                  "representative priced-path sample run mismatch"
+              )
+
+          targets = build_representative_pool_targets(
+              sample,
+              registry,
+              registrations,
+          )
+          priced_rows = read_jsonl(
+              "priced-paths/pons-representative-priced-paths.jsonl"
+          )
+          checkpoints = select_representative_dex_price_checkpoints(
+              priced_rows,
+              sample,
+          )
+
+          checkpoint_blocks = sorted({
+              int(checkpoint["block_number"])
+              for values in checkpoints.values()
+              for checkpoint in values
+          })
+          timestamp_by_block = {}
+          block_rpc_requests = 0
+          block_rpc_response_bytes = 0
+          block_rpc_route = None
+          if checkpoint_blocks:
+              rpc = RpcClient(
+                  DEFAULT_RPC_URL,
+                  route_label="robinhood_public",
+              )
+              rpc.assert_robinhood()
+              timestamp_rows = fetch_block_timestamp_rows(
+                  rpc,
+                  checkpoint_blocks,
+                  batch_size=10,
+              )
+              timestamp_by_block = {
+                  int(row["block_number"]): int(row["block_timestamp"])
+                  for row in timestamp_rows
+              }
+              block_rpc_requests = rpc.requests_made
+              block_rpc_response_bytes = rpc.response_bytes_received
+              block_rpc_route = rpc.route_label
+
+          client = GeckoTerminalClient()
+          logical_gecko_requests = sum(
+              1 + len(checkpoints[target["token"]])
+              for target in targets
+              if target.get("pool_identifier") is not None
+          )
+          if logical_gecko_requests > 40:
+              raise SystemExit(
+                  "representative DEX logical request budget exceeded: "
+                  f"{logical_gecko_requests} > 40"
+              )
+          max_gecko_attempts = logical_gecko_requests * client.attempts
+
+          rows = []
+          for target in targets:
+              token = target["token"]
+              token_checkpoints = checkpoints[token]
+              pool_identifier = target.get("pool_identifier")
+              if pool_identifier is None:
+                  row = reconcile_external_pool(target, {})
+                  row.update({
+                      "price_crosscheck_scope": "not_applicable",
+                      "canonical_price_phase": None,
+                      "canonical_block_number": None,
+                      "canonical_market_cap_proxy_usd": None,
+                      "canonical_price_usd": None,
+                      "canonical_timestamp": None,
+                      "price_match": None,
+                      "price_crosscheck_status": "not_applicable",
+                      "price_checkpoints": [],
+                  })
+                  rows.append(row)
+                  continue
+
+              external = client.pool(pool_identifier)
+              row = reconcile_external_pool(target, external)
+
+              if not token_checkpoints:
+                  row.update({
+                      "price_crosscheck_scope": "no_swap_checkpoint",
+                      "canonical_price_phase": (
+                          "v3_swap"
+                          if target["pons_version"] == "v1"
+                          else "v4_swap"
+                      ),
+                      "canonical_block_number": None,
+                      "canonical_market_cap_proxy_usd": None,
+                      "canonical_price_usd": None,
+                      "canonical_timestamp": None,
+                      "price_match": None,
+                      "price_crosscheck_status": "no_swap_checkpoint",
+                      "price_checkpoints": [],
+                  })
+                  rows.append(row)
+                  continue
+
+              reconciled = []
+              for checkpoint in token_checkpoints:
+                  block_number = int(checkpoint["block_number"])
+                  timestamp = timestamp_by_block[block_number]
+                  candles = client.ohlcv(
+                      pool_identifier,
+                      timeframe="hour",
+                      aggregate=1,
+                      before_timestamp=timestamp + 3600,
+                      limit=3,
+                      currency="usd",
+                      token=token,
+                  )
+                  price = reconcile_price_against_ohlcv(
+                      canonical_price_usd=checkpoint["token_price_usd"],
+                      canonical_timestamp=timestamp,
+                      candles=candles,
+                      candle_seconds=3600,
+                  )
+                  reconciled.append({
+                      "checkpoint_roles": checkpoint["checkpoint_roles"],
+                      "canonical_price_phase": checkpoint["price_path_phase"],
+                      "canonical_event_type": checkpoint["event_type"],
+                      "canonical_block_number": block_number,
+                      "canonical_transaction_index": (
+                          checkpoint.get("transaction_index")
+                      ),
+                      "canonical_log_index": int(checkpoint["log_index"]),
+                      "canonical_timestamp": timestamp,
+                      "canonical_market_cap_proxy_usd": (
+                          checkpoint.get("market_cap_proxy_usd")
+                      ),
+                      "canonical_price_usd": checkpoint["token_price_usd"],
+                      "price_match": price["price_match"],
+                      "price_crosscheck_status": price["status"],
+                      "independent_candle_timestamp": (
+                          price.get("candle_timestamp")
+                      ),
+                      "independent_candle_low_usd": (
+                          price.get("candle_low_usd")
+                      ),
+                      "independent_candle_high_usd": (
+                          price.get("candle_high_usd")
+                      ),
+                      "outside_candle_bps": price.get("outside_candle_bps"),
+                  })
+
+              max_checkpoint = next(
+                  checkpoint
+                  for checkpoint in reconciled
+                  if "max" in checkpoint["checkpoint_roles"]
+              )
+              all_matched = all(
+                  checkpoint["price_match"] is True
+                  for checkpoint in reconciled
+              )
+              failure_statuses = [
+                  checkpoint["price_crosscheck_status"]
+                  for checkpoint in reconciled
+                  if checkpoint["price_match"] is not True
+              ]
+              row.update({
+                  "price_crosscheck_scope": "canonical_dex_swap",
+                  "canonical_price_phase": (
+                      max_checkpoint["canonical_price_phase"]
+                  ),
+                  "canonical_block_number": (
+                      max_checkpoint["canonical_block_number"]
+                  ),
+                  "canonical_market_cap_proxy_usd": (
+                      max_checkpoint["canonical_market_cap_proxy_usd"]
+                  ),
+                  "canonical_price_usd": (
+                      max_checkpoint["canonical_price_usd"]
+                  ),
+                  "canonical_timestamp": (
+                      max_checkpoint["canonical_timestamp"]
+                  ),
+                  "price_match": all_matched,
+                  "price_crosscheck_status": (
+                      "matched"
+                      if all_matched
+                      else failure_statuses[0]
+                  ),
+                  "price_checkpoints": reconciled,
+              })
+              rows.append(row)
+
+          mismatches = [
+              row for row in rows
+              if row.get("external_match") is False
+          ]
+          targeted = [
+              row for row in rows
+              if row.get("external_match") is not None
+          ]
+          price_targeted = [
+              row for row in rows
+              if row.get("price_crosscheck_scope") == "canonical_dex_swap"
+          ]
+          price_failures = [
+              row for row in price_targeted
+              if row.get("price_match") is not True
+          ]
+          if not targeted:
+              raise SystemExit(
+                  "representative sample has no canonical DEX pools to "
+                  "cross-check"
+              )
+          if mismatches:
+              raise SystemExit(
+                  "independent DEX pool reconciliation failed for "
+                  f"{len(mismatches)} representative tokens: "
+                  f"{[row['token'] for row in mismatches]}"
+              )
+          if price_failures:
+              raise SystemExit(
+                  "independent DEX swap-price reconciliation failed for "
+                  f"{len(price_failures)} representative tokens: "
+                  f"{[row['token'] for row in price_failures]}"
+              )
+          if client.requests_made > max_gecko_attempts:
+              raise SystemExit(
+                  "representative DEX HTTP attempt budget exceeded: "
+                  f"{client.requests_made} > {max_gecko_attempts}"
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/pons-representative-dex-crosscheck.jsonl"
+              ),
+              provenance={
+                  "source": "geckoterminal_public_api",
+                  "purpose": (
+                      "independent representative pool identity and "
+                      "historical swap-price cross-check; "
+                      "not canonical historical truth"
+                  ),
+                  "geckoterminal_api_version": (
+                      GECKOTERMINAL_API_VERSION
+                  ),
+                  "network": "robinhood",
+                  "chain_id": 4663,
+                  "ohlcv_timeframe": "hour",
+                  "ohlcv_aggregate": 1,
+                  "ohlcv_tolerance_bps": "0",
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "priced_path_run_id": int(
+                      "${{ inputs.priced_path_run_id }}"
+                  ),
+                  "v1_eligibility_run_id": expected_v1_run,
+                  "v2_eligibility_run_id": expected_v2_run,
+                  "registry_run_id": int(
+                      "${{ inputs.registry_run_id }}"
+                  ),
+                  "transition_run_id": int(
+                      "${{ inputs.transition_run_id }}"
+                  ),
+              },
+          )
+          summary = {
+              "sample_tokens": len(rows),
+              "targeted_canonical_dex_pools": len(targeted),
+              "matched_canonical_dex_pools": sum(
+                  row.get("external_match") is True for row in rows
+              ),
+              "targeted_swap_price_tokens": len(price_targeted),
+              "matched_swap_price_tokens": sum(
+                  row.get("price_match") is True for row in price_targeted
+              ),
+              "targeted_swap_price_checkpoints": sum(
+                  len(row.get("price_checkpoints") or [])
+                  for row in price_targeted
+              ),
+              "matched_swap_price_checkpoints": sum(
+                  checkpoint.get("price_match") is True
+                  for row in price_targeted
+                  for checkpoint in (row.get("price_checkpoints") or [])
+              ),
+              "no_swap_checkpoint": sum(
+                  row.get("price_crosscheck_scope")
+                  == "no_swap_checkpoint"
+                  for row in rows
+              ),
+              "no_registered_v4_pool": sum(
+                  row["crosscheck_scope"] == "no_registered_v4_pool"
+                  for row in rows
+              ),
+              "pool_mismatches": len(mismatches),
+              "price_failures": len(price_failures),
+              "canonical_block_rpc_requests": block_rpc_requests,
+              "canonical_block_rpc_response_bytes": (
+                  block_rpc_response_bytes
+              ),
+              "rpc_route": block_rpc_route,
+              "geckoterminal_logical_request_budget": (
+                  logical_gecko_requests
+              ),
+              "geckoterminal_http_attempt_budget": max_gecko_attempts,
+              "geckoterminal_requests": client.requests_made,
+              "geckoterminal_bytes": client.bytes_received,
+              "crosscheck_sha256": snapshot["sha256"],
+          }
+          Path(
+              "artifacts/pons-representative-dex-crosscheck-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-crosscheck
+          path: artifacts/
+          if-no-files-found: error

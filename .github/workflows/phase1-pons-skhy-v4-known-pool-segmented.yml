@@ -1,0 +1,431 @@
+name: phase1-pons-skhy-v4-known-pool-segmented
+
+on:
+  workflow_dispatch:
+    inputs:
+      prior_probe_run_id:
+        description: "Run containing the frozen cumulative residual V4 probe"
+        required: true
+        default: "33926428274"
+        type: string
+      prior_probe_artifact_name:
+        description: "Artifact containing the cumulative residual V4 probe"
+        required: true
+        default: "phase1-pons-residual-v4-forward-probe"
+        type: string
+      prior_probe_filename:
+        description: "Cumulative residual V4 probe JSONL filename"
+        required: true
+        default: "pons-residual-v4-forward-probe.jsonl"
+        type: string
+  workflow_call:
+    inputs:
+      prior_probe_run_id:
+        required: true
+        type: string
+      prior_probe_artifact_name:
+        required: true
+        type: string
+      prior_probe_filename:
+        required: true
+        type: string
+    outputs:
+      completion_status:
+        description: "route_resolved or searched_to_snapshot_head"
+        value: ${{ jobs.finalize.outputs.completion_status }}
+      route_ready:
+        description: "Whether SKHY V4 resolved"
+        value: ${{ jobs.finalize.outputs.route_ready }}
+      search_to_block:
+        description: "Inclusive final searched block"
+        value: ${{ jobs.finalize.outputs.search_to_block }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-skhy-v4-known-pool-segmented-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  segment_0:
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ inputs.prior_probe_run_id }}
+      prior_probe_artifact_name: ${{ inputs.prior_probe_artifact_name }}
+      prior_probe_filename: ${{ inputs.prior_probe_filename }}
+      forward_blocks: "100000"
+      expected_prior_search_end: "52863525"
+      output_artifact_name: phase1-pons-skhy-v4-segment-0
+    secrets: inherit
+
+  segment_1:
+    needs: segment_0
+    if: ${{ needs.segment_0.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-0
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-1
+    secrets: inherit
+
+  segment_2:
+    needs: segment_1
+    if: ${{ needs.segment_1.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-1
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-2
+    secrets: inherit
+
+  segment_3:
+    needs: segment_2
+    if: ${{ needs.segment_2.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-2
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-3
+    secrets: inherit
+
+  segment_4:
+    needs: segment_3
+    if: ${{ needs.segment_3.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-3
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-4
+    secrets: inherit
+
+  segment_5:
+    needs: segment_4
+    if: ${{ needs.segment_4.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-4
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-5
+    secrets: inherit
+
+  segment_6:
+    needs: segment_5
+    if: ${{ needs.segment_5.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-5
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-6
+    secrets: inherit
+
+  segment_7:
+    needs: segment_6
+    if: ${{ needs.segment_6.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-6
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-7
+    secrets: inherit
+
+  segment_8:
+    needs: segment_7
+    if: ${{ needs.segment_7.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-7
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-8
+    secrets: inherit
+
+  segment_9:
+    needs: segment_8
+    if: ${{ needs.segment_8.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-8
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-9
+    secrets: inherit
+
+  segment_10:
+    needs: segment_9
+    if: ${{ needs.segment_9.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-9
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-10
+    secrets: inherit
+
+  segment_11:
+    needs: segment_10
+    if: ${{ needs.segment_10.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-10
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-11
+    secrets: inherit
+
+  segment_12:
+    needs: segment_11
+    if: ${{ needs.segment_11.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-11
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-12
+    secrets: inherit
+
+  segment_13:
+    needs: segment_12
+    if: ${{ needs.segment_12.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-12
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-13
+    secrets: inherit
+
+  segment_14:
+    needs: segment_13
+    if: ${{ needs.segment_13.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-13
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-14
+    secrets: inherit
+
+  segment_15:
+    needs: segment_14
+    if: ${{ needs.segment_14.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-14
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-15
+    secrets: inherit
+
+  segment_16:
+    needs: segment_15
+    if: ${{ needs.segment_15.outputs.continue_needed == 'true' }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-continuation.yml
+    with:
+      prior_probe_run_id: ${{ format('{0}', github.run_id) }}
+      prior_probe_artifact_name: phase1-pons-skhy-v4-segment-15
+      prior_probe_filename: pons-skhy-v4-known-pool-continuation.jsonl
+      forward_blocks: "100000"
+      expected_prior_search_end: ""
+      output_artifact_name: phase1-pons-skhy-v4-segment-16
+    secrets: inherit
+
+  finalize:
+    needs:
+      - segment_0
+      - segment_1
+      - segment_2
+      - segment_3
+      - segment_4
+      - segment_5
+      - segment_6
+      - segment_7
+      - segment_8
+      - segment_9
+      - segment_10
+      - segment_11
+      - segment_12
+      - segment_13
+      - segment_14
+      - segment_15
+      - segment_16
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      completion_status: ${{ steps.freeze.outputs.completion_status }}
+      route_ready: ${{ steps.freeze.outputs.route_ready }}
+      search_to_block: ${{ steps.freeze.outputs.search_to_block }}
+    env:
+      SNAPSHOT_HEAD: '54486035'
+      SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+      SKHY_POOL_ID: '0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v4-segment-*
+          path: segments
+      - id: freeze
+        name: Freeze completed SKHY continuation
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          summaries = list(
+              Path("segments").glob(
+                  "phase1-pons-skhy-v4-segment-*/"
+                  "pons-skhy-v4-known-pool-summary.json"
+              )
+          )
+          if not summaries:
+              raise SystemExit(
+                  "segmented SKHY V4 continuation produced no segment artifact"
+              )
+
+          def segment_index(path):
+              match = re.search(
+                  r"phase1-pons-skhy-v4-segment-(\d+)",
+                  str(path),
+              )
+              if not match:
+                  raise SystemExit(
+                      f"cannot parse SKHY V4 segment index: {path}"
+                  )
+              return int(match.group(1))
+
+          latest_summary_path = max(summaries, key=segment_index)
+          latest_index = segment_index(latest_summary_path)
+          source_dir = latest_summary_path.parent
+          source = source_dir / "pons-skhy-v4-known-pool-continuation.jsonl"
+          if not source.exists():
+              raise SystemExit(
+                  "final SKHY V4 segment is missing continuation JSONL"
+              )
+          rows = [
+              json.loads(line)
+              for line in source.read_text().splitlines()
+              if line.strip()
+          ]
+          skhy = [
+              row for row in rows
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
+          ]
+          if len(skhy) != 1:
+              raise SystemExit(
+                  f"expected exactly one final SKHY row, got {len(skhy)}"
+              )
+          row = skhy[0]
+          candidates = row.get("v4_candidates") or []
+          if len(candidates) != 1:
+              raise SystemExit(
+                  "final SKHY continuation changed candidate count"
+              )
+          if candidates[0]["pool_id"].lower() != os.environ["SKHY_POOL_ID"]:
+              raise SystemExit("final SKHY pool id changed")
+
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          search_to = int(row["search_to_block"])
+          ready = bool(
+              row.get("causal_route_ready")
+              or row.get("delayed_route_ready")
+          )
+          remaining = max(0, head - search_to)
+          if not ready and search_to != head:
+              raise SystemExit(
+                  "segmented SKHY continuation ended before snapshot head: "
+                  f"search_to={search_to} remaining={remaining}"
+              )
+
+          target = Path(
+              "artifacts/pons-skhy-v4-known-pool-segmented.jsonl"
+          )
+          target.write_text(
+              "\n".join(
+                  json.dumps(value, sort_keys=True, separators=(",", ":"))
+                  for value in rows
+              )
+              + "\n"
+          )
+          completion_status = (
+              "route_resolved" if ready else "searched_to_snapshot_head"
+          )
+          report = {
+              "snapshot_head_block": head,
+              "quote_token": row["quote_token"],
+              "symbol": row.get("symbol"),
+              "launches": int(row["launches"]),
+              "pool_id": candidates[0]["pool_id"],
+              "search_to_block": search_to,
+              "route_ready": ready,
+              "completion_status": completion_status,
+              "causal_route_ready": bool(row.get("causal_route_ready")),
+              "delayed_route_ready": bool(row.get("delayed_route_ready")),
+              "remaining_unsearched_blocks": remaining,
+              "continuation_segments": latest_index + 1,
+              "max_blocks_per_segment": 100000,
+              "source_probe_run_id": int(
+                  "${{ inputs.prior_probe_run_id }}"
+              ),
+          }
+          Path(
+              "artifacts/pons-skhy-v4-known-pool-segmented-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"completion_status={completion_status}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(f"search_to_block={search_to}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-skhy-v4-known-pool-segmented
+          path: artifacts/
+          if-no-files-found: error

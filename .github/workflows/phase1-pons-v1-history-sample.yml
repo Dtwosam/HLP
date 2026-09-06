@@ -1,0 +1,62 @@
+name: phase1-pons-v1-history-sample
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v1-history-sample.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Acquire 100k active Pons V1 blocks
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-pons-sample             --version v1             --from-block 30000000             --to-block 30099999             --limit 10000             --chunk-size 2000             --min-chunk-size 50             --out artifacts/pons-v1-30m-100k.jsonl
+      - name: Validate and summarize decoded launches
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/pons-v1-30m-100k.jsonl")
+          rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+          assert rows, "active Pons V1 sample returned no launches"
+          blocks = [row["block_number"] for row in rows]
+          assert blocks == sorted(blocks), "launches not chronological"
+          assert len({row["token"] for row in rows}) == len(rows), "duplicate launch token"
+          assert all(row["version"] == "v1" for row in rows)
+          assert all(row["pool"] for row in rows)
+          print(json.dumps({
+              "launches": len(rows),
+              "first_block": min(blocks),
+              "last_block": max(blocks),
+              "first_five": [
+                  {
+                      "token": row["token"],
+                      "pool": row["pool"],
+                      "pair_token": row["pair_token"],
+                      "block": row["block_number"],
+                      "tx": row["transaction_hash"],
+                  }
+                  for row in rows[:5]
+              ],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-30m-100k
+          path: artifacts/
+          if-no-files-found: error

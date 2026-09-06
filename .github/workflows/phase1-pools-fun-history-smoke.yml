@@ -1,0 +1,117 @@
+name: phase1-pools-fun-history-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pools-fun-history-smoke.yml'
+      - 'src/hlp/protocols/pools_fun.py'
+
+permissions:
+  contents: read
+
+jobs:
+  pools-fun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Reconcile pools.fun launches with Sushi V3
+        run: |
+          python - <<'PY'
+          import json, os
+          from collections import Counter
+          from hlp.config import (
+              POOLS_FUN_FACTORY,SOLIDRPC_PUBLIC_RPC_URL,SUSHISWAP_V3_FACTORY
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.pools_fun import TOKEN_LAUNCHED_TOPIC,decode_pools_fun_launch
+          from hlp.protocols.uniswap import V3_POOL_CREATED_TOPIC,decode_v3_pool_created
+
+          rpc=RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL",SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,attempts=5,min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key":os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY") else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head=rpc.block_number()
+          factory_first=rpc.find_first_code_block(
+              POOLS_FUN_FACTORY,low=0,high=head
+          )
+          sushi_first=rpc.find_first_code_block(
+              SUSHISWAP_V3_FACTORY,low=0,high=head
+          )
+          start=factory_first
+          end=min(head,start+99_999)
+          assert sushi_first<=start,(sushi_first,start)
+
+          launch_logs=list(rpc.iter_logs_chunked(
+              start,end,address=POOLS_FUN_FACTORY,topics=[TOKEN_LAUNCHED_TOPIC],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          launches=[decode_pools_fun_launch(x) for x in launch_logs]
+          assert launches
+
+          pool_logs=list(rpc.iter_logs_chunked(
+              start,end,address=SUSHISWAP_V3_FACTORY,topics=[V3_POOL_CREATED_TOPIC],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          pools=[decode_v3_pool_created(x) for x in pool_logs]
+          by_pool={row.pool:row for row in pools}
+
+          missing=[]
+          mismatch=[]
+          for launch in launches:
+              row=by_pool.get(launch.pool)
+              if row is None:
+                  missing.append(launch.token)
+                  continue
+              expected={launch.token,launch.paired_asset}
+              if {row.token0,row.token1}!=expected or row.fee!=10000 or row.tick_spacing!=200:
+                  mismatch.append({
+                      "token":launch.token,"launch_pool":launch.pool,
+                      "pair":launch.paired_asset,
+                      "pool_token0":row.token0,"pool_token1":row.token1,
+                      "fee":row.fee,"tick_spacing":row.tick_spacing,
+                  })
+          assert not missing,missing[:10]
+          assert not mismatch,mismatch[:10]
+
+          supply_checks=[]
+          for launch in launches[:20]:
+              static=read_erc20_static(rpc,launch.token,block=launch.block_number)
+              supply_checks.append({
+                  "token":launch.token,
+                  "decimals":static.decimals,
+                  "total_supply":static.total_supply,
+              })
+              assert static.decimals==18
+              assert static.total_supply==1_000_000_000*10**18
+
+          print(json.dumps({
+              "from_block":start,"to_block":end,
+              "factory_first_code_block":factory_first,
+              "sushi_first_code_block":sushi_first,
+              "launches":len(launches),
+              "unique_tokens":len({x.token for x in launches}),
+              "sushi_v3_pools_created":len(pools),
+              "matched_launch_pools":len(launches)-len(missing),
+              "quote_counts":dict(Counter(x.paired_asset for x in launches)),
+              "creator_gateway_count":dict(Counter(x.creator for x in launches)).get(
+                  "0x3ab42e7dd316af8854033bc216c657ed34961164",0
+              ),
+              "supply_checks":supply_checks,
+              "requests_made":rpc.requests_made,
+          },sort_keys=True))
+          PY

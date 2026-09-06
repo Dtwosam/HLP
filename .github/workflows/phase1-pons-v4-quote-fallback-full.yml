@@ -1,0 +1,555 @@
+name: phase1-pons-v4-quote-fallback-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_run_id:
+        description: "Successful residual V4 quote probe/continuation run"
+        required: true
+        default: "33926428274"
+        type: string
+      probe_artifact_name:
+        description: "Artifact containing the V4 quote probe JSONL"
+        required: true
+        default: "phase1-pons-residual-v4-forward-probe"
+        type: string
+      probe_filename:
+        description: "V4 quote probe JSONL filename"
+        required: true
+        default: "pons-residual-v4-forward-probe.jsonl"
+        type: string
+      v3_run_id:
+        description: "Successful canonical 25- or 26-route V3 fallback run"
+        required: true
+        type: string
+      skhy_v4_run_id:
+        description: "Optional resolved SKHY V4 segmented continuation when V3 leaves SKHY unresolved"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      probe_run_id:
+        description: "Successful cumulative residual V4 quote probe run"
+        required: true
+        type: string
+      probe_artifact_name:
+        description: "Artifact containing the cumulative V4 quote probe JSONL"
+        required: true
+        type: string
+      probe_filename:
+        description: "Cumulative V4 quote probe JSONL filename"
+        required: true
+        type: string
+      v3_run_id:
+        description: "Canonical 25- or 26-route V3 fallback run"
+        required: true
+        type: string
+      skhy_v4_run_id:
+        description: "Optional resolved SKHY V4 segmented continuation"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v4-quote-fallback-full-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_V4_FALLBACK_SWAP: '36023158'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.probe_artifact_name }}
+          path: probe
+          run-id: ${{ inputs.probe_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.skhy_v4_run_id != '' }}
+        with:
+          name: phase1-pons-skhy-v4-known-pool-segmented
+          path: skhy-v4
+          run-id: ${{ inputs.skhy_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Freeze deterministic V4 fallback routes
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.quote_v4_routes import select_v4_quote_routes
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          probe_rows = [
+              json.loads(line)
+              for line in Path(
+                  "probe/${{ inputs.probe_filename }}"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if len(probe_rows) != 5:
+              raise SystemExit(
+                  "frozen residual V4 probe must contain exactly five "
+                  f"V3-miss quote assets, got {len(probe_rows)}"
+              )
+          probe_tokens = {
+              row["quote_token"].lower() for row in probe_rows
+          }
+          if len(probe_tokens) != 5:
+              raise SystemExit(
+                  "frozen residual V4 probe must contain five unique assets"
+              )
+
+          promoted_v3 = [
+              json.loads(line)
+              for line in Path(
+                  "canonical-v3/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v3_tokens = {
+              row["quote_token"].lower() for row in promoted_v3
+          }
+          v3_manifest = json.loads(
+              Path(
+                  "canonical-v3/pons-v3-quote-routes.jsonl.manifest.json"
+              ).read_text()
+          )
+          v3_provenance = v3_manifest.get("provenance") or {}
+          if (
+              int(v3_provenance.get("chain_id", -1)) != 4663
+              or int(v3_provenance.get("snapshot_head_block", -1))
+              != int(os.environ["SNAPSHOT_HEAD"])
+              or v3_provenance.get("source")
+              != "causal_v3_routes_with_optional_delayed_skhy_weth"
+          ):
+              raise SystemExit(
+                  "canonical V3 route-manifest provenance changed"
+              )
+          if len(promoted_v3) not in {25, 26}:
+              raise SystemExit(
+                  "canonical V3 fallback must contain 25 or 26 routes"
+              )
+          if len(v3_tokens) != len(promoted_v3):
+              raise SystemExit(
+                  "canonical V3 fallback contains duplicate quote ownership"
+              )
+          if int(v3_provenance.get("routes", -1)) != len(promoted_v3):
+              raise SystemExit(
+                  "canonical V3 manifest route count disagrees with artifact"
+              )
+
+          skhy = os.environ["SKHY_TOKEN"].lower()
+          residual_v3_owned = probe_tokens & v3_tokens
+          skhy_v4_run = "${{ inputs.skhy_v4_run_id }}".strip()
+          if len(promoted_v3) == 26:
+              if residual_v3_owned != {skhy}:
+                  raise SystemExit(
+                      "26-route V3 ownership must own exactly SKHY among "
+                      "the five residual assets"
+                  )
+              if (
+                  v3_provenance.get("skhy_v3_completion_status")
+                  != "route_resolved"
+                  or v3_provenance.get("skhy_owned_by_v3") is not True
+              ):
+                  raise SystemExit(
+                      "26-route V3 manifest does not prove resolved SKHY"
+                  )
+              ownership_mode = "26_v3_4_v4"
+          else:
+              if residual_v3_owned:
+                  raise SystemExit(
+                      "25-route V3 fallback must own none of the five "
+                      "residual assets"
+                  )
+              if (
+                  v3_provenance.get("skhy_v3_completion_status")
+                  != "searched_to_snapshot_head"
+                  or v3_provenance.get("skhy_owned_by_v3") is not False
+              ):
+                  raise SystemExit(
+                      "25-route V3 manifest does not prove exhaustive "
+                      "unresolved SKHY/WETH search"
+                  )
+              if not skhy_v4_run:
+                  raise SystemExit(
+                      "25-route V3 fallback requires resolved SKHY V4 "
+                      "segmented continuation"
+                  )
+              summary = json.loads(
+                  Path(
+                      "skhy-v4/"
+                      "pons-skhy-v4-known-pool-segmented-summary.json"
+                  ).read_text()
+              )
+              if (
+                  int(summary.get("snapshot_head_block", -1))
+                  != int(os.environ["SNAPSHOT_HEAD"])
+                  or int(summary.get("source_probe_run_id", -1))
+                  != int("${{ inputs.probe_run_id }}")
+                  or summary.get("quote_token", "").lower() != skhy
+                  or summary.get("route_ready") is not True
+              ):
+                  raise SystemExit(
+                      "SKHY V4 continuation provenance or resolution changed"
+                  )
+              skhy_rows = [
+                  json.loads(line)
+                  for line in Path(
+                      "skhy-v4/"
+                      "pons-skhy-v4-known-pool-segmented.jsonl"
+                  ).read_text().splitlines()
+                  if line.strip()
+              ]
+              skhy_rows = [
+                  row for row in skhy_rows
+                  if row["quote_token"].lower() == skhy
+              ]
+              if len(skhy_rows) != 1:
+                  raise SystemExit(
+                      "resolved SKHY V4 artifact must contain exactly one "
+                      "SKHY row"
+                  )
+              skhy_row = skhy_rows[0]
+              if not (
+                  skhy_row.get("causal_route_ready")
+                  or skhy_row.get("delayed_route_ready")
+              ):
+                  raise SystemExit(
+                      "resolved SKHY V4 row is not route-ready"
+                  )
+              replaced = 0
+              promoted_probe = []
+              for row in probe_rows:
+                  if row["quote_token"].lower() == skhy:
+                      if (
+                          int(row["first_launch_block"])
+                          != int(skhy_row["first_launch_block"])
+                          or int(row["launches"]) != int(skhy_row["launches"])
+                      ):
+                          raise SystemExit(
+                              "SKHY V4 continuation identity disagrees with "
+                              "frozen residual probe"
+                          )
+                      promoted_probe.append(skhy_row)
+                      replaced += 1
+                  else:
+                      promoted_probe.append(row)
+              if replaced != 1:
+                  raise SystemExit(
+                      "frozen residual V4 probe does not contain exactly one "
+                      "SKHY row"
+                  )
+              probe_rows = promoted_probe
+              ownership_mode = "25_v3_5_v4"
+
+          routes = select_v4_quote_routes(probe_rows)
+          route_tokens = {
+              row["quote_token"].lower() for row in routes
+          }
+          expected_v4_tokens = probe_tokens - v3_tokens
+          if route_tokens != expected_v4_tokens:
+              raise SystemExit(
+                  "V3/V4 residual ownership does not cover the five frozen "
+                  "V3 misses exactly"
+              )
+          if len(routes) != len(expected_v4_tokens):
+              raise SystemExit(
+                  "V4 fallback route count disagrees with expected ownership"
+              )
+          if len(routes) not in {4, 5}:
+              raise SystemExit(
+                  "V4 fallback must select four or five unique routes"
+              )
+          if bool(skhy in v3_tokens) == bool(skhy in route_tokens):
+              raise SystemExit(
+                  "SKHY must be owned by exactly one of canonical V3 or V4"
+              )
+          if not all(
+              row["anchor_token"].lower()
+              == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+              for row in routes
+          ):
+              raise SystemExit(
+                  "canonical V4 fallback must use direct USDG routes"
+              )
+
+          earliest = min(int(row["activation_block"]) for row in routes)
+          configured = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
+          if earliest < configured:
+              raise SystemExit(
+                  "canonical V4 route activates before frozen scan start"
+              )
+
+          write_jsonl_snapshot(
+              routes,
+              output=Path("artifacts/pons-v4-quote-routes.jsonl"),
+              provenance={
+                  "source": "v3_aware_v4_quote_route_selection",
+                  "chain_id": 4663,
+                  "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+                  "probe_run_id": int("${{ inputs.probe_run_id }}"),
+                  "v3_run_id": int("${{ inputs.v3_run_id }}"),
+                  "skhy_v4_run_id": (
+                      int(skhy_v4_run) if skhy_v4_run else None
+                  ),
+                  "ownership_mode": ownership_mode,
+                  "routes": len(routes),
+              },
+          )
+          report = {
+              "residual_quote_assets": len(probe_rows),
+              "externally_resolved_assets": len(residual_v3_owned),
+              "externally_resolved_quote_tokens": sorted(residual_v3_owned),
+              "unresolved_assets": 0,
+              "selected_routes": len(routes),
+              "covered_launches": sum(int(row["launches"]) for row in routes),
+              "v3_run_id": int("${{ inputs.v3_run_id }}"),
+              "skhy_v4_run_id": (
+                  int(skhy_v4_run) if skhy_v4_run else None
+              ),
+              "ownership_mode": ownership_mode,
+              "earliest_activation_block": earliest,
+              "routes": [
+                  {
+                      "symbol": row["symbol"],
+                      "quote_token": row["quote_token"],
+                      "pool_id": row["pool_id"],
+                      "activation_block": row["activation_block"],
+                      "route_type": row["route_type"],
+                      "launches": row["launches"],
+                  }
+                  for row in routes
+              ],
+          }
+          Path("artifacts/pons-v4-quote-route-selection-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-routes-selected
+          path: artifacts/
+          if-no-files-found: error
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard:
+          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+           64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '128'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-routes-selected
+          path: routes
+      - id: bounds
+        name: Compute exact V4 quote shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire selected V4 route swaps
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v4-quote-route-tape \
+            --routes routes/pons-v4-quote-routes.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v4-quote-events-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v4-quote-fallback-*
+          path: downloads
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-routes-selected
+          path: routes
+      - name: Stream-merge exact V4 quote shards
+        run: |
+          mkdir -p artifacts
+          cp routes/pons-v4-quote-routes.jsonl artifacts/
+          cp routes/pons-v4-quote-route-selection-summary.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          files = sorted(
+              Path("downloads").glob("v4-quote-events-shard-*.jsonl")
+          )
+          assert len(files) == 128, [p.name for p in files]
+
+          manifests = []
+          previous_hi = None
+          prior = None
+          records = 0
+
+          def rows():
+              nonlocal_state = {"previous_hi": None, "prior": None, "records": 0}
+              for path in files:
+                  manifest = json.loads(
+                      path.with_suffix(path.suffix + ".manifest.json").read_text()
+                  )
+                  prov = manifest["provenance"]
+                  lo, hi = int(prov["from_block"]), int(prov["to_block"])
+                  if nonlocal_state["previous_hi"] is None:
+                      assert lo == START, lo
+                  else:
+                      assert lo == nonlocal_state["previous_hi"] + 1, (
+                          nonlocal_state["previous_hi"], lo
+                      )
+                  nonlocal_state["previous_hi"] = hi
+                  manifests.append({
+                      "file": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if nonlocal_state["prior"] is not None:
+                              assert nonlocal_state["prior"] < order, (
+                                  nonlocal_state["prior"], order
+                              )
+                          nonlocal_state["prior"] = order
+                          assert row["event_type"] == "v4_swap"
+                          nonlocal_state["records"] += 1
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+              assert nonlocal_state["previous_hi"] == HEAD
+              rows.records = nonlocal_state["records"]
+
+          rows.records = 0
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path("artifacts/pons-v4-quote-fallback-events-full.jsonl"),
+              provenance={
+                  "source": "stream_merged_selected_v4_quote_route_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "probe_run_id": int("${{ inputs.probe_run_id }}"),
+                  "v3_run_id": int(
+                      "${{ inputs.v3_run_id }}"
+                  ),
+                  "skhy_v4_run_id": (
+                      int("${{ inputs.skhy_v4_run_id }}")
+                      if "${{ inputs.skhy_v4_run_id }}"
+                      else None
+                  ),
+                  "shards": manifests,
+              },
+          )
+          summary = {
+              "snapshot_head_block": HEAD,
+              "records": rows.records,
+              "event_tape_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v4-quote-fallback-events-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Convert V4 routes to generic quote USD tape
+        run: |
+          hlp pons-v4-quote-usd-tape \
+            --routes artifacts/pons-v4-quote-routes.jsonl \
+            --v4-events artifacts/pons-v4-quote-fallback-events-full.jsonl \
+            --state-out artifacts/pons-v4-quote-fallback-initial.jsonl \
+            --out artifacts/pons-v4-quote-fallback-updates.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error

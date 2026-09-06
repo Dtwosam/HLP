@@ -1,0 +1,266 @@
+name: phase1-pons-v1-v3-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        default: "33911022718"
+        type: string
+  workflow_call:
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v1-v3-full-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_V1_LAUNCH: '8621658'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard:
+          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+           32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+           64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
+           96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+           128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+           160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+           192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+           224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239 ]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '240'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ env.SOURCE_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - id: bounds
+        name: Compute exact V1 V3 shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_V1_LAUNCH"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire globally scanned V3 Initialize and Swap shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-pons-tape \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-topic-scan \
+            --out "artifacts/v1-v3-events-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: downloads
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ env.SOURCE_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Merge and validate complete V1 V3 tape
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.sharded_tape import (
+              canonical_jsonl_bytes,
+              write_virtual_jsonl_manifest,
+          )
+
+          START = int(os.environ["FIRST_V1_LAUNCH"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-full-launch-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v1 = [row for row in registry if row.get("version") == "v1"]
+          launch_by_pool = {
+              row["pool"].lower(): int(row["block_number"])
+              for row in v1
+          }
+          assert len(launch_by_pool) == len(v1), (
+              len(launch_by_pool), len(v1)
+          )
+
+          files = sorted(Path("downloads").glob("v1-v3-events-shard-*.jsonl"))
+          assert len(files) == 240, [p.name for p in files]
+          previous_hi = None
+          manifests = []
+          initialized = set()
+          matched = set()
+          counts = {"records": 0, "v3_initialize": 0, "v3_swap": 0}
+
+          def rows():
+              nonlocal_state = {"prior": None}
+              global previous_hi
+              for path in files:
+                  manifest = json.loads(
+                      path.with_suffix(path.suffix + ".manifest.json").read_text()
+                  )
+                  prov = manifest["provenance"]
+                  lo = int(prov["from_block"])
+                  hi = int(prov["to_block"])
+                  if previous_hi is None:
+                      assert lo == START, lo
+                  else:
+                      assert lo == previous_hi + 1, (previous_hi, lo)
+                  previous_hi = hi
+                  manifests.append({
+                      "file": path.name,
+                      "sha256": manifest["sha256"],
+                      "records": int(manifest["records"]),
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+                  shard_records = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          prior = nonlocal_state["prior"]
+                          if prior is not None:
+                              assert prior < order, (prior, order)
+                          nonlocal_state["prior"] = order
+                          pool = row["pool"].lower()
+                          assert pool in launch_by_pool, pool
+                          assert int(row["block_number"]) >= launch_by_pool[pool]
+                          kind = row["event_type"]
+                          assert kind in {"v3_initialize", "v3_swap"}, kind
+                          if kind == "v3_initialize":
+                              initialized.add(pool)
+                          matched.add(pool)
+                          counts[kind] += 1
+                          counts["records"] += 1
+                          shard_records += 1
+                          yield row
+                  assert shard_records == int(manifest["records"]), (
+                      path.name, shard_records, manifest["records"]
+                  )
+              assert previous_hi == HEAD, (previous_hi, HEAD)
+
+          digest = hashlib.sha256()
+          for row in rows():
+              digest.update(canonical_jsonl_bytes(row))
+          snapshot = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/pons-v1-v3-full.jsonl.manifest.json"
+              ),
+              path_name="pons-v1-v3-full.jsonl",
+              records=counts["records"],
+              sha256=digest.hexdigest(),
+              provenance={
+                  "source": "stream_merged_global_v3_topic_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "source_registry_run_id": int(
+                      os.environ["SOURCE_REGISTRY_RUN_ID"]
+                  ),
+                  "storage_mode": "sharded_artifacts",
+                  "filter_semantics": (
+                      "global V3 Initialize/Swap topic scan followed by "
+                      "frozen Pons V1 pool membership"
+                  ),
+                  "shards": manifests,
+              },
+          )
+          missing = sorted(set(launch_by_pool) - initialized)
+          assert not missing, (
+              "Pons V1 pools missing V3 Initialize",
+              missing[:20],
+              len(missing),
+          )
+          summary = {
+              "snapshot_head_block": HEAD,
+              "v1_registry_tokens": len(v1),
+              "registered_pools": len(launch_by_pool),
+              "matched_pools": len(matched),
+              "v3_initializes": counts["v3_initialize"],
+              "v3_swaps": counts["v3_swap"],
+              "records": counts["records"],
+              "missing_initialize_pools": 0,
+              "tape_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v1-v3-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: artifacts/
+          if-no-files-found: error

@@ -34,6 +34,9 @@ The project does not begin with assumptions such as “holders must rise” or �
 
 ## Current phase
 
-Phase 0 — Source of Truth & Free-Data Viability.
+Phase 1 — Historical/Live Data Acquisition Spike.
 
-The next gate is not “build a model.” It is to prove that the historical and live data required to study Robinhood Chain can be acquired reproducibly at $0.
+Phase 0 source-of-truth and free-data viability passed. The current gate is to
+finish the complete causal Pons >=$100k universe and prove the required
+historical acquisition/reconstruction path remains reproducible at $0 before
+Phase 2 dataset construction begins.

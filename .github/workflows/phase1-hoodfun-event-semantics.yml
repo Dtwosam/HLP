@@ -1,0 +1,129 @@
+name: phase1-hoodfun-event-semantics
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-hoodfun-event-semantics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  semantics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Resolve hood.fun launch-event semantics from token contracts
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+
+          ADDRESS = "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c"
+          TOKEN_CREATED_TOPIC = "0x91de26bc430b3a4f1d6cfb11d72f2e5ca75d7622d37b2a88a8998ec28e747a11"
+          TRADE_TOPIC = "0x2c76e7a47fd53e2854856ac3f0a5f3ee40d15cfaa82266357ea9779c486ab9c3"
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          first = rpc.find_first_code_block(ADDRESS, low=0, high=10_000_000)
+          logs = list(
+              rpc.iter_logs_chunked(
+                  first,
+                  first + 1_000_000,
+                  address=ADDRESS,
+                  topics=[TOKEN_CREATED_TOPIC],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          assert logs, first
+          launches = []
+          for log in logs[:20]:
+              candidates = []
+              for topic in log.topics[1:]:
+                  address = "0x" + topic[-40:]
+                  code = rpc.get_code(address, log.block_number)
+                  candidate = {
+                      "address": address,
+                      "has_code": code not in {"0x", "0x0", ""},
+                      "code_bytes": len(code.removeprefix("0x")) // 2,
+                  }
+                  if candidate["has_code"]:
+                      try:
+                          static = read_erc20_static(
+                              rpc, address, block=log.block_number
+                          )
+                          candidate["erc20"] = {
+                              "decimals": static.decimals,
+                              "total_supply": static.total_supply,
+                          }
+                      except Exception as exc:
+                          candidate["erc20_error"] = type(exc).__name__
+                  candidates.append(candidate)
+
+              words = [
+                  int(log.data.removeprefix("0x")[i:i+64], 16)
+                  for i in range(0, len(log.data.removeprefix("0x")), 64)
+              ]
+              launches.append({
+                  "block_number": log.block_number,
+                  "transaction_hash": log.transaction_hash,
+                  "topics": list(log.topics),
+                  "candidates": candidates,
+                  "head_words": words[:6],
+                  "all_words": words,
+              })
+
+          # Pull Trade logs for launch tokens/txs so the indexed-address roles
+          # can be compared without guessing.
+          trade_logs = list(
+              rpc.iter_logs_chunked(
+                  logs[0].block_number,
+                  logs[min(len(logs)-1, 19)].block_number,
+                  address=ADDRESS,
+                  topics=[TRADE_TOPIC],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          trade_samples = [{
+              "block_number": row.block_number,
+              "transaction_hash": row.transaction_hash,
+              "topics": list(row.topics),
+              "words": [
+                  int(row.data.removeprefix("0x")[i:i+64], 16)
+                  for i in range(0, len(row.data.removeprefix("0x")), 64)
+              ],
+          } for row in trade_logs[:30]]
+
+          print(json.dumps({
+              "first_code_block": first,
+              "token_created_logs_in_first_1m_blocks": len(logs),
+              "launch_samples": launches,
+              "trade_samples": trade_samples,
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY

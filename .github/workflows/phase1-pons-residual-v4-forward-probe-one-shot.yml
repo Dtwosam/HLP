@@ -1,0 +1,55 @@
+name: phase1-pons-residual-v4-forward-probe-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-residual-v4-forward-probe-one-shot.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-residual-v4-forward-probe-one-shot
+  cancel-in-progress: true
+
+env:
+  PRIOR_PROBE_RUN_ID: '33925011975'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-residual-v4-route-probe
+          path: prior
+          run-id: ${{ env.PRIOR_PROBE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Continue only unresolved V4 routes
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-extend-v4-quote-routes \
+            --probe prior/pons-residual-v4-route-probe.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --forward-blocks 500000 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pons-residual-v4-forward-probe.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-residual-v4-forward-probe
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,510 @@
+name: phase1-pons-final-acceptance-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_run_id:
+        description: "Run containing canonical phase1-pons-eligible-universe artifact; promotion run is allowed"
+        required: true
+        type: string
+      representative_run_id:
+        description: "Successful representative evidence-chain run"
+        required: true
+        type: string
+      pons_registry_run_id:
+        description: "Instrumented pons_registry viability measurement run"
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        description: "Instrumented pons_v1_v3 viability measurement run"
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        description: "Instrumented pons_v2_curve viability measurement run"
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        description: "Instrumented pons_v2_transition viability measurement run"
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        description: "Instrumented pons_v2_v4 viability measurement run"
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        description: "Instrumented weth_usdg_anchor viability measurement run"
+        required: true
+        type: string
+      stock_oracle_run_id:
+        description: "Instrumented stock_oracle viability measurement run"
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        description: "Instrumented quote_v3_fallback viability measurement run"
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        description: "Instrumented quote_v4_fallback viability measurement run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      eligibility_run_id:
+        required: true
+        type: string
+      representative_run_id:
+        required: true
+        type: string
+      pons_registry_run_id:
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        required: true
+        type: string
+      stock_oracle_run_id:
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-final-acceptance-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify evidence and nine route provenance before acceptance work
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          REPRESENTATIVE_RUN_ID: ${{ inputs.representative_run_id }}
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          evidence_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          representative_run_id = int(os.environ["REPRESENTATIVE_RUN_ID"])
+          if evidence_run_id <= 0:
+              raise SystemExit(
+                  "final acceptance evidence run ID must be positive"
+              )
+          if representative_run_id != evidence_run_id:
+              raise SystemExit(
+                  "final acceptance eligible and representative runs must "
+                  "be the same evidence handoff"
+              )
+
+          route_env = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          expected_paths = {
+              route: (
+                  ".github/workflows/"
+                  f"phase1-pons-viability-{route.replace('_', '-')}-one-shot.yml"
+              )
+              for route in route_env
+          }
+          expected_paths["pons_registry"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-registry-one-shot.yml"
+          )
+          expected_paths["pons_v1_v3"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v1-v3-one-shot.yml"
+          )
+          expected_paths["pons_v2_curve"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-curve-one-shot.yml"
+          )
+          expected_paths["pons_v2_transition"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-transition-one-shot.yml"
+          )
+          expected_paths["pons_v2_v4"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-v4-one-shot.yml"
+          )
+          route_run_ids = {
+              route: int(os.environ[field])
+              for route, field in route_env.items()
+          }
+          if min(route_run_ids.values()) <= 0:
+              raise SystemExit(
+                  "final acceptance route run IDs must be positive"
+              )
+          if len(set(route_run_ids.values())) != 9:
+              raise SystemExit(
+                  "final acceptance requires nine distinct evidence run IDs"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          def json_file_at_ref(path, ref):
+              encoded_path = urllib.parse.quote(path, safe="/")
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              payload = get(
+                  f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+              )
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"unexpected contents encoding for {path}@{ref}"
+                  )
+              return json.loads(
+                  base64.b64decode(payload.get("content") or "")
+              )
+
+          def artifact_names(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "final acceptance artifact pagination exceeded "
+                          f"1000: run={run_id}"
+                      )
+              return names
+
+          def require_ancestor(label, sha):
+              if len(sha) != 40:
+                  raise SystemExit(f"{label} head SHA is invalid")
+              comparison = get(
+                  f"/repos/{repo}/compare/{sha}..."
+                  f"{os.environ['GITHUB_SHA']}"
+              )
+              if comparison.get("status") not in {"ahead", "identical"}:
+                  raise SystemExit(
+                      f"{label} head is not an ancestor of acceptance HEAD: "
+                      f"status={comparison.get('status')} sha={sha}"
+                  )
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          if (
+              evidence.get("status") != "completed"
+              or evidence.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "final acceptance evidence run is not successful"
+              )
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  "final acceptance evidence workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if evidence.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "final acceptance evidence branch changed"
+              )
+          evidence_head_sha = str(evidence.get("head_sha") or "")
+          require_ancestor("final acceptance evidence", evidence_head_sha)
+
+          required_evidence = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing_evidence = sorted(
+              required_evidence - artifact_names(evidence_run_id)
+          )
+          if missing_evidence:
+              raise SystemExit(
+                  "final acceptance evidence artifacts missing: "
+                  f"{missing_evidence}"
+              )
+
+          for route, run_id in route_run_ids.items():
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      "final acceptance route run is not successful: "
+                      f"{route} run={run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path != expected_paths[route]:
+                  raise SystemExit(
+                      "final acceptance route workflow path mismatch: "
+                      f"{route} expected={expected_paths[route]} actual={path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"final acceptance route branch changed: {route}"
+                  )
+              route_head_sha = str(run.get("head_sha") or "")
+              require_ancestor(
+                  f"final acceptance route {route}",
+                  route_head_sha,
+              )
+              required_artifacts = {
+                  f"phase1-pons-viability-measurement-{route}-primary"
+              }
+              if route == "pons_registry":
+                  required_artifacts.add(
+                      "phase1-pons-viability-measurement-"
+                      "pons_registry-secondary"
+                  )
+              missing_route = sorted(
+                  required_artifacts - artifact_names(run_id)
+              )
+              if missing_route:
+                  raise SystemExit(
+                      "final acceptance route measurement artifacts missing: "
+                      f"{route} {missing_route}"
+                  )
+
+              launch_readiness = json_file_at_ref(
+                  ".github/phase1-pons-viability-ready.json",
+                  route_head_sha,
+              )
+              launch_ledger = json_file_at_ref(
+                  ".github/phase1-pons-viability-runs.json",
+                  route_head_sha,
+              )
+              if int(
+                  launch_readiness.get("source_eligibility_run_id", 0)
+              ) != 33_982_556_591:
+                  raise SystemExit(
+                      f"final acceptance route source changed: {route}"
+                  )
+              if int(
+                  launch_readiness.get("evidence_run_id", 0)
+              ) != evidence_run_id:
+                  raise SystemExit(
+                      f"final acceptance route evidence changed: {route}"
+                  )
+              if int(launch_readiness.get("generation", 0)) <= 0:
+                  raise SystemExit(
+                      f"final acceptance route readiness unarmed: {route}"
+                  )
+              if int(launch_ledger.get("generation", 0)) <= 0:
+                  raise SystemExit(
+                      f"final acceptance route ledger unarmed: {route}"
+                  )
+              if int(
+                  launch_ledger.get("evidence_run_id", 0)
+              ) != evidence_run_id:
+                  raise SystemExit(
+                      "final acceptance route ledger evidence changed: "
+                      f"{route}"
+                  )
+              launch_routes = dict(launch_ledger.get("routes") or {})
+              if set(launch_routes) != set(route_env):
+                  raise SystemExit(
+                      f"final acceptance route launch ledger changed: {route}"
+                  )
+              if int(launch_routes.get(route, -1)) != 0:
+                  raise SystemExit(
+                      f"final acceptance route launch slot was not empty: "
+                      f"{route}"
+                  )
+
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "route_run_ids": route_run_ids,
+              "source_eligibility_run_id": 33_982_556_591,
+              "status": "ready_for_acceptance_work",
+          }, sort_keys=True))
+          PY
+
+  plan:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_ids_json: ${{ steps.plan.outputs.run_ids_json }}
+      route_plan_json: ${{ steps.plan.outputs.route_plan_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Freeze distinct nine-route evidence plan
+        env:
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.data.phase1_viability import (
+              REQUIRED_PHASE1_ROUTE_BLOCKS,
+              build_phase1_route_plan,
+          )
+
+          env_keys = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          if list(env_keys) != list(REQUIRED_PHASE1_ROUTE_BLOCKS):
+              raise SystemExit("final acceptance route order changed")
+
+          route_run_ids = {}
+          for route, key in env_keys.items():
+              value = int(os.environ[key])
+              if value <= 0:
+                  raise SystemExit(f"{route} evidence run ID must be positive")
+              route_run_ids[route] = [value]
+
+          plan = build_phase1_route_plan(route_run_ids)
+          run_ids = [row["run_ids"][0] for row in plan]
+          if len(run_ids) != 9 or len(set(run_ids)) != 9:
+              raise SystemExit(
+                  "final acceptance requires nine distinct evidence run IDs"
+              )
+
+          compact_runs = json.dumps(run_ids, separators=(",", ":"))
+          compact_plan = json.dumps(
+              route_run_ids,
+              sort_keys=True,
+              separators=(",", ":"),
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"run_ids_json={compact_runs}\n")
+              handle.write(f"route_plan_json={compact_plan}\n")
+          print(
+              json.dumps(
+                  {
+                      "routes": len(plan),
+                      "required_work_blocks": sum(
+                          REQUIRED_PHASE1_ROUTE_BLOCKS.values()
+                      ),
+                      "distinct_evidence_runs": len(set(run_ids)),
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+  accounting:
+    needs: plan
+    if: ${{ needs.plan.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-accounting.yml
+    with:
+      run_ids_json: ${{ needs.plan.outputs.run_ids_json }}
+      free_daily_method_calls: "10000"
+      require_successful_runs: true
+    secrets: inherit
+
+  viability:
+    needs:
+      - plan
+      - accounting
+    if: ${{ needs.accounting.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-viability-projection.yml
+    with:
+      accounting_run_id: ${{ format('{0}', github.run_id) }}
+      route_plan_json: ${{ needs.plan.outputs.route_plan_json }}
+      free_daily_method_calls: "10000"
+    secrets: inherit
+
+  acceptance:
+    needs: viability
+    if: ${{ needs.viability.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acceptance-gate.yml
+    with:
+      eligible_universe_run_id: ${{ inputs.eligibility_run_id }}
+      representative_validation_run_id: ${{ inputs.representative_run_id }}
+      viability_projection_run_id: ${{ format('{0}', github.run_id) }}
+    secrets: inherit

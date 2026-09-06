@@ -1,0 +1,20 @@
+name: phase1-pons-live-acquisition-checkpoint-one-shot
+# checkpoint generation 6
+
+on:
+  push:
+    paths:
+      - ".github/workflows/phase1-pons-live-acquisition-checkpoint-one-shot.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  checkpoint:
+    if: ${{ contains(github.event.head_commit.message, 'launch live acquisition checkpoint') }}
+    uses: ./.github/workflows/phase1-pons-acquisition-accounting.yml
+    with:
+      run_ids_json: "[33982556591]"
+      free_daily_method_calls: "10000"
+      require_successful_runs: false

@@ -1,0 +1,345 @@
+name: phase1-pons-skhy-v3-weth-continuation
+
+on:
+  workflow_dispatch:
+    inputs:
+      route_audit_run_id:
+        description: "Frozen unpriced V3 route-audit run"
+        required: true
+        default: "33921477647"
+        type: string
+      route_audit_artifact_name:
+        description: "Artifact containing the frozen V3 route audit"
+        required: true
+        default: "phase1-pons-unpriced-v3-route-audit"
+        type: string
+      route_audit_filename:
+        description: "Frozen V3 route-audit JSONL filename"
+        required: true
+        default: "pons-unpriced-v3-route-audit.jsonl"
+        type: string
+      from_block:
+        description: "Optional continuation start; empty resolves exact pool deployment"
+        required: false
+        default: ""
+        type: string
+      forward_blocks:
+        description: "Maximum segment size; capped at 100,000 blocks"
+        required: true
+        default: "100000"
+        type: string
+      output_artifact_name:
+        description: "Artifact name for this continuation segment"
+        required: true
+        default: "phase1-pons-skhy-v3-weth-continuation"
+        type: string
+  workflow_call:
+    inputs:
+      route_audit_run_id:
+        required: true
+        type: string
+      route_audit_artifact_name:
+        required: true
+        type: string
+      route_audit_filename:
+        required: true
+        type: string
+      from_block:
+        required: false
+        default: ""
+        type: string
+      forward_blocks:
+        required: true
+        type: string
+      output_artifact_name:
+        required: true
+        default: "phase1-pons-skhy-v3-weth-continuation"
+        type: string
+    outputs:
+      search_to_block:
+        description: "Inclusive end of the completed segment"
+        value: ${{ jobs.continue_known_pool.outputs.search_to_block }}
+      next_from_block:
+        description: "Next block after the completed segment"
+        value: ${{ jobs.continue_known_pool.outputs.next_from_block }}
+      route_ready:
+        description: "Whether a delayed SKHY/WETH route resolved"
+        value: ${{ jobs.continue_known_pool.outputs.route_ready }}
+      continue_needed:
+        description: "Whether another segment is still required"
+        value: ${{ jobs.continue_known_pool.outputs.continue_needed }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-skhy-v3-weth-continuation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  SKHY_FIRST_PONS_USE: '52263525'
+  SKHY_LAUNCHES: '129'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  SKHY_WETH_POOL: '0x13f78b235d19141f572986afcaab66ce7744b4ef'
+  SKHY_WETH_FEE: '3000'
+
+jobs:
+  continue_known_pool:
+    runs-on: ubuntu-latest
+    outputs:
+      search_to_block: ${{ steps.result.outputs.search_to_block }}
+      next_from_block: ${{ steps.result.outputs.next_from_block }}
+      route_ready: ${{ steps.result.outputs.route_ready }}
+      continue_needed: ${{ steps.result.outputs.continue_needed }}
+    timeout-minutes: 30
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      REQUESTED_FROM_BLOCK: ${{ inputs.from_block }}
+      FORWARD_BLOCKS: ${{ inputs.forward_blocks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.route_audit_artifact_name }}
+          path: audit
+          run-id: ${{ inputs.route_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Prove frozen SKHY/WETH candidate
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          forward = int(os.environ["FORWARD_BLOCKS"])
+          if not 1 <= forward <= 100_000:
+              raise SystemExit(
+                  "forward_blocks must be between 1 and 100000"
+              )
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "audit/${{ inputs.route_audit_filename }}"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          skhy = [
+              row for row in rows
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
+          ]
+          if len(skhy) != 1:
+              raise SystemExit(
+                  f"expected exactly one frozen SKHY audit row, got {len(skhy)}"
+              )
+          row = skhy[0]
+          if int(row["first_launch_block"]) != int(
+              os.environ["SKHY_FIRST_PONS_USE"]
+          ):
+              raise SystemExit("frozen SKHY first-use block changed")
+          if int(row["launches"]) != int(os.environ["SKHY_LAUNCHES"]):
+              raise SystemExit("frozen SKHY launch count changed")
+          if row.get("v3_causal_ready"):
+              raise SystemExit(
+                  "SKHY unexpectedly became causally V3-priceable"
+              )
+          if os.environ["WETH"].lower() not in {
+              value.lower() for value in row.get("searched_anchors", [])
+          }:
+              raise SystemExit("frozen SKHY audit did not search WETH")
+
+          weth = [
+              candidate
+              for candidate in row.get("v3_candidates", [])
+              if candidate["anchor_token"].lower()
+              == os.environ["WETH"].lower()
+          ]
+          if len(weth) != 1:
+              raise SystemExit(
+                  f"expected one frozen SKHY/WETH candidate, got {len(weth)}"
+              )
+          candidate = weth[0]
+          if candidate["pool"].lower() != os.environ["SKHY_WETH_POOL"]:
+              raise SystemExit("frozen SKHY/WETH pool changed")
+          if int(candidate["fee"]) != int(os.environ["SKHY_WETH_FEE"]):
+              raise SystemExit("frozen SKHY/WETH fee changed")
+          if candidate.get("causal_ready"):
+              raise SystemExit(
+                  "frozen SKHY/WETH candidate unexpectedly causal-ready"
+              )
+
+          Path("artifacts/skhy-v3-weth-audit-row.json").write_text(
+              json.dumps(row, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              "quote_token": row["quote_token"],
+              "symbol": row["symbol"],
+              "launches": int(row["launches"]),
+              "first_pons_use": int(row["first_launch_block"]),
+              "pool": candidate["pool"],
+              "fee": int(candidate["fee"]),
+              "causal_error": candidate.get("error"),
+              "forward_blocks": forward,
+          }, sort_keys=True))
+          PY
+      - id: bounds
+        name: Resolve deployment and exact bounded segment
+        run: |
+          mkdir -p artifacts
+          if [ -z "$REQUESTED_FROM_BLOCK" ]; then
+            hlp --timeout 30 --attempts 5 --min-interval 0.1               deployment-block "$SKHY_WETH_POOL"               --low "$SKHY_FIRST_PONS_USE"               --high "$SNAPSHOT_HEAD"               --archive               > artifacts/skhy-v3-weth-deployment.json
+            FIRST_CODE_BLOCK="$(
+              python -c 'import json; from pathlib import Path; print(json.loads(Path("artifacts/skhy-v3-weth-deployment.json").read_text())["first_code_block"])'
+            )"
+            START="$FIRST_CODE_BLOCK"
+          else
+            FIRST_CODE_BLOCK=""
+            START="$REQUESTED_FROM_BLOCK"
+          fi
+
+          python - "$START" "$FIRST_CODE_BLOCK" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          start = int(sys.argv[1])
+          first_code = sys.argv[2].strip()
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          first_use = int(os.environ["SKHY_FIRST_PONS_USE"])
+          forward = int(os.environ["FORWARD_BLOCKS"])
+
+          if start < first_use or start > head:
+              raise SystemExit(
+                  f"invalid SKHY/WETH continuation start: {start}"
+              )
+          end = min(head, start + forward - 1)
+          report = {
+              "requested_from_block": (
+                  None
+                  if not os.environ["REQUESTED_FROM_BLOCK"].strip()
+                  else int(os.environ["REQUESTED_FROM_BLOCK"])
+              ),
+              "pool_first_code_block": (
+                  None if not first_code else int(first_code)
+              ),
+              "from_block": start,
+              "to_block": end,
+              "forward_blocks": forward,
+              "snapshot_head_block": head,
+          }
+          Path("artifacts/skhy-v3-weth-segment-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"from_block={start}\n")
+              handle.write(f"to_block={end}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Scan only the frozen SKHY/WETH pool
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.from_block }}
+        run: |
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-pons-delayed-v3-weth-routes             --audit "audit/${{ inputs.route_audit_filename }}"             --quote-token "$SKHY_TOKEN"             --from-block "$FROM_BLOCK"             --to-block "$SNAPSHOT_HEAD"             --max-forward-blocks "$FORWARD_BLOCKS"             --chunk-size "$CHUNK" --min-chunk-size 25             --out artifacts/pons-skhy-v3-weth-continuation.jsonl
+      - id: result
+        name: Validate continuation result
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-skhy-v3-weth-continuation.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if len(rows) != 1:
+              raise SystemExit(
+                  f"expected one SKHY/WETH continuation row, got {len(rows)}"
+              )
+          row = rows[0]
+          if row["quote_token"].lower() != os.environ["SKHY_TOKEN"]:
+              raise SystemExit("SKHY/WETH continuation token changed")
+          if row["candidate_pools"] != [os.environ["SKHY_WETH_POOL"]]:
+              raise SystemExit("SKHY/WETH continuation candidate changed")
+
+          ready = bool(row["delayed_route_ready"])
+          route = row.get("route")
+          if ready:
+              if not route:
+                  raise SystemExit("ready SKHY/WETH row has no route")
+              if route["pool"].lower() != os.environ["SKHY_WETH_POOL"]:
+                  raise SystemExit("SKHY/WETH ready route pool changed")
+              if route["anchor_token"].lower() != os.environ["WETH"].lower():
+                  raise SystemExit("SKHY/WETH ready route anchor changed")
+              if route["route_type"] != "uniswap_v3_direct_weth_delayed":
+                  raise SystemExit("SKHY/WETH ready route type changed")
+              if route.get("first_observed_usd_price") is not None:
+                  raise SystemExit(
+                      "SKHY/WETH discovery must defer USD conversion"
+                  )
+
+          report = {
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "quote_token": row["quote_token"],
+              "symbol": row["symbol"],
+              "launches": int(row["launches"]),
+              "pool": os.environ["SKHY_WETH_POOL"],
+              "fee": int(os.environ["SKHY_WETH_FEE"]),
+              "searched_from_block": int(row["searched_from_block"]),
+              "searched_to_block": int(row["searched_to_block"]),
+              "route_ready": ready,
+              "route": route,
+              "remaining_unsearched_blocks": max(
+                  0,
+                  int(os.environ["SNAPSHOT_HEAD"])
+                  - int(row["searched_to_block"]),
+              ),
+              "usd_conversion_semantics": (
+                  "deferred to event-ordered WETH/USD anchor replay"
+              ),
+          }
+          Path(
+              "artifacts/pons-skhy-v3-weth-continuation-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          continue_needed = (
+              not ready
+              and int(row["searched_to_block"])
+              < int(os.environ["SNAPSHOT_HEAD"])
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"search_to_block={int(row['searched_to_block'])}\n"
+              )
+              handle.write(
+                  f"next_from_block={int(row['searched_to_block']) + 1}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(
+                  "continue_needed="
+                  f"{'true' if continue_needed else 'false'}\n"
+              )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.output_artifact_name }}
+          path: artifacts/
+          if-no-files-found: error

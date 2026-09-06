@@ -1,0 +1,65 @@
+name: phase1-pons-v1-multigen-smoke
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build registry across legacy to primary V1 generations
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-registry-window \
+            --from-block 8600612 --to-block 9191117 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pons-v1-multigen.jsonl
+      - name: Validate factory isolation and historical counts
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path("artifacts/pons-v1-multigen.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          counts = Counter(row["factory"] for row in rows)
+          ids = defaultdict(set)
+          for row in rows:
+              ids[row["factory"]].add(row["launch_config_id"])
+              assert row["supply_raw"] > 0
+              assert row["pair_token"] == row["config_pair_token"]
+
+          legacy = "0x0c37a24f5d23a486fa692d1500881d698b1f77a4"
+          primary = "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb"
+          assert counts[legacy] >= 1, counts
+          assert counts[primary] >= 54, counts
+
+          print(json.dumps({
+              "launches": len(rows),
+              "launches_by_factory": dict(counts),
+              "config_ids_by_factory": {
+                  key: sorted(value) for key, value in ids.items()
+              },
+              "first_launch": rows[0] if rows else None,
+              "last_launch": rows[-1] if rows else None,
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-multigen
+          path: artifacts/
+          if-no-files-found: error

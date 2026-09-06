@@ -1,0 +1,431 @@
+name: phase1-pons-v3-quote-fallback-recover-gaps
+
+on:
+  workflow_dispatch:
+    inputs:
+      partial_run_id:
+        description: "Interrupted phase1-pons-v3-quote-fallback-full run with successful shards"
+        required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier V3 quote gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        default: "100000"
+        type: string
+  workflow_call:
+    inputs:
+      partial_run_id:
+        required: true
+        type: string
+      prior_gap_run_id:
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v3-quote-fallback-recover-gaps-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FIRST_FEEDLESS_PONS_USE: '35992329'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v3-quote-fallback-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: routes
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-v3-quote-fallback-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - id: plan
+        name: Derive only missing V3 quote ranges
+        env:
+          MAX_GAP_BLOCKS: ${{ inputs.max_gap_blocks }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import plan_missing_subranges
+
+          start = int(os.environ["FIRST_FEEDLESS_PONS_USE"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
+          if not 1 <= max_blocks <= 100_000:
+              raise SystemExit(
+                  "max_gap_blocks must be between 1 and 100000"
+              )
+
+          routes = [
+              json.loads(line)
+              for line in Path(
+                  "routes/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          if not routes:
+              raise SystemExit("frozen V3 quote route selection is empty")
+
+          manifests = (
+              sorted(
+                  Path("partial").glob(
+                      "v3-quote-events-shard-*.jsonl.manifest.json"
+                  )
+              )
+              + sorted(
+                  Path("prior-gaps").glob(
+                      "v3-quote-events-gap-*.jsonl.manifest.json"
+                  )
+              )
+          )
+          if not manifests:
+              raise SystemExit(
+                  "recovery sources have no successful V3 quote artifacts"
+              )
+
+          covered = []
+          sources = []
+          for path in manifests:
+              manifest = json.loads(path.read_text())
+              prov = manifest["provenance"]
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "source": path.parent.name,
+                  "manifest": path.name,
+                  "from_block": lo,
+                  "to_block": hi,
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+              })
+
+          gaps = plan_missing_subranges(
+              start,
+              head,
+              covered,
+              max_blocks=max_blocks,
+          )
+          if len(gaps) > 240:
+              raise SystemExit(
+                  "V3 quote gap plan exceeds 240 matrix jobs; recover a "
+                  "bounded range first, then rerun manifest gap recovery"
+              )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(gaps)
+          ]
+          report = {
+              "first_feedless_pons_use": start,
+              "snapshot_head": head,
+              "selected_routes": len(routes),
+              "max_gap_blocks": max_blocks,
+              "successful_sources": sources,
+              "gap_jobs": include,
+              "gap_job_count": len(include),
+              "gap_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
+          }
+          Path("artifacts/v3-quote-gap-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "matrix="
+                  + json.dumps({"include": include}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(f"gap_count={len(include)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  recover:
+    needs: plan
+    if: ${{ needs.plan.outputs.gap_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: routes
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V3 quote interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-quote-route-tape \
+            --routes routes/pons-v3-quote-routes.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out "artifacts/v3-quote-events-gap-${GAP_ID}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, recover]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover.result == 'success' || needs.recover.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v3-quote-fallback-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        with:
+          pattern: phase1-pons-v3-quote-fallback-gap-*
+          path: prior-gaps
+          merge-multiple: true
+          run-id: ${{ inputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.plan.outputs.gap_count != '0' }}
+        with:
+          pattern: phase1-pons-v3-quote-fallback-gap-*
+          path: gaps
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: routes
+          run-id: ${{ inputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-gap-plan
+          path: plan
+      - name: Merge recovered V3 quote route tape
+        run: |
+          mkdir -p artifacts
+          cp routes/pons-v3-quote-routes.jsonl artifacts/
+          cp routes/pons-v3-quote-route-selection-summary.json artifacts/
+          cp plan/v3-quote-gap-plan.json artifacts/
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["FIRST_FEEDLESS_PONS_USE"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          routes = [
+              json.loads(line)
+              for line in Path(
+                  "routes/pons-v3-quote-routes.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          activation = {
+              row["pool"].lower(): int(row["activation_block"])
+              for row in routes
+          }
+
+          files = (
+              list(Path("partial").glob("v3-quote-events-shard-*.jsonl"))
+              + list(Path("prior-gaps").glob("v3-quote-events-gap-*.jsonl"))
+              + list(Path("gaps").glob("v3-quote-events-gap-*.jsonl"))
+          )
+          if not files:
+              raise SystemExit("no V3 quote artifacts available for merge")
+
+          entries = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              prov = manifest["provenance"]
+              entries.append((
+                  int(prov["from_block"]),
+                  int(prov["to_block"]),
+                  path,
+                  manifest,
+              ))
+          entries.sort(key=lambda item: item[0])
+
+          previous_hi = None
+          expected_records = 0
+          manifests = []
+          for lo, hi, path, manifest in entries:
+              if previous_hi is None:
+                  assert lo == START, (lo, START, path.name)
+              else:
+                  assert lo == previous_hi + 1, (
+                      previous_hi, lo, path.name
+                  )
+              previous_hi = hi
+              expected_records += int(manifest["records"])
+              manifests.append({
+                  "source": path.parent.name,
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == HEAD, (previous_hi, HEAD)
+
+          counts = {"records": 0, "initializes": 0, "swaps": 0}
+
+          def rows():
+              prior = None
+              for _, _, path, manifest in entries:
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if prior is not None:
+                              assert prior < order, (prior, order, path.name)
+                          prior = order
+                          pool = row["pool"].lower()
+                          assert pool in activation, pool
+                          assert int(row["block_number"]) >= activation[pool]
+                          kind = row["event_type"]
+                          if kind == "v3_initialize":
+                              counts["initializes"] += 1
+                          elif kind == "v3_swap":
+                              counts["swaps"] += 1
+                          else:
+                              raise AssertionError(kind)
+                          counts["records"] += 1
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path(
+                  "artifacts/pons-v3-quote-fallback-events-full.jsonl"
+              ),
+              provenance={
+                  "source": "manifest_gap_aware_v3_quote_recovery",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "partial_run_id": int("${{ inputs.partial_run_id }}"),
+                  "prior_gap_run_id": (
+                      int("${{ inputs.prior_gap_run_id }}")
+                      if "${{ inputs.prior_gap_run_id }}"
+                      else None
+                  ),
+                  "routes": len(routes),
+                  "shards": manifests,
+              },
+          )
+          assert counts["records"] == expected_records
+          summary = {
+              "snapshot_head_block": HEAD,
+              "selected_routes": len(routes),
+              **counts,
+              "event_tape_sha256": snapshot["sha256"],
+              "source_files": len(entries),
+          }
+          Path(
+              "artifacts/pons-v3-quote-fallback-events-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Convert recovered V3 routes to generic quote USD tape
+        run: |
+          hlp pons-v3-quote-usd-tape \
+            --routes artifacts/pons-v3-quote-routes.jsonl \
+            --v3-events artifacts/pons-v3-quote-fallback-events-full.jsonl \
+            --state-out artifacts/pons-v3-quote-fallback-initial.jsonl \
+            --out artifacts/pons-v3-quote-fallback-updates.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error

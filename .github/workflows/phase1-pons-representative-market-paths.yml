@@ -1,0 +1,512 @@
+name: phase1-pons-representative-market-paths
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful phase1-pons-representative-sample-freeze run"
+        required: true
+        type: string
+      registry_run_id:
+        description: "Canonical full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      v1_v3_run_id:
+        description: "Successful phase1-pons-v1-v3-full run"
+        required: true
+        type: string
+      v2_curve_run_id:
+        description: "Canonical complete V2 curve run"
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        description: "Canonical complete V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      v2_v4_run_id:
+        description: "Successful phase1-pons-v2-v4-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      registry_run_id:
+        required: true
+        default: "33911022718"
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      v2_curve_run_id:
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: true
+        default: "33912452330"
+        type: string
+      v2_v4_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-market-paths-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: v1v3
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: v1v3_sources
+        name: Resolve representative V1 V3 shard sources
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v1v3/pons-v1-v3-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V1 V3 tape is not sharded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v1v3_sources.outputs.partial_run_id != '' && steps.v1v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v1v3_sources.outputs.prior_gap_run_id != '' && steps.v1v3_sources.outputs.prior_gap_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: v2curve
+          run-id: ${{ inputs.v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: v2v4
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - id: v2v4_sources
+        name: Resolve representative V2 V4 shard sources
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v2v4/pons-v2-v4-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V2 V4 tape is not sharded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v2v4_sources.outputs.partial_run_id != '' && steps.v2v4_sources.outputs.partial_run_id != inputs.v2_v4_run_id }}
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v2v4_sources.outputs.prior_gap_run_id != '' && steps.v2v4_sources.outputs.prior_gap_run_id != inputs.v2_v4_run_id }}
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Freeze representative launch and market-event paths
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.data.phase1_coverage import (
+              summarize_sharded_manifest_coverage,
+          )
+          from hlp.data.pons_representative_paths import (
+              build_representative_market_path_rows,
+              summarize_representative_market_paths,
+          )
+          from hlp.data.sharded_tape import iter_sharded_jsonl
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          SNAPSHOT_HEAD = 54_486_035
+
+          def read_jsonl(path):
+              with Path(path).open() as handle:
+                  for line in handle:
+                      if line.strip():
+                          yield json.loads(line)
+
+          def load_jsonl(path):
+              return list(read_jsonl(path))
+
+          sample = load_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative market-path freeze requires exactly 10 "
+                  f"sample tokens, got {len(sample)}"
+              )
+          groups = Counter(row["sample_group"] for row in sample)
+          if groups != {"runner": 5, "failure": 5}:
+              raise SystemExit(
+                  "representative market-path sample must contain five "
+                  f"runners and five failures: {dict(groups)}"
+              )
+          versions = Counter(row["pons_version"] for row in sample)
+          if set(versions) != {"v1", "v2"}:
+              raise SystemExit(
+                  "representative market-path sample must contain both "
+                  "Pons generations"
+              )
+
+          registry_manifest = json.loads(
+              Path(
+                  "registry/pons-full-launch-registry.jsonl.manifest.json"
+              ).read_text()
+          )
+          if int(registry_manifest["records"]) != 494_639:
+              raise SystemExit(
+                  "representative market-path registry record count changed"
+              )
+          registry_provenance = registry_manifest.get("provenance") or {}
+          if int(
+              registry_provenance.get(
+                  "snapshot_head_block",
+                  registry_provenance.get("snapshot_head", -1),
+              )
+          ) != SNAPSHOT_HEAD:
+              raise SystemExit(
+                  "representative market-path registry snapshot changed"
+              )
+
+          def require_manifest(path, *, source):
+              manifest = json.loads(Path(path).read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative market-path source chain changed: {path}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != SNAPSHOT_HEAD:
+                  raise SystemExit(
+                      f"representative market-path source snapshot changed: "
+                      f"{path}"
+                  )
+              allowed = {source} if isinstance(source, str) else set(source)
+              if provenance.get("source") not in allowed:
+                  raise SystemExit(
+                      f"representative market-path source provenance changed: "
+                      f"{path}"
+                  )
+              return manifest, provenance
+
+          v1_v3_manifest, v1_v3_provenance = require_manifest(
+              "v1v3/pons-v1-v3-full.jsonl.manifest.json",
+              source={
+                  "stream_merged_global_v3_topic_shards",
+                  "manifest_gap_aware_v1_v3_recovery",
+              },
+          )
+          if v1_v3_provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V1 V3 storage mode changed")
+          if int(
+              v1_v3_provenance.get("source_registry_run_id", -1)
+          ) != int("${{ inputs.registry_run_id }}"):
+              raise SystemExit(
+                  "representative V1 V3 tape used a different registry run"
+              )
+
+          v2_curve_manifest, v2_curve_provenance = require_manifest(
+              "v2curve/pons-v2-curve-full.jsonl.manifest.json",
+              source="stream_merged_pons_specific_curve_shards",
+          )
+          expected_v2_registry_sha = (
+              "06dc7d373f79dd43aa3bb4070187b5a8"
+              "ee426f0690f3f4f7f8d5cfce3cd3d48f"
+          )
+          if (
+              v2_curve_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+          ):
+              raise SystemExit(
+                  "representative V2 curve tape registry identity changed"
+              )
+
+          graduation_manifest, graduation_provenance = require_manifest(
+              "transition/pons-v2-graduations-full.jsonl.manifest.json",
+              source="merged_shared_v2_transition_shards",
+          )
+          registration_manifest, registration_provenance = require_manifest(
+              "transition/pons-v2-registrations-full.jsonl.manifest.json",
+              source="merged_shared_v2_transition_shards",
+          )
+          if (
+              graduation_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+              or registration_provenance.get("registry_sha256")
+              != expected_v2_registry_sha
+          ):
+              raise SystemExit(
+                  "representative V2 transition registry identity changed"
+              )
+
+          v2_v4_manifest, v2_v4_provenance = require_manifest(
+              "v2v4/pons-v2-v4-full.jsonl.manifest.json",
+              source={
+                  "stream_merged_global_poolmanager_v4_shards",
+                  "manifest_gap_aware_v4_recovery",
+              },
+          )
+          if v2_v4_provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit("representative V2 V4 storage mode changed")
+          if int(
+              v2_v4_provenance.get("transition_run_id", -1)
+          ) != int("${{ inputs.transition_run_id }}"):
+              raise SystemExit(
+                  "representative V2 V4 tape used a different transition run"
+              )
+
+          v1_sample_start = min(
+              int(row["launch_block"])
+              for row in sample
+              if row["pons_version"] == "v1"
+          )
+          v2_sample_start = min(
+              int(row["launch_block"])
+              for row in sample
+              if row["pons_version"] == "v2"
+          )
+          market_source_coverage = [
+              summarize_sharded_manifest_coverage(
+                  v1_v3_manifest,
+                  label="v1_v3",
+                  required_start=v1_sample_start,
+              ),
+              summarize_sharded_manifest_coverage(
+                  v2_curve_manifest,
+                  label="v2_curve",
+                  required_start=v2_sample_start,
+              ),
+              summarize_sharded_manifest_coverage(
+                  graduation_manifest,
+                  label="v2_graduation",
+                  required_start=v2_sample_start,
+              ),
+              summarize_sharded_manifest_coverage(
+                  registration_manifest,
+                  label="v2_registration",
+                  required_start=v2_sample_start,
+              ),
+              summarize_sharded_manifest_coverage(
+                  v2_v4_manifest,
+                  label="v2_v4",
+                  required_start=v2_sample_start,
+              ),
+          ]
+          Path(
+              "artifacts/"
+              "pons-representative-market-source-coverage.json"
+          ).write_text(
+              json.dumps(
+                  {
+                      "snapshot_head_block": SNAPSHOT_HEAD,
+                      "sources": market_source_coverage,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+
+          rows = build_representative_market_path_rows(
+              sample,
+              read_jsonl(
+                  "registry/pons-full-launch-registry.jsonl"
+              ),
+              v1_v3_rows=iter_sharded_jsonl(
+                  Path("v1v3-shards"),
+                  Path("v1v3/pons-v1-v3-full.jsonl.manifest.json"),
+              ),
+              v2_curve_rows=read_jsonl(
+                  "v2curve/pons-v2-curve-full.jsonl"
+              ),
+              graduation_rows=read_jsonl(
+                  "transition/pons-v2-graduations-full.jsonl"
+              ),
+              registration_rows=read_jsonl(
+                  "transition/pons-v2-registrations-full.jsonl"
+              ),
+              v2_v4_rows=iter_sharded_jsonl(
+                  Path("v2v4-shards"),
+                  Path("v2v4/pons-v2-v4-full.jsonl.manifest.json"),
+              ),
+          )
+          summary_rows = summarize_representative_market_paths(
+              rows,
+              sample,
+          )
+
+          if len(summary_rows) != 10:
+              raise SystemExit(
+                  "representative market-path summary must contain exactly "
+                  f"10 tokens, got {len(summary_rows)}"
+              )
+
+          source_runs = {
+              "sample_run_id": int("${{ inputs.sample_run_id }}"),
+              "registry_run_id": int("${{ inputs.registry_run_id }}"),
+              "v1_v3_run_id": int("${{ inputs.v1_v3_run_id }}"),
+              "v2_curve_run_id": int("${{ inputs.v2_curve_run_id }}"),
+              "transition_run_id": int("${{ inputs.transition_run_id }}"),
+              "v2_v4_run_id": int("${{ inputs.v2_v4_run_id }}"),
+          }
+          path_snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/pons-representative-market-paths.jsonl"
+              ),
+              provenance={
+                  "source": "frozen_phase1_full_tapes",
+                  "chain_id": 4663,
+                  "snapshot_head_block": SNAPSHOT_HEAD,
+                  "purpose": (
+                      "artifact-only representative launch/trade path "
+                      "extraction; no provider requests"
+                  ),
+                  **source_runs,
+              },
+          )
+          summary_snapshot = write_jsonl_snapshot(
+              summary_rows,
+              output=Path(
+                  "artifacts/pons-representative-market-path-summary.jsonl"
+              ),
+              provenance={
+                  "source": "pons-representative-market-paths.jsonl",
+                  "chain_id": 4663,
+                  "snapshot_head_block": SNAPSHOT_HEAD,
+                  "market_paths_sha256": path_snapshot["sha256"],
+                  **source_runs,
+              },
+          )
+
+          report = {
+              "snapshot_head_block": SNAPSHOT_HEAD,
+              "tokens": len(summary_rows),
+              "sample_groups": dict(sorted(groups.items())),
+              "pons_versions": dict(sorted(versions.items())),
+              "path_rows": len(rows),
+              "stage_counts": dict(sorted(Counter(
+                  row["path_stage"] for row in rows
+              ).items())),
+              "graduated_v2_tokens": sum(
+                  row["graduated"] for row in summary_rows
+              ),
+              "registered_v4_tokens": sum(
+                  row["registered_v4"] for row in summary_rows
+              ),
+              "tokens_with_v4_market_events": sum(
+                  row["has_v4_market_events"] for row in summary_rows
+              ),
+              "market_paths_sha256": path_snapshot["sha256"],
+              "summary_sha256": summary_snapshot["sha256"],
+              "continuous_market_sources": len(market_source_coverage),
+              **source_runs,
+          }
+          Path(
+              "artifacts/pons-representative-market-path-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: artifacts/
+          if-no-files-found: error

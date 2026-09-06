@@ -1,0 +1,29 @@
+name: phase1-pons-representative-evidence-one-shot
+# validation-generation: 11
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-representative-evidence-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    if: ${{ contains(github.event.head_commit.message, 'launch representative evidence') }}
+    uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
+    with:
+      eligibility_run_id: "33982556591"
+      oracle_run_id: "33974681334"
+      runner_smoke_run_id: "33920762592"
+      registry_run_id: "33911022718"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+      anchor_run_id: "33972109927"
+    secrets: inherit

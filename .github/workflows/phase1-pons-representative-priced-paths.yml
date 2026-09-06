@@ -1,0 +1,530 @@
+name: phase1-pons-representative-priced-paths
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful representative sample freeze run"
+        required: true
+        type: string
+      market_path_run_id:
+        description: "Successful representative market-path freeze run"
+        required: true
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote-audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        description: "Successful full WETH/USDG anchor run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Successful full stock-oracle run"
+        required: true
+        type: string
+      fallback_run_id:
+        description: "Successful full quote-fallback merge run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      market_path_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-priced-paths-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Replay exact representative USD price paths
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+          from hlp.data.phase1_coverage import (
+              summarize_sharded_manifest_coverage,
+              summarize_snapshot_manifest_coverage,
+          )
+          from hlp.data.pons_representative_prices import (
+              summarize_representative_priced_paths,
+              validate_representative_priced_path_rows,
+          )
+          from hlp.data.quote_usd import (
+              merge_quote_usd_tapes,
+              prepare_quote_usd_inputs,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.universe import build_v1_market_cap_points
+          from hlp.data.v2_curve import build_v2_curve_market_cap_points
+          from hlp.data.v4 import (
+              build_v2_graduation_seed_points,
+              build_v2_v4_market_cap_points,
+          )
+
+          HEAD = 54_486_035
+
+          def read_jsonl(path):
+              with Path(path).open() as handle:
+                  for line in handle:
+                      if line.strip():
+                          yield json.loads(line)
+
+          def load_jsonl(path):
+              return list(read_jsonl(path))
+
+          def require_manifest(path, *, snapshot=True):
+              manifest = json.loads(Path(path).read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative pricing source chain changed: {path}"
+                  )
+              if snapshot and int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"representative pricing source snapshot changed: {path}"
+                  )
+              return manifest
+
+          sample = load_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative priced path requires exactly 10 tokens"
+              )
+
+          market_manifest = require_manifest(
+              "market-paths/"
+              "pons-representative-market-paths.jsonl.manifest.json"
+          )
+          market_provenance = market_manifest.get("provenance") or {}
+          if int(
+              market_provenance.get("sample_run_id", -1)
+          ) != int("${{ inputs.sample_run_id }}"):
+              raise SystemExit(
+                  "representative priced path market-path sample run changed"
+              )
+          quote_manifest = require_manifest(
+              "quotes/pons-quote-registry.jsonl.manifest.json",
+              snapshot=False,
+          )
+          if int(quote_manifest["records"]) != 57 or quote_manifest[
+              "sha256"
+          ] != (
+              "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5"
+              "be49dd346dc"
+          ):
+              raise SystemExit(
+                  "representative priced path quote registry changed"
+              )
+          anchor_manifest = require_manifest(
+              "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+          )
+          oracle_initial_manifest = require_manifest(
+              "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+          )
+          oracle_updates_manifest = require_manifest(
+              "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+          )
+          fallback_initial_manifest = require_manifest(
+              "fallback/pons-quote-fallback-initial.jsonl.manifest.json"
+          )
+          fallback_updates_manifest = require_manifest(
+              "fallback/pons-quote-fallback-updates.jsonl.manifest.json"
+          )
+
+          sample_start = min(int(row["launch_block"]) for row in sample)
+          pricing_source_coverage = [
+              summarize_sharded_manifest_coverage(
+                  anchor_manifest,
+                  label="weth_usdg_anchor",
+                  required_start=sample_start,
+              ),
+              summarize_snapshot_manifest_coverage(
+                  oracle_initial_manifest,
+                  label="stock_oracle_initial",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  oracle_updates_manifest,
+                  label="stock_oracle_updates",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  fallback_initial_manifest,
+                  label="quote_fallback_initial",
+              ),
+              summarize_snapshot_manifest_coverage(
+                  fallback_updates_manifest,
+                  label="quote_fallback_updates",
+              ),
+          ]
+          Path(
+              "artifacts/"
+              "pons-representative-pricing-source-coverage.json"
+          ).write_text(
+              json.dumps(
+                  {
+                      "snapshot_head_block": HEAD,
+                      "sample_start_block": sample_start,
+                      "sources": pricing_source_coverage,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+
+          path_rows = load_jsonl(
+              "market-paths/pons-representative-market-paths.jsonl"
+          )
+          launches = [
+              row for row in path_rows
+              if row["path_stage"] == "launch"
+          ]
+          if len(launches) != 10:
+              raise SystemExit(
+                  "representative priced path must have exactly 10 launches"
+              )
+          v1_registry = [
+              row for row in launches if row["pons_version"] == "v1"
+          ]
+          v2_registry = [
+              row for row in launches if row["pons_version"] == "v2"
+          ]
+          v1_events = [
+              row for row in path_rows
+              if row["path_stage"] == "v1_v3"
+          ]
+          curve_events = [
+              row for row in path_rows
+              if row["path_stage"] == "v2_curve"
+          ]
+          graduations = [
+              row for row in path_rows
+              if row["path_stage"] == "v2_graduation"
+          ]
+          registrations = [
+              row for row in path_rows
+              if row["path_stage"] == "v2_registration"
+          ]
+          v4_events = [
+              row for row in path_rows
+              if row["path_stage"] == "v2_v4"
+          ]
+
+          initial = json.loads(
+              Path(
+                  "anchor/pons-weth-usdg-anchor-initial.json"
+              ).read_text()
+          )
+          initial_weth_usd = Decimal(initial["weth_usd"])
+          if initial_weth_usd <= 0:
+              raise SystemExit(
+                  "representative pricing initial WETH/USD is not positive"
+              )
+
+          quote_rows = load_jsonl(
+              "quotes/pons-quote-registry.jsonl"
+          )
+          quote_decimals = {
+              row["quote_token"].lower(): int(row["quote_decimals"])
+              for row in quote_rows
+              if row.get("quote_decimals") is not None
+          }
+          weth_decimals = quote_decimals.get(ROBINHOOD_WETH.lower())
+          usdg_decimals = quote_decimals.get(ROBINHOOD_USDG.lower())
+          if weth_decimals is None or usdg_decimals is None:
+              raise SystemExit(
+                  "representative pricing quote registry lacks WETH/USDG "
+                  "decimals"
+              )
+
+          def quote_inputs(*, include_fallback):
+              pairs = [
+                  (
+                      load_jsonl(
+                          "oracle/pons-stock-oracle-initial.jsonl"
+                      ),
+                      read_jsonl(
+                          "oracle/pons-stock-oracle-updates.jsonl"
+                      ),
+                  )
+              ]
+              if include_fallback:
+                  pairs.append(
+                      (
+                          load_jsonl(
+                              "fallback/"
+                              "pons-quote-fallback-initial.jsonl"
+                          ),
+                          read_jsonl(
+                              "fallback/"
+                              "pons-quote-fallback-updates.jsonl"
+                          ),
+                      )
+                  )
+              states, updates = merge_quote_usd_tapes(pairs)
+              return prepare_quote_usd_inputs(states, [updates])
+
+          output = []
+
+          if v1_registry:
+              initial_quote_usd, quote_updates = quote_inputs(
+                  include_fallback=False
+              )
+              for point in build_v1_market_cap_points(
+                  v1_registry,
+                  iter(v1_events),
+                  read_jsonl(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl"
+                  ),
+                  initial_weth_usd=initial_weth_usd,
+                  weth_decimals=weth_decimals,
+                  usdg_decimals=usdg_decimals,
+                  initial_quote_usd=initial_quote_usd,
+                  quote_usd_updates=quote_updates,
+                  quote_decimals_by_token=quote_decimals,
+              ):
+                  row = dict(point)
+                  row["pons_version"] = "v1"
+                  row["price_path_phase"] = "v1_v3"
+                  output.append(row)
+
+          if v2_registry:
+              initial_quote_usd, quote_updates = quote_inputs(
+                  include_fallback=True
+              )
+              for point in build_v2_curve_market_cap_points(
+                  v2_registry,
+                  iter(curve_events),
+                  read_jsonl(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl"
+                  ),
+                  initial_weth_usd=initial_weth_usd,
+                  initial_quote_usd=initial_quote_usd,
+                  quote_usd_updates=quote_updates,
+              ):
+                  row = dict(point)
+                  row["pons_version"] = "v2"
+                  row["price_path_phase"] = "v2_curve"
+                  output.append(row)
+
+              initial_quote_usd, quote_updates = quote_inputs(
+                  include_fallback=True
+              )
+              for point in build_v2_graduation_seed_points(
+                  v2_registry,
+                  graduations,
+                  read_jsonl(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl"
+                  ),
+                  initial_weth_usd=initial_weth_usd,
+                  initial_quote_usd=initial_quote_usd,
+                  quote_usd_updates=quote_updates,
+              ):
+                  row = dict(point)
+                  row["pons_version"] = "v2"
+                  row["price_path_phase"] = "v2_seed"
+                  output.append(row)
+
+              initial_quote_usd, quote_updates = quote_inputs(
+                  include_fallback=True
+              )
+              for point in build_v2_v4_market_cap_points(
+                  v2_registry,
+                  registrations,
+                  iter(v4_events),
+                  read_jsonl(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl"
+                  ),
+                  initial_weth_usd=initial_weth_usd,
+                  initial_quote_usd=initial_quote_usd,
+                  quote_usd_updates=quote_updates,
+              ):
+                  row = dict(point)
+                  row["pons_version"] = "v2"
+                  row["price_path_phase"] = "v2_v4"
+                  output.append(row)
+
+          phase_order = {
+              "v2_curve": 0,
+              "v1_v3": 1,
+              "v2_seed": 2,
+              "v2_v4": 3,
+          }
+          output.sort(
+              key=lambda row: (
+                  int(row["block_number"]),
+                  -1
+                  if row.get("transaction_index") is None
+                  else int(row["transaction_index"]),
+                  int(row["log_index"]),
+                  phase_order[row["price_path_phase"]],
+                  row["token"],
+              )
+          )
+          output = validate_representative_priced_path_rows(
+              output,
+              sample,
+          )
+          summary_rows = summarize_representative_priced_paths(
+              output,
+              sample,
+          )
+          if len(summary_rows) != 10:
+              raise SystemExit(
+                  "representative priced-path summary is not exactly 10"
+              )
+
+          source_runs = {
+              "sample_run_id": int("${{ inputs.sample_run_id }}"),
+              "market_path_run_id": int(
+                  "${{ inputs.market_path_run_id }}"
+              ),
+              "quote_audit_run_id": int(
+                  "${{ inputs.quote_audit_run_id }}"
+              ),
+              "anchor_run_id": int("${{ inputs.anchor_run_id }}"),
+              "oracle_run_id": int("${{ inputs.oracle_run_id }}"),
+              "fallback_run_id": int("${{ inputs.fallback_run_id }}"),
+          }
+          snapshot = write_jsonl_snapshot(
+              output,
+              output=Path(
+                  "artifacts/pons-representative-priced-paths.jsonl"
+              ),
+              provenance={
+                  "source": "causal_replay_of_frozen_representative_paths",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "market_path_sha256": market_manifest["sha256"],
+                  **source_runs,
+              },
+          )
+          summary_snapshot = write_jsonl_snapshot(
+              summary_rows,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-priced-path-summary.jsonl"
+              ),
+              provenance={
+                  "source": "pons-representative-priced-paths.jsonl",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "priced_paths_sha256": snapshot["sha256"],
+                  **source_runs,
+              },
+          )
+          report = {
+              "snapshot_head_block": HEAD,
+              "tokens": len(summary_rows),
+              "price_points": len(output),
+              "priced_points": sum(
+                  row["priced_points"] for row in summary_rows
+              ),
+              "unpriced_points": sum(
+                  row["unpriced_points"] for row in summary_rows
+              ),
+              "pricing_complete_tokens": sum(
+                  row["pricing_complete"] for row in summary_rows
+              ),
+              "pricing_source_coverage": len(pricing_source_coverage),
+              "priced_paths_sha256": snapshot["sha256"],
+              "summary_sha256": summary_snapshot["sha256"],
+              **source_runs,
+          }
+          Path(
+              "artifacts/pons-representative-priced-path-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: artifacts/
+          if-no-files-found: error

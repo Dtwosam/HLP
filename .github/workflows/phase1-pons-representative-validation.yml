@@ -1,0 +1,663 @@
+name: phase1-pons-representative-validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_run_id:
+        description: "Successful representative sample freeze run"
+        required: true
+        type: string
+      v1_eligibility_run_id:
+        description: "Successful V1 lifecycle eligibility run"
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        description: "Successful V2 lifecycle eligibility run"
+        required: true
+        type: string
+      v1_v3_run_id:
+        description: "V1/V3 full or recovered venue run used by market paths"
+        required: true
+        type: string
+      v2_v4_run_id:
+        description: "V2/V4 full or recovered venue run used by market paths"
+        required: true
+        type: string
+      transfer_run_id:
+        description: "Successful representative transfer/holder run"
+        required: true
+        type: string
+      market_path_run_id:
+        description: "Successful representative market-path freeze run"
+        required: true
+        type: string
+      priced_path_run_id:
+        description: "Successful representative priced-path replay run"
+        required: true
+        type: string
+      dex_crosscheck_run_id:
+        description: "Successful representative DEX cross-check run"
+        required: true
+        type: string
+      registry_run_id:
+        description: "Canonical full Pons registry run"
+        required: true
+        type: string
+      v2_curve_run_id:
+        description: "Canonical full Pons V2 curve run"
+        required: true
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Canonical WETH/USDG anchor run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Canonical stock-oracle run"
+        required: true
+        type: string
+      fallback_run_id:
+        description: "Eligibility parent containing quote fallback artifacts"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      sample_run_id:
+        required: true
+        type: string
+      v1_eligibility_run_id:
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      v2_v4_run_id:
+        required: true
+        type: string
+      transfer_run_id:
+        required: true
+        type: string
+      market_path_run_id:
+        required: true
+        type: string
+      priced_path_run_id:
+        required: true
+        type: string
+      dex_crosscheck_run_id:
+        required: true
+        type: string
+      registry_run_id:
+        required: true
+        type: string
+      v2_curve_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-transfers-full
+          path: transfers
+          run-id: ${{ inputs.transfer_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-crosscheck
+          path: dex
+          run-id: ${{ inputs.dex_crosscheck_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate representative evidence provenance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          HEAD = 54_486_035
+          sample_run = int("${{ inputs.sample_run_id }}")
+          v1_run = int("${{ inputs.v1_eligibility_run_id }}")
+          v2_run = int("${{ inputs.v2_eligibility_run_id }}")
+          v1_v3_run = int("${{ inputs.v1_v3_run_id }}")
+          v2_v4_run = int("${{ inputs.v2_v4_run_id }}")
+          market_path_run = int("${{ inputs.market_path_run_id }}")
+          registry_run = int("${{ inputs.registry_run_id }}")
+          v2_curve_run = int("${{ inputs.v2_curve_run_id }}")
+          transition_run = int("${{ inputs.transition_run_id }}")
+          quote_audit_run = int("${{ inputs.quote_audit_run_id }}")
+          anchor_run = int("${{ inputs.anchor_run_id }}")
+          oracle_run = int("${{ inputs.oracle_run_id }}")
+          fallback_run = int("${{ inputs.fallback_run_id }}")
+
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          if int(sample_summary["v1_eligibility_run_id"]) != v1_run:
+              raise SystemExit(
+                  "representative validation sample V1 run mismatch"
+              )
+          if int(sample_summary["v2_eligibility_run_id"]) != v2_run:
+              raise SystemExit(
+                  "representative validation sample V2 run mismatch"
+              )
+          if int(sample_summary.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "representative validation runner smoke run mismatch"
+              )
+          if sample_summary.get("runner_smoke_universe_sha256") != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "representative validation runner smoke universe SHA mismatch"
+              )
+          if sample_summary.get("runner_smoke_outcomes_sha256") != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "representative validation runner smoke outcomes SHA mismatch"
+              )
+
+          def manifest_and_provenance(path, *, snapshot=True):
+              manifest = json.loads(Path(path).read_text())
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative evidence chain mismatch: {path}"
+                  )
+              if snapshot and int(
+                  prov.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"representative evidence snapshot mismatch: {path}"
+                  )
+              return manifest, prov
+
+          v1_lifecycle_manifest, _v1_lifecycle = manifest_and_provenance(
+              "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          v2_lifecycle_manifest, _v2_lifecycle = manifest_and_provenance(
+              "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+          )
+
+          def lifecycle_venue_run_id(provenance, field, lifecycle_run_id):
+              value = provenance.get(field)
+              if value is None:
+                  if lifecycle_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          "representative lifecycle venue provenance missing: "
+                          f"{field} run={lifecycle_run_id}"
+                      )
+                  return lifecycle_run_id
+              run_id = int(value)
+              if run_id <= 0:
+                  raise SystemExit(
+                      "representative lifecycle venue run is invalid: "
+                      f"{field}={run_id}"
+                  )
+              return run_id
+
+          lifecycle_v1_v3_run = lifecycle_venue_run_id(
+              _v1_lifecycle,
+              "v1_v3_run_id",
+              v1_run,
+          )
+          lifecycle_v2_v4_run = lifecycle_venue_run_id(
+              _v2_lifecycle,
+              "v4_run_id",
+              v2_run,
+          )
+          if lifecycle_v1_v3_run != v1_v3_run:
+              raise SystemExit(
+                  "representative V1 lifecycle/market venue run mismatch"
+              )
+          if lifecycle_v2_v4_run != v2_v4_run:
+              raise SystemExit(
+                  "representative V2 lifecycle/market venue run mismatch"
+              )
+
+          transfer_manifest, transfer = manifest_and_provenance(
+              "transfers/"
+              "pons-representative-transfers-full.jsonl.manifest.json"
+          )
+          market_manifest, market = manifest_and_provenance(
+              "market-paths/"
+              "pons-representative-market-paths.jsonl.manifest.json"
+          )
+          priced_manifest, priced = manifest_and_provenance(
+              "priced-paths/"
+              "pons-representative-priced-paths.jsonl.manifest.json"
+          )
+          dex_manifest, dex = manifest_and_provenance(
+              "dex/"
+              "pons-representative-dex-crosscheck.jsonl.manifest.json",
+              snapshot=False,
+          )
+          for label, prov in [
+              ("transfer", transfer),
+              ("market_path", market),
+              ("priced_path", priced),
+              ("dex", dex),
+          ]:
+              if int(prov.get("sample_run_id", -1)) != sample_run:
+                  raise SystemExit(
+                      f"representative {label} sample run mismatch"
+                  )
+
+          if int(
+              market.get("v1_v3_run_id", -1)
+          ) != v1_v3_run:
+              raise SystemExit(
+                  "representative market path V1 venue run mismatch"
+              )
+          if int(
+              market.get("v2_v4_run_id", -1)
+          ) != v2_v4_run:
+              raise SystemExit(
+                  "representative market path V2 venue run mismatch"
+              )
+          for field, expected in (
+              ("registry_run_id", registry_run),
+              ("v2_curve_run_id", v2_curve_run),
+              ("transition_run_id", transition_run),
+          ):
+              if int(market.get(field, -1)) != expected:
+                  raise SystemExit(
+                      f"representative market path {field} mismatch"
+                  )
+          if int(
+              priced.get("market_path_run_id", -1)
+          ) != market_path_run:
+              raise SystemExit(
+                  "representative priced path source run mismatch"
+              )
+          if int(dex.get("v1_eligibility_run_id", -1)) != v1_run:
+              raise SystemExit(
+                  "representative DEX V1 lifecycle run mismatch"
+              )
+          if int(dex.get("v2_eligibility_run_id", -1)) != v2_run:
+              raise SystemExit(
+                  "representative DEX V2 lifecycle run mismatch"
+              )
+          if int(
+              dex.get("priced_path_run_id", -1)
+          ) != int("${{ inputs.priced_path_run_id }}"):
+              raise SystemExit(
+                  "representative DEX priced-path run mismatch"
+              )
+          for field, expected in (
+              ("quote_audit_run_id", quote_audit_run),
+              ("anchor_run_id", anchor_run),
+              ("oracle_run_id", oracle_run),
+              ("fallback_run_id", fallback_run),
+          ):
+              if int(priced.get(field, -1)) != expected:
+                  raise SystemExit(
+                      f"representative priced path {field} mismatch"
+                  )
+          if int(dex.get("registry_run_id", -1)) != registry_run:
+              raise SystemExit(
+                  "representative DEX registry run mismatch"
+              )
+          if int(dex.get("transition_run_id", -1)) != transition_run:
+              raise SystemExit(
+                  "representative DEX transition run mismatch"
+              )
+          print(json.dumps({
+              "sample_run_id": sample_run,
+              "v1_eligibility_run_id": v1_run,
+              "v2_eligibility_run_id": v2_run,
+              "v1_v3_run_id": v1_v3_run,
+              "v2_v4_run_id": v2_v4_run,
+              "lifecycle_v1_v3_run_id": lifecycle_v1_v3_run,
+              "lifecycle_v2_v4_run_id": lifecycle_v2_v4_run,
+              "transfer_run_id": int("${{ inputs.transfer_run_id }}"),
+              "market_path_run_id": market_path_run,
+              "priced_path_run_id": int(
+                  "${{ inputs.priced_path_run_id }}"
+              ),
+              "dex_crosscheck_run_id": int(
+                  "${{ inputs.dex_crosscheck_run_id }}"
+              ),
+              "v1_eligibility_sha256": v1_lifecycle_manifest["sha256"],
+              "v2_eligibility_sha256": v2_lifecycle_manifest["sha256"],
+              "provenance_consistent": True,
+          }, sort_keys=True))
+          PY
+      - name: Build fail-closed representative validation bundle
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.phase1_coverage import (
+              summarize_sharded_manifest_coverage,
+              validate_representative_coverage_report,
+          )
+          from hlp.data.pons_representative_validation import (
+              build_representative_validation_rows,
+              summarize_representative_validation,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          sample = read_jsonl(
+              "sample/pons-representative-sample.jsonl"
+          )
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          if len(sample) != 10:
+              raise SystemExit(
+                  "representative coverage requires exactly 10 sample tokens"
+              )
+          sample_start = min(int(row["launch_block"]) for row in sample)
+
+          market_coverage = json.loads(
+              Path(
+                  "market-paths/"
+                  "pons-representative-market-source-coverage.json"
+              ).read_text()
+          )
+          pricing_coverage = json.loads(
+              Path(
+                  "priced-paths/"
+                  "pons-representative-pricing-source-coverage.json"
+              ).read_text()
+          )
+          transfer_manifest = json.loads(
+              Path(
+                  "transfers/"
+                  "pons-representative-transfers-full.jsonl.manifest.json"
+              ).read_text()
+          )
+          transfer_coverage = summarize_sharded_manifest_coverage(
+              transfer_manifest,
+              label="representative_transfers",
+              required_start=sample_start,
+              exact_start=True,
+          )
+          coverage_sources = [
+              *list(market_coverage.get("sources") or []),
+              *list(pricing_coverage.get("sources") or []),
+              transfer_coverage,
+          ]
+          coverage = validate_representative_coverage_report(
+              {"sources": coverage_sources},
+              sample_start_block=sample_start,
+          )
+          coverage_snapshot = write_jsonl_snapshot(
+              coverage_sources,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-source-coverage.jsonl"
+              ),
+              provenance={
+                  "source": "representative_upstream_manifest_coverage",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "transfer_run_id": int(
+                      "${{ inputs.transfer_run_id }}"
+                  ),
+                  "market_path_run_id": int(
+                      "${{ inputs.market_path_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ inputs.priced_path_run_id }}"
+                  ),
+              },
+          )
+
+          transfer_summary = json.loads(
+              Path(
+                  "transfers/pons-representative-transfers-summary.json"
+              ).read_text()
+          )
+          holder_validation = json.loads(
+              Path(
+                  "transfers/pons-representative-holder-validation.json"
+              ).read_text()
+          )
+          if int(transfer_summary["sample_tokens"]) != 10:
+              raise SystemExit(
+                  "representative transfer evidence does not cover 10 tokens"
+              )
+          if int(transfer_summary["first_transfer_mint_tokens"]) != 10:
+              raise SystemExit(
+                  "representative transfer evidence does not prove 10 mints"
+              )
+          if int(holder_validation["tokens"]) != 10:
+              raise SystemExit(
+                  "representative holder validation does not cover 10 tokens"
+              )
+
+          rows = build_representative_validation_rows(
+              sample,
+              v1_lifecycle_rows=read_jsonl(
+                  "v1/pons-v1-lifecycle-eligibility.jsonl"
+              ),
+              v2_lifecycle_rows=read_jsonl(
+                  "v2/pons-v2-lifecycle-eligibility.jsonl"
+              ),
+              holder_summary_rows=read_jsonl(
+                  "transfers/pons-representative-holder-summary.jsonl"
+              ),
+              dex_crosscheck_rows=read_jsonl(
+                  "dex/pons-representative-dex-crosscheck.jsonl"
+              ),
+              market_path_summary_rows=read_jsonl(
+                  "market-paths/"
+                  "pons-representative-market-path-summary.jsonl"
+              ),
+              priced_path_summary_rows=read_jsonl(
+                  "priced-paths/"
+                  "pons-representative-priced-path-summary.jsonl"
+              ),
+          )
+          summary = summarize_representative_validation(rows)
+          summary.update({
+              "coverage_sources": coverage["sources"],
+              "continuous_sharded_sources": (
+                  coverage["continuous_sharded_sources"]
+              ),
+              "snapshot_pinned_sources": (
+                  coverage["snapshot_pinned_sources"]
+              ),
+              "coverage_sample_start_block": (
+                  coverage["sample_start_block"]
+              ),
+              "no_unexplained_block_gaps": (
+                  coverage["no_unexplained_block_gaps"]
+              ),
+              "source_coverage_sha256": coverage_snapshot["sha256"],
+              "runner_smoke_run_id": int(
+                  sample_summary["runner_smoke_run_id"]
+              ),
+              "runner_smoke_universe_sha256": sample_summary[
+                  "runner_smoke_universe_sha256"
+              ],
+              "runner_smoke_outcomes_sha256": sample_summary[
+                  "runner_smoke_outcomes_sha256"
+              ],
+          })
+          if summary["tokens"] != 10 or summary["complete_tokens"] != 10:
+              raise SystemExit(
+                  "representative validation must contain exactly 10 "
+                  "complete tokens"
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/pons-representative-validation.jsonl"
+              ),
+              provenance={
+                  "source": "phase1_representative_evidence_join",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "runner_smoke_run_id": int(
+                      sample_summary["runner_smoke_run_id"]
+                  ),
+                  "runner_smoke_universe_sha256": sample_summary[
+                      "runner_smoke_universe_sha256"
+                  ],
+                  "runner_smoke_outcomes_sha256": sample_summary[
+                      "runner_smoke_outcomes_sha256"
+                  ],
+                  "v1_eligibility_run_id": int(
+                      "${{ inputs.v1_eligibility_run_id }}"
+                  ),
+                  "v2_eligibility_run_id": int(
+                      "${{ inputs.v2_eligibility_run_id }}"
+                  ),
+                  "v1_v3_run_id": int(
+                      "${{ inputs.v1_v3_run_id }}"
+                  ),
+                  "v2_v4_run_id": int(
+                      "${{ inputs.v2_v4_run_id }}"
+                  ),
+                  "transfer_run_id": int(
+                      "${{ inputs.transfer_run_id }}"
+                  ),
+                  "market_path_run_id": int(
+                      "${{ inputs.market_path_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ inputs.priced_path_run_id }}"
+                  ),
+                  "dex_crosscheck_run_id": int(
+                      "${{ inputs.dex_crosscheck_run_id }}"
+                  ),
+                  "registry_run_id": int(
+                      "${{ inputs.registry_run_id }}"
+                  ),
+                  "v2_curve_run_id": int(
+                      "${{ inputs.v2_curve_run_id }}"
+                  ),
+                  "transition_run_id": int(
+                      "${{ inputs.transition_run_id }}"
+                  ),
+                  "quote_audit_run_id": int(
+                      "${{ inputs.quote_audit_run_id }}"
+                  ),
+                  "anchor_run_id": int(
+                      "${{ inputs.anchor_run_id }}"
+                  ),
+                  "oracle_run_id": int(
+                      "${{ inputs.oracle_run_id }}"
+                  ),
+                  "fallback_run_id": int(
+                      "${{ inputs.fallback_run_id }}"
+                  ),
+                  "v1_eligibility_sha256": json.loads(
+                      Path(
+                          "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+                      ).read_text()
+                  )["sha256"],
+                  "v2_eligibility_sha256": json.loads(
+                      Path(
+                          "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+                      ).read_text()
+                  )["sha256"],
+                  "source_coverage_sha256": coverage_snapshot["sha256"],
+              },
+          )
+          summary["validation_sha256"] = snapshot["sha256"]
+          summary["snapshot_head_block"] = 54_486_035
+          Path(
+              "artifacts/pons-representative-validation-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: artifacts/
+          if-no-files-found: error

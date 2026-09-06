@@ -1,0 +1,285 @@
+name: phase1-pons-skhy-v4-known-pool-continuation
+
+on:
+  workflow_dispatch:
+    inputs:
+      prior_probe_run_id:
+        description: "Run containing the cumulative residual V4 quote probe"
+        required: true
+        default: "33926428274"
+        type: string
+      prior_probe_artifact_name:
+        description: "Artifact containing the cumulative residual probe"
+        required: true
+        default: "phase1-pons-residual-v4-forward-probe"
+        type: string
+      prior_probe_filename:
+        description: "Cumulative residual probe JSONL filename"
+        required: true
+        default: "pons-residual-v4-forward-probe.jsonl"
+        type: string
+      forward_blocks:
+        description: "Maximum continuation blocks; capped at 100,000"
+        required: true
+        default: "100000"
+        type: string
+      expected_prior_search_end:
+        description: "Optional exact prior search boundary; empty for chained segments"
+        required: false
+        default: "52863525"
+        type: string
+      output_artifact_name:
+        description: "Artifact name for this continuation segment"
+        required: true
+        default: "phase1-pons-skhy-v4-known-pool-continuation"
+        type: string
+  workflow_call:
+    inputs:
+      prior_probe_run_id:
+        required: true
+        type: string
+      prior_probe_artifact_name:
+        required: true
+        type: string
+      prior_probe_filename:
+        required: true
+        type: string
+      forward_blocks:
+        required: true
+        type: string
+      expected_prior_search_end:
+        required: false
+        default: ""
+        type: string
+      output_artifact_name:
+        required: true
+        default: "phase1-pons-skhy-v4-known-pool-continuation"
+        type: string
+    outputs:
+      search_to_block:
+        description: "Inclusive end of the completed SKHY V4 segment"
+        value: ${{ jobs.continue_known_pool.outputs.search_to_block }}
+      route_ready:
+        description: "Whether the frozen SKHY V4 route resolved"
+        value: ${{ jobs.continue_known_pool.outputs.route_ready }}
+      continue_needed:
+        description: "Whether another bounded V4 segment is required"
+        value: ${{ jobs.continue_known_pool.outputs.continue_needed }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-skhy-v4-known-pool-continuation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
+  SKHY_POOL_ID: '0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601'
+jobs:
+  continue_known_pool:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      search_to_block: ${{ steps.result.outputs.search_to_block }}
+      route_ready: ${{ steps.result.outputs.route_ready }}
+      continue_needed: ${{ steps.result.outputs.continue_needed }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      FORWARD_BLOCKS: ${{ inputs.forward_blocks }}
+      EXPECTED_PRIOR_SEARCH_END: ${{ inputs.expected_prior_search_end }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.prior_probe_artifact_name }}
+          path: prior
+          run-id: ${{ inputs.prior_probe_run_id }}
+          github-token: ${{ github.token }}
+      - name: Prove frozen SKHY candidate before continuation
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          forward_blocks = int(os.environ["FORWARD_BLOCKS"])
+          if not 1 <= forward_blocks <= 100_000:
+              raise SystemExit(
+                  "forward_blocks must be between 1 and 100000"
+              )
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "prior/${{ inputs.prior_probe_filename }}"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          skhy = [
+              row for row in rows
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
+          ]
+          if len(skhy) != 1:
+              raise SystemExit(
+                  "expected exactly one SKHY cumulative V4 quote row: "
+                  f"found={len(skhy)}"
+              )
+          row = skhy[0]
+          expected_end = os.environ["EXPECTED_PRIOR_SEARCH_END"].strip()
+          if expected_end and int(row["search_to_block"]) != int(
+              expected_end
+          ):
+              raise SystemExit(
+                  "SKHY prior search boundary changed from expected evidence"
+              )
+          candidates = row.get("v4_candidates", [])
+          if len(candidates) != 1:
+              raise SystemExit(
+                  "expected exactly one frozen SKHY V4 candidate"
+              )
+          candidate = candidates[0]
+          if candidate["pool_id"].lower() != os.environ["SKHY_POOL_ID"]:
+              raise SystemExit("frozen SKHY V4 pool id changed")
+          initialize = candidate.get("initialize")
+          if not initialize:
+              raise SystemExit("frozen SKHY candidate is missing Initialize")
+          currencies = {
+              initialize["currency0"].lower(),
+              initialize["currency1"].lower(),
+          }
+          if currencies != {
+              os.environ["SKHY_TOKEN"],
+              "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          }:
+              raise SystemExit("frozen SKHY pool currencies are not SKHY/USDG")
+
+          report = {
+              "quote_token": row["quote_token"],
+              "symbol": row["symbol"],
+              "launches": int(row["launches"]),
+              "pool_id": candidate["pool_id"],
+              "initialize_block": int(initialize["block_number"]),
+              "prior_search_to_block": int(row["search_to_block"]),
+              "continuation_from_block": int(row["search_to_block"]) + 1,
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "remaining_blocks": (
+                  int(os.environ["SNAPSHOT_HEAD"])
+                  - int(row["search_to_block"])
+              ),
+              "forward_blocks": forward_blocks,
+              "route_ready_before_segment": bool(
+                  row.get("causal_route_ready")
+                  or row.get("delayed_route_ready")
+              ),
+          }
+          Path("artifacts/skhy-known-pool-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Continue only the frozen SKHY pool
+        run: |
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-extend-v4-quote-routes \
+            --probe "prior/${{ inputs.prior_probe_filename }}" \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --forward-blocks "$FORWARD_BLOCKS" \
+            --known-pool-only \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --out artifacts/pons-skhy-v4-known-pool-continuation.jsonl
+      - id: result
+        name: Summarize SKHY continuation result
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-skhy-v4-known-pool-continuation.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          skhy = [
+              row for row in rows
+              if row["quote_token"].lower() == os.environ["SKHY_TOKEN"]
+          ]
+          if len(skhy) != 1:
+              raise SystemExit(
+                  f"expected one SKHY row after continuation, got {len(skhy)}"
+              )
+          row = skhy[0]
+          candidates = row.get("v4_candidates", [])
+          if len(candidates) != 1:
+              raise SystemExit(
+                  "known-pool continuation unexpectedly changed candidate count"
+              )
+          if candidates[0]["pool_id"].lower() != os.environ["SKHY_POOL_ID"]:
+              raise SystemExit(
+                  "known-pool continuation returned a different SKHY pool"
+              )
+          if row.get("continuation_mode") != "known_pool_only":
+              raise SystemExit(
+                  "SKHY continuation did not use known_pool_only mode"
+              )
+          ready = bool(
+              row.get("causal_route_ready")
+              or row.get("delayed_route_ready")
+          )
+          report = {
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "quote_token": row["quote_token"],
+              "symbol": row["symbol"],
+              "launches": int(row["launches"]),
+              "pool_id": candidates[0]["pool_id"],
+              "search_to_block": int(row["search_to_block"]),
+              "route_ready": ready,
+              "causal_route_ready": bool(row.get("causal_route_ready")),
+              "delayed_route_ready": bool(row.get("delayed_route_ready")),
+              "first_post_use_swap": candidates[0].get(
+                  "first_post_use_swap"
+              ),
+              "remaining_unsearched_blocks": max(
+                  0,
+                  int(os.environ["SNAPSHOT_HEAD"])
+                  - int(row["search_to_block"]),
+              ),
+          }
+          Path("artifacts/pons-skhy-v4-known-pool-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          continue_needed = (
+              not ready
+              and int(row["search_to_block"])
+              < int(os.environ["SNAPSHOT_HEAD"])
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"search_to_block={int(row['search_to_block'])}\n"
+              )
+              handle.write(
+                  f"route_ready={'true' if ready else 'false'}\n"
+              )
+              handle.write(
+                  "continue_needed="
+                  f"{'true' if continue_needed else 'false'}\n"
+              )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.output_artifact_name }}
+          path: artifacts/
+          if-no-files-found: error

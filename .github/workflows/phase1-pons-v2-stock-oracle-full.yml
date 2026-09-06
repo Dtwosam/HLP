@@ -1,0 +1,188 @@
+name: phase1-pons-v2-stock-oracle-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      quote_audit_run_id:
+        description: "Successful quote-audit run containing phase1-pons-v2-quote-audit"
+        required: true
+        default: "33912818816"
+        type: string
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-stock-oracle-full-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_V2_LAUNCH: '27027321'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '16'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-quote-audit
+          path: quotes
+          run-id: ${{ env.QUOTE_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - id: bounds
+        name: Compute exact oracle shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_V2_LAUNCH"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire supported Stock Token oracle shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-pons-stock-oracle-lifecycle             --quote-registry quotes/pons-v2-quote-registry.jsonl             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --state-out "artifacts/oracle-state-shard-${SHARD}.jsonl"             --out "artifacts/oracle-updates-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-oracle-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-oracle-*
+          path: downloads
+          merge-multiple: true
+      - name: Merge oracle checkpoints and updates
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          state_files = sorted(Path("downloads").glob("oracle-state-shard-*.jsonl"))
+          update_files = sorted(Path("downloads").glob("oracle-updates-shard-*.jsonl"))
+          assert len(state_files) == 16, [p.name for p in state_files]
+          assert len(update_files) == 16, [p.name for p in update_files]
+
+          checkpoints = []
+          for path in state_files:
+              for line in path.read_text().splitlines():
+                  if line.strip():
+                      checkpoints.append(json.loads(line))
+          checkpoints.sort(key=lambda row: (
+              int(row["block_number"]),
+              row["quote_token"].lower(),
+          ))
+
+          # Earliest checkpoint for each quote is the causal activation state.
+          initial_by_quote = {}
+          for row in checkpoints:
+              initial_by_quote.setdefault(row["quote_token"].lower(), row)
+          initial_states = sorted(
+              initial_by_quote.values(),
+              key=lambda row: (
+                  int(row["activation_block"]),
+                  row["quote_token"].lower(),
+              ),
+          )
+
+          stats = {"updates": 0}
+          def updates():
+              prior = None
+              for path in update_files:
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if prior is not None:
+                              assert prior < order, (prior, order)
+                          prior = order
+                          stats["updates"] += 1
+                          yield row
+
+          state_snapshot = write_jsonl_snapshot(
+              initial_states,
+              output=Path("artifacts/pons-v2-stock-oracle-initial.jsonl"),
+              provenance={
+                  "source": "earliest_causal_checkpoint_per_v2_quote",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "quote_audit_run_id": int(os.environ["QUOTE_AUDIT_RUN_ID"]),
+              },
+          )
+          update_snapshot = write_jsonl_snapshot(
+              updates(),
+              output=Path("artifacts/pons-v2-stock-oracle-updates.jsonl"),
+              provenance={
+                  "source": "stream_merged_staggered_chainlink_shards",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "quote_audit_run_id": int(os.environ["QUOTE_AUDIT_RUN_ID"]),
+              },
+          )
+          summary = {
+              "snapshot_head_block": 54_486_035,
+              "stock_quote_assets": len(initial_states),
+              "checkpoints": len(checkpoints),
+              "oracle_updates": stats["updates"],
+              "initial_sha256": state_snapshot["sha256"],
+              "updates_sha256": update_snapshot["sha256"],
+          }
+          Path("artifacts/pons-v2-stock-oracle-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-stock-oracle-full
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,43 @@
+name: phase1-blockscout-history-smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pons-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Sample earliest 100 Pons V1 launches
+        run: hlp --timeout 20 --attempts 3 blockscout-pons-sample --version v1 --limit 100 --out artifacts/pons-v1-launches.jsonl
+      - name: Sample earliest 100 Pons V2 launches
+        run: hlp --timeout 20 --attempts 3 blockscout-pons-sample --version v2 --limit 100 --out artifacts/pons-v2-launches.jsonl
+      - name: Verify samples are non-empty and decodable
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for version in ("v1", "v2"):
+              path = Path(f"artifacts/pons-{version}-launches.jsonl")
+              rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+              assert rows, f"{version}: empty sample"
+              assert len(rows) == 100, (version, len(rows))
+              blocks = [row["block_number"] for row in rows]
+              assert blocks == sorted(blocks), f"{version}: non-monotonic launch history"
+              assert len({row["token"] for row in rows}) == len(rows), f"{version}: duplicate token"
+              print(version, len(rows), min(blocks), max(blocks))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-blockscout-pons-samples
+          path: artifacts/
+          if-no-files-found: error

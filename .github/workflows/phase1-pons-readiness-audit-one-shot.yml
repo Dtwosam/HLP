@@ -1,0 +1,21 @@
+name: phase1-pons-readiness-audit-one-shot
+# audit-generation: 12
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-readiness-audit-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 readiness audit') }}
+    uses: ./.github/workflows/phase1-pons-readiness-audit.yml
+    with:
+      source_eligibility_run_id: "33982556591"
+    secrets: inherit

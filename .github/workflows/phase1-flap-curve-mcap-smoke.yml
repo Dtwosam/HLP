@@ -1,0 +1,105 @@
+name: phase1-flap-curve-mcap-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-flap-curve-mcap-smoke.yml'
+      - 'src/hlp/data/flap_curve.py'
+      - 'src/hlp/data/flap_registry.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flap-mcap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Acquire Flap Portal tape
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-flap-tape \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/flap-events.jsonl
+      - name: Build in-shard launch registry
+        run: |
+          hlp flap-registry \
+            --events artifacts/flap-events.jsonl \
+            --out artifacts/flap-registry.jsonl
+      - name: Restrict validation to tokens launched inside shard
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          registry = [
+              json.loads(x)
+              for x in Path("artifacts/flap-registry.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          tokens = {row["token"] for row in registry}
+          source = [
+              json.loads(x)
+              for x in Path("artifacts/flap-events.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          filtered = [row for row in source if row["token"] in tokens]
+          Path("artifacts/flap-events-in-shard-launches.jsonl").write_text(
+              "".join(json.dumps(row, sort_keys=True) + "\n" for row in filtered)
+          )
+          quote_counts = {}
+          for row in registry:
+              quote = row["quote_token"]
+              quote_counts[quote] = quote_counts.get(quote, 0) + 1
+          print(json.dumps({
+              "registry_tokens": len(tokens),
+              "filtered_events": len(filtered),
+              "quote_counts": quote_counts,
+              "registry_missing_quote": sum(r["quote_token"] is None for r in registry),
+          }, sort_keys=True))
+          PY
+      - name: Price Flap curve
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-flap-curve-market-cap-window \
+            --events artifacts/flap-events-in-shard-launches.jsonl \
+            --registry artifacts/flap-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/flap-curve-market-caps.jsonl \
+            --summary-out artifacts/flap-curve-summary.jsonl
+      - name: Validate eligibility summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(x)
+              for x in Path("artifacts/flap-curve-summary.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          winners = [r for r in rows if r["crossed_100k"]]
+          print(json.dumps({
+              "tokens_with_trades": len(rows),
+              "tokens_priced": sum(r["priced_points"] > 0 for r in rows),
+              "tokens_crossed_100k": len(winners),
+              "winner_examples": winners[:20],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-flap-curve-mcap
+          path: artifacts/
+          if-no-files-found: error

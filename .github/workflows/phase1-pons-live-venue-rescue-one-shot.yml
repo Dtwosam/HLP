@@ -1,0 +1,138 @@
+name: phase1-pons-live-venue-rescue-one-shot
+# validation-generation: 1
+
+on:
+  push:
+    paths:
+      - ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    if: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') || contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse rescue while frozen parent is active or already complete
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RESCUE_V1: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+          RESCUE_V2: ${{ contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          run_id = 33_982_556_591
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          def artifacts(source_run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "live venue rescue artifact pagination exceeded 2000"
+                      )
+              return names
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed":
+              raise SystemExit(
+                  "live venue rescue is blocked while source parent is active"
+              )
+
+          rescue_v1 = os.environ["RESCUE_V1"] == "true"
+          rescue_v2 = os.environ["RESCUE_V2"] == "true"
+          if rescue_v1 == rescue_v2:
+              raise SystemExit(
+                  "live venue rescue requires exactly one venue target"
+              )
+
+          requested_artifacts = set()
+          if rescue_v1:
+              requested_artifacts.add("phase1-pons-v1-v3-full")
+          if rescue_v2:
+              requested_artifacts.add("phase1-pons-v2-v4-full")
+
+          source_artifacts = artifacts(run_id)
+          already_complete = sorted(requested_artifacts & source_artifacts)
+          if already_complete:
+              raise SystemExit(
+                  "live venue rescue is unnecessary for complete source "
+                  f"artifacts: {already_complete}"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          ):
+              raise SystemExit("live venue rescue source workflow path changed")
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("live venue rescue source branch changed")
+
+          print(json.dumps({
+              "source_run_id": run_id,
+              "status": run.get("status"),
+              "conclusion": run.get("conclusion"),
+              "rescue_target": (
+                  "v1_v3" if rescue_v1 else "v2_v4"
+              ),
+              "missing_requested_artifacts": sorted(
+                  requested_artifacts - source_artifacts
+              ),
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  v1_v3_rescue:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+    uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
+    with:
+      source_registry_run_id: "33911022718"
+      partial_run_id: "33982556591"
+      prior_gap_run_id: ""
+      max_gap_blocks: "50000"
+    secrets: inherit
+
+  v2_v4_rescue:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
+    with:
+      transition_run_id: "33912452330"
+      partial_run_id: "33982556591"
+      prior_gap_run_id: ""
+      max_gap_blocks: "50000"
+    secrets: inherit

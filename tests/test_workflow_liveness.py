@@ -1,0 +1,2008 @@
+from pathlib import Path
+
+
+WORKFLOWS = [
+    "phase1-pons-v1-registry-recovery.yml",
+    "phase1-pons-full-quote-audit.yml",
+    "phase1-pons-v2-stock-oracle-full.yml",
+    "phase1-pons-v2-curve-full.yml",
+    "phase1-pons-v2-transition-full.yml",
+    "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-v2-lifecycle-eligibility.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
+    "phase1-pons-v1-lifecycle-eligibility.yml",
+    "phase1-pons-eligible-universe-freeze.yml",
+    "phase1-pons-representative-sample-freeze.yml",
+    "phase1-pons-v3-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-fallback-full.yml",
+    "phase1-pons-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-segmented.yml",
+    "phase1-pons-representative-transfers-full.yml",
+    "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-acquisition-accounting.yml",
+    "phase1-pons-viability-route-measurement.yml",
+]
+
+MATRIX_WORKFLOWS = {
+    "phase1-pons-v1-registry-recovery.yml",
+    "phase1-pons-v2-stock-oracle-full.yml",
+    "phase1-pons-v2-curve-full.yml",
+    "phase1-pons-v2-transition-full.yml",
+    "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
+}
+
+
+def _workflow(name: str) -> str:
+    return (
+        Path(__file__).parents[1] / ".github" / "workflows" / name
+    ).read_text()
+
+
+def _embedded_python_blocks(content: str) -> list[str]:
+    lines = content.splitlines()
+    blocks: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() != "python - <<'PY'":
+            index += 1
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        body: list[str] = []
+        index += 1
+        while index < len(lines):
+            current = lines[index]
+            current_indent = len(current) - len(current.lstrip())
+            if current.strip() == "PY" and current_indent == indent:
+                break
+            body.append(
+                current[indent:]
+                if len(current) >= indent
+                else current.lstrip()
+            )
+            index += 1
+        else:
+            raise AssertionError("unterminated embedded Python heredoc")
+
+        blocks.append("\n".join(body) + "\n")
+        index += 1
+    return blocks
+
+
+def test_critical_phase1_workflow_python_heredocs_compile():
+    critical = (
+        "phase1-pons-v1-v3-recover-gaps.yml",
+        "phase1-pons-v2-v4-recover-gaps.yml",
+        "phase1-pons-recovered-completion-chain.yml",
+        "phase1-pons-post-eligibility-evidence-chain.yml",
+        "phase1-pons-representative-evidence-chain.yml",
+        "phase1-pons-viability-route-measurement.yml",
+        "phase1-pons-final-acceptance-chain.yml",
+        "phase1-pons-acceptance-gate.yml",
+        "phase1-pons-readiness-audit.yml",
+    )
+    for name in critical:
+        blocks = _embedded_python_blocks(_workflow(name))
+        assert blocks, name
+        for index, block in enumerate(blocks):
+            compile(
+                block,
+                f"{name}:embedded-python-{index}",
+                "exec",
+            )
+
+
+def test_pons_heavy_workflows_never_poll_other_runs():
+    forbidden = (
+        "time.sleep(",
+        "for attempt in range",
+        "Wait for recovered",
+        "Wait for V2",
+        "Wait for all original",
+    )
+    for name in WORKFLOWS:
+        content = _workflow(name)
+        for needle in forbidden:
+            assert needle not in content, (
+                f"{name} must fail fast on unavailable prerequisites; "
+                f"runner-side polling is forbidden: {needle!r}"
+            )
+
+
+def test_pons_heavy_workflows_have_concurrency_locks():
+    for name in WORKFLOWS:
+        content = _workflow(name)
+        assert "concurrency:" in content, name
+        expected = "group: " + name.removesuffix(".yml") + "-${{ github.ref }}"
+        assert expected in content, name
+        assert "cancel-in-progress:" in content, name
+
+
+def test_archive_matrix_workflows_are_small_and_bounded():
+    for name in MATRIX_WORKFLOWS:
+        content = _workflow(name)
+        assert "max-parallel: 2" in content, name
+        if name == "phase1-pons-v2-v4-full.yml":
+            assert "SHARD_COUNT: '192'" in content, name
+            assert "timeout-minutes: 30" in content, name
+        elif name == "phase1-pons-v1-v3-full.yml":
+            assert "SHARD_COUNT: '240'" in content, name
+            assert "timeout-minutes: 40" in content, name
+        elif name == "phase1-pons-v2-curve-full.yml":
+            assert "SHARD_COUNT: '64'" in content, name
+            assert "timeout-minutes: 25" in content, name
+        elif name == "phase1-pons-weth-usdg-anchor-full.yml":
+            assert "SHARD_COUNT: '128'" in content, name
+            assert "timeout-minutes: 25" in content, name
+        else:
+            assert "SHARD_COUNT: '16'" in content, name
+            assert "timeout-minutes: 35" in content, name
+        if name in {
+            "phase1-pons-v1-v3-full.yml",
+            "phase1-pons-v2-v4-full.yml",
+            "phase1-pons-weth-usdg-anchor-full.yml",
+        }:
+            assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content, name
+            assert 'printf -v SHARD "%02d" "$SHARD_INDEX"' not in content, name
+        assert "max-parallel: 4" not in content, name
+
+
+def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
+    content = _workflow("phase1-pons-viability-route-measurement.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    for route in (
+        "pons_registry",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    ):
+        assert f"          - {route}" in content
+    assert 'default: "54436036"' in content
+    assert 'default: "54486035"' in content
+    assert "viability measurement exceeds 50000-block ceiling" in content
+    assert "hi - lo + 1 > 50_000" in content
+    assert "Verify approved evidence before any viability RPC" in content
+    assert "viability measurement evidence run ID must be positive" in content
+    assert "viability measurement evidence run is not successful" in content
+    assert "viability measurement evidence workflow path is not" in content
+    assert "viability measurement evidence branch changed" in content
+    assert "viability measurement evidence artifacts missing" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert content.count("needs: preflight") == 2
+    assert "rpc-v1-registry-window" in content
+    assert "rpc-v2-registry-window" in content
+    assert "rpc-v3-pons-tape" in content
+    assert "rpc-v2-curve-tape" in content
+    assert "rpc-v2-transition-tape" in content
+    assert "rpc-v2-v4-tape" in content
+    assert "rpc-v1-price-path" in content
+    assert "rpc-pons-stock-oracle-lifecycle" in content
+    assert "rpc-v3-quote-route-tape" in content
+    assert "rpc-v4-quote-route-tape" in content
+    assert "registry_v2:" in content
+    assert (
+        "if: ${{ needs.preflight.result == 'success' && "
+        "inputs.route == 'pons_registry' }}"
+        in content
+    )
+    assert "shared measurement range must postdate V2 deployment" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "quote fallback measurement requires fallback artifact run ID" in content
+    assert "run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}" in content
+    assert 'sequence_id:' in content
+    assert 'evidence_run_id:' in content
+    assert 'source_eligibility_run_id:' in content
+    assert '"measurement_run_id": int(' in content
+    assert '"measurement_head_sha": os.environ["GITHUB_SHA"]' in content
+    assert '"evidence_run_id": evidence_run_id' in content
+    assert '"source_eligibility_run_id": source_run_id' in content
+    assert '"fallback_artifact_run_id": fallback_run_id' in content
+    assert '"registry_generation": (' in content
+    assert '"v1" if route == "pons_registry" else None' in content
+    assert '"registry_generation": "v2"' in content
+    assert "pons_registry V2 measurement source run changed" in content
+    assert "pons_registry V2 evidence run ID cannot be negative" in content
+    assert content.count(
+        '"measurement_run_id": int('
+    ) >= 2
+    assert content.count(
+        '"measurement_head_sha": os.environ["GITHUB_SHA"]'
+    ) >= 2
+    assert "viability measurement source eligibility run changed" in content
+    assert "viability measurement evidence run ID cannot be negative" in content
+    assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
+    assert "timeout-minutes: 30" in content
+
+def test_full_quote_audit_has_short_fail_fast_bound():
+    content = _workflow("phase1-pons-full-quote-audit.yml")
+    assert "timeout-minutes: 20" in content
+    assert "timeout-minutes: 75" not in content
+
+
+
+BACKFILL_WORKFLOWS = {
+    "phase1-pons-full-registry.yml",
+    "phase1-pons-full-census.yml",
+    "phase1-pons-v1-registry-recovery.yml",
+    "phase1-pons-v2-registry-freeze.yml",
+    "phase1-pons-full-quote-audit.yml",
+    "phase1-pons-v2-stock-oracle-full.yml",
+    "phase1-pons-v2-curve-full.yml",
+    "phase1-pons-v2-transition-full.yml",
+    "phase1-pons-weth-usdg-anchor-full.yml",
+    "phase1-pons-v2-v4-full.yml",
+    "phase1-pons-v2-lifecycle-eligibility.yml",
+    "phase1-pons-stock-oracle-full.yml",
+    "phase1-pons-v1-v3-full.yml",
+    "phase1-pons-v1-lifecycle-eligibility.yml",
+    "phase1-pons-eligible-universe-freeze.yml",
+    "phase1-pons-representative-sample-freeze.yml",
+    "phase1-pons-v3-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-fallback-full.yml",
+    "phase1-pons-quote-fallback-full.yml",
+    "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-continuation.yml",
+    "phase1-pons-skhy-v4-known-pool-segmented.yml",
+    "phase1-pons-v2-curve-recover-tail-one-shot.yml",
+    "phase1-pons-weth-usdg-anchor-recover-tail-one-shot.yml",
+    "phase1-pons-v2-transition-recover-gaps.yml",
+    "phase1-pons-v2-v4-recover-gaps.yml",
+    "phase1-pons-v1-v3-recover-gaps.yml",
+    "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+    "phase1-pons-v4-quote-fallback-recover-gaps.yml",
+    "phase1-pons-stock-oracle-promote-v2-delta.yml",
+    "phase1-pons-representative-transfers-full.yml",
+    "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-viability-route-measurement.yml",
+}
+
+
+def test_full_history_backfills_are_manual_only():
+    for name in BACKFILL_WORKFLOWS:
+        content = _workflow(name)
+        trigger_block = content.split("\npermissions:", 1)[0]
+        assert "workflow_dispatch:" in trigger_block, name
+        assert "\n  push:" not in trigger_block, (
+            f"{name} must not auto-start a full-history backfill on code pushes"
+        )
+
+
+
+NETWORK_SMOKE_WORKFLOWS = {
+    "phase1-network-smoke.yml",
+    "phase1-hoodfun-curve-mcap-smoke.yml",
+    "phase1-v1-usd-path-smoke.yml",
+    "phase1-v2-full-priced-smoke.yml",
+    "phase1-pons-research-smoke.yml",
+    "phase1-v2-shared-curve-smoke.yml",
+    "phase1-v2-graduation-v4-smoke.yml",
+    "phase1-dex-pool-census.yml",
+    "phase1-pons-v1-multigen-smoke.yml",
+    "phase1-v1-shared-tape-smoke.yml",
+    "phase1-pons-representative-dex-crosscheck.yml",
+    "phase1-blockscout-transaction-smoke.yml",
+    "phase1-blockscout-v2-smoke.yml",
+}
+
+
+def test_secondary_network_smokes_are_manual_only():
+    for name in NETWORK_SMOKE_WORKFLOWS:
+        content = _workflow(name)
+        trigger_block = content.split("\npermissions:", 1)[0]
+        assert "workflow_dispatch:" in trigger_block, name
+        assert "\n  push:" not in trigger_block, (
+            f"{name} must not consume RPC runners on ordinary pushes"
+        )
+
+
+
+def test_blockscout_transaction_smoke_is_bounded_and_identity_checked():
+    content = _workflow("phase1-blockscout-transaction-smoke.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "MAX_BLOCK_LOOKBACK = 20" in content
+    assert "https://rpc.mainnet.chain.robinhood.com" in content
+    assert 'rpc("eth_chainId", [])' in content
+    assert "int(chain_id, 16) != 4663" in content
+    assert "/api/v2/transactions/" in content
+    assert "blockscout_reachable" in content
+    assert "transaction_identity_match" in content
+    assert "Blockscout transaction hash does not match Robinhood RPC" in content
+    assert "Blockscout transaction block does not match Robinhood RPC" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
+    content = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
+    assert "if uncovered:" in content
+    assert "cannot replay V2 lifecycle with uncovered quote assets" in content
+    assert '"owned_quote_assets": 30' in content
+    assert '"v3_routes": 26' in content
+    assert '"v4_routes": 4' in content
+    assert '"v3_v4_overlap_assets": 0' in content
+    assert "generic quote fallback ownership contract changed" in content
+
+
+
+def test_curve_range_recovery_is_manual_small_and_bounded():
+    content = _workflow("phase1-pons-v2-curve-recover-range.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "max-parallel: 2" in content
+    assert "SHARD_COUNT: '4'" in content
+    assert "recovery range exceeds 200000-block ceiling" in content
+    assert "timeout-minutes: 20" in content
+    assert "time.sleep(" not in content
+
+
+
+def test_anchor_range_recovery_is_manual_small_and_bounded():
+    content = _workflow("phase1-pons-weth-usdg-anchor-recover-range.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "artifact_suffix" in content
+    assert "phase1-pons-anchor-range-${{ inputs.artifact_suffix }}-" in content
+    assert (
+        "phase1-pons-anchor-recovered-range-${{ inputs.artifact_suffix }}"
+        in content
+    )
+    assert "max-parallel: 2" in content
+    assert "SHARD_COUNT: '4'" in content
+    assert "recovery range exceeds 200000-block ceiling" in content
+    assert "timeout-minutes: 20" in content
+    assert "time.sleep(" not in content
+
+
+
+def test_cancelled_anchor_gap_repair_is_manual_sequential_and_exact():
+    content = _workflow(
+        "phase1-pons-weth-usdg-anchor-cancelled-gap-repair.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "confirm_repair" in content
+    assert 'from_block: "52169619"' in content
+    assert 'to_block: "52319618"' in content
+    assert 'artifact_suffix: "gap-018"' in content
+    assert 'from_block: "53219619"' in content
+    assert 'to_block: "53369618"' in content
+    assert 'artifact_suffix: "gap-025"' in content
+    assert "needs: repair_018" in content
+    assert "needs.repair_018.result == 'success'" in content
+    assert (
+        "./.github/workflows/"
+        "phase1-pons-weth-usdg-anchor-recover-range.yml"
+        in content
+    )
+
+
+def test_anchor_recovered_promotion_is_manual_exact_and_streaming():
+    content = _workflow(
+        "phase1-pons-weth-usdg-anchor-promote-recovered.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912536839"' in content
+    assert 'default: "33925648293"' in content
+    assert 'default: "33957294304"' in content
+    assert 'default: "33970898635"' in content
+    assert "phase1-pons-anchor-recovered-range-*" in content
+    assert "select_anchor_source_ranges" in content
+    assert '"preserved": 14' in content
+    assert '"partial_recovery": 1' in content
+    assert '"gap_recovery": 32' in content
+    assert '"range_repair": 2' in content
+    assert "(52_169_619, 52_319_618)" in content
+    assert "(53_219_619, 53_369_618)" in content
+    assert "promoted_recovered_weth_usdg_anchor" in content
+    assert "pons-weth-usdg-anchor-full.jsonl" in content
+    assert "pons-weth-usdg-anchor-initial.json" in content
+    assert "pons-weth-usdg-anchor-summary.json" in content
+    assert "no_unexplained_block_gaps" in content
+    assert "state_rpc_response_bytes" in content
+    assert "state_rpc_route" in content
+    assert "rows = []" not in content
+    assert "time.sleep(" not in content
+
+
+def test_curve_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v2-curve-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert 'Path("prior-gaps").glob("curve-gap-*.jsonl")' in content
+    assert '"source": path.parent.name' in content
+    assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 50000" in content
+    assert "V2 curve gap plan exceeds 240 matrix jobs" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+
+def test_anchor_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-weth-usdg-anchor-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "prior_gap_run_id_2" in content
+    assert 'Path("prior-gaps").glob("anchor-gap-*.jsonl")' in content
+    assert 'Path("prior-gaps-2").glob("anchor-gap-*.jsonl")' in content
+    assert '"source": path.parent.name' in content
+    assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 50000" in content
+    assert "anchor gap plan exceeds 240 matrix jobs" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+
+def test_transition_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v2-transition-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "graduations-gap" in content
+    assert "registrations-gap" in content
+    assert "transition artifact families disagree" in content
+    assert "manifest_gap_aware_transition_recovery" in content
+    assert 'default: "150000"' in content
+    assert "max_gap_blocks must be between 1 and 150000" in content
+    assert "transition gap plan exceeds 240 matrix jobs" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v2-v4-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v4-events-gap" in content
+    assert "manifest_gap_aware_v4_recovery" in content
+    assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
+    assert "V4 gap plan exceeds four serialized 240-job waves" in content
+    assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify recursive prior recovery lineage" in content
+    assert "prior recovery plan lacks bound lineage metadata" in content
+    assert "prior recovery partial run does not match current" in content
+    assert "prior recovery lineage contains a cycle" in content
+    assert '"partial_run_id": int("${{ inputs.partial_run_id }}")' in content
+    assert '"prior_gap_run_id": (' in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
+    for index in range(1, 5):
+        assert (
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
+            in content
+        )
+        assert (
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, recover_1]" in content
+    assert "needs: [plan, recover_2]" in content
+    assert "needs: [plan, recover_3]" in content
+    assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
+    assert "time.sleep(" not in content
+
+
+def test_stock_oracle_delta_promotion_is_manual_bounded_and_fail_closed():
+    content = _workflow("phase1-pons-stock-oracle-promote-v2-delta.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "MAX_DELTA_BLOCKS: '100000'" in content
+    assert "prior_delta_run_id" in content
+    assert "plan_missing_subranges" in content
+    assert "prior_successful_ranges" in content
+    assert "gap_count" in content
+    assert "oracle delta plan exceeds 240 matrix jobs" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 20" in content
+    assert "expected_full={len(expected_rows)}" in content
+    assert "existing_v2={len(existing_tokens)}" in content
+    assert "expected exactly one full-Pons stock-feed delta" in content
+    assert "promoted_v2_oracle_plus_full_pons_delta" in content
+    assert "promoted oracle does not exactly cover full-Pons stock feeds" in content
+    assert "time.sleep(" not in content
+
+
+def test_v4_quote_fallback_uses_cumulative_forward_probe():
+    content = _workflow("phase1-pons-v4-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33926428274"' in content
+    assert 'default: "phase1-pons-residual-v4-forward-probe"' in content
+    assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
+    assert "select_v4_quote_routes" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "v3_run_id" in content
+    assert "skhy_v4_run_id" in content
+    assert "phase1-pons-skhy-v4-known-pool-segmented" in content
+    assert "25-route V3 fallback requires resolved SKHY V4" in content
+    assert "V4 fallback must select four or five unique routes" in content
+    assert "SKHY must be owned by exactly one of canonical V3 or V4" in content
+    assert '"ownership_mode": ownership_mode' in content
+    assert "externally_resolved_assets" in content
+    assert "residual_quote_assets" in content
+    assert (
+        "- uses: actions/upload-artifact@v4\n"
+        "      - uses: actions/upload-artifact@v4"
+    ) not in content
+    assert "SHARD_COUNT: '128'" in content
+    assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content
+    assert "max-parallel: 2" in content
+
+
+def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
+    content = _workflow("phase1-pons-v3-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33921477647"' in content
+    assert 'default: "33923160281"' in content
+    assert "pons-select-v3-quote-routes" in content
+    assert "phase1-pons-skhy-v3-weth-segmented" in content
+    assert "phase1-pons-weth-usdg-anchor-full" in content
+    assert "skhy_weth_run_id" in content
+    assert "anchor_run_id" in content
+    assert "merge_v3_quote_routes" in content
+    assert "searched_to_snapshot_head" in content
+    assert "canonical V3 fallback must select 25 or 26 unique routes" in content
+    assert "SKHY must be owned by exactly one of V3 or the residual set" in content
+    assert "causal_v3_routes_with_optional_delayed_skhy_weth" in content
+    assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
+    assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
+    assert "SHARD_COUNT: '128'" in content
+    assert 'printf -v SHARD "%03d" "$SHARD_INDEX"' in content
+    assert "max-parallel: 2" in content
+
+
+def test_generic_quote_fallback_owns_exact_26_v3_plus_4_v4():
+    content = _workflow("phase1-pons-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "generic fallback requires exact 26/4 or 25/5 V3/V4" in content
+    assert "generic fallback requires exactly one SKHY venue owner" in content
+    assert "26/4 generic fallback requires SKHY ownership in V3" in content
+    assert "25/5 generic fallback requires SKHY ownership in V4" in content
+    assert "V3/V4 fallback ownership overlaps" in content
+    assert "route ownership and merged quote/USD ownership disagree" in content
+    assert "merged quote fallback must own exactly 30 feedless quote" in content
+
+
+def test_v4_quote_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v4-quote-fallback-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v4-quote-events-gap" in content
+    assert "manifest_gap_aware_v4_quote_recovery" in content
+    assert "activation_by_pool" in content
+    assert 'int(row["block_number"]) >= (' in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
+    assert "V4 quote gap plan exceeds 240 matrix jobs" in content
+    assert "phase1-pons-v4-quote-routes-selected" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 30" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+def test_v3_quote_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v3-quote-fallback-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v3-quote-events-gap" in content
+    assert "manifest_gap_aware_v3_quote_recovery" in content
+    assert 'default: "100000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
+    assert "V3 quote gap plan exceeds 240 matrix jobs" in content
+    assert "phase1-pons-v3-quote-routes-selected" in content
+    assert "max-parallel: 2" in content
+    assert "timeout-minutes: 30" in content
+    assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in content
+    assert "time.sleep(" not in content
+
+
+def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
+    content = _workflow("phase1-pons-v1-v3-recover-gaps.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "plan_missing_subranges" in content
+    assert "prior_gap_run_id" in content
+    assert "v1-v3-events-gap" in content
+    assert "manifest_gap_aware_v1_v3_recovery" in content
+    assert 'default: "50000"' in content
+    assert "max_gap_blocks must be between 1 and 100000" in content
+    assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
+    assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify recursive prior recovery lineage" in content
+    assert "prior recovery plan lacks bound lineage metadata" in content
+    assert "prior recovery partial run does not match current" in content
+    assert "prior recovery lineage exceeds 20 generations" in content
+    assert '"partial_run_id": int("${{ inputs.partial_run_id }}")' in content
+    assert '"prior_gap_run_id": (' in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in content
+    assert "Pons V1 pools missing V3 Initialize" in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
+    for index in range(1, 5):
+        assert (
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
+            in content
+        )
+        assert (
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, recover_1]" in content
+    assert "needs: [plan, recover_2]" in content
+    assert "needs: [plan, recover_3]" in content
+    assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
+    assert "time.sleep(" not in content
+
+
+def test_v1_v3_full_is_reusable_with_frozen_registry():
+    content = _workflow("phase1-pons-v1-v3-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33911022718"' in content
+    assert "SHARD_COUNT: '240'" in content
+    assert "timeout-minutes: 40" in content
+    assert "max-parallel: 2" in content
+
+
+def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
+    content = _workflow("phase1-pons-v1-lifecycle-eligibility.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33911022718"' in content
+    assert 'default: "33923299711"' in content
+    assert 'default: "phase1-pons-full-quote-audit-current"' in content
+    assert "V1 quote coverage is not complete" in content
+    assert "Validate frozen V1 lifecycle input manifests" in content
+    assert "required V1 lifecycle manifest is missing" in content
+    assert "timeout-minutes: 60" in content
+    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
+    assert 'for key in ("partial_run_id", "prior_gap_run_id")' in content
+    assert "v3-shards/current" in content
+    assert "v3-shards/partial" in content
+    assert "v3-shards/prior" in content
+    assert "--v3-events-dir v3-shards" in content
+    assert "--v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json" in content
+    assert "V1 lifecycle manifest snapshot mismatch" in content
+    assert "Bind V1 lifecycle source run provenance" in content
+    assert '"v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"])' in content
+    assert '"source_registry_run_id": int(' in content
+    assert "frozen V1 lifecycle SHA changed" in content
+    assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
+    assert "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc" in content
+
+
+def test_v2_v4_full_is_reusable_with_frozen_transition():
+    content = _workflow("phase1-pons-v2-v4-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912452330"' in content
+    assert "max-parallel: 2" in content
+    assert "SHARD_COUNT: '192'" in content
+    assert "timeout-minutes: 30" in content
+
+
+def test_quote_fallback_merge_is_reusable_without_network_trigger():
+    content = _workflow("phase1-pons-quote-fallback-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "pons-merge-quote-usd-tapes" in content
+    assert "merged quote fallback must have exactly 25 causal initial" in content
+    assert "merged quote fallback must own exactly 30 feedless quote" in content
+    assert "owned_quote_assets" in content
+    assert "SNAPSHOT_HEAD: '54486035'" in content
+    assert '--snapshot-head "$SNAPSHOT_HEAD"' in content
+
+
+def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
+    content = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33912235341"' in content
+    assert 'default: "33936232604"' in content
+    assert 'default: "33912452330"' in content
+    assert "cannot replay V2 lifecycle with uncovered quote assets" in content
+    assert "Validate frozen V2 lifecycle input manifests" in content
+    assert "required lifecycle manifest is missing" in content
+    assert "timeout-minutes: 60" in content
+    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
+    assert 'for key in ("partial_run_id", "prior_gap_run_id")' in content
+    assert "v4-shards/current" in content
+    assert "v4-shards/partial" in content
+    assert "v4-shards/prior" in content
+    assert "--v4-events-dir v4-shards" in content
+    assert "--v4-events-manifest v4/pons-v2-v4-full.jsonl.manifest.json" in content
+    assert "lifecycle manifest snapshot mismatch" in content
+    assert "Bind V2 lifecycle source run provenance" in content
+    assert '"v4_run_id": int(os.environ["V4_RUN_ID"])' in content
+    assert '"fallback_run_id": int(os.environ["FALLBACK_RUN_ID"])' in content
+    assert "frozen lifecycle SHA changed" in content
+    assert "validated_manifest_count" in content
+    assert "771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b" in content
+
+
+def test_eligible_universe_freeze_is_reusable_and_fails_closed():
+    content = _workflow("phase1-pons-eligible-universe-freeze.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cannot freeze complete $100k universe while eligibility" in content
+    assert "required eligibility manifest is missing" in content
+    assert "eligibility manifest snapshot mismatch" in content
+    assert "eligibility manifest record mismatch" in content
+    assert '"v1_eligibility_sha256": v1_manifest["sha256"]' in content
+    assert '"v2_eligibility_sha256": v2_manifest["sha256"]' in content
+    assert '"v1_v3_run_id": v1_v3_run_id' in content
+    assert '"v2_v4_run_id": v2_v4_run_id' in content
+    assert "eligibility lifecycle venue provenance missing" in content
+    assert "lifecycle_run_id != 33_982_556_591" in content
+    assert '"validated_v1_v3_run_id": v1_v3_run_id' in content
+    assert '"validated_v2_v4_run_id": v2_v4_run_id' in content
+    assert "268_688" in content
+    assert "225_951" in content
+    assert "eligibility artifact has invalid status values" in content
+
+
+def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
+    content = _workflow("phase1-pons-skhy-v4-known-pool-continuation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33926428274"' in content
+    assert 'default: "100000"' in content
+    assert "forward_blocks must be between 1 and 100000" in content
+    assert "expected_prior_search_end" in content
+    assert "output_artifact_name" in content
+    assert "0x84cab63bc87912e71ad199ff14a0ba45de68fef8" in content
+    assert "0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601" in content
+    assert 'default: "52863525"' in content
+    assert "--known-pool-only" in content
+    assert 'row.get("continuation_mode") != "known_pool_only"' in content
+    assert "continue_needed" in content
+    assert "route_ready" in content
+    assert "search_to_block" in content
+    assert "GITHUB_OUTPUT" in content
+    assert "timeout-minutes: 30" in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_evidence_one_shot_is_guarded_and_pinned():
+    content = _workflow("phase1-pons-representative-evidence-one-shot.yml")
+    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "launch representative evidence" in content
+    assert 'eligibility_run_id: "33982556591"' in content
+    assert 'oracle_run_id: "33974681334"' in content
+    assert 'runner_smoke_run_id: "33920762592"' in content
+    assert "workflow_dispatch:" not in content
+
+
+def test_viability_pons_registry_launcher_is_guarded_and_pinned():
+    content = _workflow(
+        "phase1-pons-viability-pons-registry-one-shot.yml"
+    )
+    assert "phase1-pons-viability-guarded-route.yml" in content
+    assert "launch viability pons_registry" in content
+    assert 'route: "pons_registry"' in content
+    assert "sequence_id: ${{ github.sha }}" in content
+    assert "workflow_dispatch:" not in content
+
+def test_full_eligibility_one_shot_is_guarded_and_pinned():
+    content = _workflow(
+        "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+    )
+    assert "phase1-pons-full-eligibility-acquisition-chain.yml" in content
+    assert "launch full eligibility acquisition" in content
+    assert 'oracle_run_id: "33974681334"' in content
+    assert 'anchor_run_id: "33972109927"' in content
+    assert "workflow_dispatch:" not in content
+
+
+def test_full_eligibility_acquisition_chain_serializes_heavy_market_tapes():
+    content = _workflow(
+        "phase1-pons-full-eligibility-acquisition-chain.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-stock-oracle-full" in content
+    assert "canonical stock oracle must contain 23 feeds" in content
+    assert 'summary.get("delta_symbols") != ["DELL"]' in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
+    assert "phase1-pons-v1-v3-full.yml" in content
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
+    assert "phase1-pons-v2-v4-full.yml" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "needs.v1_v3.result == 'failure'" in content
+    assert "needs.v1_v3_recovery.result == 'success'" in content
+    assert "needs.v2_v4.result == 'failure'" in content
+    assert "needs.v2_v4_recovery.result == 'success'" in content
+    assert content.count('partial_run_id: ${{ format(\'{0}\', github.run_id) }}') == 2
+    assert content.count('max_gap_blocks: "50000"') == 2
+    assert "phase1-pons-pricing-eligibility-chain.yml" in content
+    assert content.count("format('{0}', github.run_id)") == 4
+    assert "cancel-in-progress: false" in content
+
+
+def test_final_acceptance_chain_requires_nine_distinct_route_runs():
+    content = _workflow("phase1-pons-final-acceptance-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cancel-in-progress: false" in content
+    assert "Verify evidence and nine route provenance before acceptance work" in content
+    assert "final acceptance eligible and representative runs must" in content
+    assert "final acceptance evidence workflow path is not allowed" in content
+    assert "final acceptance evidence artifacts missing" in content
+    assert "final acceptance route workflow path mismatch" in content
+    assert "final acceptance route measurement artifacts missing" in content
+    assert "final acceptance route source changed" in content
+    assert "final acceptance route evidence changed" in content
+    assert "final acceptance route launch ledger changed" in content
+    assert "final acceptance route launch slot was not empty" in content
+    assert "source_eligibility_run_id" in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
+    for route in (
+        "pons_registry",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    ):
+        assert f"{route}_run_id:" in content
+    assert "build_phase1_route_plan" in content
+    assert "final acceptance route order changed" in content
+    assert "nine distinct evidence run IDs" in content
+    assert "phase1-pons-acquisition-accounting.yml" in content
+    assert "phase1-pons-acquisition-viability-projection.yml" in content
+    assert "phase1-pons-acceptance-gate.yml" in content
+    assert "accounting_run_id: ${{ format('{0}', github.run_id) }}" in content
+    assert "viability_projection_run_id: ${{ format('{0}', github.run_id) }}" in content
+    assert "eligible_universe_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "representative_validation_run_id: ${{ inputs.representative_run_id }}" in content
+
+def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
+    content = _workflow("phase1-pons-pricing-eligibility-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "needs.skhy_v3.outputs.completion_status" in content
+    assert "searched_to_snapshot_head" in content
+    assert "needs.skhy_v4.outputs.route_ready == 'true'" in content
+    assert "needs.skhy_v3.outputs.completion_status == 'route_resolved'" in content
+    assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
+    assert "phase1-pons-v3-quote-fallback-full.yml" in content
+    assert "phase1-pons-v3-quote-fallback-recover-gaps.yml" in content
+    assert "needs.v3_fallback_recovery.result == 'success'" in content
+    assert "phase1-pons-v4-quote-fallback-full.yml" in content
+    assert "phase1-pons-v4-quote-fallback-recover-gaps.yml" in content
+    assert "needs.v4_fallback_recovery.result == 'success'" in content
+    assert content.count('max_gap_blocks: "100000"') == 2
+    assert "phase1-pons-quote-fallback-full.yml" in content
+    assert "phase1-pons-v1-lifecycle-eligibility.yml" in content
+    assert "phase1-pons-v2-lifecycle-eligibility.yml" in content
+    assert "phase1-pons-eligible-universe-freeze.yml" in content
+    assert "format('{0}', github.run_id)" in content
+    assert "cancel-in-progress: false" in content
+
+
+def test_skhy_v4_one_shot_launcher_is_explicit_and_guarded():
+    content = _workflow(
+        "phase1-pons-skhy-v4-known-pool-segmented-one-shot.yml"
+    )
+    assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
+    assert "launch SKHY V4 known-pool continuation" in content
+    assert 'prior_probe_run_id: "33926428274"' in content
+    assert "workflow_dispatch:" not in content
+
+
+def test_skhy_segmented_continuation_is_manual_sequential_and_complete():
+    content = _workflow(
+        "phase1-pons-skhy-v4-known-pool-segmented.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert content.count(
+        "uses: ./.github/workflows/"
+        "phase1-pons-skhy-v4-known-pool-continuation.yml"
+    ) == 17
+    assert content.count('forward_blocks: "100000"') == 17
+    for index in range(16):
+        assert f"needs: segment_{index}" in content
+        assert (
+            f"needs.segment_{index}.outputs.continue_needed == 'true'"
+            in content
+        )
+        assert f"phase1-pons-skhy-v4-segment-{index}" in content
+    assert "phase1-pons-skhy-v4-segment-16" in content
+    assert "pattern: phase1-pons-skhy-v4-segment-*" in content
+    assert '"continuation_segments": latest_index + 1' in content
+    assert '"max_blocks_per_segment": 100000' in content
+    assert "phase1-pons-skhy-v4-known-pool-segmented" in content
+    assert "segmented SKHY continuation ended before snapshot head" in content
+    assert '"remaining_unsearched_blocks": remaining' in content
+    assert "max_blocks_per_segment" in content
+    assert "jobs.finalize.outputs.completion_status" in content
+    assert "steps.freeze.outputs.route_ready" in content
+    assert "GITHUB_OUTPUT" in content
+    assert "time.sleep(" not in content
+
+
+def test_v4_quote_continuation_is_reusable_without_push_trigger():
+    content = _workflow("phase1-pons-v4-quote-continuation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "known_pool_only" in content
+    assert "EXTRA+=(--known-pool-only)" in content
+
+def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transfers():
+    content = _workflow("phase1-pons-representative-evidence-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "cancel-in-progress: false" in content
+    assert "phase1-pons-representative-sample-freeze.yml" in content
+    assert "phase1-pons-representative-market-paths.yml" in content
+    assert content.count("phase1-pons-representative-transfers-full.yml") == 1
+    assert "phase1-pons-representative-priced-paths.yml" in content
+    assert "phase1-pons-representative-dex-crosscheck.yml" in content
+    assert "phase1-pons-representative-validation.yml" in content
+    assert content.count("v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
+    assert content.count("v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
+    assert "v1_v3_run_id:" in content
+    assert "v2_v4_run_id:" in content
+    assert (
+        "inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || "
+        "inputs.eligibility_run_id"
+    ) in content
+    assert (
+        "inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || "
+        "inputs.eligibility_run_id"
+    ) in content
+    assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "prior_run_id: ${{ inputs.prior_transfer_run_id }}" in content
+    assert "registry_run_id: ${{ inputs.registry_run_id }}" in content
+    assert "v2_curve_run_id: ${{ inputs.v2_curve_run_id }}" in content
+    assert "transition_run_id: ${{ inputs.transition_run_id }}" in content
+    assert "quote_audit_run_id: ${{ inputs.quote_audit_run_id }}" in content
+    assert "anchor_run_id: ${{ inputs.anchor_run_id }}" in content
+    assert "oracle_run_id: ${{ inputs.oracle_run_id }}" in content
+    assert "fallback_run_id: ${{ inputs.eligibility_run_id }}" in content
+    assert "transfers_retry:" not in content
+    assert "needs.transfers.result == 'success'" in content
+    assert content.count("format('{0}', github.run_id)") >= 10
+
+def test_representative_sample_freeze_is_reusable_and_pinned():
+    content = _workflow("phase1-pons-representative-sample-freeze.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33920762592"' in content
+    assert "4861b2af1d549eb41c53341a07f6de71dce4d9486b769543c1376beab9c19ab9" in content
+    assert "6fb40693b77d7434d4e579a2225fed2c65061841a5ea9d0ba56f785071fc6ef2" in content
+    assert "frozen runner smoke must contain exactly five eligible" in content
+    assert "runner_smoke_universe_sha256" in content
+    assert "runner_smoke_outcomes_sha256" in content
+    assert "representative runner cohort drifted from frozen smoke " in content
+    assert "evidence: expected=" in content
+    assert '"runner_tokens": sorted(sample_runner_tokens)' in content
+    assert '"failure_tokens": failure_tokens' in content
+    assert 'versions != {"v1": 4, "v2": 1}' in content
+    assert "--runners 5 --failures 5" in content
+    assert "representative sample must freeze exactly five runners" in content
+    assert "representative sample must contain both Pons generations" in content
+    assert "time.sleep(" not in content
+
+def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
+    content = _workflow("phase1-pons-representative-transfers-full.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "prior_run_id" in content
+    assert "plan_missing_subranges" in content
+    assert 'default: "100000"' in content
+    call_block = content.split("  workflow_call:", 1)[1].split(
+        "\npermissions:", 1
+    )[0]
+    assert "max_blocks:" in call_block
+    assert 'default: "100000"' in call_block
+    assert "required: false" in call_block
+    assert "max_blocks must be between 1 and 200000" in content
+    assert "representative transfer plan exceeds four serialized " in content
+    assert content.count("max-parallel: 2") == 4
+    assert content.count("timeout-minutes: 30") == 4
+    assert content.count("timeout-minutes: 45") == 1
+    assert content.count("timeout-minutes: 90") == 1
+    for index in range(1, 5):
+        assert (
+            "matrix_"
+            + str(index)
+            + ": ${{ steps.plan.outputs.matrix_"
+            + str(index)
+            + " }}"
+            in content
+        )
+        assert (
+            "matrix: ${{ fromJSON(needs.plan.outputs.matrix_"
+            + str(index)
+            + ") }}"
+            in content
+        )
+        assert f"gap_count_{index}" in content
+    assert "gap_wave_job_counts" in content
+    assert "needs: [plan, acquire_1]" in content
+    assert "needs: [plan, acquire_2]" in content
+    assert "needs: [plan, acquire_3]" in content
+    assert (
+        "needs: [plan, acquire_1, acquire_2, acquire_3, acquire_4]"
+        in content
+    )
+    assert "time.sleep(" not in content
+
+def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
+    content = _workflow("phase1-pons-acceptance-gate.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-acquisition-viability-projection" in content
+    assert "Verify acceptance caller and evidence provenance" in content
+    assert "acceptance eligible and representative artifacts must" in content
+    assert "acceptance viability projection must come from the" in content
+    assert "acceptance gate direct caller is not allowed" in content
+    assert "phase1-pons-viability-ledger-finalize-one-shot.yml" in content
+    assert "phase1-pons-final-acceptance-chain.yml" in content
+    assert "acceptance evidence workflow path is not allowed" in content
+    assert "acceptance evidence artifacts missing" in content
+    assert "acceptance current run is missing viability projection" in content
+    assert "build_phase1_acceptance_report" in content
+    assert "REQUIRED_PHASE1_ACQUISITION_ROUTES" in content
+    assert 'phase1_acceptance_status"] != "pass"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
+    content = _workflow(
+        "phase1-pons-acquisition-viability-projection.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-acquisition-accounting" in content
+    assert "build_phase1_route_plan" in content
+    assert "project_phase1_acquisition_plan" in content
+    assert "route_plan_json" in content
+    assert "route -> evidence run IDs" in content
+    assert "zero_cost_route_evidence" in content
+    assert "does not mark Phase 1 PASS" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
+    content = _workflow("phase1-pons-acquisition-accounting.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "actions: read" in content
+    assert "run_ids_json" in content
+    assert "at most 50 positive integer run IDs" in content
+    assert "summarize_action_run" in content
+    assert "summarize_phase1_runs" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+def test_skhy_v3_weth_continuation_is_manual_known_pool_and_bounded():
+    content = _workflow(
+        "phase1-pons-skhy-v3-weth-continuation.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert 'default: "33921477647"' in content
+    assert "0x84cab63bc87912e71ad199ff14a0ba45de68fef8" in content
+    assert "0x13f78b235d19141f572986afcaab66ce7744b4ef" in content
+    assert "SKHY_WETH_FEE: '3000'" in content
+    assert "SKHY_FIRST_PONS_USE: '52263525'" in content
+    assert "forward_blocks must be between 1 and 100000" in content
+    assert 'deployment-block "$SKHY_WETH_POOL"' in content
+    assert "--archive" in content
+    assert "rpc-pons-delayed-v3-weth-routes" in content
+    assert '--quote-token "$SKHY_TOKEN"' in content
+    assert "continue_needed" in content
+    assert "next_from_block" in content
+    assert "route_ready" in content
+    assert "first_observed_usd_price" in content
+    assert "deferred to event-ordered WETH/USD anchor replay" in content
+    assert "timeout-minutes: 30" in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+
+def test_skhy_v3_weth_segmented_is_manual_sequential_and_early_stopping():
+    content = _workflow(
+        "phase1-pons-skhy-v3-weth-segmented.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert content.count(
+        "phase1-pons-skhy-v3-weth-continuation.yml"
+    ) == 23
+    assert content.count('forward_blocks: "100000"') == 23
+    for index in range(22):
+        assert (
+            f"needs.segment_{index}.outputs.continue_needed == 'true'"
+            in content
+        )
+        assert (
+            f"needs.segment_{index}.outputs.next_from_block"
+            in content
+        )
+    assert '"max_blocks_per_segment": 100000' in content
+    assert "if: ${{ always() }}" in content
+    assert "searched_to_snapshot_head" in content
+    assert "route_resolved" in content
+    assert "jobs.finalize.outputs.completion_status" in content
+    assert "steps.freeze.outputs.route_ready" in content
+    assert "GITHUB_OUTPUT" in content
+    assert "max_blocks_per_segment" in content
+    assert "max-parallel:" not in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_explorer_crosscheck_is_manual_public_and_bounded():
+    content = _workflow(
+        "phase1-pons-representative-explorer-crosscheck.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "access_reverified" in content
+    assert "known 403" in content
+    assert "if: ${{ inputs.access_reverified == true }}" in content
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "BlockscoutClient" in content
+    assert "build_representative_explorer_targets" in content
+    assert "build_representative_explorer_token_summaries" in content
+    assert "10 <= len(targets) <= 40" in content
+    assert "blockscout_requests" in content
+    assert "blockscout_response_bytes" in content
+    assert "transaction_identity_and_block" in content
+    assert "raw chain" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
+    content = _workflow("phase1-pons-representative-dex-crosscheck.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "GeckoTerminalClient" in content
+    assert "geckoterminal_public_api" in content
+    assert "not canonical historical truth" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "priced_path_run_id" in content
+    assert "select_representative_dex_price_checkpoints" in content
+    assert "targeted_swap_price_tokens" in content
+    assert "targeted_swap_price_checkpoints" in content
+    assert "representative DEX cross-check requires exactly 10" in content
+    assert "independent DEX pool reconciliation failed" in content
+    assert "timeout-minutes: 30" in content
+    assert "logical_gecko_requests > 40" in content
+    assert "max_gecko_attempts = logical_gecko_requests * client.attempts" in content
+    assert "representative DEX logical request budget exceeded" in content
+    assert "representative DEX HTTP attempt budget exceeded" in content
+    assert "geckoterminal_logical_request_budget" in content
+    assert "geckoterminal_http_attempt_budget" in content
+    assert 'default: "33911022718"' in content
+    assert 'default: "33912452330"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+
+def test_representative_market_paths_are_manual_artifact_only_and_bounded():
+    content = _workflow("phase1-pons-representative-market-paths.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-full-registry-recovered" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-curve-full" in content
+    assert "phase1-pons-v2-transition-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "build_representative_market_path_rows" in content
+    assert "summarize_representative_market_paths" in content
+    assert "summarize_sharded_manifest_coverage" in content
+    assert "pons-representative-market-source-coverage.json" in content
+    assert "no provider requests" in content
+    assert 'default: "33911022718"' in content
+    assert 'default: "33936232604"' in content
+    assert 'default: "33912452330"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
+    content = _workflow("phase1-pons-representative-priced-paths.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "phase1-pons-weth-usdg-anchor-full" in content
+    assert "phase1-pons-stock-oracle-full" in content
+    assert "phase1-pons-quote-fallback-full" in content
+    assert "build_v1_market_cap_points" in content
+    assert "build_v2_curve_market_cap_points" in content
+    assert "build_v2_graduation_seed_points" in content
+    assert "build_v2_v4_market_cap_points" in content
+    assert "validate_representative_priced_path_rows" in content
+    assert "summarize_representative_priced_paths" in content
+    assert "summarize_sharded_manifest_coverage" in content
+    assert "summarize_snapshot_manifest_coverage" in content
+    assert "pons-representative-pricing-source-coverage.json" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "GeckoTerminalClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_validation_is_manual_artifact_only_and_fail_closed():
+    content = _workflow("phase1-pons-representative-validation.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-representative-sample" in content
+    assert "phase1-pons-v1-lifecycle-eligibility" in content
+    assert "phase1-pons-v2-lifecycle-eligibility" in content
+    assert "phase1-pons-representative-transfers-full" in content
+    assert "phase1-pons-representative-market-paths" in content
+    assert "market_path_run_id" in content
+    assert "phase1-pons-representative-priced-paths" in content
+    assert "priced_path_run_id" in content
+    assert "pons-representative-priced-path-summary.jsonl" in content
+    assert "phase1-pons-representative-dex-crosscheck" in content
+    assert "phase1-pons-representative-explorer-crosscheck" not in content
+    assert "explorer_crosscheck_run_id" not in content
+    assert "pons-representative-explorer-token-summary.jsonl" not in content
+    assert "build_representative_validation_rows" in content
+    assert "summarize_representative_validation" in content
+    assert "validate_representative_coverage_report" in content
+    assert "pons-representative-source-coverage.jsonl" in content
+    assert "source_coverage_sha256" in content
+    assert "representative market path V1 venue run mismatch" in content
+    assert "representative market path V2 venue run mismatch" in content
+    assert "representative V1 lifecycle/market venue run mismatch" in content
+    assert "representative V2 lifecycle/market venue run mismatch" in content
+    assert "representative lifecycle venue provenance missing" in content
+    assert "v1_v3_run_id:" in content
+    assert "v2_v4_run_id:" in content
+    assert 'v1_v3_run = int("${{ inputs.v1_v3_run_id }}")' in content
+    assert 'v2_v4_run = int("${{ inputs.v2_v4_run_id }}")' in content
+    for source_input in (
+        "registry_run_id:",
+        "v2_curve_run_id:",
+        "transition_run_id:",
+        "quote_audit_run_id:",
+        "anchor_run_id:",
+        "oracle_run_id:",
+        "fallback_run_id:",
+    ):
+        assert source_input in content
+    assert "representative market path {field} mismatch" in content
+    assert "representative priced path {field} mismatch" in content
+    assert "representative DEX registry run mismatch" in content
+    assert "representative DEX transition run mismatch" in content
+    assert "v1_eligibility_sha256" in content
+    assert "v2_eligibility_sha256" in content
+    assert "runner_smoke_run_id" in content
+    assert "runner_smoke_universe_sha256" in content
+    assert "runner_smoke_outcomes_sha256" in content
+    assert "representative validation runner smoke run mismatch" in content
+    assert "representative validation runner smoke universe SHA mismatch" in content
+    assert "representative validation runner smoke outcomes SHA mismatch" in content
+    assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
+    assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
+    assert "representative validation must contain exactly 10" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+def test_representative_chain_preflights_frozen_support_before_sample():
+    content = _workflow("phase1-pons-representative-evidence-chain.yml")
+    assert "Verify frozen representative support inputs" in content
+    assert "representative support run IDs changed" in content
+    assert "representative quote audit artifact changed" in content
+    assert "representative support run is not successful" in content
+    assert "representative support workflow path changed" in content
+    assert "representative support branch changed" in content
+    assert "representative support artifact missing or expired" in content
+    assert "sample:" in content
+    assert "needs: preflight" in content
+    assert "needs.preflight.result == 'success'" in content
+    for token in (
+        "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml",
+        "phase1-pons-stock-oracle-full",
+        "phase1-pons-research-smoke.yml",
+        "phase1-pons-research-smoke",
+        "phase1-pons-v1-registry-recovery.yml",
+        "phase1-pons-full-registry-recovered",
+        "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml",
+        "phase1-pons-v2-curve-full",
+        "phase1-pons-v2-transition-full.yml",
+        "phase1-pons-v2-transition-full",
+        "phase1-pons-quote-audit-one-shot.yml",
+        "phase1-pons-full-quote-audit-current",
+        "phase1-pons-anchor-promote-recovered-one-shot.yml",
+        "phase1-pons-weth-usdg-anchor-full",
+    ):
+        assert token in content
+
+
+def test_live_acquisition_checkpoint_launcher_is_pinned_and_artifact_only():
+    content = _workflow(
+        "phase1-pons-live-acquisition-checkpoint-one-shot.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch live acquisition checkpoint" in content
+    assert 'run_ids_json: "[33982556591]"' in content
+    assert 'require_successful_runs: false' in content
+    assert "phase1-pons-acquisition-accounting.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
+    content = _workflow("phase1-pons-live-venue-rescue-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch V1 V3 rescue" in content
+    assert "launch V2 V4 rescue" in content
+    assert "live venue rescue is blocked while source parent is active" in content
+    assert "live venue rescue is unnecessary for complete source " in content
+    assert "requested_artifacts" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "live venue rescue requires exactly one venue target" in content
+    assert '"rescue_target": (' in content
+    assert "missing_requested_artifacts" in content
+    assert "live venue rescue source workflow path changed" in content
+    assert "live venue rescue source branch changed" in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert content.count("needs: preflight") == 2
+    assert content.count("needs.preflight.result == 'success'") == 2
+    assert content.count('partial_run_id: "33982556591"') == 2
+    assert 'source_registry_run_id: "33911022718"' in content
+    assert 'transition_run_id: "33912452330"' in content
+    assert content.count('max_gap_blocks: "50000"') == 2
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "time.sleep(" not in content
+
+
+def test_eligible_universe_promotion_is_artifact_only_and_reusable():
+    content = _workflow("phase1-pons-eligible-universe-promote.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-eligible-universe-freeze.yml" in content
+    assert content.count(
+        "inputs.source_eligibility_run_id"
+    ) == 2
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_eligible_universe_promotion_launcher_is_pinned_and_guarded():
+    content = _workflow(
+        "phase1-pons-eligible-universe-promote-one-shot.yml"
+    )
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "launch eligible universe promotion" in content
+    assert 'source_eligibility_run_id: "33982556591"' in content
+    assert "phase1-pons-eligible-universe-promote.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+
+
+def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
+    chain = _workflow("phase1-pons-post-eligibility-evidence-chain.yml")
+    trigger_block = chain.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "source eligibility parent is not completed successfully" in chain
+    assert "phase1-pons-eligible-universe-promote.yml" in chain
+    assert "phase1-pons-representative-evidence-chain.yml" in chain
+    assert "phase1-pons-post-eligibility-evidence-ready" in chain
+    assert '"recovery_mode": False' in chain
+    assert "validate_post_eligibility_evidence_bundle" in chain
+    assert "expected_lifecycle_run_id=source_run_id" in chain
+    assert "expected_v1_v3_run_id=source_run_id" in chain
+    assert "expected_v2_v4_run_id=source_run_id" in chain
+    assert "**validation" in chain
+
+    launcher = _workflow(
+        "phase1-pons-post-eligibility-evidence-one-shot.yml"
+    )
+    assert ".github/phase1-pons-evidence-launch.txt" in launcher
+    assert "launch Phase 1 evidence handoff" in launcher
+    assert 'source_eligibility_run_id: "33982556591"' in launcher
+
+
+
+def test_viability_guarded_route_is_evidence_gated_before_rpc():
+    content = _workflow("phase1-pons-viability-guarded-route.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_call:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "viability evidence readiness is not armed" in content
+    assert "viability run ledger is not armed" in content
+    assert "viability run ledger evidence does not match readiness" in content
+    assert "viability run ledger route set changed" in content
+    assert "viability route already recorded in ledger" in content
+    assert "viability route ledger run ID cannot be negative" in content
+    assert "ROUTE: ${{ inputs.route }}" in content
+    assert "33_982_556_591" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-post-eligibility-evidence-ready.json" in content
+    assert "evidence handoff lifecycle run ID must be positive" in content
+    assert "normal evidence handoff routing changed" in content
+    assert "evidence handoff snapshot head changed" in content
+    assert "evidence handoff Pons launch count changed" in content
+    assert "evidence handoff eligible universe is empty" in content
+    assert "evidence handoff representative token count changed" in content
+    for field in (
+        "eligible_universe_sha256",
+        "representative_validation_sha256",
+        "v1_eligibility_sha256",
+        "v2_eligibility_sha256",
+    ):
+        assert field in content
+    assert "evidence handoff hash is invalid" in content
+    assert '"evidence_hashes": evidence_hashes' in content
+    assert "evidence lifecycle/pricing workflow path is not allowed" in content
+    assert "evidence lifecycle/pricing run is missing fallback" in content
+    assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v4-quote-fallback-full" in content
+    assert "phase1-pons-quote-fallback-full" in content
+    assert "quote_fallback_run_id" in content
+    assert "evidence_run_id: ${{ steps.check.outputs.evidence_run_id }}" in content
+    assert (
+        "eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}"
+        in content
+    )
+    assert (
+        "evidence_run_id: ${{ needs.preflight.outputs.evidence_run_id }}"
+        in content
+    )
+    assert (
+        "source_eligibility_run_id: "
+        "${{ needs.preflight.outputs.source_eligibility_run_id }}"
+        in content
+    )
+    assert (
+        "\n      eligibility_run_id: "
+        "${{ needs.preflight.outputs.source_eligibility_run_id }}"
+        not in content
+    )
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-viability-route-measurement.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+def test_viability_has_nine_individual_guarded_launchers():
+    wrappers = {
+        "pons_registry": "phase1-pons-viability-pons-registry-one-shot.yml",
+        "pons_v1_v3": "phase1-pons-viability-pons-v1-v3-one-shot.yml",
+        "pons_v2_curve": "phase1-pons-viability-pons-v2-curve-one-shot.yml",
+        "pons_v2_transition": (
+            "phase1-pons-viability-pons-v2-transition-one-shot.yml"
+        ),
+        "pons_v2_v4": "phase1-pons-viability-pons-v2-v4-one-shot.yml",
+        "weth_usdg_anchor": (
+            "phase1-pons-viability-weth-usdg-anchor-one-shot.yml"
+        ),
+        "stock_oracle": "phase1-pons-viability-stock-oracle-one-shot.yml",
+        "quote_v3_fallback": (
+            "phase1-pons-viability-quote-v3-fallback-one-shot.yml"
+        ),
+        "quote_v4_fallback": (
+            "phase1-pons-viability-quote-v4-fallback-one-shot.yml"
+        ),
+    }
+    assert len(wrappers) == 9
+    for route, workflow in wrappers.items():
+        content = _workflow(workflow)
+        assert f"launch viability {route}" in content
+        assert "phase1-pons-viability-guarded-route.yml" in content
+        assert f'route: "{route}"' in content
+        assert "sequence_id: ${{ github.sha }}" in content
+        assert "cancel-in-progress: false" in content
+        assert "workflow_dispatch:" not in content
+
+
+def test_viability_ledger_finalizer_validates_nine_distinct_runs():
+    content = _workflow(
+        "phase1-pons-viability-ledger-finalize-one-shot.yml"
+    )
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert "viability ledger evidence run does not match readiness" in content
+    assert "viability readiness source run changed" in content
+    assert "launch Phase 1 final acceptance" in content
+    assert "viability run ledger is not armed" in content
+    assert "nine distinct route run IDs" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    for workflow_name in (
+        "phase1-pons-viability-pons-registry-one-shot",
+        "phase1-pons-viability-pons-v1-v3-one-shot",
+        "phase1-pons-viability-pons-v2-curve-one-shot",
+        "phase1-pons-viability-pons-v2-transition-one-shot",
+        "phase1-pons-viability-pons-v2-v4-one-shot",
+        "phase1-pons-viability-weth-usdg-anchor-one-shot",
+        "phase1-pons-viability-stock-oracle-one-shot",
+        "phase1-pons-viability-quote-v3-fallback-one-shot",
+        "phase1-pons-viability-quote-v4-fallback-one-shot",
+    ):
+        assert workflow_name in content
+    assert 'run.get("path")' in content
+    assert "viability route workflow path mismatch" in content
+    assert "viability route measurement artifacts missing" in content
+    assert "json_file_at_ref" in content
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "viability route evidence changed since launch" in content
+    assert "viability route ledger evidence changed since launch" in content
+    assert "viability route launch slot was not empty" in content
+    assert "require_ancestor" in content
+    assert "head is not an ancestor of finalizer HEAD" in content
+    assert '"route_launch_evidence_bound": True' in content
+    assert '"evidence_and_routes_are_ancestors": True' in content
+    assert "phase1-pons-viability-measurement-pons_registry-primary" in content
+    assert "phase1-pons-viability-measurement-pons_registry-secondary" in content
+    assert "artifact_names(run_id)" in content
+    assert 'run.get("name") != expected[route]' not in content
+    assert "phase1-pons-final-acceptance-chain.yml" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+def test_phase1_readiness_audit_is_artifact_only_and_guarded():
+    content = _workflow("phase1-pons-readiness-audit.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "phase1-pons-viability-ready.json" in content
+    assert "phase1-pons-viability-runs.json" in content
+    assert "phase1-readiness-report.json" in content
+    assert "phase1-pons-readiness-audit" in content
+    assert "build_phase1_readiness_report" in content
+    assert "Resolve armed evidence run" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "phase1-post-eligibility-evidence-ready.json" in content
+    assert "evidence_handoff=evidence_handoff" in content
+    assert "evidence_handoff_errors" in content
+    assert '"path": run.get("path")' in content
+    assert "json_file_at_ref" in content
+    assert "launch_readiness_evidence_run_id" in content
+    assert "launch_ledger_evidence_run_id" in content
+    assert "launch_route_slot" in content
+    assert "launch_ledger_routes" in content
+    assert "latest_recovery_run" in content
+    assert "RECOVERY_VENUE_ARTIFACTS" in content
+    assert "RECOVERY_VENUE_WORKFLOW_PATHS" in content
+    assert "recovery_runs=recovery_runs" in content
+    assert "Recovery run IDs:" in content
+    assert "invalid_finalizers" in content
+    assert "finalizer_head_sha" in content
+    assert "launch_readiness_source_run_id" in content
+    assert "launch_ledger_generation" in content
+    assert "VIABILITY_ROUTE_WORKFLOW_PATHS" in content
+    assert "VIABILITY_ROUTE_WORKFLOWS" not in content
+    assert "job_counts(run_id)" in content
+    assert "33982556591" in content
+    assert '"&per_page=100&page=1"' in content
+    assert "finalizer run pagination exceeded" not in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+    launcher = _workflow("phase1-pons-readiness-audit-one-shot.yml")
+    assert "launch Phase 1 readiness audit" in launcher
+    assert 'source_eligibility_run_id: "33982556591"' in launcher
+    assert "phase1-pons-readiness-audit.yml" in launcher
+    assert "workflow_dispatch:" not in launcher
+
+
+def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
+    content = _workflow("phase1-pons-pass-closeout-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-pass-closeout.json" in content
+    assert "launch Phase 1 PASS closeout" in content
+    assert "phase1-pons-acceptance-gate" in content
+    assert "phase1-acceptance-report.json" in content
+    assert 'report.get("phase1_acceptance_status") != "pass"' in content
+    assert "hlp-v1-phase1-data-viability" in content
+    assert "331_011_903" in content
+    assert "phase1-pons-viability-ledger-finalize-one-shot.yml" in content
+    assert '["git", "merge-base", "--is-ancestor"' in content
+    assert ".github/phase1-pons-pass-closeout.json" in content
+    assert "docs/project-state.md" in content
+    assert "code changed after Phase 1 PASS evidence" in content
+    assert "## Phase 1 remaining gates" in content
+    assert '"- [ ]" in gate_section' in content
+    assert "Phase 1 PASS run is not recorded in project-state" in content
+    assert 'get(f"/repos/{repo}/pulls/3")' in content
+    assert 'pr.get("state") != "open"' in content
+    assert 'pr.get("draft") is not True' in content
+    assert '!= "phase1/data-acquisition-spike"' in content
+    assert '!= "main"' in content
+    assert "PR 3 head moved while Phase 1 closeout was running" in content
+    assert "safe_to_mark_pr_ready" in content
+    assert "safe_to_merge_after_required_checks" in content
+    assert "phase1-pons-pass-closeout" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_recovered_completion_chain_is_terminal_gated_and_resumable():
+    content = _workflow("phase1-pons-recovered-completion-chain.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "workflow_call:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "33982556591" in content
+    assert "recovered completion cannot start before source is terminal" in content
+    assert "recovered completion is unnecessary after complete " in content
+    assert "missing_source_artifacts" in content
+    assert "required_source_artifacts" in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
+    assert "phase1-pons-v1-v3-recover-gaps.yml" in content
+    assert "phase1-pons-v2-v4-recover-gaps.yml" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "inputs.v2_v4_run_id == ''" in content
+    assert "pricing_run_id:" in content
+    assert "reused pricing requires an explicit V2/V4 run ID" in content
+    assert "recovered completion support run IDs changed" in content
+    assert "recovered completion support run is not successful" in content
+    assert "recovered completion support workflow path changed" in content
+    assert "recovered completion support branch changed" in content
+    assert "recovered completion support artifact missing or" in content
+    for run_id in (
+        "33_974_681_334",
+        "33_920_762_592",
+        "33_911_022_718",
+        "33_936_232_604",
+        "33_912_452_330",
+        "33_923_299_711",
+        "33_972_109_927",
+    ):
+        assert run_id in content
+    assert "source already has complete V2/V4; set v2_v4_run_id" in content
+    assert "source has reusable V2/V4 shards; recover source gaps" in content
+    assert "source already has complete pricing; set pricing_run_id" in content
+    assert "source_v2_shards" in content
+    assert "recovery_manifest" in content
+    assert "pons-v1-v3-full.jsonl.manifest.json" in content
+    assert "pons-v2-v4-full.jsonl.manifest.json" in content
+    assert "manifest_gap_aware_v1_v3_recovery" in content
+    assert "manifest_gap_aware_v4_recovery" in content
+    assert "recovery venue partial run does not match frozen" in content
+    assert "recovery_lineage plan artifact identity is ambiguous".replace("_", " ") in content
+    assert "recovery venue plan lacks bound lineage metadata" in content
+    assert "recovery venue manifest/plan prior lineage" in content
+    assert "recovery venue prior lineage contains a cycle" in content
+    assert "recovery venue prior lineage exceeds" in content
+    assert "recovery venue prior plan lacks bound" in content
+    assert "recovery venue prior partial run mismatch" in content
+    assert "source_registry_run_id" in content
+    assert "transition_run_id" in content
+    assert "reused pricing run is missing lifecycle/fallback" in content
+    assert "inputs.pricing_run_id == ''" in content
+    assert "phase1-pons-pricing-eligibility-chain.yml" in content
+    assert "phase1-pons-eligible-universe-promote.yml" in content
+    assert "promote_reused_universe" in content
+    assert "verify_reused_pricing" in content
+    assert "reused pricing V1/V3 provenance mismatch" in content
+    assert "reused pricing V2/V4 provenance mismatch" in content
+    assert "reused pricing eligible universe remains incomplete" in content
+    assert '"validated_v1_v3_run_id"' in content
+    assert '"validated_v2_v4_run_id"' in content
+    assert (
+        "needs.verify_reused_pricing.result == 'success'"
+        in content
+    )
+    assert (
+        "inputs.pricing_run_id != '' && inputs.pricing_run_id || "
+        "format('{0}', github.run_id)"
+    ) in content
+    assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "v1_v3_run_id: ${{ inputs.v1_v3_run_id }}" in content
+    assert (
+        "inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || "
+        "format('{0}', github.run_id)"
+    ) in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-representative-validation" in content
+    assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert '"recovery_mode": True' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+
+def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
+    content = _workflow("phase1-pons-recovered-completion-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-recovered-completion.json" in content
+    assert "launch recovered Phase 1 completion" in content
+    assert "recovered completion config is not armed" in content
+    assert "source_id != 33_982_556_591" in content
+    assert "v1_id <= 0" in content
+    assert "pricing_run_id" in content
+    assert "reused pricing requires an explicit V2/V4 run ID" in content
+    assert "phase1-pons-recovered-completion-chain.yml" in content
+
+
+def test_viability_accepts_only_approved_evidence_workflow_paths():
+    guard = _workflow("phase1-pons-viability-guarded-route.yml")
+    finalizer = _workflow(
+        "phase1-pons-viability-ledger-finalize-one-shot.yml"
+    )
+    for content in (guard, finalizer):
+        assert (
+            "phase1-pons-post-eligibility-evidence-one-shot.yml"
+            in content
+        )
+        assert "phase1-pons-recovered-completion-one-shot.yml" in content
+        assert "phase1/data-acquisition-spike" in content
+    assert "evidence handoff workflow path is not allowed" in guard
+    assert "viability ledger evidence workflow path is not allowed" in finalizer
+
+
+def test_readiness_state_change_watcher_is_artifact_only_and_scoped():
+    content = _workflow("phase1-pons-readiness-on-state-change.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-viability-ready.json" in content
+    assert ".github/phase1-pons-viability-runs.json" in content
+    assert "phase1-pons-readiness-audit.yml" in content
+    assert 'source_eligibility_run_id: "33982556591"' in content
+    assert "cancel-in-progress: true" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "RpcClient" not in content
+    assert "time.sleep(" not in content
+
+
+def test_post_eligibility_handoffs_validate_bundle_before_viability():
+    normal = _workflow("phase1-pons-post-eligibility-evidence-chain.yml")
+    recovered = _workflow("phase1-pons-recovered-completion-chain.yml")
+    for content in (normal, recovered):
+        assert "validate_post_eligibility_evidence_bundle" in content
+        assert "pons-eligible-universe-summary.json" in content
+        assert "pons-eligible-100k-universe.jsonl.manifest.json" in content
+        assert "pons-representative-validation-summary.json" in content
+        assert "pons-representative-validation.jsonl.manifest.json" in content
+        assert '"eligible_universe_sha256"' not in content or "**validation" in content
+        assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "post-eligibility source run must match frozen parent" in normal
+    assert "33_982_556_591" in normal
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in normal
+    assert "post-eligibility source workflow path changed" in normal
+    assert "post-eligibility source branch changed" in normal
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in normal
+    assert "post-eligibility source launch commit changed" in normal
+    assert "post-eligibility support run IDs changed" in normal
+    assert "post-eligibility support run is not successful" in normal
+    assert "post-eligibility support workflow path changed" in normal
+    assert "post-eligibility support branch changed" in normal
+    assert "post-eligibility support artifact missing or expired" in normal
+    assert "post-eligibility quote audit artifact changed" in normal
+    for run_id in (
+        "33_974_681_334",
+        "33_920_762_592",
+        "33_911_022_718",
+        "33_936_232_604",
+        "33_912_452_330",
+        "33_923_299_711",
+        "33_972_109_927",
+    ):
+        assert run_id in normal
+    for token in (
+        "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml",
+        "phase1-pons-stock-oracle-full",
+        "phase1-pons-research-smoke.yml",
+        "phase1-pons-research-smoke",
+        "phase1-pons-v1-registry-recovery.yml",
+        "phase1-pons-full-registry-recovered",
+        "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml",
+        "phase1-pons-v2-curve-full",
+        "phase1-pons-v2-transition-full.yml",
+        "phase1-pons-v2-transition-full",
+        "phase1-pons-quote-audit-one-shot.yml",
+        "phase1-pons-full-quote-audit-current",
+        "phase1-pons-anchor-promote-recovered-one-shot.yml",
+        "phase1-pons-weth-usdg-anchor-full",
+    ):
+        assert token in normal
+        assert token in recovered
+    assert "expected_lifecycle_run_id=source_run_id" in normal
+    assert "expected_v1_v3_run_id=source_run_id" in normal
+    assert "expected_v2_v4_run_id=source_run_id" in normal
+    assert "expected_lifecycle_run_id=pricing_run_id" in recovered
+    assert "expected_v1_v3_run_id=v1_v3_run_id" in recovered
+    assert "expected_v2_v4_run_id=v2_v4_run_id" in recovered

@@ -1,0 +1,254 @@
+name: phase1-pons-eligible-universe-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      v1_eligibility_run_id:
+        description: "Successful phase1-pons-v1-lifecycle-eligibility run"
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        description: "Successful phase1-pons-v2-lifecycle-eligibility run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      v1_eligibility_run_id:
+        required: true
+        type: string
+      v2_eligibility_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-eligible-universe-freeze-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Freeze exact all-Pons $100k+ research universe
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def load(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          HEAD = 54_486_035
+          CHAIN_ID = 4663
+
+          def validate_manifest(path, expected_records):
+              manifest_path = Path(path)
+              if not manifest_path.exists():
+                  raise SystemExit(
+                      f"required eligibility manifest is missing: {path}"
+                  )
+              manifest = json.loads(manifest_path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"eligibility manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"eligibility manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if int(manifest["records"]) != expected_records:
+                  raise SystemExit(
+                      f"eligibility manifest record mismatch: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              return manifest
+
+          v1_manifest = validate_manifest(
+              "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json",
+              268_688,
+          )
+          v2_manifest = validate_manifest(
+              "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json",
+              225_951,
+          )
+
+          v1_lifecycle_run_id = int(
+              "${{ inputs.v1_eligibility_run_id }}"
+          )
+          v2_lifecycle_run_id = int(
+              "${{ inputs.v2_eligibility_run_id }}"
+          )
+
+          def venue_run_id(manifest, field, lifecycle_run_id):
+              provenance = manifest.get("provenance") or {}
+              value = provenance.get(field)
+              if value is None:
+                  if lifecycle_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          f"eligibility lifecycle venue provenance missing: "
+                          f"{field} run={lifecycle_run_id}"
+                      )
+                  return lifecycle_run_id
+              run_id = int(value)
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"eligibility lifecycle venue run is invalid: "
+                      f"{field}={run_id}"
+                  )
+              return run_id
+
+          v1_v3_run_id = venue_run_id(
+              v1_manifest,
+              "v1_v3_run_id",
+              v1_lifecycle_run_id,
+          )
+          v2_v4_run_id = venue_run_id(
+              v2_manifest,
+              "v4_run_id",
+              v2_lifecycle_run_id,
+          )
+
+          v1 = load("v1/pons-v1-lifecycle-eligibility.jsonl")
+          v2 = load("v2/pons-v2-lifecycle-eligibility.jsonl")
+          if len(v1) != 268_688 or len(v2) != 225_951:
+              raise SystemExit(
+                  "eligibility artifact cardinality does not match frozen "
+                  f"registries: v1={len(v1)} v2={len(v2)}"
+              )
+          statuses = {"eligible", "ineligible", "unknown"}
+          unexpected_status = [
+              (row["token"], row.get("eligibility_status"))
+              for row in [*v1, *v2]
+              if row.get("eligibility_status") not in statuses
+          ]
+          if unexpected_status:
+              raise SystemExit(
+                  "eligibility artifact has invalid status values: "
+                  f"{unexpected_status[:10]}"
+              )
+
+          v1_tokens = {row["token"].lower() for row in v1}
+          v2_tokens = {row["token"].lower() for row in v2}
+          assert not (v1_tokens & v2_tokens), "V1/V2 token overlap"
+
+          unknown_v1 = [
+              row for row in v1
+              if row.get("eligibility_status") == "unknown"
+          ]
+          unknown_v2 = [
+              row for row in v2
+              if row.get("eligibility_status") == "unknown"
+          ]
+          if unknown_v1 or unknown_v2:
+              raise SystemExit(
+                  "cannot freeze complete $100k universe while eligibility "
+                  f"remains unknown: v1={len(unknown_v1)} "
+                  f"v2={len(unknown_v2)} "
+                  f"v1_sample={[r['token'] for r in unknown_v1[:10]]} "
+                  f"v2_sample={[r['token'] for r in unknown_v2[:10]]}"
+              )
+
+          eligible = [
+              {**row, "version": "v1"}
+              for row in v1
+              if row.get("eligibility_status") == "eligible"
+          ] + [
+              {**row, "version": "v2"}
+              for row in v2
+              if row.get("eligibility_status") == "eligible"
+          ]
+          eligible.sort(
+              key=lambda row: (
+                  int(row["launch_block"]),
+                  row["version"],
+                  row["token"],
+              )
+          )
+          manifest = write_jsonl_snapshot(
+              eligible,
+              output=Path("artifacts/pons-eligible-100k-universe.jsonl"),
+              provenance={
+                  "source": "complete_v1_plus_v2_lifecycle_eligibility",
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "eligibility_threshold_usd": "100000",
+                  "threshold_semantics": (
+                      "reached >=$100k market-cap proxy at least once in "
+                      "complete observed Pons lifecycle"
+                  ),
+                  "v1_eligibility_run_id": v1_lifecycle_run_id,
+                  "v2_eligibility_run_id": v2_lifecycle_run_id,
+                  "v1_v3_run_id": v1_v3_run_id,
+                  "v2_v4_run_id": v2_v4_run_id,
+                  "v1_eligibility_sha256": v1_manifest["sha256"],
+                  "v2_eligibility_sha256": v2_manifest["sha256"],
+              },
+          )
+          report = {
+              "snapshot_head_block": HEAD,
+              "all_pons_launches": len(v1) + len(v2),
+              "validated_v1_input_sha256": v1_manifest["sha256"],
+              "validated_v2_input_sha256": v2_manifest["sha256"],
+              "validated_v1_v3_run_id": v1_v3_run_id,
+              "validated_v2_v4_run_id": v2_v4_run_id,
+              "v1_launches": len(v1),
+              "v2_launches": len(v2),
+              "eligible_tokens": len(eligible),
+              "eligible_v1": sum(row["version"] == "v1" for row in eligible),
+              "eligible_v2": sum(row["version"] == "v2" for row in eligible),
+              "eligible_share": (
+                  0 if not (v1 or v2)
+                  else len(eligible) / (len(v1) + len(v2))
+              ),
+              "unknown_tokens": 0,
+              "partial_but_proven_eligible": sum(
+                  int(row.get("unpriced_points", 0)) > 0
+                  for row in eligible
+              ),
+              "universe_sha256": manifest["sha256"],
+          }
+          Path("artifacts/pons-eligible-universe-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: artifacts/
+          if-no-files-found: error

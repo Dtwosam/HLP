@@ -1,0 +1,55 @@
+name: phase1-v1-usd-path-smoke
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  reconstruct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Reconstruct point-in-time USD market-cap path
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-v1-usd-path             --token 0x468488fa24e2839fae01e7d9dc40ffad50f16b18             --quote-token 0x0bd7d308f8e1639fab988df18a8011f41eacad73             --pool 0x7cf8d18896137a4fd258892353d419fa3e94c746             --from-block 30000757             --to-block 30100756             --chunk-size 2000             --min-chunk-size 50             --out artifacts/v1-token-usd-path.jsonl
+      - name: Validate USD path
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path("artifacts/v1-token-usd-path.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert rows
+          mcaps = [Decimal(row["market_cap_proxy_usd"]) for row in rows]
+          prices = [Decimal(row["token_price_usd"]) for row in rows]
+          anchors = [Decimal(row["quote_usd"]) for row in rows]
+          assert all(x > 0 for x in mcaps + prices + anchors)
+          print(json.dumps({
+              "points": len(rows),
+              "first_block": rows[0]["block_number"],
+              "last_block": rows[-1]["block_number"],
+              "first_mcap_usd": str(mcaps[0]),
+              "last_mcap_usd": str(mcaps[-1]),
+              "min_mcap_usd": str(min(mcaps)),
+              "max_mcap_usd": str(max(mcaps)),
+              "first_weth_usd": str(anchors[0]),
+              "last_weth_usd": str(anchors[-1]),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-v1-usd-path
+          path: artifacts/
+          if-no-files-found: error

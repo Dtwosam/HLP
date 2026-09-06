@@ -1,0 +1,438 @@
+name: phase1-pons-v1-lifecycle-eligibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        default: "33911022718"
+        type: string
+      v1_v3_run_id:
+        description: "Successful phase1-pons-v1-v3-full run"
+        required: true
+        type: string
+      quote_audit_run_id:
+        description: "Successful full-Pons quote-audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        description: "Successful phase1-pons-weth-usdg-anchor-full run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Successful phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      source_registry_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v1-lifecycle-eligibility-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: v3
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: v3_sources
+        name: Resolve V1 V3 shard source runs
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("v3/pons-v1-v3-full.jsonl.manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit(
+                  "canonical V1 V3 tape is not stored as sharded artifacts"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key in ("partial_run_id", "prior_gap_run_id"):
+                  value = provenance.get(key)
+                  handle.write(f"{key}={'' if value is None else int(value)}\n")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v3_sources.outputs.partial_run_id != '' && steps.v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.v3_sources.outputs.prior_gap_run_id != '' && steps.v3_sources.outputs.prior_gap_run_id != inputs.v1_v3_run_id }}
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate frozen V1 lifecycle input manifests
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          CHAIN_ID = 4663
+
+          specs = [
+              (
+                  Path(
+                      "registry/pons-full-launch-registry.jsonl.manifest.json"
+                  ),
+                  494_639,
+                  "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed",
+                  True,
+              ),
+              (
+                  Path(
+                      "quotes/pons-quote-registry.jsonl.manifest.json"
+                  ),
+                  57,
+                  "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc",
+                  False,
+              ),
+              (
+                  Path("v3/pons-v1-v3-full.jsonl.manifest.json"),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+          ]
+
+          validated = []
+          for (
+              path,
+              expected_records,
+              expected_sha,
+              require_snapshot,
+          ) in specs:
+              if not path.exists():
+                  raise SystemExit(
+                      f"required V1 lifecycle manifest is missing: {path}"
+                  )
+              manifest = json.loads(path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if require_snapshot and int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if (
+                  expected_records is not None
+                  and int(manifest["records"]) != expected_records
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle record count changed: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              if (
+                  expected_sha is not None
+                  and manifest["sha256"] != expected_sha
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle SHA changed: {path} "
+                      f"expected={expected_sha} "
+                      f"actual={manifest['sha256']}"
+                  )
+              validated.append({
+                  "manifest": str(path),
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+                  "snapshot_required": require_snapshot,
+              })
+
+          report = {
+              "chain_id": CHAIN_ID,
+              "snapshot_head_block": HEAD,
+              "validated_manifests": validated,
+              "validated_manifest_count": len(validated),
+          }
+          Path(
+              "artifacts/pons-v1-input-manifest-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Validate complete direct-USD coverage for V1 quotes
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-full-launch-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v1 = [row for row in registry if row.get("version") == "v1"]
+          quote_tokens = {
+              row["pair_token"].lower()
+              for row in v1
+          }
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          by_token = {
+              row["quote_token"].lower(): row
+              for row in quotes
+          }
+          missing = sorted(quote_tokens - set(by_token))
+          blockers = [
+              by_token[token]
+              for token in sorted(quote_tokens & set(by_token))
+              if by_token[token]["pricing_status"] in {
+                  "missing_chainlink_feed",
+                  "unsupported_quote",
+              }
+          ]
+          if missing or blockers:
+              raise SystemExit(
+                  "V1 quote coverage is not complete: "
+                  f"missing={missing[:10]} "
+                  f"blockers={[r['quote_token'] for r in blockers[:10]]}"
+              )
+
+          statuses = Counter(
+              by_token[token]["pricing_status"]
+              for token in quote_tokens
+          )
+          print(json.dumps({
+              "v1_launches": len(v1),
+              "v1_quote_assets": len(quote_tokens),
+              "pricing_status_counts": dict(sorted(statuses.items())),
+              "blocking_quote_assets": 0,
+          }, sort_keys=True))
+          PY
+      - name: Replay complete V1 lifecycle as token summaries
+        run: |
+          mkdir -p artifacts
+          hlp pons-v1-lifecycle-eligibility \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --v3-events-dir v3-shards \
+            --v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json \
+            --quote-registry quotes/pons-quote-registry.jsonl \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --oracle-state oracle/pons-stock-oracle-initial.jsonl \
+            --oracle-events oracle/pons-stock-oracle-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --out artifacts/pons-v1-lifecycle-eligibility.jsonl
+      - name: Bind V1 lifecycle source run provenance
+        env:
+          SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/"
+              "pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          manifest = json.loads(path.read_text())
+          provenance = dict(manifest.get("provenance") or {})
+          provenance.update({
+              "source_registry_run_id": int(
+                  os.environ["SOURCE_REGISTRY_RUN_ID"]
+              ),
+              "v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"]),
+              "quote_audit_run_id": int(
+                  os.environ["QUOTE_AUDIT_RUN_ID"]
+              ),
+              "anchor_run_id": int(os.environ["ANCHOR_RUN_ID"]),
+              "oracle_run_id": int(os.environ["ORACLE_RUN_ID"]),
+          })
+          manifest["provenance"] = provenance
+          path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(provenance, sort_keys=True))
+          PY
+      - name: Freeze V1 tokens that ever reached the $100k universe gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source = Path("artifacts/pons-v1-lifecycle-eligibility.jsonl")
+          rows = [
+              json.loads(line)
+              for line in source.read_text().splitlines()
+              if line.strip()
+          ]
+          eligible = [
+              row for row in rows
+              if row.get("eligibility_status") == "eligible"
+          ]
+          unknown = [
+              row for row in rows
+              if row.get("eligibility_status") == "unknown"
+          ]
+          eligible.sort(key=lambda row: (row["launch_block"], row["token"]))
+          snapshot = write_jsonl_snapshot(
+              eligible,
+              output=Path("artifacts/pons-v1-eligible-100k.jsonl"),
+              provenance={
+                  "source": source.name,
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+          report = {
+              "snapshot_head_block": 54_486_035,
+              "registry_tokens": len(rows),
+              "eligible_tokens": len(eligible),
+              "eligible_share": 0 if not rows else len(eligible) / len(rows),
+              "tokens_without_priced_points": sum(
+                  int(row["priced_points"]) == 0 for row in rows
+              ),
+              "tokens_with_partial_pricing": sum(
+                  int(row.get("unpriced_points", 0)) > 0 for row in rows
+              ),
+              "eligibility_unknown_tokens": len(unknown),
+              "unknown_sample": [row["token"] for row in unknown[:20]],
+              "eligible_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v1-eligibility-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error

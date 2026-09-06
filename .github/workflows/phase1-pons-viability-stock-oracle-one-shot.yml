@@ -1,0 +1,26 @@
+name: phase1-pons-viability-stock-oracle-one-shot
+run-name: phase1 viability stock_oracle ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-viability-stock-oracle-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-stock-oracle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch viability stock_oracle') }}
+    uses: ./.github/workflows/phase1-pons-viability-guarded-route.yml
+    with:
+      route: "stock_oracle"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit
