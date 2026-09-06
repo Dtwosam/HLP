@@ -1689,6 +1689,10 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "inputs.v2_v4_run_id == ''" in content
     assert "pricing_run_id:" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
+    assert "source already has complete V2/V4; set v2_v4_run_id" in content
+    assert "source has reusable V2/V4 shards; recover source gaps" in content
+    assert "source already has complete pricing; set pricing_run_id" in content
+    assert "source_v2_shards" in content
     assert "reused pricing run is missing lifecycle/fallback" in content
     assert "inputs.pricing_run_id == ''" in content
     assert "phase1-pons-pricing-eligibility-chain.yml" in content
