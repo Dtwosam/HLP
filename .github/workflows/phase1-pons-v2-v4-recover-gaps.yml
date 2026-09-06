@@ -123,6 +123,163 @@ jobs:
                   "frozen parent recovery source launch commit changed"
               )
           PY
+      - name: Verify recursive prior recovery lineage
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+          PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import urllib.request
+          import zipfile
+
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
+          prior_run_id = int(os.environ["PRIOR_GAP_RUN_ID"])
+          if partial_run_id <= 0 or prior_run_id <= 0:
+              raise SystemExit(
+                  "recovery lineage run IDs must be positive"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          artifact_name = "phase1-pons-v2-v4-gap-plan"
+          plan_name = "v4-gap-plan.json"
+          allowed_paths = {
+              ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
+              ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          }
+
+          def request(path, *, decode_json=True):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = response.read()
+              return json.loads(payload) if decode_json else payload
+
+          def plan_for(run_id):
+              run = request(f"/repos/{repo}/actions/runs/{run_id}")
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      "prior recovery lineage run is not terminal: "
+                      f"{run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path not in allowed_paths:
+                  raise SystemExit(
+                      "prior recovery lineage workflow path is not allowed: "
+                      f"{path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      "prior recovery lineage branch changed: "
+                      f"{run_id}"
+                  )
+
+              matches = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  matches.extend(
+                      row
+                      for row in rows
+                      if not row.get("expired")
+                      and str(row.get("name")) == artifact_name
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "prior recovery artifact pagination exceeded 2000"
+                      )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "prior recovery plan artifact identity is ambiguous: "
+                      f"run={run_id}"
+                  )
+
+              payload = request(
+                  f"/repos/{repo}/actions/artifacts/"
+                  f"{int(matches[0]['id'])}/zip",
+                  decode_json=False,
+              )
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == plan_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "prior recovery plan identity is ambiguous: "
+                          f"run={run_id}"
+                      )
+                  plan = json.loads(archive.read(names[0]))
+
+              if "partial_run_id" not in plan or "prior_gap_run_id" not in plan:
+                  raise SystemExit(
+                      "prior recovery plan lacks bound lineage metadata: "
+                      f"run={run_id}"
+                  )
+              if int(plan["partial_run_id"]) != partial_run_id:
+                  raise SystemExit(
+                      "prior recovery partial run does not match current "
+                      f"partial source: run={run_id}"
+                  )
+              if int(plan.get("snapshot_head", -1)) != 54_486_035:
+                  raise SystemExit(
+                      "prior recovery plan snapshot head changed"
+                  )
+              if int(plan.get("generation_start", -1)) != 26_841_846:
+                  raise SystemExit(
+                      "prior V2/V4 recovery plan start block changed"
+                  )
+              return plan
+
+          seen = set()
+          depth = 0
+          cursor = prior_run_id
+          while cursor:
+              if cursor in seen:
+                  raise SystemExit(
+                      "prior recovery lineage contains a cycle"
+                  )
+              seen.add(cursor)
+              depth += 1
+              if depth > 20:
+                  raise SystemExit(
+                      "prior recovery lineage exceeds 20 generations"
+                  )
+              plan = plan_for(cursor)
+              parent = plan.get("prior_gap_run_id")
+              cursor = int(parent) if parent not in {None, "", 0} else 0
+
+          print(json.dumps({
+              "partial_run_id": partial_run_id,
+              "prior_gap_run_id": prior_run_id,
+              "verified_generations": depth,
+              "lineage": "pass",
+          }, sort_keys=True))
+          PY
       - uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v2-v4-*
@@ -219,6 +376,12 @@ jobs:
           report = {
               "generation_start": start,
               "snapshot_head": head,
+              "partial_run_id": int("${{ inputs.partial_run_id }}"),
+              "prior_gap_run_id": (
+                  int("${{ inputs.prior_gap_run_id }}")
+                  if "${{ inputs.prior_gap_run_id }}"
+                  else None
+              ),
               "max_gap_blocks": max_blocks,
               "successful_sources": sources,
               "gap_jobs": include,
