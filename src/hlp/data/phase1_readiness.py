@@ -76,6 +76,21 @@ FINALIZER_WORKFLOW_PATH = (
     ".github/workflows/phase1-pons-viability-ledger-finalize-one-shot.yml"
 )
 
+RECOVERY_VENUE_ARTIFACTS = {
+    "v1_v3": "phase1-pons-v1-v3-full",
+    "v2_v4": "phase1-pons-v2-v4-full",
+}
+RECOVERY_VENUE_WORKFLOW_PATHS = {
+    "v1_v3": (
+        ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+        ".github/workflows/phase1-pons-v1-v3-recover-gaps.yml",
+    ),
+    "v2_v4": (
+        ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+        ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
+    ),
+}
+
 
 def _artifact_names(run: Mapping[str, Any] | None) -> set[str]:
     if not run:
@@ -104,11 +119,48 @@ def _run_id(run: Mapping[str, Any] | None) -> int:
         return 0
 
 
+def _recovered_venue_run_id(
+    venue: str,
+    run: Mapping[str, Any] | None,
+) -> int:
+    if venue not in RECOVERY_VENUE_ARTIFACTS:
+        raise ValueError(f"unknown recovery venue: {venue}")
+    if not _successful(run):
+        return 0
+    observed_path = str((run or {}).get("path") or "").split("@", 1)[0]
+    if observed_path not in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
+        return 0
+    if (run or {}).get("head_branch") != "phase1/data-acquisition-spike":
+        return 0
+    if RECOVERY_VENUE_ARTIFACTS[venue] not in _artifact_names(run):
+        return 0
+    return _run_id(run)
+
+
 def _source_recovery_plan(
     source_artifacts: set[str],
+    recovery_runs: Mapping[str, Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
+    recovery_runs = recovery_runs or {}
+    if set(recovery_runs) - set(RECOVERY_VENUE_ARTIFACTS):
+        raise ValueError("readiness recovery venue set changed")
+
     has_v1_v3 = "phase1-pons-v1-v3-full" in source_artifacts
     has_v2_v4 = "phase1-pons-v2-v4-full" in source_artifacts
+    recovered_v1_v3_id = _recovered_venue_run_id(
+        "v1_v3",
+        recovery_runs.get("v1_v3"),
+    )
+    recovered_v2_v4_id = _recovered_venue_run_id(
+        "v2_v4",
+        recovery_runs.get("v2_v4"),
+    )
+    recommended_v1_v3_id = (
+        SOURCE_ELIGIBILITY_RUN_ID if has_v1_v3 else recovered_v1_v3_id
+    )
+    recommended_v2_v4_id = (
+        SOURCE_ELIGIBILITY_RUN_ID if has_v2_v4 else recovered_v2_v4_id
+    )
     pricing_artifacts = {
         "phase1-pons-v1-lifecycle-eligibility",
         "phase1-pons-v2-lifecycle-eligibility",
@@ -117,26 +169,26 @@ def _source_recovery_plan(
         "phase1-pons-quote-fallback-full",
     }
     has_pricing = pricing_artifacts <= source_artifacts
-    reusable_pricing = bool(has_pricing and has_v1_v3 and has_v2_v4)
+    reusable_pricing = bool(
+        has_pricing
+        and recommended_v1_v3_id == SOURCE_ELIGIBILITY_RUN_ID
+        and recommended_v2_v4_id == SOURCE_ELIGIBILITY_RUN_ID
+    )
     return {
         "source_has_v1_v3_full": has_v1_v3,
         "source_has_v2_v4_full": has_v2_v4,
         "source_has_complete_pricing": has_pricing,
-        "recommended_v1_v3_run_id": (
-            SOURCE_ELIGIBILITY_RUN_ID if has_v1_v3 else 0
-        ),
-        "recommended_v2_v4_run_id": (
-            SOURCE_ELIGIBILITY_RUN_ID if has_v2_v4 else 0
-        ),
+        "recommended_v1_v3_run_id": recommended_v1_v3_id,
+        "recommended_v2_v4_run_id": recommended_v2_v4_id,
         "recommended_pricing_run_id": (
             SOURCE_ELIGIBILITY_RUN_ID if reusable_pricing else 0
         ),
         "next_action": (
             "launch_v1_v3_rescue"
-            if not has_v1_v3
+            if recommended_v1_v3_id <= 0
             else (
                 "launch_v2_v4_rescue"
-                if not has_v2_v4
+                if recommended_v2_v4_id <= 0
                 else "launch_recovered_phase1_completion"
             )
         ),
@@ -224,6 +276,7 @@ def build_phase1_readiness_report(
     ledger_evidence_run_id: int,
     ledger_route_run_ids: Mapping[str, int],
     evidence_handoff: Mapping[str, Any] | None = None,
+    recovery_runs: Mapping[str, Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
     if int(configured_source_run_id) != SOURCE_ELIGIBILITY_RUN_ID:
         raise ValueError("readiness source eligibility run changed")
@@ -292,7 +345,10 @@ def build_phase1_readiness_report(
         source_completed and not source_successful
     )
     source_recovery_plan = (
-        _source_recovery_plan(source_artifacts)
+        _source_recovery_plan(
+            source_artifacts,
+            recovery_runs=recovery_runs,
+        )
         if source_requires_recovery
         else None
     )
