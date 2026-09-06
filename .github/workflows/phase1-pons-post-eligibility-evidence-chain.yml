@@ -128,26 +128,64 @@ jobs:
                   "33982556591"
               )
 
-          expected_support_runs = {
-              "ORACLE_RUN_ID": 33_974_681_334,
-              "RUNNER_SMOKE_RUN_ID": 33_920_762_592,
-              "REGISTRY_RUN_ID": 33_911_022_718,
-              "V2_CURVE_RUN_ID": 33_936_232_604,
-              "TRANSITION_RUN_ID": 33_912_452_330,
-              "QUOTE_AUDIT_RUN_ID": 33_923_299_711,
-              "ANCHOR_RUN_ID": 33_972_109_927,
+          support_contracts = {
+              "ORACLE_RUN_ID": {
+                  "run_id": 33_974_681_334,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-stock-oracle-full",
+              },
+              "RUNNER_SMOKE_RUN_ID": {
+                  "run_id": 33_920_762_592,
+                  "path": ".github/workflows/phase1-pons-research-smoke.yml",
+                  "artifact": "phase1-pons-research-smoke",
+              },
+              "REGISTRY_RUN_ID": {
+                  "run_id": 33_911_022_718,
+                  "path": ".github/workflows/phase1-pons-v1-registry-recovery.yml",
+                  "artifact": "phase1-pons-full-registry-recovered",
+              },
+              "V2_CURVE_RUN_ID": {
+                  "run_id": 33_936_232_604,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-v2-curve-full",
+              },
+              "TRANSITION_RUN_ID": {
+                  "run_id": 33_912_452_330,
+                  "path": ".github/workflows/phase1-pons-v2-transition-full.yml",
+                  "artifact": "phase1-pons-v2-transition-full",
+              },
+              "QUOTE_AUDIT_RUN_ID": {
+                  "run_id": 33_923_299_711,
+                  "path": ".github/workflows/phase1-pons-quote-audit-one-shot.yml",
+                  "artifact": "phase1-pons-full-quote-audit-current",
+              },
+              "ANCHOR_RUN_ID": {
+                  "run_id": 33_972_109_927,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-anchor-promote-recovered-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-weth-usdg-anchor-full",
+              },
           }
           observed_support_runs = {
               field: int(os.environ[field])
-              for field in expected_support_runs
+              for field in support_contracts
           }
           mismatched_support_runs = {
               field: {
-                  "expected": expected_support_runs[field],
+                  "expected": support_contracts[field]["run_id"],
                   "observed": observed_support_runs[field],
               }
-              for field in expected_support_runs
-              if observed_support_runs[field] != expected_support_runs[field]
+              for field in support_contracts
+              if observed_support_runs[field]
+              != support_contracts[field]["run_id"]
           }
           if mismatched_support_runs:
               raise SystemExit(
@@ -172,6 +210,66 @@ jobs:
               )
               with urllib.request.urlopen(request, timeout=30) as response:
                   return json.load(response)
+
+          def artifact_names(target_run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{target_run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "support artifact pagination exceeded 2000 items: "
+                          f"run={target_run_id}"
+                      )
+              return names
+
+          for field, contract in support_contracts.items():
+              support_run_id = int(contract["run_id"])
+              support = get(
+                  f"/repos/{repo}/actions/runs/{support_run_id}"
+              )
+              if (
+                  support.get("status") != "completed"
+                  or support.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      "post-eligibility support run is not successful: "
+                      f"{field} run={support_run_id}"
+                  )
+              support_path = str(
+                  support.get("path") or ""
+              ).split("@", 1)[0]
+              if support_path != contract["path"]:
+                  raise SystemExit(
+                      "post-eligibility support workflow path changed: "
+                      f"{field} actual={support_path}"
+                  )
+              if support.get("head_branch") != (
+                  "phase1/data-acquisition-spike"
+              ):
+                  raise SystemExit(
+                      "post-eligibility support branch changed: "
+                      f"{field}"
+                  )
+              if contract["artifact"] not in artifact_names(
+                  support_run_id
+              ):
+                  raise SystemExit(
+                      "post-eligibility support artifact missing or expired: "
+                      f"{field} artifact={contract['artifact']}"
+                  )
 
           run = get(f"/repos/{repo}/actions/runs/{run_id}")
           if run.get("status") != "completed" or run.get("conclusion") != "success":
@@ -200,24 +298,7 @@ jobs:
                   "post-eligibility source launch commit changed"
               )
 
-          names = set()
-          page = 1
-          while True:
-              payload = get(
-                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
-                  f"?per_page=100&page={page}"
-              )
-              artifacts = list(payload.get("artifacts") or [])
-              names.update(
-                  str(artifact.get("name"))
-                  for artifact in artifacts
-                  if not artifact.get("expired")
-              )
-              if len(artifacts) < 100:
-                  break
-              page += 1
-              if page > 20:
-                  raise SystemExit("source artifact pagination exceeded 2000 items")
+          names = artifact_names(run_id)
 
           required = {
               "phase1-pons-v1-v3-full",
