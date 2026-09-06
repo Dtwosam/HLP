@@ -455,6 +455,12 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify recursive prior recovery lineage" in content
+    assert "prior recovery plan lacks bound lineage metadata" in content
+    assert "prior recovery partial run does not match current" in content
+    assert "prior recovery lineage contains a cycle" in content
+    assert '"partial_run_id": int("${{ inputs.partial_run_id }}")' in content
+    assert '"prior_gap_run_id": (' in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
     assert "c53b3a63156976a5873752c332fa7578011249b0" in content
     assert content.count("max-parallel: 2") == 4
@@ -635,6 +641,12 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify recursive prior recovery lineage" in content
+    assert "prior recovery plan lacks bound lineage metadata" in content
+    assert "prior recovery partial run does not match current" in content
+    assert "prior recovery lineage exceeds 20 generations" in content
+    assert '"partial_run_id": int("${{ inputs.partial_run_id }}")' in content
+    assert '"prior_gap_run_id": (' in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
     assert "c53b3a63156976a5873752c332fa7578011249b0" in content
     assert "Pons V1 pools missing V3 Initialize" in content
