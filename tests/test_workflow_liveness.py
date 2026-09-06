@@ -1708,6 +1708,17 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "inputs.v2_v4_run_id == ''" in content
     assert "pricing_run_id:" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
+    assert "recovered completion support run IDs changed" in content
+    for run_id in (
+        "33_974_681_334",
+        "33_920_762_592",
+        "33_911_022_718",
+        "33_936_232_604",
+        "33_912_452_330",
+        "33_923_299_711",
+        "33_972_109_927",
+    ):
+        assert run_id in content
     assert "source already has complete V2/V4; set v2_v4_run_id" in content
     assert "source has reusable V2/V4 shards; recover source gaps" in content
     assert "source already has complete pricing; set pricing_run_id" in content
@@ -1816,6 +1827,18 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
     assert "post-eligibility source branch changed" in normal
     assert "c53b3a63156976a5873752c332fa7578011249b0" in normal
     assert "post-eligibility source launch commit changed" in normal
+    assert "post-eligibility support run IDs changed" in normal
+    assert "post-eligibility quote audit artifact changed" in normal
+    for run_id in (
+        "33_974_681_334",
+        "33_920_762_592",
+        "33_911_022_718",
+        "33_936_232_604",
+        "33_912_452_330",
+        "33_923_299_711",
+        "33_972_109_927",
+    ):
+        assert run_id in normal
     assert "expected_lifecycle_run_id=source_run_id" in normal
     assert "expected_v1_v3_run_id=source_run_id" in normal
     assert "expected_v2_v4_run_id=source_run_id" in normal
