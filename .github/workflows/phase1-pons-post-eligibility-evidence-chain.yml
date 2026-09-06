@@ -104,6 +104,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+          RUNNER_SMOKE_RUN_ID: ${{ inputs.runner_smoke_run_id }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          V2_CURVE_RUN_ID: ${{ inputs.v2_curve_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          QUOTE_AUDIT_ARTIFACT_NAME: ${{ inputs.quote_audit_artifact_name }}
         run: |
           python - <<'PY'
           import json
@@ -118,6 +126,39 @@ jobs:
               raise SystemExit(
                   "post-eligibility source run must match frozen parent "
                   "33982556591"
+              )
+
+          expected_support_runs = {
+              "ORACLE_RUN_ID": 33_974_681_334,
+              "RUNNER_SMOKE_RUN_ID": 33_920_762_592,
+              "REGISTRY_RUN_ID": 33_911_022_718,
+              "V2_CURVE_RUN_ID": 33_936_232_604,
+              "TRANSITION_RUN_ID": 33_912_452_330,
+              "QUOTE_AUDIT_RUN_ID": 33_923_299_711,
+              "ANCHOR_RUN_ID": 33_972_109_927,
+          }
+          observed_support_runs = {
+              field: int(os.environ[field])
+              for field in expected_support_runs
+          }
+          mismatched_support_runs = {
+              field: {
+                  "expected": expected_support_runs[field],
+                  "observed": observed_support_runs[field],
+              }
+              for field in expected_support_runs
+              if observed_support_runs[field] != expected_support_runs[field]
+          }
+          if mismatched_support_runs:
+              raise SystemExit(
+                  "post-eligibility support run IDs changed: "
+                  f"{mismatched_support_runs}"
+              )
+          if os.environ["QUOTE_AUDIT_ARTIFACT_NAME"] != (
+              "phase1-pons-full-quote-audit-current"
+          ):
+              raise SystemExit(
+                  "post-eligibility quote audit artifact changed"
               )
 
           def get(path):
@@ -196,6 +237,10 @@ jobs:
               "source_eligibility_run_id": run_id,
               "source_workflow_path": observed_path,
               "source_head_sha": run.get("head_sha"),
+              "support_run_ids": observed_support_runs,
+              "quote_audit_artifact_name": os.environ[
+                  "QUOTE_AUDIT_ARTIFACT_NAME"
+              ],
               "required_artifacts": sorted(required),
               "preflight": "pass",
           }, sort_keys=True))
