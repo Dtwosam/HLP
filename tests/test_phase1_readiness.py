@@ -797,3 +797,72 @@ def test_readiness_does_not_auto_accept_direct_gap_recovery_run():
     assert report["next_action"] == "launch_v2_v4_rescue"
     assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == 0
 
+def test_readiness_malformed_evidence_numeric_fields_fail_closed():
+    handoff = _handoff(400)
+    handoff["evidence_run_id"] = "not-an-id"
+    handoff["eligible_tokens"] = "many"
+    handoff["lifecycle_run_id"] = None
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["stage"] == "post_eligibility_evidence"
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
+    assert "evidence handoff run ID mismatch" in report["evidence_handoff_errors"]
+    assert "evidence handoff eligible universe is empty" in (
+        report["evidence_handoff_errors"]
+    )
+    assert "evidence handoff routing run ID is invalid" in (
+        report["evidence_handoff_errors"]
+    )
+
+
+def test_readiness_malformed_route_launch_numeric_provenance_is_invalid():
+    runs = _route_runs()
+    runs["pons_v1_v3"]["launch_readiness_source_run_id"] = "bad-id"
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=runs,
+    )
+
+    assert report["next_action"] == "repair_invalid_viability_routes"
+    assert report["invalid_viability_routes"] == [
+        {
+            "route": "pons_v1_v3",
+            "reason": "launch_source_run_mismatch",
+            "observed": -1,
+        }
+    ]
+
+
+def test_readiness_malformed_finalizer_route_map_is_rejected_not_raised():
+    finalizer = _finalizer()
+    finalizer["launch_ledger_routes"] = {
+        **_ledger_ids(),
+        "pons_v1_v3": "bad-id",
+    }
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        ledger_generation=1,
+        ledger_evidence_run_id=400,
+        ledger_route_run_ids=_ledger_ids(),
+        viability_runs=_route_runs(),
+        finalizer_runs=[finalizer],
+    )
+
+    assert report["phase1_ready"] is False
+    assert report["next_action"] == "launch_phase1_final_acceptance"
+    assert report["invalid_finalizers"] == [
+        {"run_id": 5000, "reason": "ledger_routes_mismatch"}
+    ]
+
