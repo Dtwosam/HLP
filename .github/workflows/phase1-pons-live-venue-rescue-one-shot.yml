@@ -73,13 +73,18 @@ jobs:
                   "live venue rescue is blocked while source parent is active"
               )
 
+          rescue_v1 = os.environ["RESCUE_V1"] == "true"
+          rescue_v2 = os.environ["RESCUE_V2"] == "true"
+          if rescue_v1 == rescue_v2:
+              raise SystemExit(
+                  "live venue rescue requires exactly one venue target"
+              )
+
           requested_artifacts = set()
-          if os.environ["RESCUE_V1"] == "true":
+          if rescue_v1:
               requested_artifacts.add("phase1-pons-v1-v3-full")
-          if os.environ["RESCUE_V2"] == "true":
+          if rescue_v2:
               requested_artifacts.add("phase1-pons-v2-v4-full")
-          if not requested_artifacts:
-              raise SystemExit("live venue rescue target is missing")
 
           source_artifacts = artifacts(run_id)
           already_complete = sorted(requested_artifacts & source_artifacts)
@@ -100,6 +105,9 @@ jobs:
               "source_run_id": run_id,
               "status": run.get("status"),
               "conclusion": run.get("conclusion"),
+              "rescue_target": (
+                  "v1_v3" if rescue_v1 else "v2_v4"
+              ),
               "missing_requested_artifacts": sorted(
                   requested_artifacts - source_artifacts
               ),
