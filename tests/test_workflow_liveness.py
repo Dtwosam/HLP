@@ -1393,6 +1393,8 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "requested_artifacts" in content
     assert "phase1-pons-v1-v3-full" in content
     assert "phase1-pons-v2-v4-full" in content
+    assert "live venue rescue requires exactly one venue target" in content
+    assert '"rescue_target": (' in content
     assert "missing_requested_artifacts" in content
     assert "live venue rescue source workflow path changed" in content
     assert "live venue rescue source branch changed" in content
