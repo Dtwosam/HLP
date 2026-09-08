@@ -557,8 +557,16 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     )
     assert "original_shard_artifacts" in content
     assert "duplicate V2/V4 shard file while downloading" in content
+    assert "Download paginated V2/V4 gap artifacts" in content
+    assert "V2/V4 merge gap artifact pagination " in content
+    assert "V2/V4 merge contains duplicate gap artifact IDs" in content
+    assert "current V2/V4 gap artifact count does not match " in content
+    assert "duplicate V2/V4 gap file while " in content
+    assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
+    assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
+    assert "pattern: phase1-pons-v2-v4-gap-*" not in content
     assert "pattern: phase1-pons-v2-v4-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 3
+    assert content.count("fetch_github_actions_artifact_zip(") == 4
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
