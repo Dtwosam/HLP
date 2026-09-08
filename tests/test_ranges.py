@@ -335,6 +335,45 @@ def test_v2_generation2_retry_replans_failed_and_unmaterialized_gaps():
     ] == [240, 74, 0, 0]
 
 
+def test_v2_retry_lineage_can_collapse_to_only_gap_053():
+    start = 26_841_846
+    end = 54_486_035
+    generation_2 = split_range(start, end, max_blocks=50_000)
+
+    generation_2_success = [
+        block_range
+        for index, block_range in enumerate(generation_2[:240])
+        if index != 53
+    ]
+    generation_3 = plan_missing_subranges(
+        start,
+        end,
+        generation_2_success,
+        max_blocks=50_000,
+    )
+    assert len(generation_3) == 314
+    assert generation_3[0] == generation_2[53]
+
+    generation_3_success = generation_3[1:]
+    lineage_coverage = [
+        *generation_2_success,
+        *generation_3_success,
+    ]
+    generation_4 = plan_missing_subranges(
+        start,
+        end,
+        lineage_coverage,
+        max_blocks=50_000,
+    )
+
+    assert generation_4 == [generation_2[53]]
+    assert coalesce_covered_ranges(
+        start,
+        end,
+        [*lineage_coverage, generation_4[0]],
+    ) == [(start, end)]
+
+
 def test_v2_full_range_retry_reuses_all_553_prior_gaps():
     start = 26_841_846
     end = 54_486_035
