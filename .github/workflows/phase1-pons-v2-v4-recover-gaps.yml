@@ -137,6 +137,10 @@ jobs:
           import urllib.request
           import zipfile
 
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
           partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
           prior_run_id = int(os.environ["PRIOR_GAP_RUN_ID"])
           if partial_run_id <= 0 or prior_run_id <= 0:
@@ -217,10 +221,11 @@ jobs:
                       f"run={run_id}"
                   )
 
-              payload = request(
-                  f"/repos/{repo}/actions/artifacts/"
-                  f"{int(matches[0]['id'])}/zip",
-                  decode_json=False,
+              payload = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(matches[0]['id'])}/zip",
+                  token,
               )
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
                   names = [
@@ -294,6 +299,10 @@ jobs:
           import zipfile
           from pathlib import Path
 
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
@@ -348,10 +357,11 @@ jobs:
           target.mkdir(parents=True, exist_ok=True)
           extracted = 0
           for index, artifact in selected:
-              blob = request(
-                  f"/repos/{repo}/actions/artifacts/"
-                  f"{int(artifact['id'])}/zip",
-                  decode_json=False,
+              blob = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
               )
               with zipfile.ZipFile(io.BytesIO(blob)) as archive:
                   for member in archive.infolist():
@@ -731,6 +741,10 @@ jobs:
           import zipfile
           from pathlib import Path
 
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
@@ -785,10 +799,11 @@ jobs:
           target.mkdir(parents=True, exist_ok=True)
           extracted = 0
           for index, artifact in selected:
-              blob = request(
-                  f"/repos/{repo}/actions/artifacts/"
-                  f"{int(artifact['id'])}/zip",
-                  decode_json=False,
+              blob = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
               )
               with zipfile.ZipFile(io.BytesIO(blob)) as archive:
                   for member in archive.infolist():
