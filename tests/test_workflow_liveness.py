@@ -2180,8 +2180,20 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "raw_launch_message != launch_message" in content
     assert "launch message must be exactly " in content
     assert '"one line"' in content
-    assert "terminal_generations = []" in content
-    assert "max(terminal_generations, default=0) + 1" in content
+    assert "target_plan_job_name = (" in content
+    assert '"v1_v3_rescue / plan"' in content
+    assert '"v2_v4_rescue / plan"' in content
+    assert "def target_plan_succeeded(source_run_id):" in content
+    assert "?filter=all&per_page=100&page={page}" in content
+    assert "generation-plan job " in content
+    assert "consumed_generations = []" in content
+    assert "unconsumed_terminal_generations = []" in content
+    assert "target_plan_succeeded(int(row[\"id\"]))" in content
+    assert "max(consumed_generations, default=0) + 1" in content
+    assert '"consumed_generations": sorted(' in content
+    assert '"unconsumed_terminal_generations": (' in content
+    assert "consumed generations:" in content
+    assert "unconsumed terminal generations:" in content
     assert "live venue rescue generation is not monotonic: " in content
     assert '"requested_generation": requested_generation' in content
     assert '"expected_generation": expected_generation' in content
