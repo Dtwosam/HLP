@@ -2183,6 +2183,12 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"remaining_repairs": remaining_repairs' in content
     assert '"progress_percent": progress_percent' in content
     assert '"current_wave": current_wave' in content
+    assert "first_unresolved_wave" in content
+    assert 'state = "failed"' in content
+    assert 'state = "incomplete"' in content
+    assert 'state = "active"' in content
+    assert 'current_wave is None and state == "active"' in content
+    assert "current_wave = first_unresolved_wave" in content
     assert '"job_plan_drift"' in content
     assert '"over_materialized"' in content
     assert '"unexpected_jobs"' in content

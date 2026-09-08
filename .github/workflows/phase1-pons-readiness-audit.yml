@@ -633,6 +633,7 @@ jobs:
               successful_repairs = 0
               failed_repairs = 0
               current_wave = None
+              first_unresolved_wave = None
               materialized_repairs = 0
 
               for index, expected in enumerate(
@@ -651,6 +652,15 @@ jobs:
                   failed = sum(
                       int(counts.get(state, 0))
                       for state in failed_states
+                  )
+                  active = sum(
+                      int(counts.get(state, 0))
+                      for state in {
+                          "queued",
+                          "in_progress",
+                          "waiting",
+                          "pending",
+                      }
                   )
                   materialized_repairs += observed
                   successful_repairs += success
@@ -679,15 +689,22 @@ jobs:
                       state = "empty"
                   elif success == expected and observed == expected:
                       state = "complete"
-                  elif observed:
+                  elif active:
                       state = "active"
+                  elif observed == expected and failed:
+                      state = "failed"
+                  elif observed:
+                      state = "incomplete"
                   else:
                       state = "pending"
+
                   if (
-                      current_wave is None
+                      first_unresolved_wave is None
                       and expected > 0
                       and state != "complete"
                   ):
+                      first_unresolved_wave = wave
+                  if current_wave is None and state == "active":
                       current_wave = wave
 
                   waves[wave] = {
@@ -696,6 +713,9 @@ jobs:
                       "state": state,
                       "counts": counts,
                   }
+
+              if current_wave is None:
+                  current_wave = first_unresolved_wave
 
               repair_jobs = diagnostics.get("repair_jobs") or {}
               duplicate_job_ids = sorted(
