@@ -399,6 +399,7 @@ jobs:
 
           def job_diagnostics(run_id):
               counts = {}
+              repair_wave_counts = {}
               problem_jobs = []
               failed_states = {
                   "failure",
@@ -422,6 +423,21 @@ jobs:
                           or "unknown"
                       )
                       counts[key] = counts.get(key, 0) + 1
+                      job_name = str(job.get("name") or "")
+                      wave_marker = "/ recover_"
+                      if wave_marker in job_name:
+                          wave_text = job_name.split(
+                              wave_marker,
+                              1,
+                          )[1].split(" ", 1)[0]
+                          if wave_text in {"1", "2", "3", "4"}:
+                              wave_counts = repair_wave_counts.setdefault(
+                                  wave_text,
+                                  {},
+                              )
+                              wave_counts[key] = (
+                                  int(wave_counts.get(key, 0)) + 1
+                              )
                       if key in failed_states and len(problem_jobs) < 20:
                           problem_jobs.append(
                               {
@@ -440,6 +456,7 @@ jobs:
                       )
               return {
                   "job_counts": counts,
+                  "repair_wave_counts": repair_wave_counts,
                   "problem_jobs": problem_jobs,
               }
 
@@ -911,6 +928,29 @@ jobs:
                               if active_counts
                               else "none"
                           )
+                          + "\n"
+                      )
+                  wave_counts = active_run.get(
+                      "repair_wave_counts"
+                  ) or {}
+                  if wave_counts:
+                      wave_parts = []
+                      for wave in sorted(
+                          wave_counts,
+                          key=int,
+                      ):
+                          values = wave_counts[wave]
+                          wave_parts.append(
+                              f"{wave}[" + ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      values.items()
+                                  )
+                              ) + "]"
+                          )
+                      summary.write(
+                          "    - Repair waves: "
+                          + "; ".join(wave_parts)
                           + "\n"
                       )
                   terminal_run = diagnostics.get(
