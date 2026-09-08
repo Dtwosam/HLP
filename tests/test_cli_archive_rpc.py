@@ -1,6 +1,13 @@
+import hashlib
+import json
 from types import SimpleNamespace
 
-from hlp.cli import _archive_rpc, _load_initial_quote_usd, build_parser
+from hlp.cli import (
+    _archive_rpc,
+    _load_initial_quote_usd,
+    build_parser,
+    cmd_rpc_pons_transfer_tape,
+)
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
 
 
@@ -473,3 +480,73 @@ def test_representative_sample_parser():
     assert args.runners == 5
     assert args.failures == 5
     assert args.out == "sample.jsonl"
+
+
+
+def test_transfer_tape_manifest_binds_exact_sample_identity(
+    monkeypatch,
+    tmp_path,
+):
+    sample = tmp_path / "sample.jsonl"
+    rows = [
+        {"token": "0x" + "11" * 20},
+        {"token": "0x" + "22" * 20},
+    ]
+    sample.write_text(
+        "".join(
+            json.dumps(row, sort_keys=True) + "\n"
+            for row in rows
+        )
+    )
+
+    class FakeRpc:
+        requests_made = 3
+        response_bytes_received = 4
+        route_label = "test_route"
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr(
+        "hlp.cli._archive_rpc",
+        lambda args: FakeRpc(),
+    )
+    monkeypatch.setattr(
+        "hlp.cli.fetch_pons_transfer_rows",
+        lambda *args, **kwargs: [],
+    )
+
+    captured = {}
+
+    def fake_snapshot(rows, *, output, provenance):
+        captured["output"] = output
+        captured["provenance"] = provenance
+        return {"sha256": "deadbeef", "records": 0}
+
+    monkeypatch.setattr(
+        "hlp.cli.write_jsonl_snapshot",
+        fake_snapshot,
+    )
+
+    args = SimpleNamespace(
+        tokens=str(sample),
+        from_block=100,
+        to_block=200,
+        chunk_size=50,
+        min_chunk_size=5,
+        out=str(tmp_path / "transfers.jsonl"),
+    )
+    assert cmd_rpc_pons_transfer_tape(args) == 0
+
+    expected_tokens = sorted(row["token"].lower() for row in rows)
+    expected_sample_sha = hashlib.sha256(
+        sample.read_bytes()
+    ).hexdigest()
+    expected_token_set_sha = hashlib.sha256(
+        ("\n".join(expected_tokens) + "\n").encode()
+    ).hexdigest()
+
+    provenance = captured["provenance"]
+    assert provenance["sample_sha256"] == expected_sample_sha
+    assert provenance["token_set_sha256"] == expected_token_set_sha
+    assert provenance["token_count"] == 2
