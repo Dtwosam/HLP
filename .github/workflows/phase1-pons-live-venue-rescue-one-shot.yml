@@ -1,5 +1,5 @@
 name: phase1-pons-live-venue-rescue-one-shot
-# validation-generation: 1
+# validation-generation: 2
 
 on:
   push:
