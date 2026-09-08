@@ -94,7 +94,7 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Verify evidence and nine route provenance before acceptance work
         env:
@@ -386,6 +386,185 @@ jobs:
               "route_run_ids": route_run_ids,
               "source_eligibility_run_id": 33_982_556_591,
               "status": "ready_for_acceptance_work",
+          }, sort_keys=True))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify route measurement artifact contents
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          evidence_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          route_env = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          route_run_ids = {
+              route: int(os.environ[field])
+              for route, field in route_env.items()
+          }
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          def validate_measurement(
+              route,
+              run_id,
+              path,
+              *,
+              registry_generation,
+          ):
+              report = json.loads(Path(path).read_text())
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              head_sha = str(run.get("head_sha") or "")
+              expected = {
+                  "route": route,
+                  "from_block": 54_436_036,
+                  "to_block": 54_486_035,
+                  "processed_block_span": 50_000,
+                  "snapshot_head_block": 54_486_035,
+                  "measurement_run_id": run_id,
+                  "measurement_head_sha": head_sha,
+                  "evidence_run_id": evidence_run_id,
+                  "source_eligibility_run_id": 33_982_556_591,
+                  "sequence_id": head_sha,
+                  "registry_generation": registry_generation,
+              }
+              mismatched = {
+                  key: {
+                      "expected": value,
+                      "observed": report.get(key),
+                  }
+                  for key, value in expected.items()
+                  if report.get(key) != value
+              }
+              if mismatched:
+                  raise SystemExit(
+                      "final acceptance route measurement content mismatch: "
+                      f"{route} run={run_id} {mismatched}"
+                  )
+
+          for route, run_id in route_run_ids.items():
+              validate_measurement(
+                  route,
+                  run_id,
+                  (
+                      "route-artifacts/"
+                      f"{route}/primary/"
+                      "phase1-route-measurement.json"
+                  ),
+                  registry_generation=(
+                      "v1" if route == "pons_registry" else None
+                  ),
+              )
+
+          validate_measurement(
+              "pons_registry",
+              route_run_ids["pons_registry"],
+              (
+                  "route-artifacts/pons_registry/secondary/"
+                  "phase1-route-measurement.json"
+              ),
+              registry_generation="v2",
+          )
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "route_run_ids": route_run_ids,
+              "measurement_window": [54_436_036, 54_486_035],
+              "route_measurement_content": "pass",
           }, sort_keys=True))
           PY
 
