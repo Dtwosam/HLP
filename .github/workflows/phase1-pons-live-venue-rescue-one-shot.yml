@@ -428,7 +428,10 @@ jobs:
                       )
                       continue
                   display_title = str(row.get("display_title") or "")
-                  if display_title.startswith(launch_marker):
+                  if (
+                      generation_pattern.fullmatch(display_title)
+                      is not None
+                  ):
                       terminal_target_runs.append(
                           {
                               "id": row_id,
