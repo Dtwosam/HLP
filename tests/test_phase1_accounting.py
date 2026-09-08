@@ -92,6 +92,9 @@ def test_summarize_action_run_measures_requests_egress_blocks_and_runtime():
     assert result["artifact_bytes"] == 125
     assert result["expired_artifacts"] == 1
     assert result["jobs_with_logs"] == 2
+    assert result["completed_jobs"] == 2
+    assert result["missing_completed_job_logs"] == 0
+    assert result["all_completed_job_logs_available"] is True
 
 
 def test_summarize_action_run_deduplicates_repeated_reported_ranges():
@@ -210,3 +213,44 @@ def test_phase1_summary_rejects_duplicate_runs():
 def test_phase1_summary_rejects_zero_daily_quota():
     with pytest.raises(ValueError, match="must be positive"):
         summarize_phase1_runs([], free_daily_method_calls=0)
+
+
+def test_summarize_action_run_flags_missing_completed_job_log():
+    run = {
+        "id": 126,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    jobs = [
+        {"id": 1, "status": "completed", "conclusion": "success"},
+        {"id": 2, "status": "completed", "conclusion": "success"},
+    ]
+    result = summarize_action_run(
+        run,
+        jobs,
+        [],
+        {1: '{"requests_made": 3}\n'},
+    )
+    assert result["jobs_with_logs"] == 1
+    assert result["completed_jobs"] == 2
+    assert result["missing_completed_job_logs"] == 1
+    assert result["missing_completed_job_log_ids"] == [2]
+    assert result["all_completed_job_logs_available"] is False
+
+
+def test_phase1_summary_marks_missing_logs_incomplete_accounting():
+    result = summarize_phase1_runs(
+        [
+            {
+                "run_id": 3,
+                "status": "completed",
+                "conclusion": "success",
+                "missing_completed_job_logs": 2,
+            }
+        ]
+    )
+    assert result["all_runs_successful"] is True
+    assert result["missing_completed_job_logs"] == 2
+    assert result["runs_with_missing_job_logs"] == [3]
+    assert result["all_completed_job_logs_available"] is False
+    assert result["accounting_complete"] is False
