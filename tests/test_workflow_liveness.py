@@ -1990,13 +1990,14 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
     assert '"live venue rescue is unnecessary because prior "' in content
-    assert '"canonical rescue is complete: "' in content
+    assert '"successful canonical rescue is complete: "' in content
+    assert 'str(candidate.get("conclusion") or "") == "success"' in content
     assert "requested_artifact in candidate_artifacts" in content
     assert "requested_artifacts = {requested_artifact}" in content
     assert "not prior_gap_run_id and has_plan and has_gap" in content
     assert 'prior_gap_run_id = str(candidate["id"])' in content
     prior_selection = content.split(
-        "for candidate in terminal_target_runs:",
+        "successful_gap_ids = successful_repair_gap_ids(",
         1,
     )[1].split("requested_artifacts = {requested_artifact}", 1)[0]
     assert 'candidate["conclusion"]' not in prior_selection

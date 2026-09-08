@@ -201,10 +201,13 @@ jobs:
           prior_gap_run_id = ""
           for candidate in terminal_target_runs:
               candidate_artifacts = artifacts(candidate["id"])
-              if requested_artifact in candidate_artifacts:
+              if (
+                  str(candidate.get("conclusion") or "") == "success"
+                  and requested_artifact in candidate_artifacts
+              ):
                   raise SystemExit(
                       "live venue rescue is unnecessary because prior "
-                      "canonical rescue is complete: "
+                      "successful canonical rescue is complete: "
                       f"run={candidate['id']} "
                       f"artifact={requested_artifact}"
                   )
