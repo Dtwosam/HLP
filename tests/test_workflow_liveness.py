@@ -953,6 +953,18 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance evidence artifacts missing" in content
     assert "final acceptance route workflow path mismatch" in content
     assert "final acceptance route measurement artifacts missing" in content
+    assert "Verify route measurement artifact contents" in content
+    assert content.count("actions/download-artifact@v4") >= 10
+    assert "final acceptance route measurement content mismatch" in content
+    assert '"from_block": 54_436_036' in content
+    assert '"to_block": 54_486_035' in content
+    assert '"processed_block_span": 50_000' in content
+    assert '"measurement_run_id": run_id' in content
+    assert '"measurement_head_sha": head_sha' in content
+    assert '"evidence_run_id": evidence_run_id' in content
+    assert '"source_eligibility_run_id": 33_982_556_591' in content
+    assert '"sequence_id": head_sha' in content
+    assert 'registry_generation="v2"' in content
     assert "final acceptance route source changed" in content
     assert "final acceptance route evidence changed" in content
     assert "final acceptance route launch ledger changed" in content
