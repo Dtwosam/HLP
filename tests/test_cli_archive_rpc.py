@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from hlp.cli import (
@@ -7,6 +8,7 @@ from hlp.cli import (
     _load_initial_quote_usd,
     build_parser,
     cmd_rpc_pons_transfer_tape,
+    cmd_rpc_v2_v4_tape,
 )
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
 
@@ -138,6 +140,95 @@ def test_v4_global_pool_scan_parses():
         "--out", "v4.jsonl",
     ])
     assert args.global_pool_scan is True
+
+
+def test_v2_v4_filter_modes_shape_topic1_and_provenance(
+    monkeypatch,
+    tmp_path,
+):
+    pool_id = "0x" + "11" * 32
+    registrations = tmp_path / "registrations.jsonl"
+    registrations.write_text(
+        json.dumps({"pool_id": pool_id}) + "\n"
+    )
+    calls = []
+
+    class FakeRpc:
+        requests_made = 0
+        request_bytes_sent = 0
+        response_bytes_received = 0
+        route_label = "test_route"
+
+        def assert_robinhood(self):
+            return None
+
+        def iter_logs_chunked(
+            self,
+            from_block,
+            to_block,
+            *,
+            address=None,
+            topics=None,
+            chunk_size=100_000,
+            min_chunk_size=1,
+        ):
+            calls.append(
+                {
+                    "from_block": from_block,
+                    "to_block": to_block,
+                    "address": address,
+                    "topics": topics,
+                    "chunk_size": chunk_size,
+                    "min_chunk_size": min_chunk_size,
+                }
+            )
+            return iter(())
+
+    monkeypatch.setattr(
+        "hlp.cli._archive_rpc",
+        lambda args: FakeRpc(),
+    )
+
+    manifests = []
+    for global_pool_scan, name in (
+        (True, "global"),
+        (False, "server"),
+    ):
+        out = tmp_path / f"{name}.jsonl"
+        parsed = SimpleNamespace(
+            registrations=str(registrations),
+            from_block=10,
+            to_block=20,
+            chunk_size=5,
+            min_chunk_size=1,
+            global_pool_scan=global_pool_scan,
+            out=str(out),
+        )
+        assert cmd_rpc_v2_v4_tape(parsed) == 0
+        manifests.append(
+            json.loads(
+                Path(str(out) + ".manifest.json").read_text()
+            )
+        )
+
+    assert len(calls) == 2
+    assert len(calls[0]["topics"]) == 1
+    assert len(calls[0]["topics"][0]) == 2
+    assert calls[1]["topics"][0] == calls[0]["topics"][0]
+    assert calls[1]["topics"][1] == [pool_id]
+
+    global_provenance = manifests[0]["provenance"]
+    server_provenance = manifests[1]["provenance"]
+    assert global_provenance["event_topic1_pool_ids"] is None
+    assert (
+        global_provenance["pool_filter_mode"]
+        == "global_poolmanager_topic_then_registry"
+    )
+    assert server_provenance["event_topic1_pool_ids"] == [pool_id]
+    assert (
+        server_provenance["pool_filter_mode"]
+        == "server_side_topic1_registered_pool_ids"
+    )
 
 
 def test_v2_lifecycle_eligibility_parses():
