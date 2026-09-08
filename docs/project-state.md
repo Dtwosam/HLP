@@ -926,8 +926,15 @@ only and derive exact original shard ranges with the same deterministic
 equal-span formula used by the 240-way V1/V3 and 192-way V2/V4 acquisition
 workflows. Planning records `planning_source_bytes_downloaded=0` for those
 originals; full shard bytes are downloaded only once in final merge, where
-content validation actually requires them. Prior recovery gaps remain reusable
-planning inputs.
+content validation actually requires them. Prior recovery gaps are planned
+the same way: each recursive generation contributes only its small bound
+gap-plan ZIP plus the non-expired artifact inventory, and planning intersects
+the plan's exact `gap_jobs` with observed numeric gap artifacts. It records
+`planning_prior_gap_jsonl_bytes_downloaded=0`, so no prior gap JSONL payload
+is downloaded during planning. Generation 4 run **34228430753** passed
+recursive lineage to **34207459960**, rediscovered all **236** surviving
+original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
+four repair waves, and entered the corrected final merge.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
