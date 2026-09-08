@@ -84,6 +84,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -107,6 +108,15 @@ jobs:
               raise SystemExit(
                   "representative transfer sample contains duplicate tokens"
               )
+          sample_path = Path(
+              "sample/pons-representative-sample.jsonl"
+          )
+          sample_sha256 = hashlib.sha256(
+              sample_path.read_bytes()
+          ).hexdigest()
+          token_set_sha256 = hashlib.sha256(
+              ("\n".join(sorted(tokens)) + "\n").encode()
+          ).hexdigest()
 
           start = min(int(row["launch_block"]) for row in sample)
           head = int(os.environ["SNAPSHOT_HEAD"])
@@ -132,6 +142,16 @@ jobs:
               if int(prov.get("token_count", -1)) != 10:
                   raise SystemExit(
                       f"prior transfer shard token count mismatch: {path}"
+                  )
+              if prov.get("sample_sha256") != sample_sha256:
+                  raise SystemExit(
+                      "prior transfer shard sample identity mismatch: "
+                      f"{path}"
+                  )
+              if prov.get("token_set_sha256") != token_set_sha256:
+                  raise SystemExit(
+                      "prior transfer shard token-set identity mismatch: "
+                      f"{path}"
                   )
               lo = int(prov["from_block"])
               hi = int(prov["to_block"])
@@ -178,6 +198,8 @@ jobs:
               ),
               "snapshot_head_block": head,
               "sample_tokens": sorted(tokens),
+              "sample_sha256": sample_sha256,
+              "token_set_sha256": token_set_sha256,
               "sample_start_block": start,
               "max_blocks": max_blocks,
               "reused_sources": sources,
@@ -443,6 +465,7 @@ jobs:
           cp sample/pons-representative-sample.jsonl.manifest.json artifacts/
           cp plan/pons-representative-transfer-plan.json artifacts/
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -463,6 +486,20 @@ jobs:
               row["token"].lower(): int(row["launch_block"])
               for row in sample
           }
+          if len(launch_by_token) != 10:
+              raise SystemExit(
+                  "representative transfer merge requires exactly 10 "
+                  "unique sample tokens"
+              )
+          sample_path = Path(
+              "sample/pons-representative-sample.jsonl"
+          )
+          sample_sha256 = hashlib.sha256(
+              sample_path.read_bytes()
+          ).hexdigest()
+          token_set_sha256 = hashlib.sha256(
+              ("\n".join(sorted(launch_by_token)) + "\n").encode()
+          ).hexdigest()
           START = min(launch_by_token.values())
 
           files = (
@@ -497,6 +534,16 @@ jobs:
               if int(prov.get("token_count", -1)) != 10:
                   raise SystemExit(
                       f"representative transfer shard token mismatch: {path}"
+                  )
+              if prov.get("sample_sha256") != sample_sha256:
+                  raise SystemExit(
+                      "representative transfer shard sample identity "
+                      f"mismatch: {path}"
+                  )
+              if prov.get("token_set_sha256") != token_set_sha256:
+                  raise SystemExit(
+                      "representative transfer shard token-set identity "
+                      f"mismatch: {path}"
                   )
               entries.append((
                   int(prov["from_block"]),
@@ -569,6 +616,8 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "sample_sha256": sample_sha256,
+                  "token_set_sha256": token_set_sha256,
                   "prior_run_id": (
                       int("${{ inputs.prior_run_id }}")
                       if "${{ inputs.prior_run_id }}"
@@ -610,6 +659,8 @@ jobs:
           report = {
               "snapshot_head_block": HEAD,
               "sample_tokens": len(launch_by_token),
+              "sample_sha256": sample_sha256,
+              "token_set_sha256": token_set_sha256,
               "records": state["records"],
               "source_files": len(entries),
               "transfer_tape_sha256": snapshot["sha256"],
