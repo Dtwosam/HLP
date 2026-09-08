@@ -147,6 +147,7 @@ def _report(
     finalizer_runs=(),
     evidence_handoff=_AUTO_HANDOFF,
     recovery_runs=None,
+    active_recovery_run_ids=None,
 ):
     if evidence_handoff is _AUTO_HANDOFF:
         recovered = bool(
@@ -174,6 +175,7 @@ def _report(
         or {route: 0 for route in VIABILITY_ROUTE_WORKFLOW_PATHS},
         evidence_handoff=evidence_handoff,
         recovery_runs=recovery_runs,
+        active_recovery_run_ids=active_recovery_run_ids,
     )
 
 
@@ -617,6 +619,83 @@ def test_readiness_terminal_failure_requires_v1_rescue_when_tape_missing():
         "recommended_pricing_run_id": 0,
         "next_action": "launch_v1_v3_rescue",
     }
+
+
+def test_readiness_waits_for_active_v1_rescue():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-v3-full"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        active_recovery_run_ids={"v1_v3": 900, "v2_v4": 0},
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "wait_for_v1_v3_rescue"
+    assert report["source_recovery_plan"]["next_action"] == (
+        "wait_for_v1_v3_rescue"
+    )
+
+
+def test_readiness_waits_for_active_v2_rescue():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v2-v4-full"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        active_recovery_run_ids={"v1_v3": 0, "v2_v4": 901},
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "wait_for_v2_v4_rescue"
+    assert report["source_recovery_plan"]["next_action"] == (
+        "wait_for_v2_v4_rescue"
+    )
+
+
+def test_readiness_waits_for_other_active_venue_before_launching():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-v3-full"
+    ]
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        active_recovery_run_ids={"v1_v3": 0, "v2_v4": 901},
+    )
+
+    assert report["next_action"] == "wait_for_active_venue_rescue"
+
+
+def test_readiness_rejects_unknown_active_recovery_venue():
+    with pytest.raises(
+        ValueError,
+        match="readiness active recovery venue set changed",
+    ):
+        _report(
+            source_run=_source(
+                status="completed",
+                conclusion="failure",
+                artifacts=(),
+            ),
+            active_recovery_run_ids={"wrong": 900},
+        )
 
 
 def test_readiness_terminal_failure_reuses_complete_source_pricing():
