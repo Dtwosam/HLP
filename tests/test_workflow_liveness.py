@@ -2119,7 +2119,7 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "except (TypeError, ValueError):" in content
     assert "recovery_lineage_valid" in content
     assert "validate_gap_plan_jobs" in content
-    assert content.count("validate_gap_plan_jobs(") == 2
+    assert content.count("validate_gap_plan_jobs(") == 3
     assert "phase1-pons-v1-v3-gap-plan" in content
     assert "v1-v3-gap-plan.json" in content
     assert "phase1-pons-v2-v4-gap-plan" in content
