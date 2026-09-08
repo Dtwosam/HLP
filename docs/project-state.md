@@ -948,7 +948,11 @@ validated before those bindings are trusted: `gap_job_count`, `gap_blocks`,
 `gap_wave_job_counts`, sequential zero-padded IDs, per-job bounds, max-gap size,
 strict ordering/non-overlap and the four-wave 240-job capacity must all agree.
 The live V2 generation-2 plan passes this validator at its full **553-job**
-`240 / 240 / 73 / 0` scale. Gap manifests are also bound to the acquisition
+`240 / 240 / 73 / 0` scale. The same structural validator now runs again when
+readiness considers a recovered venue canonical and when recovered completion
+accepts the venue handoff, including every recursive prior generation. A plan
+that drifts after acquisition therefore cannot be auto-adopted downstream.
+Gap manifests are also bound to the acquisition
 provenance that generated them: source `evm_json_rpc`, chain **4663**, the
 venue-specific protocol, the frozen registry/registration input filename and
 the required global-scan filter mode must all match before extraction. A
