@@ -915,9 +915,9 @@ aggregate rejection counts, and up to 20 rejected candidate run IDs with
 reasons such as missing canonical artifact, invalid manifest, invalid lineage
 or workflow-path mismatch. When a canonical rescue is still nonterminal, the
 same diagnostics capture its run ID, status and paginated job-state counts.
-Discovery is target-bound by the launch marker, so an active V1/V3 rescue is
+Discovery uses the same launch-prefix contract, so an active V1/V3 rescue is
 not misreported as V2/V4 merely because both venues share the same launcher
-workflow. The readiness artifact can therefore distinguish "still recovering"
+workflow, and incidental commit-message mentions are ignored. The readiness artifact can therefore distinguish "still recovering"
 from "completed but invalid" without launching any additional archive work. Readiness now also opens the canonical recovered venue manifest
 before adopting a run and verifies recovery source type, chain **4663**,
 snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
@@ -936,8 +936,10 @@ recursive prior-gap lineage before accepting a non-source venue artifact. It als
 or pricing when the source already contains reusable complete artifacts, and
 refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
 The pinned rescue launcher now requires exactly one venue target per launch,
-runs only on the Phase 1 branch, pins frozen parent **33982556591** to launch
-commit `c53b3a63156976a5873752c332fa7578011249b0`, and enumerates its own
+accepts rescue arming only when the commit title starts with the exact
+`launch V1 V3 rescue` or `launch V2 V4 rescue` prefix, runs only on the
+Phase 1 branch, pins frozen parent **33982556591** to launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`, and enumerates its own
 workflow runs before starting any child RPC. Recovered completion and the
 readiness state machine independently enforce the same frozen source workflow,
 branch and launch-commit identity. Any other nonterminal pinned rescue run
