@@ -454,6 +454,11 @@ jobs:
 
           def latest_recovery_run(venue):
               artifact = RECOVERY_VENUE_ARTIFACTS[venue]
+              launch_marker = (
+                  "launch V1 V3 rescue"
+                  if venue == "v1_v3"
+                  else "launch V2 V4 rescue"
+              )
               candidates = []
               diagnostics = recovery_discovery[venue]
               for workflow_path in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
@@ -473,6 +478,11 @@ jobs:
                       )
                       rows = list(payload.get("workflow_runs") or [])
                       for row in rows:
+                          display_title = str(
+                              row.get("display_title") or ""
+                          )
+                          if launch_marker not in display_title:
+                              continue
                           if (
                               diagnostics["active_run"] is None
                               and row.get("status") != "completed"
@@ -483,6 +493,7 @@ jobs:
                                   "run_id": active_run_id,
                                   "status": row.get("status"),
                                   "head_sha": row.get("head_sha"),
+                                  "display_title": display_title,
                                   "job_counts": job_counts(active_run_id),
                               }
                           if (
