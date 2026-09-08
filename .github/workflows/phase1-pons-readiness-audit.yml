@@ -254,6 +254,11 @@ jobs:
                   manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
                   plan_artifact = "phase1-pons-v1-v3-gap-plan"
                   plan_name = "v1-v3-gap-plan.json"
+                  summary_name = "pons-v1-v3-summary.json"
+                  membership_field = "registered_pools"
+                  matched_field = "matched_pools"
+                  missing_field = "missing_initialize_pools"
+                  expected_membership = 268_688
                   start_field = "first_v1_launch"
                   expected_start = 8_621_658
                   allowed_paths = {
@@ -269,6 +274,11 @@ jobs:
                   manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
                   plan_artifact = "phase1-pons-v2-v4-gap-plan"
                   plan_name = "v4-gap-plan.json"
+                  summary_name = "pons-v2-v4-summary.json"
+                  membership_field = "registered_pool_ids"
+                  matched_field = "matched_pool_ids"
+                  missing_field = "missing_initialize_pool_ids"
+                  expected_membership = 3_638
                   start_field = "generation_start"
                   expected_start = 26_841_846
                   allowed_paths = {
@@ -344,6 +354,43 @@ jobs:
                   )
               except (TypeError, ValueError):
                   return False
+              embedded_plan = artifact_json(
+                  run_id,
+                  artifact_name,
+                  plan_name,
+              )
+              if embedded_plan != current_plan:
+                  return False
+
+              summary = artifact_json(
+                  run_id,
+                  artifact_name,
+                  summary_name,
+              )
+              if not isinstance(summary, dict):
+                  return False
+              try:
+                  if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+                      return False
+                  if int(summary.get("records", -1)) != int(
+                      manifest.get("records", -1)
+                  ):
+                      return False
+                  if str(summary.get("tape_sha256") or "") != str(
+                      manifest.get("sha256") or ""
+                  ):
+                      return False
+                  if int(summary.get(membership_field, -1)) != expected_membership:
+                      return False
+                  if int(summary.get(matched_field, -1)) != expected_membership:
+                      return False
+                  if int(summary.get(missing_field, -1)) != 0:
+                      return False
+                  if int(summary.get("source_files", 0)) <= 0:
+                      return False
+              except (TypeError, ValueError):
+                  return False
+
               if prior_gap_id == 0:
                   return True
 
