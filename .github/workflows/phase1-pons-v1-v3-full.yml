@@ -93,11 +93,31 @@ jobs:
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --global-topic-scan \
             --out "artifacts/v1-v3-events-shard-${SHARD}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v1-v3-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: shard

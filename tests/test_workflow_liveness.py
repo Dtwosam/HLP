@@ -155,6 +155,24 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         assert "max-parallel: 4" not in content, name
 
 
+def test_venue_full_backfills_retry_transient_shard_uploads():
+    workflows = (
+        "phase1-pons-v1-v3-full.yml",
+        "phase1-pons-v2-v4-full.yml",
+    )
+    for name in workflows:
+        content = _workflow(name)
+        assert content.count("id: upload_shard") == 1, name
+        assert content.count("id: retry_upload_shard") == 1, name
+        assert content.count("name: Retry shard artifact upload") == 1, name
+        assert content.count("name: Final shard artifact upload retry") == 1, name
+        assert content.count("steps.upload_shard.outcome == 'failure'") == 1, name
+        assert content.count(
+            "steps.retry_upload_shard.outcome == 'failure'"
+        ) == 1, name
+        assert content.count("overwrite: true") == 2, name
+
+
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
