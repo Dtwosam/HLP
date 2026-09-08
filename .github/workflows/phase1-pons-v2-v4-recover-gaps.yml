@@ -6,6 +6,7 @@ on:
       transition_run_id:
         description: "Run containing phase1-pons-v2-transition-full"
         required: true
+        default: "33912452330"
         type: string
       partial_run_id:
         description: "Interrupted phase1-pons-v2-v4-full run with successful shard artifacts"
@@ -74,6 +75,151 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
+      - name: Verify frozen V2 transition input
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ inputs.transition_run_id }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import urllib.request
+          import zipfile
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["UPSTREAM_RUN_ID"])
+          expected_run_id = 33_912_452_330
+          expected_path = ".github/workflows/phase1-pons-v2-transition-full.yml"
+          expected_sha = "7ce5eac5c1980e8618173e1a8ff0effb06ecb327"
+          artifact_name = "phase1-pons-v2-transition-full"
+          manifest_name = "pons-v2-registrations-full.jsonl.manifest.json"
+
+          if run_id != expected_run_id:
+              raise SystemExit(
+                  "V2 transition run ID changed: "
+                  f"observed={run_id} expected={expected_run_id}"
+              )
+
+          def request(path):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return json.load(response)
+
+          run = request(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed" or (
+              run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "V2 transition run is not successful"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != expected_path:
+              raise SystemExit(
+                  "V2 transition workflow path changed"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "V2 transition branch changed"
+              )
+          if str(run.get("head_sha") or "") != expected_sha:
+              raise SystemExit(
+                  "V2 transition launch commit changed"
+              )
+
+          matches = []
+          page = 1
+          while True:
+              payload = request(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              matches.extend(
+                  row
+                  for row in rows
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == artifact_name
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "V2 transition artifact pagination exceeded 2000"
+                  )
+          if len(matches) != 1:
+              raise SystemExit(
+                  "V2 transition artifact identity is ambiguous"
+              )
+
+          payload = fetch_github_actions_artifact_zip(
+              api
+              + f"/repos/{repo}/actions/artifacts/"
+              + f"{int(matches[0]['id'])}/zip",
+              token,
+          )
+          with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+              names = [
+                  name
+                  for name in archive.namelist()
+                  if name.rsplit("/", 1)[-1] == manifest_name
+              ]
+              if len(names) != 1:
+                  raise SystemExit(
+                      "V2 transition manifest identity is ambiguous"
+                  )
+              manifest = json.loads(archive.read(names[0]))
+
+          provenance = manifest.get("provenance") or {}
+          checks = {
+              "path": manifest.get("path") == "pons-v2-registrations-full.jsonl",
+              "records": int(manifest.get("records", -1)) == 3_638,
+              "sha256": str(manifest.get("sha256") or "") == (
+                  "8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93"
+              ),
+              "chain_id": int(provenance.get("chain_id", -1)) == 4663,
+              "snapshot_head": int(
+                  provenance.get("snapshot_head_block", -1)
+              ) == 54_486_035,
+              "source": str(provenance.get("source") or "") == (
+                  "merged_shared_v2_transition_shards"
+              ),
+              "registry_sha256": str(
+                  provenance.get("registry_sha256") or ""
+              ) == (
+                  "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f"
+              ),
+          }
+          failed = sorted(
+              key for key, passed in checks.items() if not passed
+          )
+          if failed:
+              raise SystemExit(
+                  "V2 transition manifest changed: "
+                  + ", ".join(failed)
+              )
+          print(json.dumps({
+              "run_id": run_id,
+              "artifact": artifact_name,
+              "manifest": manifest_name,
+              "records": int(manifest["records"]),
+              "sha256": manifest["sha256"],
+              "verification": "pass",
+          }, sort_keys=True))
+          PY
       - name: Refuse frozen-parent recovery while source is active
         env:
           GITHUB_TOKEN: ${{ github.token }}
