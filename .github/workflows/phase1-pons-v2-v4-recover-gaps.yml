@@ -2348,8 +2348,28 @@ jobs:
           )
           print(json.dumps(summary, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_full
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-full
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_full
+        name: Retry canonical V2/V4 artifact upload
+        if: ${{ steps.upload_full.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final canonical V2/V4 artifact upload retry
+        if: ${{ steps.retry_upload_full.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

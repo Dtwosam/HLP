@@ -617,7 +617,22 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("steps.upload_gap.outcome == 'failure'") == 4
     assert content.count("steps.retry_upload_gap.outcome == 'failure'") == 4
     assert content.count("overwrite: true") == 8
-    assert content.count("continue-on-error: true") >= 8
+    assert content.count("continue-on-error: true") >= 10
+    assert content.count("id: upload_full") == 1
+    assert content.count("id: retry_upload_full") == 1
+    assert content.count("name: Retry canonical V2/V4 artifact upload") == 1
+    assert content.count(
+        "name: Final canonical V2/V4 artifact upload retry"
+    ) == 1
+    assert content.count("steps.upload_full.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_full.outcome == 'failure'"
+    ) == 1
+    canonical_upload_block = content.split(
+        "id: upload_full",
+        1,
+    )[1]
+    assert canonical_upload_block.count("overwrite: true") == 2
     assert "frozen parent recovery is blocked while source is active" in content
     assert "Verify frozen V2 transition input" in content
     assert "V2 transition run ID changed: " in content
