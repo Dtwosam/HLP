@@ -111,6 +111,7 @@ jobs:
 
           def repair_job_terminal_snapshot(source_run_id):
               counts = {}
+              gap_id_counts = {}
               nonterminal = []
               repair_jobs = 0
               page = 1
@@ -127,6 +128,10 @@ jobs:
                       if match is None:
                           continue
                       repair_jobs += 1
+                      gap_id = match.group(1)
+                      gap_id_counts[gap_id] = (
+                          gap_id_counts.get(gap_id, 0) + 1
+                      )
                       state = (
                           str(row.get("conclusion") or "")
                           or str(row.get("status") or "")
@@ -147,9 +152,18 @@ jobs:
                           "live venue rescue terminal job pagination "
                           "exceeded 1000"
                       )
+              duplicate_gap_ids = sorted(
+                  [
+                      gap_id
+                      for gap_id, count in gap_id_counts.items()
+                      if count > 1
+                  ],
+                  key=int,
+              )
               return {
                   "repair_jobs": repair_jobs,
                   "counts": counts,
+                  "duplicate_gap_ids": duplicate_gap_ids,
                   "nonterminal": nonterminal,
               }
 
@@ -388,6 +402,12 @@ jobs:
                       "repair jobs on fresh snapshot: "
                       f"{fresh_job_snapshot['nonterminal'][:20]}"
                   )
+              if fresh_job_snapshot["duplicate_gap_ids"]:
+                  raise SystemExit(
+                      "selected prior rescue has duplicate repair gap "
+                      "IDs on fresh snapshot: "
+                      f"{fresh_job_snapshot['duplicate_gap_ids'][:20]}"
+                  )
               fresh_artifacts = artifacts(
                   int(prior_gap_run_id)
               )
@@ -453,6 +473,9 @@ jobs:
                       "repair_jobs"
                   ],
                   "repair_job_counts": fresh_job_snapshot["counts"],
+                  "duplicate_repair_gap_ids": fresh_job_snapshot[
+                      "duplicate_gap_ids"
+                  ][:20],
                   "repair_nonterminal_count": len(
                       fresh_job_snapshot["nonterminal"]
                   ),

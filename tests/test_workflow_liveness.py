@@ -2055,6 +2055,11 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "selected prior rescue still has nonterminal " in content
     assert '"repair_job_count": fresh_job_snapshot[' in content
     assert '"repair_job_counts": fresh_job_snapshot["counts"]' in content
+    assert "gap_id_counts = {}" in content
+    assert "gap_id_counts.get(gap_id, 0) + 1" in content
+    assert "duplicate_gap_ids = sorted(" in content
+    assert "selected prior rescue has duplicate repair gap " in content
+    assert '"duplicate_repair_gap_ids": fresh_job_snapshot[' in content
     assert '"repair_nonterminal_count": len(' in content
     assert "fresh_reusable_gap_ids = sorted(" in content
     assert "selected prior rescue reconciliation changed " in content
