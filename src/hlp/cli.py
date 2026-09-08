@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -3771,6 +3772,12 @@ def cmd_rpc_pons_transfer_tape(args: argparse.Namespace) -> int:
     if not tokens:
         raise SystemExit("representative token file contains no tokens")
 
+    token_file = Path(args.tokens)
+    sample_sha256 = hashlib.sha256(token_file.read_bytes()).hexdigest()
+    token_set_sha256 = hashlib.sha256(
+        ("\n".join(tokens) + "\n").encode()
+    ).hexdigest()
+
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
@@ -3790,8 +3797,10 @@ def cmd_rpc_pons_transfer_tape(args: argparse.Namespace) -> int:
         provenance={
             "source": "erc20_transfer_logs_for_representative_pons_tokens",
             "chain_id": 4663,
-            "tokens": Path(args.tokens).name,
+            "tokens": token_file.name,
             "token_count": len(tokens),
+            "sample_sha256": sample_sha256,
+            "token_set_sha256": token_set_sha256,
             "from_block": args.from_block,
             "to_block": args.to_block,
             "event_topic0": TRANSFER_TOPIC,
