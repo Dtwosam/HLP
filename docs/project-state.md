@@ -963,9 +963,12 @@ rejects the same intentionally empty V2 source before reading recovered gaps.
 The active run is left untouched because every successful repair artifact is
 reusable. Current branch merge code now independently re-proves the exact
 `acquire / v2_v4` and `acquire / v2_v4_recovery` terminal/skipped states
-and permits zero original files only under that frozen proof, so a retry after
-the active generation can reuse completed gaps and reach merge without
-re-fetching them.
+and permits zero original files only under that frozen proof. It also replaces
+the wildcard prior/current gap downloads with paginated exact numeric artifact
+discovery, rejects duplicate gap IDs/files, and requires the current run's
+observed gap-artifact count to equal the plan. This avoids the same artifact
+truncation class at V2's **553-artifact** scale, so a retry after the active
+generation can reuse completed gaps and reach merge without re-fetching them.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
