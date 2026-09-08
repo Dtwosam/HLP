@@ -1167,6 +1167,27 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "representative transfer shard sample identity " in content
     assert "representative transfer shard token-set identity " in content
     assert "representative transfer merge requires exactly 10 " in content
+    assert (
+        "Download every prior representative transfer shard artifact"
+        in content
+    )
+    assert (
+        "Download every representative transfer shard artifact for merge"
+        in content
+    )
+    assert (
+        "representative transfer artifact pagination exceeded 2000"
+        in content
+    )
+    assert (
+        'r"^phase1-pons-representative-transfer-(\\d+)$"'
+        in content
+    )
+    assert "pattern: phase1-pons-representative-transfer-*" not in content
+    assert content.count("fetch_github_actions_artifact_zip(") == 2
+    assert 'CURRENT_RUN_ID: ${{ github.run_id }}' in content
+    assert "prior representative transfer run has no shard artifacts" in content
+    assert "current representative transfer run has no shard artifacts" in content
     assert content.count("max-parallel: 2") == 4
     assert content.count("timeout-minutes: 30") == 4
     assert content.count("timeout-minutes: 45") == 1
