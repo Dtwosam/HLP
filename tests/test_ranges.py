@@ -306,6 +306,35 @@ def test_validate_gap_plan_jobs_rejects_overlap():
             expected_end=100,
         )
 
+def test_v2_generation2_retry_replans_failed_and_unmaterialized_gaps():
+    start = 26_841_846
+    end = 54_486_035
+    generation_2 = split_range(start, end, max_blocks=50_000)
+
+    successful_wave_1 = [
+        block_range
+        for index, block_range in enumerate(generation_2[:240])
+        if index != 53
+    ]
+    remaining = plan_missing_subranges(
+        start,
+        end,
+        successful_wave_1,
+        max_blocks=50_000,
+    )
+
+    assert len(generation_2) == 553
+    assert len(successful_wave_1) == 239
+    assert len(remaining) == 314
+    assert remaining[0] == generation_2[53]
+    assert remaining[1] == generation_2[240]
+    assert remaining[-1] == generation_2[-1]
+    assert [
+        min(max(len(remaining) - 240 * index, 0), 240)
+        for index in range(4)
+    ] == [240, 74, 0, 0]
+
+
 def test_v2_full_range_retry_reuses_all_553_prior_gaps():
     start = 26_841_846
     end = 54_486_035
