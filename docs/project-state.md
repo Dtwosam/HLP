@@ -1183,7 +1183,11 @@ advances the next launch to generation 3. Preflight reports both consumed
 generation numbers and terminal-but-unconsumed generation runs so this state is
 auditable. Once a child plan succeeds, that generation is consumed even if a
 later repair/upload/merge stage fails, because archive recovery work may already
-have materialized.
+have materialized. Consumed-generation history is also one-to-one: if two
+distinct launcher run IDs ever contain successful target `plan` jobs for the
+same generation number, preflight treats the history as ambiguous and fails
+closed instead of choosing one. The preflight summary records the exact
+generation-to-run-ID mapping alongside terminal-but-unconsumed generations.
 
 This reduces the chance that a single platform/network blip consumes the
 generation-3 marker commit before child handoff.
