@@ -486,7 +486,7 @@ jobs:
                       )
               return False
 
-          consumed_generations = []
+          consumed_generation_runs = {}
           unconsumed_terminal_generations = []
           for row in terminal_target_runs:
               match = generation_pattern.match(
@@ -496,13 +496,31 @@ jobs:
                   continue
               generation = int(match.group(1))
               if target_plan_succeeded(int(row["id"])):
-                  consumed_generations.append(generation)
+                  consumed_generation_runs.setdefault(
+                      generation,
+                      [],
+                  ).append(int(row["id"]))
               else:
                   unconsumed_terminal_generations.append({
                       "generation": generation,
                       "run_id": int(row["id"]),
                       "conclusion": row.get("conclusion"),
                   })
+          ambiguous_consumed_generations = {
+              generation: sorted(run_ids)
+              for generation, run_ids
+              in consumed_generation_runs.items()
+              if len(set(run_ids)) > 1
+          }
+          if ambiguous_consumed_generations:
+              raise SystemExit(
+                  "live venue rescue consumed generation history "
+                  "is ambiguous: "
+                  f"{ambiguous_consumed_generations}"
+              )
+          consumed_generations = sorted(
+              consumed_generation_runs
+          )
           expected_generation = (
               max(consumed_generations, default=0) + 1
           )
@@ -873,9 +891,12 @@ jobs:
               ),
               "requested_generation": requested_generation,
               "expected_generation": expected_generation,
-              "consumed_generations": sorted(
-                  consumed_generations
-              ),
+              "consumed_generations": consumed_generations,
+              "consumed_generation_runs": {
+                  str(generation): sorted(run_ids)
+                  for generation, run_ids
+                  in sorted(consumed_generation_runs.items())
+              },
               "unconsumed_terminal_generations": (
                   unconsumed_terminal_generations
               ),
@@ -923,7 +944,9 @@ jobs:
                   f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
                   f"- generation: {requested_generation}\n"
                   f"- consumed generations: "
-                  f"{sorted(consumed_generations)}\n"
+                  f"{consumed_generations}\n"
+                  f"- consumed generation runs: "
+                  f"{consumed_generation_runs}\n"
                   f"- unconsumed terminal generations: "
                   f"{unconsumed_terminal_generations}\n"
                   f"- fresh active siblings: "

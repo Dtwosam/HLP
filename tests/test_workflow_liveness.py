@@ -2186,11 +2186,17 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "def target_plan_succeeded(source_run_id):" in content
     assert "?filter=all&per_page=100&page={page}" in content
     assert "generation-plan job " in content
-    assert "consumed_generations = []" in content
+    assert "consumed_generation_runs = {}" in content
     assert "unconsumed_terminal_generations = []" in content
     assert "target_plan_succeeded(int(row[\"id\"]))" in content
+    assert "ambiguous_consumed_generations = {" in content
+    assert "len(set(run_ids)) > 1" in content
+    assert "consumed generation history " in content
+    assert "consumed_generations = sorted(" in content
     assert "max(consumed_generations, default=0) + 1" in content
-    assert '"consumed_generations": sorted(' in content
+    assert '"consumed_generations": consumed_generations' in content
+    assert '"consumed_generation_runs": {' in content
+    assert "consumed generation runs:" in content
     assert '"unconsumed_terminal_generations": (' in content
     assert "consumed generations:" in content
     assert "unconsumed terminal generations:" in content
