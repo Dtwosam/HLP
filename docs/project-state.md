@@ -917,8 +917,17 @@ new V1/V3 paginated source selector used raw regex `\\d+` instead of
 `\d+`, so none of the 236 numeric original shard artifact names matched.
 The frozen parent still exposes all **314** non-expired artifacts. Current
 V1/V3 planning and merge now use the correct numeric regex in both source
-downloads; V2/V4 already had the correct pattern. Regression tests pin both
-patterns so this escaping error cannot recur.
+lookups; V2/V4 already had the correct pattern. Regression tests pin both
+patterns so this escaping error cannot recur. The frozen parent’s **236**
+surviving numeric V1/V3 artifacts total about **6.28 GiB**, so downloading
+them inside both planning and merge unnecessarily threatens the 45-minute
+planner ceiling. Future V1/V3 and V2/V4 planners now list numeric artifact IDs
+only and derive exact original shard ranges with the same deterministic
+equal-span formula used by the 240-way V1/V3 and 192-way V2/V4 acquisition
+workflows. Planning records `planning_source_bytes_downloaded=0` for those
+originals; full shard bytes are downloaded only once in final merge, where
+content validation actually requires them. Prior recovery gaps remain reusable
+planning inputs.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
