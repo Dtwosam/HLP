@@ -411,6 +411,21 @@ jobs:
               fresh_artifacts = artifacts(
                   int(prior_gap_run_id)
               )
+              if prior_plan_artifact not in fresh_artifacts:
+                  raise SystemExit(
+                      "selected prior rescue plan artifact disappeared "
+                      "during fresh terminal snapshot"
+                  )
+              if (
+                  str(fresh_prior.get("conclusion") or "") == "success"
+                  and requested_artifact in fresh_artifacts
+              ):
+                  raise SystemExit(
+                      "live venue rescue became unnecessary because "
+                      "fresh prior snapshot is canonically complete: "
+                      f"run={prior_gap_run_id} "
+                      f"artifact={requested_artifact}"
+                  )
               fresh_successful_gap_ids = (
                   successful_repair_gap_ids(
                       int(prior_gap_run_id)
@@ -487,6 +502,12 @@ jobs:
                   ),
                   "non_success_gap_artifact_count": len(
                       fresh_non_success_gap_artifacts
+                  ),
+                  "plan_artifact_present": (
+                      prior_plan_artifact in fresh_artifacts
+                  ),
+                  "canonical_artifact_present": (
+                      requested_artifact in fresh_artifacts
                   ),
               }
 

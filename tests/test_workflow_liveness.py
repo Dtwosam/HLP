@@ -2047,6 +2047,13 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "selected prior rescue is not terminal on fresh snapshot" in content
     assert "selected prior rescue identity changed during " in content
     assert "fresh_artifacts = artifacts(" in content
+    assert "prior_plan_artifact not in fresh_artifacts" in content
+    assert "selected prior rescue plan artifact disappeared " in content
+    assert 'str(fresh_prior.get("conclusion") or "") == "success"' in content
+    assert "requested_artifact in fresh_artifacts" in content
+    assert "fresh prior snapshot is canonically complete: " in content
+    assert '"plan_artifact_present": (' in content
+    assert '"canonical_artifact_present": (' in content
     assert "fresh_successful_gap_ids" in content
     assert "repair_job_terminal_snapshot" in content
     assert "repair_job_pattern = re.compile(" in content
