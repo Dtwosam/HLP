@@ -1583,6 +1583,9 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "missing_requested_artifacts" in content
     assert "live venue rescue source workflow path changed" in content
     assert "live venue rescue source branch changed" in content
+    assert "live venue rescue launch branch changed" in content
+    assert "live venue rescue source launch commit changed" in content
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
     assert content.count("needs: preflight") == 2
     assert content.count("needs.preflight.result == 'success'") == 2
@@ -1941,6 +1944,8 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
         "33_972_109_927",
     ):
         assert run_id in content
+    assert "recovery source launch commit changed" in content
+    assert "c53b3a63156976a5873752c332fa7578011249b0" in content
     assert "source already has complete V2/V4; set v2_v4_run_id" in content
     assert "source has reusable V2/V4 shards; recover source gaps" in content
     assert "source already has complete pricing; set pricing_run_id" in content
