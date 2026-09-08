@@ -8,6 +8,87 @@ from collections.abc import Iterable
 BlockRange = tuple[int, int]
 
 
+def coalesce_covered_ranges(
+    expected_start: int,
+    expected_end: int,
+    covered: Iterable[BlockRange],
+) -> list[BlockRange]:
+    """Return the union of valid covered intervals, tolerating overlap."""
+    start = int(expected_start)
+    end = int(expected_end)
+    if start <= 0 or end < start:
+        raise ValueError(f"invalid expected range: {start}..{end}")
+
+    rows = sorted((int(lo), int(hi)) for lo, hi in covered)
+    merged: list[list[int]] = []
+    for lo, hi in rows:
+        if lo <= 0 or hi < lo:
+            raise ValueError(f"invalid covered range: {lo}..{hi}")
+        if lo < start or hi > end:
+            raise ValueError(
+                f"covered range outside expected bounds: {lo}..{hi} "
+                f"not within {start}..{end}"
+            )
+        if not merged or lo > merged[-1][1] + 1:
+            merged.append([lo, hi])
+            continue
+        merged[-1][1] = max(merged[-1][1], hi)
+    return [(lo, hi) for lo, hi in merged]
+
+
+def select_contiguous_cover(
+    expected_start: int,
+    expected_end: int,
+    candidates: Iterable[BlockRange],
+) -> list[int]:
+    """Select whole candidate intervals forming one exact non-overlapping cover."""
+    start = int(expected_start)
+    end = int(expected_end)
+    if start <= 0 or end < start:
+        raise ValueError(f"invalid expected range: {start}..{end}")
+
+    rows = [(int(lo), int(hi)) for lo, hi in candidates]
+    by_start: dict[int, list[int]] = {}
+    for index, (lo, hi) in enumerate(rows):
+        if lo <= 0 or hi < lo:
+            raise ValueError(f"invalid candidate range: {lo}..{hi}")
+        if lo < start or hi > end:
+            raise ValueError(
+                f"candidate range outside expected bounds: {lo}..{hi} "
+                f"not within {start}..{end}"
+            )
+        by_start.setdefault(lo, []).append(index)
+
+    memo: dict[int, list[int] | None] = {}
+
+    def solve(cursor: int) -> list[int] | None:
+        if cursor == end + 1:
+            return []
+        if cursor > end + 1:
+            return None
+        if cursor in memo:
+            return memo[cursor]
+
+        indexes = sorted(
+            by_start.get(cursor, ()),
+            key=lambda index: (-rows[index][1], index),
+        )
+        for index in indexes:
+            suffix = solve(rows[index][1] + 1)
+            if suffix is not None:
+                memo[cursor] = [index, *suffix]
+                return memo[cursor]
+        memo[cursor] = None
+        return None
+
+    selected = solve(start)
+    if selected is None:
+        raise ValueError(
+            f"candidate ranges cannot form exact cover: {start}..{end}"
+        )
+    return selected
+
+
 def missing_ranges(
     expected_start: int,
     expected_end: int,
