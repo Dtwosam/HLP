@@ -285,31 +285,31 @@ jobs:
               "lineage": "pass",
           }, sort_keys=True))
           PY
-      - name: Download every original V2/V4 shard artifact
+      - name: Discover original V2/V4 shard coverage
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
         run: |
+          mkdir -p source-metadata
           python - <<'PY'
-          import io
           import json
           import os
           import re
           import urllib.request
-          import zipfile
           from pathlib import Path
 
-          from hlp.data.github_actions import (
-              fetch_github_actions_artifact_zip,
-          )
+          from hlp.data.ranges import indexed_shard_bounds
 
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
           run_id = int(os.environ["PARTIAL_RUN_ID"])
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = 192
           name_pattern = re.compile(r"^phase1-pons-v2-v4-(\d+)$")
 
-          def request(path, *, decode_json=True):
+          def request(path):
               req = urllib.request.Request(
                   api + path,
                   headers={
@@ -319,8 +319,7 @@ jobs:
                   },
               )
               with urllib.request.urlopen(req, timeout=60) as response:
-                  payload = response.read()
-              return json.loads(payload) if decode_json else payload
+                  return json.load(response)
 
           selected = []
           page = 1
@@ -332,8 +331,22 @@ jobs:
               rows = list(payload.get("artifacts") or [])
               for row in rows:
                   match = name_pattern.fullmatch(str(row.get("name") or ""))
-                  if match and not row.get("expired"):
-                      selected.append((int(match.group(1)), row))
+                  if not match or row.get("expired"):
+                      continue
+                  index = int(match.group(1))
+                  lo, hi = indexed_shard_bounds(
+                      start,
+                      head,
+                      index,
+                      shard_count,
+                  )
+                  selected.append({
+                      "artifact_id": int(row["id"]),
+                      "artifact_name": str(row["name"]),
+                      "shard_index": index,
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
               if len(rows) < 100:
                   break
               page += 1
@@ -342,8 +355,8 @@ jobs:
                       "V2/V4 source artifact pagination exceeded 2000"
                   )
 
-          selected.sort(key=lambda item: item[0])
-          indexes = [index for index, _ in selected]
+          selected.sort(key=lambda row: row["shard_index"])
+          indexes = [row["shard_index"] for row in selected]
           if not selected:
               raise SystemExit(
                   "V2/V4 source has no original shard artifacts"
@@ -353,39 +366,18 @@ jobs:
                   "V2/V4 source contains duplicate shard artifact indexes"
               )
 
-          target = Path("partial")
-          target.mkdir(parents=True, exist_ok=True)
-          extracted = 0
-          for index, artifact in selected:
-              blob = fetch_github_actions_artifact_zip(
-                  api
-                  + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(artifact['id'])}/zip",
-                  token,
-              )
-              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-                  for member in archive.infolist():
-                      if member.is_dir():
-                          continue
-                      name = Path(member.filename).name
-                      if not name:
-                          continue
-                      destination = target / name
-                      if destination.exists():
-                          raise SystemExit(
-                              "duplicate V2/V4 shard file while downloading "
-                              f"artifact index {index}: {name}"
-                          )
-                      destination.write_bytes(archive.read(member))
-                      extracted += 1
-
+          Path(
+              "source-metadata/v2-v4-original-shards.json"
+          ).write_text(
+              json.dumps(selected, indent=2, sort_keys=True) + "\n"
+          )
           print(json.dumps({
               "source_run_id": run_id,
               "source_artifact_pages": page,
               "original_shard_artifacts": len(selected),
               "first_shard_index": indexes[0],
               "last_shard_index": indexes[-1],
-              "extracted_files": extracted,
+              "planning_source_bytes_downloaded": 0,
           }, sort_keys=True))
           PY
       - uses: actions/download-artifact@v4
@@ -421,26 +413,36 @@ jobs:
                   "max_gap_blocks must be between 1 and 100000"
               )
 
-          manifests = (
-              sorted(
-                  Path("partial").glob(
-                      "v4-events-shard-*.jsonl.manifest.json"
-                  )
-              )
-              + sorted(
-                  Path("prior-gaps").glob(
-                      "v4-events-gap-*.jsonl.manifest.json"
-                  )
+          source_rows = json.loads(
+              Path(
+                  "source-metadata/v2-v4-original-shards.json"
+              ).read_text()
+          )
+          gap_manifests = sorted(
+              Path("prior-gaps").glob(
+                  "v4-events-gap-*.jsonl.manifest.json"
               )
           )
-          if not manifests:
+          if not source_rows and not gap_manifests:
               raise SystemExit(
                   "recovery sources have no successful V4 artifacts"
               )
 
           covered = []
           sources = []
-          for path in manifests:
+          for row in source_rows:
+              lo = int(row["from_block"])
+              hi = int(row["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "source": "partial-run-artifact-metadata",
+                  "artifact": row["artifact_name"],
+                  "artifact_id": int(row["artifact_id"]),
+                  "shard_index": int(row["shard_index"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          for path in gap_manifests:
               manifest = json.loads(path.read_text())
               prov = manifest["provenance"]
               lo = int(prov["from_block"])
