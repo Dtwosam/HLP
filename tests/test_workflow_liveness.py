@@ -355,6 +355,15 @@ def test_curve_range_recovery_is_manual_small_and_bounded():
     assert "SHARD_COUNT: '4'" in content
     assert "recovery range exceeds 200000-block ceiling" in content
     assert "timeout-minutes: 20" in content
+    assert content.count("id: upload_range_shard") == 1
+    assert content.count("id: retry_upload_range_shard") == 1
+    assert content.count("name: Retry range shard artifact upload") == 1
+    assert content.count("name: Final range shard artifact upload retry") == 1
+    assert content.count("steps.upload_range_shard.outcome == 'failure'") == 1
+    assert (
+        content.count("steps.retry_upload_range_shard.outcome == 'failure'") == 1
+    )
+    assert content.count("overwrite: true") == 2
     assert "time.sleep(" not in content
 
 
@@ -375,6 +384,15 @@ def test_anchor_range_recovery_is_manual_small_and_bounded():
     assert "SHARD_COUNT: '4'" in content
     assert "recovery range exceeds 200000-block ceiling" in content
     assert "timeout-minutes: 20" in content
+    assert content.count("id: upload_range_shard") == 1
+    assert content.count("id: retry_upload_range_shard") == 1
+    assert content.count("name: Retry range shard artifact upload") == 1
+    assert content.count("name: Final range shard artifact upload retry") == 1
+    assert content.count("steps.upload_range_shard.outcome == 'failure'") == 1
+    assert (
+        content.count("steps.retry_upload_range_shard.outcome == 'failure'") == 1
+    )
+    assert content.count("overwrite: true") == 2
     assert "time.sleep(" not in content
 
 

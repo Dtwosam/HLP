@@ -108,11 +108,31 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/anchor-range-${SHARD}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_range_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-anchor-range-${{ inputs.artifact_suffix }}-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_range_shard
+        name: Retry range shard artifact upload
+        if: ${{ steps.upload_range_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-anchor-range-${{ inputs.artifact_suffix }}-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final range shard artifact upload retry
+        if: ${{ steps.retry_upload_range_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-anchor-range-${{ inputs.artifact_suffix }}-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: recover
