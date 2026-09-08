@@ -1835,6 +1835,12 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "phase1-pons-v2-v4-gap-plan" in content
     assert "v4-gap-plan.json" in content
     assert 'current_plan.get("prior_gap_run_id") or 0' in content
+    assert '"partial_run_id" not in current_plan' in content
+    assert '"prior_gap_run_id" not in current_plan' in content
+    assert "if prior_gap_id == 0:" in content
+    assert content.index("current_plan = artifact_json(") < content.index(
+        "if prior_gap_id == 0:"
+    )
     assert '"partial_run_id" not in prior_plan' in content
     assert '"prior_gap_run_id" not in prior_plan' in content
     assert "if cursor in seen:" in content
@@ -1962,6 +1968,14 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "recovery venue partial run does not match frozen" in content
     assert "recovery_lineage plan artifact identity is ambiguous".replace("_", " ") in content
     assert "recovery venue plan lacks bound lineage metadata" in content
+    assert "recovery venue plan metadata is invalid" in content
+    assert "recovery venue plan snapshot changed" in content
+    assert "recovery venue plan start block changed" in content
+    assert "recovery venue prior lineage is invalid" in content
+    assert "if prior_gap_id == 0:" in content
+    assert content.index("current_plan = recovery_plan(") < content.index(
+        "if prior_gap_id == 0:"
+    )
     assert "recovery venue manifest/plan prior lineage" in content
     assert "recovery venue prior lineage contains a cycle" in content
     assert "recovery venue prior lineage exceeds" in content
