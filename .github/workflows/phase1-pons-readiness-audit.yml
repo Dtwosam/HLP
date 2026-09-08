@@ -941,7 +941,7 @@ jobs:
               launch_pattern = re.compile(
                   "^"
                   + re.escape(launch_marker)
-                  + r" generation (\\d+)$"
+                  + r" generation (\d+)$"
               )
               candidates = []
               diagnostics = recovery_discovery[venue]
