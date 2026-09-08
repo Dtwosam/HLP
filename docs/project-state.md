@@ -908,8 +908,13 @@ The readiness audit discovers successful venue artifacts only from the pinned
 exact run IDs in its recovery plan; direct/debug gap workflows are never
 auto-adopted. Recovery discovery paginates the launcher workflow history rather
 than assuming the valid rescue remains among the newest 20 runs, so later inert
-validation pushes cannot hide an older completed canonical rescue. Readiness
-now also opens the canonical recovered venue manifest
+validation pushes cannot hide an older completed canonical rescue. The
+readiness report now also records per-venue recovery discovery diagnostics:
+the selected canonical run ID, number of completed-success candidates inspected,
+aggregate rejection counts, and up to 20 rejected candidate run IDs with
+reasons such as missing canonical artifact, invalid manifest, invalid lineage
+or workflow-path mismatch. This keeps recovery failures explainable without
+launching any additional archive work. Readiness now also opens the canonical recovered venue manifest
 before adopting a run and verifies recovery source type, chain **4663**,
 snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
 registry/transition upstream run. A malformed successful V1 rescue therefore
