@@ -485,6 +485,35 @@ def test_readiness_advances_from_terminal_source_failure_with_recovered_evidence
     assert report["evidence_run_id"] == 500
 
 
+def test_readiness_active_rescue_blocks_recovered_evidence_advance():
+    source = _source(
+        status="completed",
+        conclusion="failure",
+        artifacts=(),
+        job_counts={"success": 16, "cancelled": 1},
+    )
+    evidence = _run(
+        500,
+        name="phase1-pons-recovered-completion-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-recovered-completion-one-shot.yml"
+        ),
+        artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
+    )
+
+    report = _report(
+        source_run=source,
+        evidence_run=evidence,
+        evidence_run_id=500,
+        active_recovery_run_ids={"v1_v3": 900, "v2_v4": 0},
+    )
+
+    assert report["stage"] == "eligibility_acquisition"
+    assert report["next_action"] == "wait_for_v1_v3_rescue"
+    assert report["phase1_ready"] is False
+
+
 def test_readiness_rejects_unapproved_recovery_evidence_workflow():
     source = _source(
         status="completed",
