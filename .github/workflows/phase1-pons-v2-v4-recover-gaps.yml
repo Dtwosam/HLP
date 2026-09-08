@@ -560,7 +560,7 @@ jobs:
           print(json.dumps({
               "prior_gap_generations": depth,
               "reusable_prior_gap_artifacts": len(coverage),
-              "planning_prior_gap_payload_bytes_downloaded": 0,
+              "planning_prior_gap_jsonl_bytes_downloaded": 0,
           }, sort_keys=True))
           PY
       - id: plan
