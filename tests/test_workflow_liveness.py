@@ -1819,6 +1819,16 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "recovery run pagination exceeded 1000" in content
     assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
+    assert "recovery_lineage_valid" in content
+    assert "phase1-pons-v1-v3-gap-plan" in content
+    assert "v1-v3-gap-plan.json" in content
+    assert "phase1-pons-v2-v4-gap-plan" in content
+    assert "v4-gap-plan.json" in content
+    assert 'current_plan.get("prior_gap_run_id") or 0' in content
+    assert '"partial_run_id" not in prior_plan' in content
+    assert '"prior_gap_run_id" not in prior_plan' in content
+    assert "if cursor in seen:" in content
+    assert "if depth > 20:" in content
     assert "pons-v1-v3-full.jsonl.manifest.json" in content
     assert "pons-v2-v4-full.jsonl.manifest.json" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
@@ -1829,6 +1839,7 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "33_912_452_330" in content
     assert content.count("fetch_github_actions_artifact_zip(") == 1
     assert '"recovery_manifest_valid"] = True' in content
+    assert '"recovery_lineage_valid"] = True' in content
     assert "RECOVERY_VENUE_ARTIFACTS" in content
     assert "RECOVERY_VENUE_WORKFLOW_PATHS" in content
     assert "recovery_runs=recovery_runs" in content
