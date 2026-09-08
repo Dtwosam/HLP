@@ -888,7 +888,12 @@ overlapping source/prior-gap coverage before deriving missing ranges, and final
 merge selects an exact contiguous whole-file cover while dropping redundant
 overlapping candidates. A failed final merge from the running rescue can
 therefore be retried with `prior_gap_run_id` without re-fetching those blocks
-or failing on duplicate coverage. The V2/V4 gap workflow uses the same
+or failing on duplicate coverage. The pinned launcher now discovers the newest
+completed target-matched rescue that still exposes both its bound gap plan and
+at least one successful gap artifact, and passes that run ID into the next
+generation automatically after the global active-rescue guard clears. A
+merge-only failure therefore reuses successful recovery work instead of
+silently reverting to an empty prior lineage. The V2/V4 gap workflow uses the same
 paginated discovery, overlap coalescing and exact-cover merge, preventing both
 the 300-artifact truncation class and the follow-on overlap class when V2
 recovery is eventually armed. Both venue merges now also verify every selected
