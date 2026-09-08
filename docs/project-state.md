@@ -1133,7 +1133,33 @@ read. Finally, if the fresh prior run is successful and the canonical full
 artifact is now present, the rescue stops as unnecessary rather than handing off
 stale preflight state. The terminal snapshot records repair-job state counts,
 duplicate-ID diagnostics, artifact-presence flags, run attempt and update time
-alongside the reusable-gap count.
+alongside the reusable-gap count. Generation 3 now also pins the complete
+generation-2 plan fingerprint derived from its successful plan-job output: no
+prior gap lineage, no successful source shards, `max_gap_blocks=50000`, exactly
+**553** deterministic `split_range(26841846, 54486035, 50000)` rows,
+**27,644,190** planned blocks, wave counts **240 / 240 / 73 / 0**, and gap
+**053 = 29,491,846-29,541,845**. The child planner compares the downloaded
+generation-2 plan row-for-row against that deterministic split before it can
+materialize recovery jobs.
+
+The actual V2/V4 generation-3 launch is intentionally reduced to a one-line
+wrapper mutation. The current launcher marker is
+`LAUNCH_VALIDATION_GENERATION: '9'`; generation 3 requires marker **10**
+because V2/V4 enforces `validation_generation = rescue_generation + 7`.
+The launch commit message must be exactly the single line
+`launch V2 V4 rescue generation 3`. Preflight reopens the launch commit through
+the GitHub commit API and requires it to be a direct single-parent child of the
+previous branch tip, to modify exactly one file — the live venue-rescue
+wrapper — and to contain exactly the marker diff `9 -> 10` with no other
+changed lines. The marker must increment by exactly one and the new value must
+equal the workflow-observed validation generation. Launch titles with suffixes
+or commit-message bodies are rejected.
+
+The launcher workflow is now serialized by branch with
+`cancel-in-progress: false`, so two rescue launchers cannot execute preflight
+concurrently. In addition to the initial sibling scan, preflight performs a
+second paginated active-sibling scan immediately before handoff and fails if
+another nonterminal venue-rescue launcher has appeared.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
