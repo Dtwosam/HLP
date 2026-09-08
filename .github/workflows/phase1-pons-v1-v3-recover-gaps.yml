@@ -302,7 +302,7 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
           run_id = int(os.environ["PARTIAL_RUN_ID"])
-          name_pattern = re.compile(r"^phase1-pons-v1-v3-(\\d+)$")
+          name_pattern = re.compile(r"^phase1-pons-v1-v3-(\d+)$")
 
           def request(path, *, decode_json=True):
               req = urllib.request.Request(
@@ -752,7 +752,7 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
           run_id = int(os.environ["PARTIAL_RUN_ID"])
-          name_pattern = re.compile(r"^phase1-pons-v1-v3-(\\d+)$")
+          name_pattern = re.compile(r"^phase1-pons-v1-v3-(\d+)$")
 
           def request(path, *, decode_json=True):
               req = urllib.request.Request(
