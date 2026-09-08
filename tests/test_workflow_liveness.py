@@ -1831,6 +1831,14 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"completed_success_candidates": 0' in content
     assert '"selected_run_id": 0' in content
     assert '"active_run": None' in content
+    assert '"latest_terminal_run": None' in content
+    assert "def job_diagnostics(run_id):" in content
+    assert '"problem_jobs": problem_jobs' in content
+    assert "if key in failed_states and len(problem_jobs) < 20:" in content
+    assert 'diagnostics["latest_terminal_run"] is None' in content
+    assert '"conclusion": row.get("conclusion")' in content
+    assert "Latest terminal rescue" in content
+    assert "Problem jobs:" in content
     assert '"launch V1 V3 rescue"' in content
     assert '"launch V2 V4 rescue"' in content
     assert "if not display_title.startswith(" in content
