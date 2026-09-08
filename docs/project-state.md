@@ -906,7 +906,10 @@ successful source shards are not replaced by an unnecessary full venue rerun.
 The readiness audit discovers successful venue artifacts only from the pinned
 `phase1-pons-live-venue-rescue-one-shot` launcher and then publishes those
 exact run IDs in its recovery plan; direct/debug gap workflows are never
-auto-adopted. Readiness now also opens the canonical recovered venue manifest
+auto-adopted. Recovery discovery paginates the launcher workflow history rather
+than assuming the valid rescue remains among the newest 20 runs, so later inert
+validation pushes cannot hide an older completed canonical rescue. Readiness
+now also opens the canonical recovered venue manifest
 before adopting a run and verifies recovery source type, chain **4663**,
 snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
 registry/transition upstream run. A malformed successful V1 rescue therefore
