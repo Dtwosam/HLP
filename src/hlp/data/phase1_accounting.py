@@ -188,14 +188,20 @@ def summarize_action_run(
     job_runtime_values: list[float] = []
     json_records = 0
     jobs_with_logs = 0
+    completed_job_ids: list[int] = []
+    missing_completed_job_log_ids: list[int] = []
 
     for job in job_rows:
         runtime = _job_runtime_seconds(job)
         if runtime is not None:
             job_runtime_values.append(runtime)
         job_id = _nonnegative_int(job.get("id"), field="job.id")
+        if job.get("status") == "completed" or job.get("conclusion") is not None:
+            completed_job_ids.append(job_id)
         text = logs_by_job_id.get(job_id)
         if text is None:
+            if job_id in completed_job_ids:
+                missing_completed_job_log_ids.append(job_id)
             continue
         jobs_with_logs += 1
         records = extract_action_json_records(text)
@@ -247,6 +253,10 @@ def summarize_action_run(
         "jobs": len(job_rows),
         "job_conclusions": dict(sorted(conclusions.items())),
         "jobs_with_logs": jobs_with_logs,
+        "completed_jobs": len(completed_job_ids),
+        "missing_completed_job_logs": len(missing_completed_job_log_ids),
+        "missing_completed_job_log_ids": missing_completed_job_log_ids,
+        "all_completed_job_logs_available": not missing_completed_job_log_ids,
         "log_json_records": json_records,
         "request_counters": dict(sorted(request_totals.items())),
         "request_counter_total": sum(request_totals.values()),
@@ -302,6 +312,8 @@ def summarize_phase1_runs(
     job_runtime_seconds = 0.0
     unsuccessful = []
     incomplete = []
+    missing_log_runs = []
+    missing_completed_job_logs = 0
 
     for row in rows:
         for key, value in dict(row.get("request_counters") or {}).items():
@@ -343,6 +355,15 @@ def summarize_phase1_runs(
             unsuccessful.append(
                 _nonnegative_int(row["run_id"], field="run_id")
             )
+        missing_logs = _nonnegative_int(
+            row.get("missing_completed_job_logs", 0),
+            field="missing_completed_job_logs",
+        )
+        missing_completed_job_logs += missing_logs
+        if missing_logs:
+            missing_log_runs.append(
+                _nonnegative_int(row["run_id"], field="run_id")
+            )
 
     counted_requests = sum(request_totals.values())
     counted_response_bytes = sum(response_byte_totals.values())
@@ -370,13 +391,23 @@ def summarize_phase1_runs(
         "incomplete_run_ids": incomplete,
         "unsuccessful_run_ids": unsuccessful,
         "all_runs_successful": not incomplete and not unsuccessful,
+        "missing_completed_job_logs": missing_completed_job_logs,
+        "runs_with_missing_job_logs": missing_log_runs,
+        "all_completed_job_logs_available": not missing_log_runs,
+        "accounting_complete": (
+            not incomplete
+            and not unsuccessful
+            and not missing_log_runs
+        ),
         "accounting_scope_note": (
             "request and response-byte totals sum explicit top-level counters "
             "printed by HLP jobs; processed work blocks deduplicate repeated "
             "reported ranges within each job but preserve overlap across "
             "distinct jobs/scans, while runtime uses reported acquisition "
-            "timers plus GitHub job timestamps. The accounting does not infer "
-            "unreported traffic or claim that every counter is billable by "
-            "the same provider"
+            "timers plus GitHub job timestamps. Completed jobs whose historical "
+            "log blobs are unavailable are explicitly counted and omitted, so "
+            "affected checkpoint totals are lower bounds. The accounting does "
+            "not infer unreported traffic or claim that every counter is billable "
+            "by the same provider"
         ),
     }
