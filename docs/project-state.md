@@ -1166,7 +1166,13 @@ previous branch tip, to modify exactly one file — the live venue-rescue
 wrapper — and to contain exactly the marker diff `9 -> 10` with no other
 changed lines. The marker must increment by exactly one and the new value must
 equal the workflow-observed validation generation. Launch titles with suffixes
-or commit-message bodies are rejected.
+or commit-message bodies are rejected. Because that marker bump is deliberately
+one-shot, every GitHub JSON API read inside launcher preflight now gets up to
+**three** attempts for transient HTTP 403/408/409/425/429/5xx responses and
+`URLError`/timeout failures. Retries happen inside the same launcher run with no
+sleep/poll loop and do not relax any semantic guard; an exhausted retry still
+fails closed. This reduces the chance that a single platform/network blip
+consumes the generation-3 marker commit before child handoff.
 
 The launcher workflow is now serialized by branch with
 `cancel-in-progress: false`, so two rescue launchers cannot execute preflight
