@@ -615,8 +615,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 merge current gap snapshot head changed" in content
     assert "V2/V4 merge current gap start block changed" in content
     assert "V2/V4 merge current gap prior lineage changed" in content
-    assert "V2/V4 merge current plan has " in content
     assert "current V2/V4 gap artifact IDs do not match " in content
+    assert content.count("validate_gap_plan_jobs") == 3
+    assert "prior gap coverage plan structure changed: " in content
+    assert "V2/V4 merge prior gap plan structure changed: " in content
+    assert "V2/V4 merge current gap plan structure changed: " in content
     assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert "pattern: phase1-pons-v2-v4-gap-*" not in content
@@ -894,8 +897,11 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 merge current gap snapshot head changed" in content
     assert "V1/V3 merge current gap start block changed" in content
     assert "V1/V3 merge current gap prior lineage changed" in content
-    assert "V1/V3 merge current plan has " in content
     assert "current V1/V3 gap artifact IDs do not match " in content
+    assert content.count("validate_gap_plan_jobs") == 3
+    assert "prior gap coverage plan structure changed: " in content
+    assert "V1/V3 merge prior gap plan structure changed: " in content
+    assert "V1/V3 merge current gap plan structure changed: " in content
     assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert 'Path("prior-gaps").rglob("v1-v3-events-gap-*.jsonl")' in content
