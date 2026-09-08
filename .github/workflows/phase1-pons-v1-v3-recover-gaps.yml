@@ -862,6 +862,7 @@ jobs:
           mkdir -p artifacts
           cp plan/v1-v3-gap-plan.json artifacts/
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
