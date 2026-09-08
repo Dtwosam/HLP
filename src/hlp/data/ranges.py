@@ -124,6 +124,36 @@ def missing_ranges(
     return gaps
 
 
+def indexed_shard_bounds(
+    expected_start: int,
+    expected_end: int,
+    shard_index: int,
+    shard_count: int,
+) -> BlockRange:
+    """Return deterministic inclusive bounds for one indexed equal-span shard."""
+    start = int(expected_start)
+    end = int(expected_end)
+    index = int(shard_index)
+    count = int(shard_count)
+    if start <= 0 or end < start:
+        raise ValueError(f"invalid expected range: {start}..{end}")
+    if count <= 0:
+        raise ValueError("shard_count must be positive")
+    if index < 0 or index >= count:
+        raise ValueError(
+            f"shard_index outside 0..{count - 1}: {index}"
+        )
+    span = end - start + 1
+    lo = start + (span * index) // count
+    hi = start + (span * (index + 1)) // count - 1
+    if hi < lo:
+        raise ValueError(
+            "shard_count exceeds inclusive block span: "
+            f"{count} > {span}"
+        )
+    return lo, hi
+
+
 def split_range(
     start: int,
     end: int,
