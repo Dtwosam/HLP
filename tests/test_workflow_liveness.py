@@ -1573,6 +1573,12 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "phase1-pons-v1-v3-full" in content
     assert "phase1-pons-v2-v4-full" in content
     assert "live venue rescue requires exactly one venue target" in content
+    assert "live venue rescue is blocked while another rescue " in content
+    assert "active_siblings" in content
+    assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
+    assert "BRANCH: ${{ github.ref_name }}" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
+    assert "live venue rescue run pagination exceeded 1000" in content
     assert '"rescue_target": (' in content
     assert "missing_requested_artifacts" in content
     assert "live venue rescue source workflow path changed" in content
