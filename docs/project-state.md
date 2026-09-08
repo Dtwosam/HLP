@@ -1140,7 +1140,12 @@ prior gap lineage, no successful source shards, `max_gap_blocks=50000`, exactly
 **27,644,190** planned blocks, wave counts **240 / 240 / 73 / 0**, and gap
 **053 = 29,491,846-29,541,845**. The child planner compares the downloaded
 generation-2 plan row-for-row against that deterministic split before it can
-materialize recovery jobs.
+materialize recovery jobs. When the immediate prior run is specifically
+**34234471190**, the child now also requires the launcher's reusable-gap count
+to be explicitly present and greater than zero; an omitted/zero count fails
+before planning rather than falling back to manual-style prior reuse. The count
+is parsed once, must be non-negative, and must equal the child planner's own
+successful-job/artifact intersection.
 
 The actual V2/V4 generation-3 launch is intentionally reduced to a one-line
 wrapper mutation. The current launcher marker is
@@ -1171,7 +1176,12 @@ generation-2 gap 053, where the scan completed successfully but GitHub artifact
 finalization returned an intermediary HTTP 403. A transient artifact-service
 failure can therefore no longer turn a successful generation-3 plan, shard, or
 canonical merge into an avoidable new rescue generation after only one upload
-attempt.
+attempt. Artifact **downloads** used by lineage/planning are hardened too:
+`fetch_github_actions_artifact_zip` now makes up to three attempts for transient
+GitHub API or redirected blob failures (including 403/408/409/425/429 and
+5xx), obtains a fresh signed redirect on each retry, and still never forwards
+the GitHub bearer token to blob storage. This protects the generation-2 plan
+and preserved-gap reads without weakening identity or digest validation.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
