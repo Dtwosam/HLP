@@ -1086,7 +1086,13 @@ only uncovered ranges (including gap 053 and the never-materialized later
 waves), and continue through all remaining waves without one isolated failure
 blocking unrelated ranges. Readiness reporting now distinguishes a terminal
 failed wave from a genuinely active wave and prefers an actually running later
-wave as `current_wave`.
+wave as `current_wave`. Deterministic range-planning coverage is now pinned for
+this exact generation-2 shape: if gap **053** remains the only failed wave-1
+repair and the other **239** wave-1 repairs succeed, the next retry must derive
+exactly **314** missing 50k-or-less jobs — failed gap 053 plus the **313**
+never-materialized wave-2/wave-3 jobs — split **240 / 74 / 0 / 0**. A
+different count under those same terminal conditions is treated as a planning
+or lineage discrepancy rather than accepted silently.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
