@@ -188,12 +188,14 @@ jobs:
               if venue == "v1_v3":
                   artifact_name = "phase1-pons-v1-v3-full"
                   manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
+                  expected_data_name = "pons-v1-v3-full.jsonl"
                   expected_source = "manifest_gap_aware_v1_v3_recovery"
                   upstream_field = "source_registry_run_id"
                   upstream_run_id = 33_911_022_718
               elif venue == "v2_v4":
                   artifact_name = "phase1-pons-v2-v4-full"
                   manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
+                  expected_data_name = "pons-v2-v4-full.jsonl"
                   expected_source = "manifest_gap_aware_v4_recovery"
                   upstream_field = "transition_run_id"
                   upstream_run_id = 33_912_452_330
@@ -212,6 +214,23 @@ jobs:
               if not isinstance(manifest.get("provenance"), dict):
                   return False
               provenance = dict(manifest["provenance"])
+              try:
+                  records = int(manifest.get("records", -1))
+              except (TypeError, ValueError):
+                  return False
+              digest = str(manifest.get("sha256") or "")
+              if manifest.get("path") != expected_data_name:
+                  return False
+              if records < 0:
+                  return False
+              if (
+                  len(digest) != 64
+                  or any(
+                      char not in "0123456789abcdef"
+                      for char in digest
+                  )
+              ):
+                  return False
               try:
                   return bool(
                       provenance.get("source") == expected_source
