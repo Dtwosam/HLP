@@ -2015,6 +2015,10 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "live venue rescue requires exactly one venue target" in content
     assert "live venue rescue is blocked while another rescue " in content
     assert "active_siblings" in content
+    assert "fresh_active_siblings = []" in content
+    assert "live venue rescue fresh sibling pagination " in content
+    assert "live venue rescue sibling state changed before " in content
+    assert '"fresh_active_sibling_rescues": fresh_active_siblings' in content
     assert "terminal_target_runs" in content
     assert "terminal_target_runs.sort(" in content
     assert 'key=lambda row: int(row["id"])' in content
@@ -2077,6 +2081,10 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert 'r" generation (\\d+)$"' in content
     assert 'r" generation (\\d+)(?:\\b|$)"' not in content
     assert "launch requires an explicit " in content
+    assert "raw_launch_message = str(" in content
+    assert "raw_launch_message != launch_message" in content
+    assert "launch message must be exactly " in content
+    assert '"one line"' in content
     assert "terminal_generations = []" in content
     assert "max(terminal_generations, default=0) + 1" in content
     assert "live venue rescue generation is not monotonic: " in content

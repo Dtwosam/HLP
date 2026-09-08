@@ -194,9 +194,15 @@ jobs:
               + re.escape(launch_marker)
               + r" generation (\d+)$"
           )
-          launch_message = str(
+          raw_launch_message = str(
               os.environ["LAUNCH_MESSAGE"]
-          ).splitlines()[0]
+          )
+          launch_message = raw_launch_message.splitlines()[0]
+          if raw_launch_message != launch_message:
+              raise SystemExit(
+                  "live venue rescue launch message must be exactly "
+                  "one line"
+              )
           generation_match = generation_pattern.match(
               launch_message
           )
@@ -672,6 +678,41 @@ jobs:
                       "V2/V4 generation 3 must reuse pinned generation 2 run"
                   )
 
+          fresh_active_siblings = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/{workflow_file}/runs"
+                  f"?branch={encoded_branch}&per_page=100&page={page}"
+              )
+              rows = list(payload.get("workflow_runs") or [])
+              for row in rows:
+                  row_id = int(row["id"])
+                  if row_id == current_run_id:
+                      continue
+                  if row.get("status") != "completed":
+                      fresh_active_siblings.append({
+                          "id": row_id,
+                          "status": row.get("status"),
+                          "head_sha": row.get("head_sha"),
+                          "display_title": row.get(
+                              "display_title"
+                          ),
+                      })
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "live venue rescue fresh sibling pagination "
+                      "exceeded 1000"
+                  )
+          if fresh_active_siblings:
+              raise SystemExit(
+                  "live venue rescue sibling state changed before "
+                  f"handoff: {fresh_active_siblings[:20]}"
+              )
+
           requested_artifacts = {requested_artifact}
 
           source_artifacts = artifacts(run_id)
@@ -706,6 +747,7 @@ jobs:
                   requested_artifacts - source_artifacts
               ),
               "active_sibling_rescues": active_siblings,
+              "fresh_active_sibling_rescues": fresh_active_siblings,
               "prior_gap_run_id": prior_gap_run_id,
               "prior_gap_diagnostics": prior_gap_diagnostics,
               "prior_terminal_snapshot": prior_terminal_snapshot,
@@ -750,6 +792,8 @@ jobs:
                   f"- target: "
                   f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
                   f"- generation: {requested_generation}\n"
+                  f"- fresh active siblings: "
+                  f"{fresh_active_siblings}\n"
                   f"- validation generation: "
                   f"{validation_generation}\n"
                   f"- prior gap run: {prior_gap_run_id or 'none'}\n"
