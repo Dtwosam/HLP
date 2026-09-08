@@ -5,6 +5,7 @@ import pytest
 
 from hlp.data.github_actions import (
     GitHubActionsJobLogUnavailable,
+    fetch_github_actions_artifact_zip,
     fetch_github_actions_job_log,
 )
 
@@ -107,3 +108,52 @@ def test_actions_log_missing_redirect_blob_is_classified(monkeypatch):
         match="log blob is unavailable",
     ):
         fetch_github_actions_job_log(api_url, "secret-token")
+
+
+
+def test_actions_artifact_redirect_does_not_forward_github_token(monkeypatch):
+    api_url = (
+        "https://api.github.com/repos/Dtwosam/HLP/"
+        "actions/artifacts/789/zip"
+    )
+    blob_url = (
+        "https://results.blob.core.windows.net/actions/artifact.zip"
+    )
+    seen = {}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            seen["api_headers"] = dict(request.header_items())
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_url},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    def fake_urlopen(request, timeout):
+        seen["blob_url"] = request.full_url
+        seen["blob_headers"] = dict(request.header_items())
+        return _Response(b"PK\x03\x04zip")
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        fake_urlopen,
+    )
+
+    payload = fetch_github_actions_artifact_zip(
+        api_url,
+        "secret-token",
+        timeout=60,
+    )
+
+    assert payload == b"PK\x03\x04zip"
+    assert seen["blob_url"] == blob_url
+    assert seen["api_headers"]["Authorization"] == "Bearer secret-token"
+    assert "Authorization" not in seen["blob_headers"]
