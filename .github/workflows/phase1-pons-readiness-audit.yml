@@ -430,7 +430,13 @@ jobs:
                               wave_marker,
                               1,
                           )[1].split(" ", 1)[0]
-                          if wave_text in {"1", "2", "3", "4"}:
+                          matrix_marker = (
+                              f"/ recover_{wave_text} ("
+                          )
+                          if (
+                              wave_text in {"1", "2", "3", "4"}
+                              and matrix_marker in job_name
+                          ):
                               wave_counts = repair_wave_counts.setdefault(
                                   wave_text,
                                   {},
@@ -458,6 +464,172 @@ jobs:
                   "job_counts": counts,
                   "repair_wave_counts": repair_wave_counts,
                   "problem_jobs": problem_jobs,
+              }
+
+          def recovery_progress(venue, run_id, diagnostics):
+              if venue == "v1_v3":
+                  plan_artifact = "phase1-pons-v1-v3-gap-plan"
+                  plan_name = "v1-v3-gap-plan.json"
+                  expected_start = 8_621_658
+              elif venue == "v2_v4":
+                  plan_artifact = "phase1-pons-v2-v4-gap-plan"
+                  plan_name = "v4-gap-plan.json"
+                  expected_start = 26_841_846
+              else:
+                  raise SystemExit(
+                      f"readiness recovery progress venue changed: {venue}"
+                  )
+
+              plan = artifact_json(
+                  run_id,
+                  plan_artifact,
+                  plan_name,
+              )
+              if not isinstance(plan, dict):
+                  return {
+                      "status": "plan_unavailable",
+                      "planned_repairs": 0,
+                      "successful_repairs": 0,
+                      "failed_repairs": 0,
+                      "remaining_repairs": 0,
+                      "current_wave": None,
+                      "waves": {},
+                      "drift": [],
+                  }
+
+              try:
+                  validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=54_486_035,
+                  )
+                  expected_wave_counts = [
+                      int(value)
+                      for value in plan["gap_wave_job_counts"]
+                  ]
+                  planned_repairs = int(plan["gap_job_count"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  return {
+                      "status": "plan_invalid",
+                      "error": str(exc),
+                      "planned_repairs": 0,
+                      "successful_repairs": 0,
+                      "failed_repairs": 0,
+                      "remaining_repairs": 0,
+                      "current_wave": None,
+                      "waves": {},
+                      "drift": [],
+                  }
+
+              failed_states = {
+                  "failure",
+                  "cancelled",
+                  "timed_out",
+                  "startup_failure",
+                  "action_required",
+                  "stale",
+              }
+              observed_waves = diagnostics.get(
+                  "repair_wave_counts"
+              ) or {}
+              waves = {}
+              drift = []
+              successful_repairs = 0
+              failed_repairs = 0
+              current_wave = None
+              materialized_repairs = 0
+
+              for index, expected in enumerate(
+                  expected_wave_counts,
+                  start=1,
+              ):
+                  wave = str(index)
+                  counts = {
+                      str(key): int(value)
+                      for key, value in (
+                          observed_waves.get(wave) or {}
+                      ).items()
+                  }
+                  observed = sum(counts.values())
+                  success = int(counts.get("success", 0))
+                  failed = sum(
+                      int(counts.get(state, 0))
+                      for state in failed_states
+                  )
+                  materialized_repairs += observed
+                  successful_repairs += success
+                  failed_repairs += failed
+
+                  if observed > expected:
+                      drift.append(
+                          {
+                              "wave": wave,
+                              "reason": "over_materialized",
+                              "expected": expected,
+                              "observed": observed,
+                          }
+                      )
+                  if expected == 0 and observed:
+                      drift.append(
+                          {
+                              "wave": wave,
+                              "reason": "unexpected_jobs",
+                              "expected": expected,
+                              "observed": observed,
+                          }
+                      )
+
+                  if expected == 0:
+                      state = "empty"
+                  elif success == expected and observed == expected:
+                      state = "complete"
+                  elif observed:
+                      state = "active"
+                  else:
+                      state = "pending"
+                  if (
+                      current_wave is None
+                      and expected > 0
+                      and state != "complete"
+                  ):
+                      current_wave = wave
+
+                  waves[wave] = {
+                      "expected": expected,
+                      "observed": observed,
+                      "state": state,
+                      "counts": counts,
+                  }
+
+              remaining_repairs = max(
+                  0,
+                  planned_repairs - successful_repairs,
+              )
+              progress_percent = (
+                  round(
+                      100.0
+                      * successful_repairs
+                      / planned_repairs,
+                      2,
+                  )
+                  if planned_repairs
+                  else 100.0
+              )
+              return {
+                  "status": (
+                      "job_plan_drift"
+                      if drift
+                      else "ok"
+                  ),
+                  "planned_repairs": planned_repairs,
+                  "materialized_repairs": materialized_repairs,
+                  "successful_repairs": successful_repairs,
+                  "failed_repairs": failed_repairs,
+                  "remaining_repairs": remaining_repairs,
+                  "progress_percent": progress_percent,
+                  "current_wave": current_wave,
+                  "waves": waves,
+                  "drift": drift,
               }
 
           def job_counts(run_id):
@@ -545,11 +717,17 @@ jobs:
                           ):
                               active_run_id = int(row["id"])
                               active_jobs = job_diagnostics(active_run_id)
+                              active_progress = recovery_progress(
+                                  venue,
+                                  active_run_id,
+                                  active_jobs,
+                              )
                               diagnostics["active_run"] = {
                                   "run_id": active_run_id,
                                   "status": row.get("status"),
                                   "head_sha": row.get("head_sha"),
                                   "display_title": display_title,
+                                  "repair_progress": active_progress,
                                   **active_jobs,
                               }
                           if (
@@ -561,12 +739,18 @@ jobs:
                               terminal_jobs = job_diagnostics(
                                   terminal_run_id
                               )
+                              terminal_progress = recovery_progress(
+                                  venue,
+                                  terminal_run_id,
+                                  terminal_jobs,
+                              )
                               diagnostics["latest_terminal_run"] = {
                                   "run_id": terminal_run_id,
                                   "status": row.get("status"),
                                   "conclusion": row.get("conclusion"),
                                   "head_sha": row.get("head_sha"),
                                   "display_title": display_title,
+                                  "repair_progress": terminal_progress,
                                   **terminal_jobs,
                               }
                           if (
