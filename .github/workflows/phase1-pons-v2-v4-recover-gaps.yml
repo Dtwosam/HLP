@@ -17,6 +17,11 @@ on:
         required: false
         default: ""
         type: string
+      expected_prior_reusable_gap_count:
+        description: "Optional launcher-pinned reusable prior-gap artifact count"
+        required: false
+        default: ""
+        type: string
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
@@ -34,6 +39,11 @@ on:
         type: string
       prior_gap_run_id:
         description: "Optional earlier V4 gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      expected_prior_reusable_gap_count:
+        description: "Optional launcher-pinned reusable prior-gap artifact count"
         required: false
         default: ""
         type: string
@@ -881,6 +891,7 @@ jobs:
         name: Derive only missing V4 ranges
         env:
           MAX_GAP_BLOCKS: ${{ inputs.max_gap_blocks }}
+          EXPECTED_PRIOR_REUSABLE_GAP_COUNT: ${{ inputs.expected_prior_reusable_gap_count }}
         run: |
           mkdir -p artifacts
           python - <<'PY'
@@ -993,6 +1004,9 @@ jobs:
           immediate_prior_id = int(
               "${{ inputs.prior_gap_run_id }}" or 0
           )
+          expected_prior_reusable = os.environ[
+              "EXPECTED_PRIOR_REUSABLE_GAP_COUNT"
+          ]
           if immediate_prior_id:
               immediate_rows = [
                   row
@@ -1005,6 +1019,21 @@ jobs:
                       "identity is ambiguous"
                   )
               immediate = immediate_rows[0]
+              observed_prior_reusable = len(
+                  immediate["reusable_ranges"]
+              )
+              if expected_prior_reusable:
+                  expected_prior_reusable_count = int(
+                      expected_prior_reusable
+                  )
+                  if (
+                      observed_prior_reusable
+                      != expected_prior_reusable_count
+                  ):
+                      raise SystemExit(
+                          "V2/V4 launcher/planner reusable prior-gap "
+                          "count changed"
+                      )
               prior_planned_ranges = [
                   (
                       int(row["from_block"]),
@@ -1058,6 +1087,11 @@ jobs:
                   "reusable_gap_count": len(
                       prior_reusable_ranges
                   ),
+                  "launcher_expected_reusable_gap_count": (
+                      int(expected_prior_reusable)
+                      if expected_prior_reusable
+                      else None
+                  ),
                   "retry_gap_count": len(gaps),
                   "successful_jobs_missing_artifacts": (
                       immediate[
@@ -1069,6 +1103,16 @@ jobs:
                   ),
                   "exact_range_reconstruction": True,
               }
+
+          if (
+              not immediate_prior_id
+              and expected_prior_reusable
+              and int(expected_prior_reusable) != 0
+          ):
+              raise SystemExit(
+                  "V2/V4 launcher expected prior reusable gaps "
+                  "without a prior run"
+              )
 
           if len(gaps) > 960:
               raise SystemExit(

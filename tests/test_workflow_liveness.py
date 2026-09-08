@@ -673,6 +673,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 retry job accounting changed under " in content
     assert '"exact_range_reconstruction": True' in content
     assert '"prior_retry_accounting": prior_retry_accounting' in content
+    assert "expected_prior_reusable_gap_count" in content
+    assert "EXPECTED_PRIOR_REUSABLE_GAP_COUNT" in content
+    assert "V2/V4 launcher/planner reusable prior-gap " in content
+    assert "launcher_expected_reusable_gap_count" in content
+    assert "V2/V4 launcher expected prior reusable gaps " in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
     prior_coverage_block = content.split(
         "Discover reusable prior V2/V4 gap coverage",
@@ -2029,6 +2034,11 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert content.count(
         'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}'
     ) == 2
+    assert (
+        "expected_prior_reusable_gap_count: "
+        "${{ needs.preflight.outputs.prior_reusable_gap_count }}"
+        in content
+    )
     assert 'prior_gap_run_id: ""' not in content
     assert "steps.guard.outputs.prior_gap_run_id" in content
     assert "steps.guard.outputs.prior_reusable_gap_count" in content
