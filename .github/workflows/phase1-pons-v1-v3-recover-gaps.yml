@@ -743,6 +743,7 @@ jobs:
           from hlp.data.ranges import (
               coalesce_covered_ranges,
               plan_missing_subranges,
+              validate_gap_plan_jobs,
           )
 
           start = int(os.environ["FIRST_V1_LAUNCH"])
@@ -845,6 +846,17 @@ jobs:
                   for row in include
               ),
           }
+          try:
+              validate_gap_plan_jobs(
+                  report,
+                  expected_start=start,
+                  expected_end=head,
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  "V1/V3 generated gap plan is invalid: "
+                  f"{exc}"
+              ) from exc
           Path("artifacts/v1-v3-gap-plan.json").write_text(
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
