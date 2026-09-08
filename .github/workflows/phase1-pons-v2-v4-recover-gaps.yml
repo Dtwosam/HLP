@@ -1048,14 +1048,51 @@ jobs:
 
           selected.sort(key=lambda item: item[0])
           indexes = [index for index, _ in selected]
-          if not selected:
-              raise SystemExit(
-                  "V2/V4 source has no original shard artifacts"
-              )
           if len(indexes) != len(set(indexes)):
               raise SystemExit(
                   "V2/V4 source contains duplicate shard artifact indexes"
               )
+
+          empty_source_proven = False
+          if not selected:
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              observed_jobs = {}
+              job_page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={job_page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      name = str(row.get("name") or "")
+                      if name in expected_jobs:
+                          observed_jobs[name] = {
+                              "status": row.get("status"),
+                              "conclusion": row.get("conclusion"),
+                          }
+                  if len(rows) < 100:
+                      break
+                  job_page += 1
+                  if job_page > 10:
+                      raise SystemExit(
+                          "V2/V4 merge source job pagination exceeded 1000"
+                      )
+              if observed_jobs != expected_jobs:
+                  raise SystemExit(
+                      "V2/V4 merge empty source is not proven by skipped "
+                      f"frozen-parent jobs: {observed_jobs}"
+                  )
+              empty_source_proven = True
 
           target = Path("partial")
           target.mkdir(parents=True, exist_ok=True)
@@ -1087,8 +1124,9 @@ jobs:
               "source_run_id": run_id,
               "source_artifact_pages": page,
               "original_shard_artifacts": len(selected),
-              "first_shard_index": indexes[0],
-              "last_shard_index": indexes[-1],
+              "first_shard_index": indexes[0] if indexes else None,
+              "last_shard_index": indexes[-1] if indexes else None,
+              "empty_source_proven": empty_source_proven,
               "extracted_files": extracted,
           }, sort_keys=True))
           PY
