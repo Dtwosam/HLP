@@ -954,7 +954,18 @@ two exact frozen-parent jobs are terminal/skipped, writes a bound
 `v2-v4-empty-source-proof.json`, and otherwise fails closed. With that proof,
 the first recovery generation is allowed to plan the full
 **26,841,846..54,486,035** V2/V4 range rather than treating intentional source
-absence as corruption.
+absence as corruption. V2/V4 generation 2 run **34234471190** passed that
+proof and planned the full **27,644,190** blocks as **553** bounded 50k-or-less
+repair jobs split **240 / 240 / 73 / 0** across the serialized waves; V1/V3 is
+skipped and archive concurrency remains two jobs. Its launch SHA still has one
+known end-of-run incompatibility: the merge-side original-shard downloader
+rejects the same intentionally empty V2 source before reading recovered gaps.
+The active run is left untouched because every successful repair artifact is
+reusable. Current branch merge code now independently re-proves the exact
+`acquire / v2_v4` and `acquire / v2_v4_recovery` terminal/skipped states
+and permits zero original files only under that frozen proof, so a retry after
+the active generation can reuse completed gaps and reach merge without
+re-fetching them.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
