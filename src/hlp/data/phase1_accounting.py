@@ -160,7 +160,7 @@ def _job_runtime_seconds(job: Mapping[str, object]) -> float | None:
         ) from exc
     seconds = (completed - started).total_seconds()
     if seconds < 0:
-        raise ValueError("GitHub job completed before it started")
+        return None
     return seconds
 
 
@@ -186,16 +186,19 @@ def summarize_action_run(
     reported_processed_blocks = 0
     reported_elapsed_seconds = 0.0
     job_runtime_values: list[float] = []
+    invalid_job_runtime_ids: list[int] = []
     json_records = 0
     jobs_with_logs = 0
     completed_job_ids: list[int] = []
     missing_completed_job_log_ids: list[int] = []
 
     for job in job_rows:
+        job_id = _nonnegative_int(job.get("id"), field="job.id")
         runtime = _job_runtime_seconds(job)
         if runtime is not None:
             job_runtime_values.append(runtime)
-        job_id = _nonnegative_int(job.get("id"), field="job.id")
+        elif job.get("started_at") and job.get("completed_at"):
+            invalid_job_runtime_ids.append(job_id)
         if job.get("status") == "completed" or job.get("conclusion") is not None:
             completed_job_ids.append(job_id)
         text = logs_by_job_id.get(job_id)
@@ -275,6 +278,9 @@ def summarize_action_run(
         ),
         "reported_elapsed_seconds": reported_elapsed_seconds,
         "job_runtime_seconds": sum(job_runtime_values),
+        "invalid_job_runtimes": len(invalid_job_runtime_ids),
+        "invalid_job_runtime_ids": invalid_job_runtime_ids,
+        "all_job_runtimes_valid": not invalid_job_runtime_ids,
         "max_job_runtime_seconds": (
             max(job_runtime_values) if job_runtime_values else None
         ),
@@ -314,6 +320,8 @@ def summarize_phase1_runs(
     incomplete = []
     missing_log_runs = []
     missing_completed_job_logs = 0
+    invalid_job_runtimes = 0
+    invalid_runtime_runs = []
 
     for row in rows:
         for key, value in dict(row.get("request_counters") or {}).items():
@@ -364,6 +372,15 @@ def summarize_phase1_runs(
             missing_log_runs.append(
                 _nonnegative_int(row["run_id"], field="run_id")
             )
+        invalid_runtimes = _nonnegative_int(
+            row.get("invalid_job_runtimes", 0),
+            field="invalid_job_runtimes",
+        )
+        invalid_job_runtimes += invalid_runtimes
+        if invalid_runtimes:
+            invalid_runtime_runs.append(
+                _nonnegative_int(row["run_id"], field="run_id")
+            )
 
     counted_requests = sum(request_totals.values())
     counted_response_bytes = sum(response_byte_totals.values())
@@ -394,10 +411,14 @@ def summarize_phase1_runs(
         "missing_completed_job_logs": missing_completed_job_logs,
         "runs_with_missing_job_logs": missing_log_runs,
         "all_completed_job_logs_available": not missing_log_runs,
+        "invalid_job_runtimes": invalid_job_runtimes,
+        "runs_with_invalid_job_runtimes": invalid_runtime_runs,
+        "all_job_runtimes_valid": not invalid_runtime_runs,
         "accounting_complete": (
             not incomplete
             and not unsuccessful
             and not missing_log_runs
+            and not invalid_runtime_runs
         ),
         "accounting_scope_note": (
             "request and response-byte totals sum explicit top-level counters "
@@ -406,7 +427,9 @@ def summarize_phase1_runs(
             "distinct jobs/scans, while runtime uses reported acquisition "
             "timers plus GitHub job timestamps. Completed jobs whose historical "
             "log blobs are unavailable are explicitly counted and omitted, so "
-            "affected checkpoint totals are lower bounds. The accounting does "
+            "affected checkpoint totals are lower bounds. Jobs with impossible "
+            "GitHub timestamps are explicitly counted and omitted from runtime "
+            "totals. The accounting does "
             "not infer unreported traffic or claim that every counter is billable "
             "by the same provider"
         ),
