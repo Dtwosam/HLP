@@ -1823,6 +1823,10 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "reject_recovery_candidate" in content
     assert '"completed_success_candidates": 0' in content
     assert '"selected_run_id": 0' in content
+    assert '"active_run": None' in content
+    assert 'diagnostics["active_run"] is None' in content
+    assert '"job_counts": job_counts(active_run_id)' in content
+    assert "Active rescue {active_run.get('run_id', 0)}" in content
     assert '"rejection_counts": {}' in content
     assert '"rejected_candidates": []' in content
     assert "if len(rejected) < 20:" in content
