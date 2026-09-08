@@ -575,6 +575,17 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 merge gap artifact is not bound " in content
     assert "V2/V4 merge gap manifest identity " in content
     assert "V2/V4 merge gap manifest range " in content
+    assert "V2/V4 merge gap source changed: " in content
+    assert "V2/V4 merge gap chain changed: " in content
+    assert "V2/V4 merge gap protocol changed: " in content
+    assert "V2/V4 merge gap frozen input changed: " in content
+    assert "V2/V4 merge gap filter mode changed: " in content
+    assert '"source") or "") != "evm_json_rpc"' in content
+    assert 'provenance.get("chain_id", -1)' in content
+    assert "pons_v2_v4_price_events" in content
+    assert 'provenance.get("registrations")' in content
+    assert "pons-v2-registrations-full.jsonl" in content
+    assert "global_poolmanager_topic_then_registry" in content
     assert "observed_bounds != expected_bounds" in content
     assert "V2/V4 merge current gap plan artifact identity " in content
     assert "V2/V4 merge current gap plan file identity " in content
@@ -821,6 +832,17 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 merge gap artifact is not bound " in content
     assert "V1/V3 merge gap manifest identity " in content
     assert "V1/V3 merge gap manifest range " in content
+    assert "V1/V3 merge gap source changed: " in content
+    assert "V1/V3 merge gap chain changed: " in content
+    assert "V1/V3 merge gap protocol changed: " in content
+    assert "V1/V3 merge gap frozen input changed: " in content
+    assert "V1/V3 merge gap filter mode changed: " in content
+    assert '"source") or "") != "evm_json_rpc"' in content
+    assert 'provenance.get("chain_id", -1)' in content
+    assert "uniswap_v3_shared_price_tape" in content
+    assert 'provenance.get("registry")' in content
+    assert "pons-full-launch-registry.jsonl" in content
+    assert "global_topic_then_registry" in content
     assert "observed_bounds != expected_bounds" in content
     assert "V1/V3 merge current gap plan artifact identity " in content
     assert "V1/V3 merge current gap plan file identity " in content
