@@ -1120,7 +1120,20 @@ retry ranges to exactly reconstruct that prior plan's range union before any
 reusable-count plus retry-job count must also equal the prior plan's declared
 job count. The artifact-only plan step publishes a summary with prior plan size,
 reusable count, retry count/waves and exact-reconstruction result before archive
-work starts.
+work starts. Immediately before child handoff, the launcher now takes a second
+fresh snapshot of the selected prior rescue. That snapshot must still report
+`status=completed`, and every paginated repair job must itself be terminal;
+queued/in-progress/waiting/pending repair jobs block the launch even if the run
+record has already flipped to completed. Duplicate numeric repair gap IDs are
+also rejected rather than collapsed, matching readiness reconciliation. The
+fresh run identity (conclusion, head SHA and display title) and the complete
+reusable/missing/non-success gap-ID sets must match the earlier candidate
+selection. The bound plan artifact must still be present on the second artifact
+read. Finally, if the fresh prior run is successful and the canonical full
+artifact is now present, the rescue stops as unnecessary rather than handing off
+stale preflight state. The terminal snapshot records repair-job state counts,
+duplicate-ID diagnostics, artifact-presence flags, run attempt and update time
+alongside the reusable-gap count.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
