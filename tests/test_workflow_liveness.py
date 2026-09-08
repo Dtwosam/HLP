@@ -519,7 +519,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
-    assert content.count("Download every original V2/V4 shard artifact") == 2
+    assert content.count("Download every original V2/V4 shard artifact") == 1
+    assert content.count("Discover original V2/V4 shard coverage") == 1
+    assert "indexed_shard_bounds" in content
+    assert "source-metadata/v2-v4-original-shards.json" in content
+    assert '"planning_source_bytes_downloaded": 0' in content
     assert "V2/V4 source artifact pagination exceeded 2000" in content
     assert content.count(
         r'name_pattern = re.compile(r"^phase1-pons-v2-v4-(\d+)$")'
@@ -531,7 +535,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "original_shard_artifacts" in content
     assert "duplicate V2/V4 shard file while downloading" in content
     assert "pattern: phase1-pons-v2-v4-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 3
+    assert content.count("fetch_github_actions_artifact_zip(") == 2
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
@@ -728,7 +732,11 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
-    assert content.count("Download every original V1/V3 shard artifact") == 2
+    assert content.count("Download every original V1/V3 shard artifact") == 1
+    assert content.count("Discover original V1/V3 shard coverage") == 1
+    assert "indexed_shard_bounds" in content
+    assert "source-metadata/v1-v3-original-shards.json" in content
+    assert '"planning_source_bytes_downloaded": 0' in content
     assert "V1/V3 source artifact pagination exceeded 2000" in content
     assert content.count(
         r'name_pattern = re.compile(r"^phase1-pons-v1-v3-(\d+)$")'
@@ -740,7 +748,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "original_shard_artifacts" in content
     assert "duplicate V1/V3 shard file while downloading" in content
     assert "pattern: phase1-pons-v1-v3-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 3
+    assert content.count("fetch_github_actions_artifact_zip(") == 2
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
