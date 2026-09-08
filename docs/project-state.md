@@ -1001,7 +1001,10 @@ generation in a separate directory before recursive exact-cover selection.
 Thus a second or later retry cannot lose successful gaps from an older ancestor
 generation merely because the immediate prior run did not copy them forward.
 A retry after the active generation can therefore reuse completed gaps and
-reach merge without re-fetching them.
+reach merge without re-fetching them. The pinned rescue launcher now considers
+a prior run reusable only when it exposes the bound plan plus at least one
+**numeric** gap artifact matching the target venue's exact `...-gap-<id>`
+contract; prefix-only lookalikes no longer qualify as prior lineage.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
