@@ -1,5 +1,5 @@
 name: phase1-pons-live-venue-rescue-one-shot
-# validation-generation: 2
+# validation-generation: 3
 
 on:
   push:
@@ -19,12 +19,15 @@ jobs:
       - name: Refuse rescue while frozen parent is active or already complete
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
           RESCUE_V1: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
           RESCUE_V2: ${{ contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
         run: |
           python - <<'PY'
           import json
           import os
+          import urllib.parse
           import urllib.request
 
           run_id = 33_982_556_591
@@ -80,6 +83,44 @@ jobs:
                   "live venue rescue requires exactly one venue target"
               )
 
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          branch = os.environ["BRANCH"]
+          workflow_file = urllib.parse.quote(
+              "phase1-pons-live-venue-rescue-one-shot.yml",
+              safe="",
+          )
+          encoded_branch = urllib.parse.quote(branch, safe="")
+          active_siblings = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/{workflow_file}/runs"
+                  f"?branch={encoded_branch}&per_page=100&page={page}"
+              )
+              rows = list(payload.get("workflow_runs") or [])
+              active_siblings.extend(
+                  {
+                      "id": int(row["id"]),
+                      "status": row.get("status"),
+                      "head_sha": row.get("head_sha"),
+                  }
+                  for row in rows
+                  if int(row["id"]) != current_run_id
+                  and row.get("status") != "completed"
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "live venue rescue run pagination exceeded 1000"
+                  )
+          if active_siblings:
+              raise SystemExit(
+                  "live venue rescue is blocked while another rescue "
+                  f"run is active: {active_siblings}"
+              )
+
           requested_artifacts = set()
           if rescue_v1:
               requested_artifacts.add("phase1-pons-v1-v3-full")
@@ -111,6 +152,7 @@ jobs:
               "missing_requested_artifacts": sorted(
                   requested_artifacts - source_artifacts
               ),
+              "active_sibling_rescues": active_siblings,
               "preflight": "pass",
           }, sort_keys=True))
           PY
