@@ -10,6 +10,10 @@ import urllib.request
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
 
 
+class GitHubActionsJobLogUnavailable(RuntimeError):
+    """Raised when GitHub metadata exists but the historical log blob is gone."""
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
@@ -89,6 +93,15 @@ def fetch_github_actions_job_log(
             timeout=timeout,
         ) as response:
             payload = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in {404, 410}:
+            raise GitHubActionsJobLogUnavailable(
+                "GitHub Actions redirected log blob is unavailable: "
+                f"HTTP {exc.code}"
+            ) from exc
+        raise RuntimeError(
+            f"GitHub Actions redirected log download failed: {exc}"
+        ) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(
             f"GitHub Actions redirected log download failed: {exc}"
