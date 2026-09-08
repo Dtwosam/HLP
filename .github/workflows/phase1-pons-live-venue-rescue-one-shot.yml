@@ -100,6 +100,11 @@ jobs:
               if rescue_v1
               else "phase1-pons-v2-v4-gap-"
           )
+          requested_artifact = (
+              "phase1-pons-v1-v3-full"
+              if rescue_v1
+              else "phase1-pons-v2-v4-full"
+          )
 
           current_run_id = int(os.environ["CURRENT_RUN_ID"])
           branch = os.environ["BRANCH"]
@@ -160,21 +165,23 @@ jobs:
           prior_gap_run_id = ""
           for candidate in terminal_target_runs:
               candidate_artifacts = artifacts(candidate["id"])
+              if requested_artifact in candidate_artifacts:
+                  raise SystemExit(
+                      "live venue rescue is unnecessary because prior "
+                      "canonical rescue is complete: "
+                      f"run={candidate['id']} "
+                      f"artifact={requested_artifact}"
+                  )
               has_plan = prior_plan_artifact in candidate_artifacts
               has_gap = any(
                   name.startswith(prior_gap_prefix)
                   and name != prior_plan_artifact
                   for name in candidate_artifacts
               )
-              if has_plan and has_gap:
+              if not prior_gap_run_id and has_plan and has_gap:
                   prior_gap_run_id = str(candidate["id"])
-                  break
 
-          requested_artifacts = set()
-          if rescue_v1:
-              requested_artifacts.add("phase1-pons-v1-v3-full")
-          if rescue_v2:
-              requested_artifacts.add("phase1-pons-v2-v4-full")
+          requested_artifacts = {requested_artifact}
 
           source_artifacts = artifacts(run_id)
           already_complete = sorted(requested_artifacts & source_artifacts)
