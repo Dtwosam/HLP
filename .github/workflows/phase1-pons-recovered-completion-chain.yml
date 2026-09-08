@@ -313,7 +313,13 @@ jobs:
                       f"expired: {field} artifact={contract['artifact']}"
                   )
 
-          def recovery_manifest(run_id, artifact_name, manifest_name):
+          def recovery_artifact_json(
+              run_id,
+              artifact_name,
+              filename,
+              *,
+              identity_label,
+          ):
               matches = [
                   row
                   for row in artifact_rows(run_id)
@@ -334,44 +340,30 @@ jobs:
                   names = [
                       name
                       for name in archive.namelist()
-                      if name.rsplit("/", 1)[-1] == manifest_name
+                      if name.rsplit("/", 1)[-1] == filename
                   ]
                   if len(names) != 1:
                       raise SystemExit(
-                          "recovery venue manifest identity is ambiguous: "
-                          f"{manifest_name} run={run_id}"
+                          f"{identity_label} identity is ambiguous: "
+                          f"{filename} run={run_id}"
                       )
                   return json.loads(archive.read(names[0]))
 
-          def recovery_plan(run_id, artifact_name, plan_name):
-              matches = [
-                  row
-                  for row in artifact_rows(run_id)
-                  if str(row.get("name")) == artifact_name
-              ]
-              if len(matches) != 1:
-                  raise SystemExit(
-                      "recovery lineage plan artifact identity is ambiguous: "
-                      f"{artifact_name} run={run_id}"
-                  )
-              artifact_id = int(matches[0]["id"])
-              payload = fetch_github_actions_artifact_zip(
-                  api
-                  + f"/repos/{repo}/actions/artifacts/{artifact_id}/zip",
-                  token,
+          def recovery_manifest(run_id, artifact_name, manifest_name):
+              return recovery_artifact_json(
+                  run_id,
+                  artifact_name,
+                  manifest_name,
+                  identity_label="recovery venue manifest",
               )
-              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-                  names = [
-                      name
-                      for name in archive.namelist()
-                      if name.rsplit("/", 1)[-1] == plan_name
-                  ]
-                  if len(names) != 1:
-                      raise SystemExit(
-                          "recovery lineage plan identity is ambiguous: "
-                          f"{plan_name} run={run_id}"
-                      )
-                  return json.loads(archive.read(names[0]))
+
+          def recovery_plan(run_id, artifact_name, plan_name):
+              return recovery_artifact_json(
+                  run_id,
+                  artifact_name,
+                  plan_name,
+                  identity_label="recovery lineage plan",
+              )
 
           source = get(f"/repos/{repo}/actions/runs/{source_id}")
           if source.get("status") != "completed":
@@ -579,12 +571,22 @@ jobs:
               if expected_source == "manifest_gap_aware_v1_v3_recovery":
                   plan_artifact = "phase1-pons-v1-v3-gap-plan"
                   plan_name = "v1-v3-gap-plan.json"
+                  summary_name = "pons-v1-v3-summary.json"
+                  membership_field = "registered_pools"
+                  matched_field = "matched_pools"
+                  missing_field = "missing_initialize_pools"
+                  expected_membership = 268_688
                   start_field = "first_v1_launch"
                   expected_start = 8_621_658
                   lineage_paths = set(allowed_paths)
               else:
                   plan_artifact = "phase1-pons-v2-v4-gap-plan"
                   plan_name = "v4-gap-plan.json"
+                  summary_name = "pons-v2-v4-summary.json"
+                  membership_field = "registered_pool_ids"
+                  matched_field = "matched_pool_ids"
+                  missing_field = "missing_initialize_pool_ids"
+                  expected_membership = 3_638
                   start_field = "generation_start"
                   expected_start = 26_841_846
                   lineage_paths = set(allowed_paths) | {
@@ -653,6 +655,66 @@ jobs:
                       "recovery venue plan structure changed: "
                       f"run={run_id} {exc}"
                   ) from exc
+              embedded_plan = recovery_artifact_json(
+                  run_id,
+                  artifact,
+                  plan_name,
+                  identity_label="recovery venue embedded plan",
+              )
+              if embedded_plan != current_plan:
+                  raise SystemExit(
+                      "recovery venue embedded plan does not match lineage "
+                      f"plan: run={run_id}"
+                  )
+
+              summary = recovery_artifact_json(
+                  run_id,
+                  artifact,
+                  summary_name,
+                  identity_label="recovery venue summary",
+              )
+              try:
+                  if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+                      raise SystemExit(
+                          "recovery venue summary snapshot changed: "
+                          f"run={run_id}"
+                      )
+                  if int(summary.get("records", -1)) != manifest_records:
+                      raise SystemExit(
+                          "recovery venue summary records changed: "
+                          f"run={run_id}"
+                      )
+                  if str(summary.get("tape_sha256") or "") != manifest_digest:
+                      raise SystemExit(
+                          "recovery venue summary tape SHA changed: "
+                          f"run={run_id}"
+                      )
+                  if int(summary.get(membership_field, -1)) != expected_membership:
+                      raise SystemExit(
+                          "recovery venue summary membership changed: "
+                          f"run={run_id}"
+                      )
+                  if int(summary.get(matched_field, -1)) != expected_membership:
+                      raise SystemExit(
+                          "recovery venue summary matched membership changed: "
+                          f"run={run_id}"
+                      )
+                  if int(summary.get(missing_field, -1)) != 0:
+                      raise SystemExit(
+                          "recovery venue summary missing initialize changed: "
+                          f"run={run_id}"
+                      )
+                  if int(summary.get("source_files", 0)) <= 0:
+                      raise SystemExit(
+                          "recovery venue summary source file count is invalid: "
+                          f"run={run_id}"
+                      )
+              except (TypeError, ValueError):
+                  raise SystemExit(
+                      "recovery venue summary metadata is invalid: "
+                      f"run={run_id}"
+                  )
+
               if prior_gap_id == 0:
                   return
 
