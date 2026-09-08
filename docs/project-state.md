@@ -924,10 +924,14 @@ repeats that manifest contract and then replays any recursive prior-gap lineage
 before accepting a non-source venue artifact. It also refuses to rerun V2/V4
 or pricing when the source already contains reusable complete artifacts, and
 refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
-The pinned rescue launcher now requires exactly one venue target per launch and
-also enumerates its own workflow runs before starting any child RPC. Any other
-nonterminal pinned rescue run blocks the new launch, so V1/V3 and V2/V4
-recovery cannot overlap archive concurrency even across separate manual pushes.
+The pinned rescue launcher now requires exactly one venue target per launch,
+runs only on the Phase 1 branch, pins frozen parent **33982556591** to launch
+commit `c53b3a63156976a5873752c332fa7578011249b0`, and enumerates its own
+workflow runs before starting any child RPC. Recovered completion and the
+readiness state machine independently enforce the same frozen source workflow,
+branch and launch-commit identity. Any other nonterminal pinned rescue run
+blocks the new launch, so V1/V3 and V2/V4 recovery cannot overlap archive
+concurrency even across separate manual pushes.
 The low-level V1/V3 and V2/V4 gap workflows independently refuse
 `partial_run_id=33982556591` while that frozen parent is active, closing the
 manual-dispatch bypass around the launcher guard while preserving inline
