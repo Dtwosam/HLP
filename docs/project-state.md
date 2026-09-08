@@ -1189,8 +1189,11 @@ same generation number, preflight treats the history as ambiguous and fails
 closed instead of choosing one. Historical reuse now applies the same exact
 `launch <venue> rescue generation N` title grammar as generation accounting;
 completed runs that merely start with the launch prefix are ignored instead of
-being eligible as prior plan/gap sources. The preflight summary records the
-exact generation-to-run-ID mapping alongside terminal-but-unconsumed generations.
+being eligible as prior plan/gap sources. Readiness recovery discovery uses the
+same exact generation grammar for active, terminal and successful candidates,
+so a prefix-only launcher title cannot be auto-adopted downstream either. The
+preflight summary records the exact generation-to-run-ID mapping alongside
+terminal-but-unconsumed generations.
 
 This reduces the chance that a single platform/network blip consumes the
 generation-3 marker commit before child handoff.
