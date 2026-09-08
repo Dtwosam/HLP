@@ -511,6 +511,12 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
     assert content.count("import hashlib") == 3
+    merge_block = content.split(
+        "- name: Merge recovered V4 event tape",
+        1,
+    )[1].split("- uses: actions/upload-artifact@v4", 1)[0]
+    assert "import hashlib" in merge_block
+    assert "digest = hashlib.sha256()" in merge_block
     assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v4-events-gap" in content
@@ -814,6 +820,12 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
     assert content.count("import hashlib") == 3
+    merge_block = content.split(
+        "- name: Merge recovered V1 V3 event tape",
+        1,
+    )[1].split("- uses: actions/upload-artifact@v4", 1)[0]
+    assert "import hashlib" in merge_block
+    assert "digest = hashlib.sha256()" in merge_block
     assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v1-v3-events-gap" in content
