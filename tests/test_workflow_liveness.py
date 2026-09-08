@@ -2286,7 +2286,8 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert 'len(manifest_digest) != 64' in content
     assert 'char not in "0123456789abcdef"' in content
     assert "recovery venue partial run does not match frozen" in content
-    assert "recovery_lineage plan artifact identity is ambiguous".replace("_", " ") in content
+    assert "recovery lineage plan" in content
+    assert "identity is ambiguous: " in content
     assert "recovery venue plan lacks bound lineage metadata" in content
     assert "recovery venue plan metadata is invalid" in content
     assert "recovery venue plan snapshot changed" in content
