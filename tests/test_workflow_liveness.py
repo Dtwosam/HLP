@@ -2110,6 +2110,14 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "recovery run pagination exceeded 1000" in content
     assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
+    assert '"pons-v1-v3-full.jsonl"' in content
+    assert '"pons-v2-v4-full.jsonl"' in content
+    assert 'records = int(manifest.get("records", -1))' in content
+    assert 'digest = str(manifest.get("sha256") or "")' in content
+    assert 'manifest.get("path") != expected_data_name' in content
+    assert 'if records < 0:' in content
+    assert 'len(digest) != 64' in content
+    assert 'char not in "0123456789abcdef"' in content
     assert "zipfile.BadZipFile" in content
     assert "json.JSONDecodeError" in content
     assert "UnicodeDecodeError" in content
@@ -2257,6 +2265,12 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "pons-v2-v4-full.jsonl.manifest.json" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
     assert "manifest_gap_aware_v4_recovery" in content
+    assert "recovery venue manifest path changed" in content
+    assert "recovery venue manifest record count is invalid" in content
+    assert "recovery venue manifest SHA-256 is invalid" in content
+    assert 'manifest_name.removesuffix(' in content
+    assert 'len(manifest_digest) != 64' in content
+    assert 'char not in "0123456789abcdef"' in content
     assert "recovery venue partial run does not match frozen" in content
     assert "recovery_lineage plan artifact identity is ambiguous".replace("_", " ") in content
     assert "recovery venue plan lacks bound lineage metadata" in content
