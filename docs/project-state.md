@@ -938,7 +938,12 @@ rejects duplicate or unplanned gap IDs, verifies the current generation's
 observed artifact count against its plan, and materializes ancestors in
 run-scoped directories before exact-cover selection. This closes the latent
 case where recursive planning could reuse an older ancestor but merge only
-downloaded the immediate prior generation. Generation 4 run **34228430753** passed
+downloaded the immediate prior generation. Both venue merge downloaders now
+also bind every extracted gap artifact back to the exact block interval assigned
+to its gap ID in the corresponding plan. Prior/current manifest
+`from_block`/`to_block` must match the plan exactly, and the current generation's
+observed numeric gap-ID set must equal its plan rather than merely matching the
+expected artifact count. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
 four repair waves, and completed the corrected final merge successfully. Its
