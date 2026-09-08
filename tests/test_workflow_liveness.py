@@ -373,6 +373,55 @@ def test_v2_v4_filter_comparison_is_manual_bounded_and_guarded():
     assert "time.sleep(" not in content
 
 
+def test_v2_generation3_terminal_snapshot_binding_schema_matches_launcher():
+    launcher = _workflow("phase1-pons-live-venue-rescue-one-shot.yml")
+    recovery = _workflow("phase1-pons-v2-v4-recover-gaps.yml")
+
+    def binding_keys(content, marker):
+        lines = content.splitlines()
+        start = next(
+            index
+            for index, line in enumerate(lines)
+            if marker in line
+        )
+        keys = []
+        for line in lines[start + 1 :]:
+            stripped = line.strip()
+            if stripped == "}":
+                break
+            if stripped.startswith('"') and '":' in stripped:
+                keys.append(stripped.split('":', 1)[0].strip('"'))
+        return keys
+
+    expected = [
+        "run_id",
+        "status",
+        "conclusion",
+        "head_sha",
+        "display_title",
+        "run_attempt",
+        "reusable_gap_ids",
+        "missing_success_artifacts",
+        "non_success_gap_artifacts",
+        "plan_artifact_present",
+        "canonical_artifact_present",
+    ]
+    assert binding_keys(
+        launcher,
+        "prior_terminal_binding = {",
+    ) == expected
+    assert binding_keys(
+        recovery,
+        "terminal_binding = {",
+    ) == expected
+
+    assert "prior_terminal_snapshot_sha256 = hashlib.sha256(" in launcher
+    assert "observed_snapshot_sha256 = hashlib.sha256(" in recovery
+    for content in (launcher, recovery):
+        assert "sort_keys=True" in content
+        assert 'separators=(",", ":")' in content
+
+
 def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
     content = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
     assert "if uncovered:" in content
