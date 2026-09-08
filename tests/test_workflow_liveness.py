@@ -2048,6 +2048,14 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "selected prior rescue identity changed during " in content
     assert "fresh_artifacts = artifacts(" in content
     assert "fresh_successful_gap_ids" in content
+    assert "repair_job_terminal_snapshot" in content
+    assert "repair_job_pattern = re.compile(" in content
+    assert "?filter=all&per_page=100&page={page}" in content
+    assert "live venue rescue terminal job pagination " in content
+    assert "selected prior rescue still has nonterminal " in content
+    assert '"repair_job_count": fresh_job_snapshot[' in content
+    assert '"repair_job_counts": fresh_job_snapshot["counts"]' in content
+    assert '"repair_nonterminal_count": len(' in content
     assert "fresh_reusable_gap_ids = sorted(" in content
     assert "selected prior rescue reconciliation changed " in content
     assert '"run_attempt": fresh_prior.get("run_attempt")' in content
