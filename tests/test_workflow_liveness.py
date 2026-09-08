@@ -2063,6 +2063,23 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"repair_wave_counts": repair_wave_counts' in content
     assert 'wave_marker = "/ recover_"' in content
     assert 'wave_text in {"1", "2", "3", "4"}' in content
+    assert 'matrix_marker = (' in content
+    assert 'f"/ recover_{wave_text} ("' in content
+    assert "def recovery_progress(venue, run_id, diagnostics):" in content
+    assert '"repair_progress": active_progress' in content
+    assert '"repair_progress": terminal_progress' in content
+    assert '"planned_repairs": planned_repairs' in content
+    assert '"materialized_repairs": materialized_repairs' in content
+    assert '"successful_repairs": successful_repairs' in content
+    assert '"failed_repairs": failed_repairs' in content
+    assert '"remaining_repairs": remaining_repairs' in content
+    assert '"progress_percent": progress_percent' in content
+    assert '"current_wave": current_wave' in content
+    assert '"job_plan_drift"' in content
+    assert '"over_materialized"' in content
+    assert '"unexpected_jobs"' in content
+    assert "Repair progress:" in content
+    assert "Terminal repair progress:" in content
     assert "Repair waves:" in content
     assert "if key in failed_states and len(problem_jobs) < 20:" in content
     assert 'diagnostics["latest_terminal_run"] is None' in content
