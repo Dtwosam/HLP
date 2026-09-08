@@ -885,9 +885,13 @@ future V1/V3 retries, so later recovery generations cannot silently lose those
 oldest source shards. The V2/V4 gap workflow now uses the same exact paginated
 source-artifact enumeration in both planning and merge instead of its prior
 wildcard download, preventing the same 300-artifact truncation class from
-reappearing when V2 recovery is eventually armed. The already-running V1/V3
-rescue remains valid and is left untouched rather than starting a competing
-archive crawl.
+reappearing when V2 recovery is eventually armed. Cross-run artifact ZIP reads
+in both venue recovery workflows and recovered completion now use the shared
+safe GitHub Actions downloader: the GitHub API request carries auth, but the
+redirected blob-storage request deliberately does not. Recursive prior-gap
+manifest/plan verification uses the same token-stripping path. The
+already-running V1/V3 rescue remains valid and is left untouched rather than
+starting a competing archive crawl.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
@@ -949,9 +953,14 @@ well: every shard manifest records both the SHA256 of the ten-token sample
 JSONL and a canonical SHA256 of the sorted token-address set, and both the gap
 planner and final merge reject prior shards whose sample or token-set identity
 does not match the current sample. Older prior runs without those bindings fail
-closed instead of being reused by artifact name alone. Readiness metadata
-parsing also fails closed on malformed numeric evidence, route-launch or
-finalizer provenance instead of crashing the audit.
+closed instead of being reused by artifact name alone. The Transfer backfill
+can span up to four 240-job waves, so prior-run planning and final merge no
+longer use wildcard artifact downloads either: they paginate exact numeric
+`phase1-pons-representative-transfer-<id>` artifacts through the API, and
+merge independently paginates the current caller run as well. Those ZIP reads
+also use the token-stripping safe downloader. Readiness metadata parsing also
+fails closed on malformed numeric evidence, route-launch or finalizer
+provenance instead of crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
 evidence preflight in addition to the guarded route launcher. Manual/debug
