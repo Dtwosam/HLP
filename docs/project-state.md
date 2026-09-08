@@ -420,6 +420,19 @@ Planned high-level scans:
    server-side topic1 OR mode for bounded validation, but production
    full-history/recovery workflows must not adopt that large filter without a
    provider-safe measured comparison;
+
+The RPC client now counts request-body bytes per real transport attempt in
+addition to request count and response bytes, and the V2/V4 tape report exposes
+that metric. Manual workflow `phase1-pons-v2-v4-filter-comparison` is staged
+to compare the production global scan against the optional registered-pool
+topic1 mode over at most **5,000 blocks** using frozen transition run
+**33912452330**. It compares exact canonical row bytes/data SHA, RPC route,
+request count, request bytes and response bytes, preserves evidence when the
+server-side filter is unsupported, and fails closed if both modes succeed but
+produce different rows. Its preflight refuses to run while any live venue
+rescue is nonterminal, so it has deliberately **not** been launched during
+active V2/V4 generation 2.
+
 4. V3 Initialize/Swap through block-sharded global topic scans followed by frozen Pons V1 pool membership locally; the 268,688-pool V1 registry is too large to push as one RPC address filter;
 5. first-pass price/mcap reconstruction keeps eligibility evidence for the full launch population without doing holder/wallet backfills;
 6. only after the $100k universe is known, fetch complete market/transfer history for eligible tokens to reconstruct wallet and historical holder state.
