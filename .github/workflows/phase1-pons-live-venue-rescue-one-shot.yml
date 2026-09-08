@@ -1,5 +1,5 @@
 name: phase1-pons-live-venue-rescue-one-shot
-# validation-generation: 3
+# validation-generation: 4
 
 on:
   push:
@@ -15,8 +15,11 @@ jobs:
     if: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') || startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      prior_gap_run_id: ${{ steps.guard.outputs.prior_gap_run_id }}
     steps:
-      - name: Refuse rescue while frozen parent is active or already complete
+      - id: guard
+        name: Refuse rescue while frozen parent is active or already complete
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -82,6 +85,21 @@ jobs:
               raise SystemExit(
                   "live venue rescue requires exactly one venue target"
               )
+          launch_marker = (
+              "launch V1 V3 rescue"
+              if rescue_v1
+              else "launch V2 V4 rescue"
+          )
+          prior_plan_artifact = (
+              "phase1-pons-v1-v3-gap-plan"
+              if rescue_v1
+              else "phase1-pons-v2-v4-gap-plan"
+          )
+          prior_gap_prefix = (
+              "phase1-pons-v1-v3-gap-"
+              if rescue_v1
+              else "phase1-pons-v2-v4-gap-"
+          )
 
           current_run_id = int(os.environ["CURRENT_RUN_ID"])
           branch = os.environ["BRANCH"]
@@ -95,6 +113,7 @@ jobs:
           )
           encoded_branch = urllib.parse.quote(branch, safe="")
           active_siblings = []
+          terminal_target_runs = []
           page = 1
           while True:
               payload = get(
@@ -102,16 +121,29 @@ jobs:
                   f"?branch={encoded_branch}&per_page=100&page={page}"
               )
               rows = list(payload.get("workflow_runs") or [])
-              active_siblings.extend(
-                  {
-                      "id": int(row["id"]),
-                      "status": row.get("status"),
-                      "head_sha": row.get("head_sha"),
-                  }
-                  for row in rows
-                  if int(row["id"]) != current_run_id
-                  and row.get("status") != "completed"
-              )
+              for row in rows:
+                  row_id = int(row["id"])
+                  if row_id == current_run_id:
+                      continue
+                  if row.get("status") != "completed":
+                      active_siblings.append(
+                          {
+                              "id": row_id,
+                              "status": row.get("status"),
+                              "head_sha": row.get("head_sha"),
+                          }
+                      )
+                      continue
+                  display_title = str(row.get("display_title") or "")
+                  if display_title.startswith(launch_marker):
+                      terminal_target_runs.append(
+                          {
+                              "id": row_id,
+                              "conclusion": row.get("conclusion"),
+                              "head_sha": row.get("head_sha"),
+                              "display_title": display_title,
+                          }
+                      )
               if len(rows) < 100:
                   break
               page += 1
@@ -124,6 +156,19 @@ jobs:
                   "live venue rescue is blocked while another rescue "
                   f"run is active: {active_siblings}"
               )
+
+          prior_gap_run_id = ""
+          for candidate in terminal_target_runs:
+              candidate_artifacts = artifacts(candidate["id"])
+              has_plan = prior_plan_artifact in candidate_artifacts
+              has_gap = any(
+                  name.startswith(prior_gap_prefix)
+                  and name != prior_plan_artifact
+                  for name in candidate_artifacts
+              )
+              if has_plan and has_gap:
+                  prior_gap_run_id = str(candidate["id"])
+                  break
 
           requested_artifacts = set()
           if rescue_v1:
@@ -163,8 +208,11 @@ jobs:
                   requested_artifacts - source_artifacts
               ),
               "active_sibling_rescues": active_siblings,
+              "prior_gap_run_id": prior_gap_run_id,
               "preflight": "pass",
           }, sort_keys=True))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"prior_gap_run_id={prior_gap_run_id}\n")
           PY
 
   v1_v3_rescue:
@@ -174,7 +222,7 @@ jobs:
     with:
       source_registry_run_id: "33911022718"
       partial_run_id: "33982556591"
-      prior_gap_run_id: ""
+      prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
       max_gap_blocks: "50000"
     secrets: inherit
 
@@ -185,6 +233,6 @@ jobs:
     with:
       transition_run_id: "33912452330"
       partial_run_id: "33982556591"
-      prior_gap_run_id: ""
+      prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
       max_gap_blocks: "50000"
     secrets: inherit
