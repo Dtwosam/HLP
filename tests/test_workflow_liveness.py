@@ -2041,6 +2041,21 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "V2/V4 generation 3 prior launch SHA changed" in content
     assert "V2/V4 generation 3 prior launch title changed" in content
     assert "V2/V4 generation 3 must reuse pinned generation 2 run" in content
+    assert "selected_prior_row = None" in content
+    assert "selected_prior_reusable_gap_ids = []" in content
+    assert "prior_terminal_snapshot = None" in content
+    assert "selected prior rescue is not terminal on fresh snapshot" in content
+    assert "selected prior rescue identity changed during " in content
+    assert "fresh_artifacts = artifacts(" in content
+    assert "fresh_successful_gap_ids" in content
+    assert "fresh_reusable_gap_ids = sorted(" in content
+    assert "selected prior rescue reconciliation changed " in content
+    assert '"run_attempt": fresh_prior.get("run_attempt")' in content
+    assert '"updated_at": fresh_prior.get("updated_at")' in content
+    assert '"prior_terminal_snapshot": prior_terminal_snapshot' in content
+    assert "V2/V4 generation 3 fresh prior snapshot is missing" in content
+    assert "V2/V4 generation 3 fresh prior launch SHA changed" in content
+    assert "V2/V4 generation 3 fresh prior launch title changed" in content
     assert '"live venue rescue is unnecessary because prior "' in content
     assert '"successful canonical rescue is complete: "' in content
     assert 'str(candidate.get("conclusion") or "") == "success"' in content

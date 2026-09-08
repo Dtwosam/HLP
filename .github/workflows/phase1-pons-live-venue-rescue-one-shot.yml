@@ -241,6 +241,11 @@ jobs:
               )
 
           prior_gap_run_id = ""
+          selected_prior_row = None
+          selected_prior_reusable_gap_ids = []
+          selected_prior_missing_success_artifacts = []
+          selected_prior_non_success_gap_artifacts = []
+          prior_terminal_snapshot = None
           prior_gap_diagnostics = {
               "reusable_gap_count": 0,
               "missing_success_artifacts": [],
@@ -282,6 +287,16 @@ jobs:
               has_gap = bool(reusable_gap_ids)
               if not prior_gap_run_id and has_plan and has_gap:
                   prior_gap_run_id = str(candidate["id"])
+                  selected_prior_row = dict(candidate)
+                  selected_prior_reusable_gap_ids = list(
+                      reusable_gap_ids
+                  )
+                  selected_prior_missing_success_artifacts = list(
+                      missing_success_artifacts
+                  )
+                  selected_prior_non_success_gap_artifacts = list(
+                      non_success_gap_artifacts
+                  )
                   prior_gap_diagnostics = {
                       "reusable_gap_count": len(reusable_gap_ids),
                       "missing_success_artifacts": (
@@ -291,6 +306,103 @@ jobs:
                           non_success_gap_artifacts[:20]
                       ),
                   }
+
+          if prior_gap_run_id:
+              fresh_prior = get(
+                  f"/repos/{repo}/actions/runs/{prior_gap_run_id}"
+              )
+              if fresh_prior.get("status") != "completed":
+                  raise SystemExit(
+                      "selected prior rescue is not terminal on fresh snapshot"
+                  )
+              if selected_prior_row is None:
+                  raise SystemExit(
+                      "selected prior rescue row is missing"
+                  )
+              if (
+                  str(fresh_prior.get("head_sha") or "")
+                  != str(selected_prior_row.get("head_sha") or "")
+                  or str(fresh_prior.get("display_title") or "")
+                  != str(selected_prior_row.get("display_title") or "")
+                  or str(fresh_prior.get("conclusion") or "")
+                  != str(selected_prior_row.get("conclusion") or "")
+              ):
+                  raise SystemExit(
+                      "selected prior rescue identity changed during "
+                      "fresh terminal snapshot"
+                  )
+
+              fresh_artifacts = artifacts(
+                  int(prior_gap_run_id)
+              )
+              fresh_successful_gap_ids = (
+                  successful_repair_gap_ids(
+                      int(prior_gap_run_id)
+                  )
+              )
+              fresh_artifact_gap_ids = set()
+              for name in fresh_artifacts:
+                  match = prior_gap_pattern.fullmatch(name)
+                  if match is not None:
+                      fresh_artifact_gap_ids.add(match.group(1))
+              fresh_reusable_gap_ids = sorted(
+                  fresh_successful_gap_ids
+                  & fresh_artifact_gap_ids,
+                  key=int,
+              )
+              fresh_missing_success_artifacts = sorted(
+                  fresh_successful_gap_ids
+                  - fresh_artifact_gap_ids,
+                  key=int,
+              )
+              fresh_non_success_gap_artifacts = sorted(
+                  fresh_artifact_gap_ids
+                  - fresh_successful_gap_ids,
+                  key=int,
+              )
+              if (
+                  fresh_reusable_gap_ids
+                  != selected_prior_reusable_gap_ids
+                  or fresh_missing_success_artifacts
+                  != selected_prior_missing_success_artifacts
+                  or fresh_non_success_gap_artifacts
+                  != selected_prior_non_success_gap_artifacts
+              ):
+                  raise SystemExit(
+                      "selected prior rescue reconciliation changed "
+                      "during fresh terminal snapshot"
+                  )
+              prior_gap_diagnostics = {
+                  "reusable_gap_count": len(
+                      fresh_reusable_gap_ids
+                  ),
+                  "missing_success_artifacts": (
+                      fresh_missing_success_artifacts[:20]
+                  ),
+                  "non_success_gap_artifacts": (
+                      fresh_non_success_gap_artifacts[:20]
+                  ),
+              }
+              prior_terminal_snapshot = {
+                  "run_id": int(prior_gap_run_id),
+                  "status": fresh_prior.get("status"),
+                  "conclusion": fresh_prior.get("conclusion"),
+                  "head_sha": fresh_prior.get("head_sha"),
+                  "display_title": fresh_prior.get(
+                      "display_title"
+                  ),
+                  "run_attempt": fresh_prior.get("run_attempt"),
+                  "updated_at": fresh_prior.get("updated_at"),
+                  "reusable_gap_count": len(
+                      fresh_reusable_gap_ids
+                  ),
+                  "missing_success_artifact_count": len(
+                      fresh_missing_success_artifacts
+                  ),
+                  "non_success_gap_artifact_count": len(
+                      fresh_non_success_gap_artifacts
+                  ),
+              }
 
           if rescue_v2 and requested_generation == 3:
               expected_prior_run_id = 34_234_471_190
@@ -310,6 +422,22 @@ jobs:
                       "V2/V4 generation 3 pinned prior run is unavailable"
                   )
               pinned_prior = pinned_prior_rows[0]
+              if prior_terminal_snapshot is None:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior snapshot is missing"
+                  )
+              if str(
+                  prior_terminal_snapshot.get("head_sha") or ""
+              ) != expected_prior_head_sha:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior launch SHA changed"
+                  )
+              if str(
+                  prior_terminal_snapshot.get("display_title") or ""
+              ) != expected_prior_title:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior launch title changed"
+                  )
               if str(pinned_prior.get("head_sha") or "") != (
                   expected_prior_head_sha
               ):
@@ -363,6 +491,7 @@ jobs:
               "active_sibling_rescues": active_siblings,
               "prior_gap_run_id": prior_gap_run_id,
               "prior_gap_diagnostics": prior_gap_diagnostics,
+              "prior_terminal_snapshot": prior_terminal_snapshot,
               "requested_generation": requested_generation,
               "expected_generation": expected_generation,
               "preflight": "pass",
@@ -400,6 +529,8 @@ jobs:
                   f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
                   f"- generation: {requested_generation}\n"
                   f"- prior gap run: {prior_gap_run_id or 'none'}\n"
+                  f"- prior terminal snapshot: "
+                  f"{prior_terminal_snapshot}\n"
                   f"- reusable successful gap artifacts: "
                   f"{prior_gap_diagnostics['reusable_gap_count']}\n"
                   f"- successful jobs missing artifacts: "
