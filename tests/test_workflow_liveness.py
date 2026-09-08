@@ -616,8 +616,9 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 merge current gap start block changed" in content
     assert "V2/V4 merge current gap prior lineage changed" in content
     assert "current V2/V4 gap artifact IDs do not match " in content
-    assert content.count("validate_gap_plan_jobs(") == 3
+    assert content.count("validate_gap_plan_jobs(") == 4
     assert "prior gap coverage plan structure changed: " in content
+    assert "V2/V4 generated gap plan is invalid: " in content
     assert "V2/V4 merge prior gap plan structure changed: " in content
     assert "V2/V4 merge current gap plan structure changed: " in content
     assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
@@ -898,8 +899,9 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 merge current gap start block changed" in content
     assert "V1/V3 merge current gap prior lineage changed" in content
     assert "current V1/V3 gap artifact IDs do not match " in content
-    assert content.count("validate_gap_plan_jobs(") == 3
+    assert content.count("validate_gap_plan_jobs(") == 4
     assert "prior gap coverage plan structure changed: " in content
+    assert "V1/V3 generated gap plan is invalid: " in content
     assert "V1/V3 merge prior gap plan structure changed: " in content
     assert "V1/V3 merge current gap plan structure changed: " in content
     assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
