@@ -2174,6 +2174,15 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "active_recovery_run_ids = {" in content
     assert "active_recovery_run_ids=active_recovery_run_ids" in content
     assert "Recovery run IDs:" in content
+    assert "successful_job_artifact_missing" in content
+    assert "artifact_without_successful_job" in content
+    assert "unexpected_gap_artifacts" in content
+    assert "malformed_gap_artifact_names" in content
+    assert "duplicate_repair_job_ids" in content
+    assert "artifacts_without_successful_jobs" in content
+    assert "successful_job_ids - observed_artifact_ids" in content
+    assert "(observed_artifact_ids & expected_gap_ids)" in content
+    assert "artifact-without-success=" in content
     assert "invalid_finalizers" in content
     assert "finalizer_head_sha" in content
     assert "launch_readiness_source_run_id" in content
