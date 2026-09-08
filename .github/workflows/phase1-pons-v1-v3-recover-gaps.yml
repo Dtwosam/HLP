@@ -608,7 +608,37 @@ jobs:
                       )
               return output
 
+          def successful_repair_gap_ids(run_id):
+              pattern = re.compile(
+                  r"(?:^| / )recover_[1-4] \((\d{3}),"
+              )
+              successful = set()
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = pattern.search(str(row.get("name") or ""))
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "V1/V3 prior gap job pagination "
+                          "exceeded 1000"
+                      )
+              return successful
+
           coverage = []
+          ignored_non_success_artifacts = 0
           seen_runs = set()
           depth = 0
           while cursor:
@@ -624,6 +654,7 @@ jobs:
                   )
 
               rows = artifact_rows(cursor)
+              successful_gap_ids = successful_repair_gap_ids(cursor)
               plan_rows = [
                   row
                   for row in rows
@@ -702,6 +733,9 @@ jobs:
                           "prior gap artifact is not bound by its plan: "
                           f"run={cursor} gap={gap_id}"
                       )
+                  if gap_id not in successful_gap_ids:
+                      ignored_non_success_artifacts += 1
+                      continue
                   bounds = planned[gap_id]
                   coverage.append({
                       "run_id": cursor,
@@ -725,6 +759,9 @@ jobs:
           print(json.dumps({
               "prior_gap_generations": depth,
               "reusable_prior_gap_artifacts": len(coverage),
+              "ignored_non_success_artifacts": (
+                  ignored_non_success_artifacts
+              ),
               "planning_prior_gap_jsonl_bytes_downloaded": 0,
           }, sort_keys=True))
           PY
@@ -1339,6 +1376,35 @@ jobs:
                       )
               return output, page
 
+          def successful_repair_gap_ids(run_id):
+              pattern = re.compile(
+                  r"(?:^| / )recover_[1-4] \((\d{3}),"
+              )
+              successful = set()
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = pattern.search(str(row.get("name") or ""))
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "V1/V3 merge prior gap job pagination "
+                          "exceeded 1000"
+                      )
+              return successful
+
           def artifact_zip(artifact):
               return fetch_github_actions_artifact_zip(
                   api
@@ -1456,6 +1522,7 @@ jobs:
               return extracted
 
           prior_total = 0
+          prior_ignored_non_success = 0
           prior_generations = 0
           seen_runs = set()
           cursor = prior_run_id
@@ -1472,6 +1539,7 @@ jobs:
                   )
 
               rows, pages = artifact_rows(cursor)
+              successful_gap_ids = successful_repair_gap_ids(cursor)
               plan_rows = [
                   row
                   for row in rows
@@ -1530,6 +1598,17 @@ jobs:
                           "V1/V3 merge prior gap artifact is not bound "
                           f"by its plan: run={cursor} gap={gap_id}"
                       )
+              ignored_gap_ids = [
+                  gap_id
+                  for gap_id, _ in selected
+                  if gap_id not in successful_gap_ids
+              ]
+              selected = [
+                  item
+                  for item in selected
+                  if item[0] in successful_gap_ids
+              ]
+              prior_ignored_non_success += len(ignored_gap_ids)
               target = Path("prior-gaps") / str(cursor)
               extracted = extract_rows(
                   selected,
@@ -1542,6 +1621,9 @@ jobs:
                   "run_id": cursor,
                   "artifact_pages": pages,
                   "gap_artifacts": len(selected),
+                  "ignored_non_success_artifacts": len(
+                      ignored_gap_ids
+                  ),
                   "extracted_files": extracted,
               }, sort_keys=True))
 
@@ -1651,6 +1733,9 @@ jobs:
           print(json.dumps({
               "prior_gap_generations": prior_generations,
               "prior_gap_artifacts": prior_total,
+              "prior_ignored_non_success_artifacts": (
+                  prior_ignored_non_success
+              ),
               "current_run_id": current_run_id,
               "current_artifact_pages": current_pages,
               "current_gap_artifacts": len(current_selected),

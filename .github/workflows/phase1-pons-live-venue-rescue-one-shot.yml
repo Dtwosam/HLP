@@ -74,6 +74,34 @@ jobs:
                       )
               return names
 
+          def successful_repair_gap_ids(source_run_id):
+              pattern = re.compile(
+                  r"(?:^| / )recover_[1-4] \((\d{3}),"
+              )
+              successful = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = pattern.search(str(row.get("name") or ""))
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "live venue rescue job pagination exceeded 1000"
+                      )
+              return successful
+
           run = get(f"/repos/{repo}/actions/runs/{run_id}")
           if run.get("status") != "completed":
               raise SystemExit(
@@ -180,11 +208,19 @@ jobs:
                       f"run={candidate['id']} "
                       f"artifact={requested_artifact}"
                   )
-              has_plan = prior_plan_artifact in candidate_artifacts
-              has_gap = any(
-                  prior_gap_pattern.fullmatch(name) is not None
-                  for name in candidate_artifacts
+              successful_gap_ids = successful_repair_gap_ids(
+                  candidate["id"]
               )
+              has_plan = prior_plan_artifact in candidate_artifacts
+              has_gap = False
+              for name in candidate_artifacts:
+                  match = prior_gap_pattern.fullmatch(name)
+                  if (
+                      match is not None
+                      and match.group(1) in successful_gap_ids
+                  ):
+                      has_gap = True
+                      break
               if not prior_gap_run_id and has_plan and has_gap:
                   prior_gap_run_id = str(candidate["id"])
 

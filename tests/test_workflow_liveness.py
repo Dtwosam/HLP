@@ -668,6 +668,15 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     )[1].split("- id: plan", 1)[0]
     assert "for gap_id, row in observed.items():" in prior_coverage_block
     assert "if gap_id not in planned:" in prior_coverage_block
+    assert "successful_repair_gap_ids" in prior_coverage_block
+    assert 'str(row.get("conclusion") or "") == "success"' in prior_coverage_block
+    assert "successful_gap_ids = successful_repair_gap_ids(cursor)" in prior_coverage_block
+    assert "if gap_id not in successful_gap_ids:" in prior_coverage_block
+    assert "ignored_non_success_artifacts += 1" in prior_coverage_block
+    assert (
+        prior_coverage_block.index("if gap_id not in planned:")
+        < prior_coverage_block.index("if gap_id not in successful_gap_ids:")
+    )
     assert "len(observed) != len(planned)" not in prior_coverage_block
     assert "len(observed) == len(planned)" not in prior_coverage_block
     assert content.count(
@@ -698,6 +707,14 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 merge prior gap snapshot head changed" in content
     assert "V2/V4 merge prior gap start block changed" in content
     assert "V2/V4 merge prior gap artifact is not bound " in content
+    assert "V2/V4 merge prior gap job pagination " in content
+    assert content.count("successful_repair_gap_ids") == 2
+    assert content.count(
+        'str(row.get("conclusion") or "") == "success"'
+    ) == 2
+    assert "ignored_gap_ids = [" in content
+    assert "if gap_id not in successful_gap_ids" in content
+    assert "prior_ignored_non_success_artifacts" in content
     assert 'Path("prior-gaps") / str(cursor)' in content
     assert 'Path("prior-gaps").rglob("v4-events-gap-*.jsonl")' in content
     assert "current V2/V4 gap artifact count does not match " in content
@@ -990,6 +1007,15 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     )[1].split("- id: plan", 1)[0]
     assert "for gap_id, row in observed.items():" in prior_coverage_block
     assert "if gap_id not in planned:" in prior_coverage_block
+    assert "successful_repair_gap_ids" in prior_coverage_block
+    assert 'str(row.get("conclusion") or "") == "success"' in prior_coverage_block
+    assert "successful_gap_ids = successful_repair_gap_ids(cursor)" in prior_coverage_block
+    assert "if gap_id not in successful_gap_ids:" in prior_coverage_block
+    assert "ignored_non_success_artifacts += 1" in prior_coverage_block
+    assert (
+        prior_coverage_block.index("if gap_id not in planned:")
+        < prior_coverage_block.index("if gap_id not in successful_gap_ids:")
+    )
     assert "len(observed) != len(planned)" not in prior_coverage_block
     assert "len(observed) == len(planned)" not in prior_coverage_block
     assert content.count(
@@ -1015,6 +1041,14 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 merge prior gap lineage contains a cycle" in content
     assert "V1/V3 merge prior gap lineage exceeds 20 generations" in content
     assert "V1/V3 merge prior gap artifact is not bound " in content
+    assert "V1/V3 merge prior gap job pagination " in content
+    assert content.count("successful_repair_gap_ids") == 2
+    assert content.count(
+        'str(row.get("conclusion") or "") == "success"'
+    ) == 2
+    assert "ignored_gap_ids = [" in content
+    assert "if gap_id not in successful_gap_ids" in content
+    assert "prior_ignored_non_success_artifacts" in content
     assert "current V1/V3 gap artifact count does not match " in content
     assert "duplicate V1/V3 gap file while " in content
     assert "V1/V3 merge gap artifact is not bound " in content
@@ -1942,7 +1976,11 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "prior_gap_pattern = re.compile(" in content
     assert "re.escape(prior_gap_prefix)" in content
     assert 'r"(\\d+)$"' in content
-    assert "prior_gap_pattern.fullmatch(name) is not None" in content
+    assert "prior_gap_pattern.fullmatch(name)" in content
+    assert "successful_repair_gap_ids" in content
+    assert "live venue rescue job pagination exceeded 1000" in content
+    assert 'str(row.get("conclusion") or "") == "success"' in content
+    assert "match.group(1) in successful_gap_ids" in content
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
     assert '"live venue rescue is unnecessary because prior "' in content
