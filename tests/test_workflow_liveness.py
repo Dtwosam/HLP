@@ -662,6 +662,14 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "Discover reusable prior V2/V4 gap coverage" in content
     assert "source-metadata/v2-v4-prior-gap-coverage.json" in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
+    prior_coverage_block = content.split(
+        "Discover reusable prior V2/V4 gap coverage",
+        1,
+    )[1].split("- id: plan", 1)[0]
+    assert "for gap_id, row in observed.items():" in prior_coverage_block
+    assert "if gap_id not in planned:" in prior_coverage_block
+    assert "len(observed) != len(planned)" not in prior_coverage_block
+    assert "len(observed) == len(planned)" not in prior_coverage_block
     assert content.count(
         r'gap_pattern = re.compile(r"^phase1-pons-v2-v4-gap-(\d+)$")'
     ) == 1
@@ -976,6 +984,14 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "Discover reusable prior V1/V3 gap coverage" in content
     assert "source-metadata/v1-v3-prior-gap-coverage.json" in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
+    prior_coverage_block = content.split(
+        "Discover reusable prior V1/V3 gap coverage",
+        1,
+    )[1].split("- id: plan", 1)[0]
+    assert "for gap_id, row in observed.items():" in prior_coverage_block
+    assert "if gap_id not in planned:" in prior_coverage_block
+    assert "len(observed) != len(planned)" not in prior_coverage_block
+    assert "len(observed) == len(planned)" not in prior_coverage_block
     assert content.count(
         r'gap_pattern = re.compile(r"^phase1-pons-v1-v3-gap-(\d+)$")'
     ) == 1
