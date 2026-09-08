@@ -2268,6 +2268,16 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "steps.guard.outputs.prior_non_success_gap_artifacts" in content
     assert "GITHUB_OUTPUT" in content
     assert "GITHUB_STEP_SUMMARY" in content
+    assert "import urllib.error" in content
+    assert "transient_http_codes = {" in content
+    for code in ("403", "408", "409", "425", "429", "500", "502", "503", "504"):
+        assert code in content
+    assert "def get(path, attempts=3):" in content
+    assert "attempt_count <= 0" in content
+    assert "urllib.error.HTTPError" in content
+    assert "urllib.error.URLError" in content
+    assert "attempt + 1 < attempt_count" in content
+    assert "live venue rescue GitHub API retry loop exhausted" in content
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert "BRANCH: ${{ github.ref_name }}" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
