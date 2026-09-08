@@ -1,7 +1,12 @@
 import io
 import urllib.error
 
-from hlp.data.github_actions import fetch_github_actions_job_log
+import pytest
+
+from hlp.data.github_actions import (
+    GitHubActionsJobLogUnavailable,
+    fetch_github_actions_job_log,
+)
 
 
 class _Response:
@@ -62,3 +67,43 @@ def test_actions_log_redirect_does_not_forward_github_token(monkeypatch):
     assert seen["blob_url"] == blob_url
     assert seen["api_headers"]["Authorization"] == "Bearer secret-token"
     assert "Authorization" not in seen["blob_headers"]
+
+
+def test_actions_log_missing_redirect_blob_is_classified(monkeypatch):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/jobs/456/logs"
+    blob_url = "https://results.blob.core.windows.net/actions/missing-log.txt"
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_url},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    def missing_blob(request, timeout):
+        raise urllib.error.HTTPError(
+            blob_url,
+            404,
+            "Not Found",
+            {},
+            io.BytesIO(b"gone"),
+        )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        missing_blob,
+    )
+
+    with pytest.raises(
+        GitHubActionsJobLogUnavailable,
+        match="log blob is unavailable",
+    ):
+        fetch_github_actions_job_log(api_url, "secret-token")
