@@ -1782,6 +1782,9 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "live venue rescue is blocked while another rescue " in content
     assert "active_siblings" in content
     assert "terminal_target_runs" in content
+    assert "terminal_target_runs.sort(" in content
+    assert 'key=lambda row: int(row["id"])' in content
+    assert "reverse=True" in content
     assert "prior_plan_artifact" in content
     assert "prior_gap_prefix" in content
     assert "prior_gap_pattern = re.compile(" in content
