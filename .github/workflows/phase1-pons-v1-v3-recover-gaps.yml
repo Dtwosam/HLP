@@ -956,12 +956,18 @@ jobs:
           def rows():
               prior = None
               for _, _, path, manifest in entries:
+                  assert manifest.get("path") == path.name, (
+                      path.name,
+                      manifest.get("path"),
+                  )
                   local = 0
-                  with path.open() as handle:
-                      for line in handle:
-                          if not line.strip():
+                  local_digest = hashlib.sha256()
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          local_digest.update(raw)
+                          if not raw.strip():
                               continue
-                          row = json.loads(line)
+                          row = json.loads(raw)
                           order = event_order(row)
                           if prior is not None:
                               assert prior < order, (prior, order, path.name)
@@ -980,6 +986,11 @@ jobs:
                           yield row
                   assert local == int(manifest["records"]), (
                       path.name, local, manifest["records"]
+                  )
+                  assert local_digest.hexdigest() == manifest["sha256"], (
+                      path.name,
+                      local_digest.hexdigest(),
+                      manifest["sha256"],
                   )
 
           digest = hashlib.sha256()
