@@ -708,7 +708,10 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 merge prior gap start block changed" in content
     assert "V2/V4 merge prior gap artifact is not bound " in content
     assert "V2/V4 merge prior gap job pagination " in content
-    assert content.count("successful_repair_gap_ids") == 2
+    assert content.count("def successful_repair_gap_ids(") == 2
+    assert content.count(
+        "successful_gap_ids = successful_repair_gap_ids(cursor)"
+    ) == 2
     assert content.count(
         'str(row.get("conclusion") or "") == "success"'
     ) == 2
@@ -1042,7 +1045,10 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 merge prior gap lineage exceeds 20 generations" in content
     assert "V1/V3 merge prior gap artifact is not bound " in content
     assert "V1/V3 merge prior gap job pagination " in content
-    assert content.count("successful_repair_gap_ids") == 2
+    assert content.count("def successful_repair_gap_ids(") == 2
+    assert content.count(
+        "successful_gap_ids = successful_repair_gap_ids(cursor)"
+    ) == 2
     assert content.count(
         'str(row.get("conclusion") or "") == "success"'
     ) == 2
