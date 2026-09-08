@@ -69,6 +69,7 @@ jobs:
           from pathlib import Path
 
           from hlp.data.github_actions import (
+              GitHubActionsJobLogUnavailable,
               fetch_github_actions_job_log,
           )
           from hlp.data.phase1_accounting import (
@@ -161,10 +162,17 @@ jobs:
                   job_id = int(job["id"])
                   if job.get("status") != "completed":
                       continue
-                  logs[job_id] = fetch_github_actions_job_log(
-                      base + f"/actions/jobs/{job_id}/logs",
-                      token,
-                  )
+                  try:
+                      logs[job_id] = fetch_github_actions_job_log(
+                          base + f"/actions/jobs/{job_id}/logs",
+                          token,
+                      )
+                  except GitHubActionsJobLogUnavailable as exc:
+                      print(json.dumps({
+                          "accounting_missing_job_log_id": job_id,
+                          "run_id": run_id,
+                          "reason": str(exc),
+                      }, sort_keys=True))
 
               summary = summarize_action_run(
                   run,
@@ -195,10 +203,10 @@ jobs:
           require_success = (
               os.environ["REQUIRE_SUCCESSFUL_RUNS"].lower() == "true"
           )
-          if require_success and not combined["all_runs_successful"]:
+          if require_success and not combined["accounting_complete"]:
               raise SystemExit(
-                  "Phase 1 accounting input includes incomplete or "
-                  "unsuccessful runs"
+                  "Phase 1 accounting input includes incomplete, "
+                  "unsuccessful, or missing-log evidence"
               )
           PY
       - uses: actions/upload-artifact@v4
