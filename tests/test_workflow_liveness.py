@@ -2192,8 +2192,15 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "malformed_gap_artifact_names" in content
     assert "duplicate_repair_job_ids" in content
     assert "artifacts_without_successful_jobs" in content
+    assert "artifacts_with_active_jobs" in content
+    assert "active_job_states" in content
+    assert '"queued"' in content
+    assert '"in_progress"' in content
     assert "successful_job_ids - observed_artifact_ids" in content
     assert "(observed_artifact_ids & expected_gap_ids)" in content
+    assert "artifact_candidate_ids - active_job_ids" in content
+    assert "artifact_candidate_ids & active_job_ids" in content
+    assert "in-flight=" in content
     assert "artifact-without-success=" in content
     assert "invalid_finalizers" in content
     assert "finalizer_head_sha" in content

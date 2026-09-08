@@ -711,6 +711,20 @@ jobs:
                       for row in rows
                   )
               }
+              active_job_states = {
+                  "queued",
+                  "in_progress",
+                  "waiting",
+                  "pending",
+              }
+              active_job_ids = {
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if any(
+                      str(row.get("state") or "") in active_job_states
+                      for row in rows
+                  )
+              }
               malformed_job_ids = sorted(
                   gap_id
                   for gap_id in repair_jobs
@@ -731,9 +745,15 @@ jobs:
               missing_success_artifacts = sorted(
                   successful_job_ids - observed_artifact_ids
               )
-              artifacts_without_successful_jobs = sorted(
+              artifact_candidate_ids = (
                   (observed_artifact_ids & expected_gap_ids)
                   - successful_job_ids
+              )
+              artifacts_with_active_jobs = sorted(
+                  artifact_candidate_ids & active_job_ids
+              )
+              artifacts_without_successful_jobs = sorted(
+                  artifact_candidate_ids - active_job_ids
               )
               unexpected_artifact_ids = sorted(
                   observed_artifact_ids - expected_gap_ids
@@ -825,6 +845,9 @@ jobs:
                       ),
                       "missing_success_artifacts": (
                           missing_success_artifacts[:20]
+                      ),
+                      "artifacts_with_active_jobs": (
+                          artifacts_with_active_jobs[:20]
                       ),
                       "artifacts_without_successful_jobs": (
                           artifacts_without_successful_jobs[:20]
@@ -1349,6 +1372,7 @@ jobs:
                               f"observed={artifact_progress.get('observed_gap_artifacts', 0)}, "
                               f"successful-jobs={artifact_progress.get('successful_job_ids', 0)}, "
                               f"missing-success={len(artifact_progress.get('missing_success_artifacts') or [])}, "
+                              f"in-flight={len(artifact_progress.get('artifacts_with_active_jobs') or [])}, "
                               f"artifact-without-success={len(artifact_progress.get('artifacts_without_successful_jobs') or [])}, "
                               f"unexpected={len(artifact_progress.get('unexpected_artifact_ids') or [])}, "
                               f"malformed={len(artifact_progress.get('malformed_gap_artifacts') or [])}, "
@@ -1423,6 +1447,7 @@ jobs:
                                   f"observed={terminal_artifact_progress.get('observed_gap_artifacts', 0)}, "
                                   f"successful-jobs={terminal_artifact_progress.get('successful_job_ids', 0)}, "
                                   f"missing-success={len(terminal_artifact_progress.get('missing_success_artifacts') or [])}, "
+                                  f"in-flight={len(terminal_artifact_progress.get('artifacts_with_active_jobs') or [])}, "
                                   f"artifact-without-success={len(terminal_artifact_progress.get('artifacts_without_successful_jobs') or [])}, "
                                   f"unexpected={len(terminal_artifact_progress.get('unexpected_artifact_ids') or [])}"
                                   + "\n"
