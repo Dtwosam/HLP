@@ -1900,6 +1900,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "RECOVERY_VENUE_ARTIFACTS" in content
     assert "RECOVERY_VENUE_WORKFLOW_PATHS" in content
     assert "recovery_runs=recovery_runs" in content
+    assert "active_recovery_run_ids = {" in content
+    assert "active_recovery_run_ids=active_recovery_run_ids" in content
     assert "Recovery run IDs:" in content
     assert "invalid_finalizers" in content
     assert "finalizer_head_sha" in content
