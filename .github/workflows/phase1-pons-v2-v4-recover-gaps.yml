@@ -1028,8 +1028,18 @@ jobs:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
-      - name: Retry gap artifact upload
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
         if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
@@ -1083,8 +1093,18 @@ jobs:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
-      - name: Retry gap artifact upload
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
         if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
@@ -1138,8 +1158,18 @@ jobs:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
-      - name: Retry gap artifact upload
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
         if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
@@ -1193,8 +1223,18 @@ jobs:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
-      - name: Retry gap artifact upload
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
         if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-gap-${{ matrix.id }}
