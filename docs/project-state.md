@@ -1073,9 +1073,13 @@ available. An already-valid recovered evidence handoff also cannot advance the
 state machine into viability while any venue rescue remains nonterminal, so
 downstream RPC never overlaps active recovery merely because evidence already
 exists. Readiness now also opens the canonical recovered venue manifest
-before adopting a run and verifies recovery source type, chain **4663**,
-snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
-registry/transition upstream run. A malformed successful V1 rescue therefore
+before adopting a run and verifies its envelope as well as provenance: the
+manifest must name the expected canonical JSONL, expose a nonnegative record
+count and carry a lowercase 64-hex SHA-256 before recovery source type, chain
+**4663**, snapshot head **54,486,035**, `partial_run_id=33982556591` and the
+frozen registry/transition upstream run are considered. Recovered completion
+independently enforces the same path/record/SHA envelope before accepting a
+venue handoff. A malformed successful V1 rescue therefore
 cannot trigger V2 archive work merely because its artifact name exists.
 Readiness now requires every recovered venue, including a first-generation
 recovery with an empty `prior_gap_run_id`, to expose its bound V1/V3 or V2/V4
