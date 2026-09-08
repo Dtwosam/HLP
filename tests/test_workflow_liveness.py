@@ -1645,8 +1645,12 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "terminal_target_runs" in content
     assert "prior_plan_artifact" in content
     assert "prior_gap_prefix" in content
+    assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
-    assert "has_plan and has_gap" in content
+    assert "prior canonical rescue is complete" in content
+    assert "requested_artifact in candidate_artifacts" in content
+    assert "requested_artifacts = {requested_artifact}" in content
+    assert "not prior_gap_run_id and has_plan and has_gap" in content
     assert 'prior_gap_run_id = str(candidate["id"])' in content
     assert 'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}' in content
     assert content.count(
