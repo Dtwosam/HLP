@@ -2024,6 +2024,15 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "Venue rescue terminal preflight" in content
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
+    assert "LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}" in content
+    assert "generation_pattern = re.compile(" in content
+    assert 'r" generation (\\d+)(?:\\b|$)"' in content
+    assert "launch requires an explicit " in content
+    assert "terminal_generations = []" in content
+    assert "max(terminal_generations, default=0) + 1" in content
+    assert "live venue rescue generation is not monotonic: " in content
+    assert '"requested_generation": requested_generation' in content
+    assert '"expected_generation": expected_generation' in content
     assert '"live venue rescue is unnecessary because prior "' in content
     assert '"successful canonical rescue is complete: "' in content
     assert 'str(candidate.get("conclusion") or "") == "success"' in content

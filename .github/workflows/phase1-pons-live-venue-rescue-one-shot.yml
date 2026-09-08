@@ -29,6 +29,7 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RESCUE_V1: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
           RESCUE_V2: ${{ startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           python - <<'PY'
           import json
@@ -122,6 +123,25 @@ jobs:
               if rescue_v1
               else "launch V2 V4 rescue"
           )
+          generation_pattern = re.compile(
+              "^"
+              + re.escape(launch_marker)
+              + r" generation (\d+)(?:\b|$)"
+          )
+          launch_message = str(
+              os.environ["LAUNCH_MESSAGE"]
+          ).splitlines()[0]
+          generation_match = generation_pattern.match(
+              launch_message
+          )
+          if generation_match is None:
+              raise SystemExit(
+                  "live venue rescue launch requires an explicit "
+                  "generation number"
+              )
+          requested_generation = int(
+              generation_match.group(1)
+          )
           prior_plan_artifact = (
               "phase1-pons-v1-v3-gap-plan"
               if rescue_v1
@@ -201,6 +221,25 @@ jobs:
               key=lambda row: int(row["id"]),
               reverse=True,
           )
+          terminal_generations = []
+          for row in terminal_target_runs:
+              match = generation_pattern.match(
+                  str(row.get("display_title") or "")
+              )
+              if match is not None:
+                  terminal_generations.append(
+                      int(match.group(1))
+                  )
+          expected_generation = (
+              max(terminal_generations, default=0) + 1
+          )
+          if requested_generation != expected_generation:
+              raise SystemExit(
+                  "live venue rescue generation is not monotonic: "
+                  f"requested={requested_generation} "
+                  f"expected={expected_generation}"
+              )
+
           prior_gap_run_id = ""
           prior_gap_diagnostics = {
               "reusable_gap_count": 0,
@@ -289,6 +328,8 @@ jobs:
               "active_sibling_rescues": active_siblings,
               "prior_gap_run_id": prior_gap_run_id,
               "prior_gap_diagnostics": prior_gap_diagnostics,
+              "requested_generation": requested_generation,
+              "expected_generation": expected_generation,
               "preflight": "pass",
           }, sort_keys=True))
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
@@ -322,6 +363,7 @@ jobs:
                   "### Venue rescue terminal preflight\n\n"
                   f"- target: "
                   f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
+                  f"- generation: {requested_generation}\n"
                   f"- prior gap run: {prior_gap_run_id or 'none'}\n"
                   f"- reusable successful gap artifacts: "
                   f"{prior_gap_diagnostics['reusable_gap_count']}\n"

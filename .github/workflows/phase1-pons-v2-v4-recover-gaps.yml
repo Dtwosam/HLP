@@ -1195,25 +1195,6 @@ jobs:
               handle.write(f"gap_count_2={len(wave_2)}\n")
               handle.write(f"gap_count_3={len(wave_3)}\n")
               handle.write(f"gap_count_4={len(wave_4)}\n")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
-              handle.write(
-                  "### V2/V4 retry planner\n\n"
-                  f"- prior gap run: "
-                  f"{report['prior_gap_run_id'] or 'none'}\n"
-                  f"- planned retry jobs: {report['gap_job_count']}\n"
-                  f"- retry waves: {report['gap_wave_job_counts']}\n"
-              )
-              if prior_retry_accounting is not None:
-                  handle.write(
-                      f"- prior planned gaps: "
-                      f"{prior_retry_accounting['prior_planned_gap_count']}\n"
-                      f"- reusable prior gaps: "
-                      f"{prior_retry_accounting['reusable_gap_count']}\n"
-                      f"- launcher expected reusable gaps: "
-                      f"{prior_retry_accounting['launcher_expected_reusable_gap_count']}\n"
-                      f"- exact prior-plan reconstruction: "
-                      f"{prior_retry_accounting['exact_range_reconstruction']}\n"
-                  )
           print(json.dumps(report, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
