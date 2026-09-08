@@ -1598,6 +1598,19 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "live venue rescue requires exactly one venue target" in content
     assert "live venue rescue is blocked while another rescue " in content
     assert "active_siblings" in content
+    assert "terminal_target_runs" in content
+    assert "prior_plan_artifact" in content
+    assert "prior_gap_prefix" in content
+    assert "display_title.startswith(launch_marker)" in content
+    assert "has_plan and has_gap" in content
+    assert 'prior_gap_run_id = str(candidate["id"])' in content
+    assert 'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}' in content
+    assert content.count(
+        'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}'
+    ) == 2
+    assert 'prior_gap_run_id: ""' not in content
+    assert "steps.guard.outputs.prior_gap_run_id" in content
+    assert "GITHUB_OUTPUT" in content
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert "BRANCH: ${{ github.ref_name }}" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
