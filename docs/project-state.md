@@ -882,10 +882,16 @@ because the launch commit's wildcard artifact download only surfaced the newest
 300 artifacts; the remaining 16 jobs cover the four real timeout regions.
 Current code now paginates every source artifact through the GitHub API for
 future V1/V3 retries, so later recovery generations cannot silently lose those
-oldest source shards. The V2/V4 gap workflow now uses the same exact paginated
-source-artifact enumeration in both planning and merge instead of its prior
-wildcard download, preventing the same 300-artifact truncation class from
-reappearing when V2 recovery is eventually armed. Cross-run artifact ZIP reads
+oldest source shards. Because that makes the first generation's 54 replacement
+gaps overlap rediscovered original shards, future planning now coalesces
+overlapping source/prior-gap coverage before deriving missing ranges, and final
+merge selects an exact contiguous whole-file cover while dropping redundant
+overlapping candidates. A failed final merge from the running rescue can
+therefore be retried with `prior_gap_run_id` without re-fetching those blocks
+or failing on duplicate coverage. The V2/V4 gap workflow uses the same
+paginated discovery, overlap coalescing and exact-cover merge, preventing both
+the 300-artifact truncation class and the follow-on overlap class when V2
+recovery is eventually armed. Cross-run artifact ZIP reads
 in both venue recovery workflows and recovered completion now use the shared
 safe GitHub Actions downloader: the GitHub API request carries auth, but the
 redirected blob-storage request deliberately does not. Recursive prior-gap
