@@ -1160,6 +1160,18 @@ The launcher workflow is now serialized by branch with
 concurrently. In addition to the initial sibling scan, preflight performs a
 second paginated active-sibling scan immediately before handoff and fails if
 another nonterminal venue-rescue launcher has appeared.
+
+Generation-3 artifact finalization is now protected at every recovery stage.
+The artifact-only gap plan upload, each archive gap artifact upload, and the
+final canonical `phase1-pons-v2-v4-full` upload each get up to **three total
+attempts**. Retry attempts reuse the already-generated local files with
+`overwrite: true`; they do not repeat the range scan, the merge, or any other
+archive RPC work. This specifically closes the failure mode observed on
+generation-2 gap 053, where the scan completed successfully but GitHub artifact
+finalization returned an intermediary HTTP 403. A transient artifact-service
+failure can therefore no longer turn a successful generation-3 plan, shard, or
+canonical merge into an avoidable new rescue generation after only one upload
+attempt.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
