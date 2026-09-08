@@ -414,6 +414,10 @@ jobs:
               raise SystemExit("recovery source workflow path changed")
           if source.get("head_branch") != "phase1/data-acquisition-spike":
               raise SystemExit("recovery source branch changed")
+          if str(source.get("head_sha") or "") != (
+              "c53b3a63156976a5873752c332fa7578011249b0"
+          ):
+              raise SystemExit("recovery source launch commit changed")
 
           if v2_id == 0 and "phase1-pons-v2-v4-full" in source_artifacts:
               raise SystemExit(
