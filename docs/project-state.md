@@ -1171,8 +1171,22 @@ one-shot, every GitHub JSON API read inside launcher preflight now gets up to
 **three** attempts for transient HTTP 403/408/409/425/429/5xx responses and
 `URLError`/timeout failures. Retries happen inside the same launcher run with no
 sleep/poll loop and do not relax any semantic guard; an exhausted retry still
-fails closed. This reduces the chance that a single platform/network blip
-consumes the generation-3 marker commit before child handoff.
+fails closed. Generation numbering now distinguishes a terminal launcher from
+a consumed recovery generation: a numbered generation advances history only
+after the target child `plan` job concludes `success`. A preflight-only or
+plan-only failure therefore does **not** force the next generation number; the
+same launcher run should be rerun at the same generation. This matters for the
+observed V2/V4 history: generation 1 (`34233813090`) reached a failed child
+`plan` with **0** repair jobs, while generation 2 (`34234471190`) has a
+successful child plan and is therefore the generation that legitimately
+advances the next launch to generation 3. Preflight reports both consumed
+generation numbers and terminal-but-unconsumed generation runs so this state is
+auditable. Once a child plan succeeds, that generation is consumed even if a
+later repair/upload/merge stage fails, because archive recovery work may already
+have materialized.
+
+This reduces the chance that a single platform/network blip consumes the
+generation-3 marker commit before child handoff.
 
 The launcher workflow is now serialized by branch with
 `cancel-in-progress: false`, so two rescue launchers cannot execute preflight
