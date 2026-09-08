@@ -934,7 +934,27 @@ the plan's exact `gap_jobs` with observed numeric gap artifacts. It records
 is downloaded during planning. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
-four repair waves, and entered the corrected final merge.
+four repair waves, and completed the corrected final merge successfully. Its
+canonical `phase1-pons-v1-v3-full` artifact contains **63,560,072** records,
+all **268,688** registered V1 pools have V3 Initialize coverage, the aggregate
+tape SHA-256 is
+`169b60a74f5fea9f5c6b198d849387374e968d8233f69abcd4d9b3492dd92fa8`,
+and the embedded gap plan exactly matches the separately uploaded plan with
+zero missing blocks. Readiness therefore advances the recovery plan to
+`launch_v2_v4_rescue`.
+
+V2/V4 generation 1 run **34233813090** was armed only after V1/V3 became
+canonical. Its preflight passed, V1/V3 was skipped, and no repair RPC job
+started; the artifact-only planner failed because it assumed at least one
+original V2/V4 shard artifact. The frozen parent actually has **zero** V2/V4
+artifacts because both `acquire / v2_v4` and
+`acquire / v2_v4_recovery` completed as `skipped`. Current V2 planning now
+accepts empty original coverage only after paginated job discovery proves those
+two exact frozen-parent jobs are terminal/skipped, writes a bound
+`v2-v4-empty-source-proof.json`, and otherwise fails closed. With that proof,
+the first recovery generation is allowed to plan the full
+**26,841,846..54,486,035** V2/V4 range rather than treating intentional source
+absence as corruption.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
