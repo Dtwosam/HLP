@@ -955,6 +955,15 @@ The live V2 generation-2 plan passes this validator at its full **553-job**
 readiness considers a recovered venue canonical and when recovered completion
 accepts the venue handoff, including every recursive prior generation. A plan
 that drifts after acquisition therefore cannot be auto-adopted downstream.
+The canonical venue artifact is now bound to that lineage plan as well:
+readiness and recovered completion require its embedded gap-plan JSON to equal
+the standalone plan artifact exactly. They also reconcile the embedded summary
+to the canonical manifest: snapshot **54,486,035**, record count and tape
+SHA-256 must match the manifest, frozen membership must be **268,688** V1 pools
+or **3,638** V2 pool IDs, matched membership must equal that frozen count,
+missing-initialize count must be zero, and at least one source file must have
+contributed. This catches canonical metadata-bundle substitution without
+downloading the sharded event tape.
 Gap manifests are also bound to the acquisition
 provenance that generated them: source `evm_json_rpc`, chain **4663**, the
 venue-specific protocol, the frozen registry/registration input filename and
