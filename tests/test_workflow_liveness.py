@@ -558,6 +558,12 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "digest = hashlib.sha256()" in merge_block
     assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
+    lineage_block = content.split(
+        "def plan_for(run_id):",
+        1,
+    )[1].split("seen = set()", 1)[0]
+    assert 'run.get("status") != "completed"' in lineage_block
+    assert 'run.get("conclusion")' not in lineage_block
     assert "v4-events-gap" in content
     assert "manifest_gap_aware_v4_recovery" in content
     assert 'default: "50000"' in content
@@ -1868,6 +1874,12 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "requested_artifacts = {requested_artifact}" in content
     assert "not prior_gap_run_id and has_plan and has_gap" in content
     assert 'prior_gap_run_id = str(candidate["id"])' in content
+    prior_selection = content.split(
+        "for candidate in terminal_target_runs:",
+        1,
+    )[1].split("requested_artifacts = {requested_artifact}", 1)[0]
+    assert 'candidate["conclusion"]' not in prior_selection
+    assert "candidate.get(\"conclusion\")" not in prior_selection
     assert 'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}' in content
     assert content.count(
         'prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}'
