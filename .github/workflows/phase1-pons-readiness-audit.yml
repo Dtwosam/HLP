@@ -66,12 +66,17 @@ jobs:
           mkdir -p artifacts
           python - <<'PY'
           import base64
+          import io
           import json
           import os
           import urllib.parse
           import urllib.request
+          import zipfile
           from pathlib import Path
 
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
           from hlp.data.phase1_readiness import (
               RECOVERY_VENUE_ARTIFACTS,
               RECOVERY_VENUE_WORKFLOW_PATHS,
@@ -116,8 +121,8 @@ jobs:
                   base64.b64decode(payload.get("content") or "")
               )
 
-          def artifact_names(run_id):
-              names = set()
+          def artifact_rows(run_id):
+              rows_out = []
               page = 1
               while True:
                   payload = get(
@@ -125,8 +130,8 @@ jobs:
                       f"?per_page=100&page={page}"
                   )
                   artifacts = list(payload.get("artifacts") or [])
-                  names.update(
-                      str(artifact.get("name"))
+                  rows_out.extend(
+                      artifact
                       for artifact in artifacts
                       if not artifact.get("expired")
                   )
@@ -137,7 +142,79 @@ jobs:
                       raise SystemExit(
                           f"artifact pagination exceeded 2000 for run {run_id}"
                       )
-              return sorted(names)
+              return rows_out
+
+          def artifact_names(run_id):
+              return sorted(
+                  {
+                      str(artifact.get("name"))
+                      for artifact in artifact_rows(run_id)
+                  }
+              )
+
+          def artifact_json(run_id, artifact_name, filename):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if str(row.get("name")) == artifact_name
+              ]
+              if len(matches) != 1:
+                  return None
+              blob = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(matches[0]['id'])}/zip",
+                  token,
+              )
+              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == filename
+                  ]
+                  if len(names) != 1:
+                      return None
+                  return json.loads(archive.read(names[0]))
+
+          def recovery_manifest_valid(venue, run_id):
+              if venue == "v1_v3":
+                  artifact_name = "phase1-pons-v1-v3-full"
+                  manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
+                  expected_source = "manifest_gap_aware_v1_v3_recovery"
+                  upstream_field = "source_registry_run_id"
+                  upstream_run_id = 33_911_022_718
+              elif venue == "v2_v4":
+                  artifact_name = "phase1-pons-v2-v4-full"
+                  manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
+                  expected_source = "manifest_gap_aware_v4_recovery"
+                  upstream_field = "transition_run_id"
+                  upstream_run_id = 33_912_452_330
+              else:
+                  raise SystemExit(
+                      f"readiness recovery venue changed: {venue}"
+                  )
+
+              manifest = artifact_json(
+                  run_id,
+                  artifact_name,
+                  manifest_name,
+              )
+              if not isinstance(manifest, dict):
+                  return False
+              provenance = dict(manifest.get("provenance") or {})
+              return bool(
+                  provenance.get("source") == expected_source
+                  and int(provenance.get("chain_id", 0)) == 4663
+                  and int(
+                      provenance.get("snapshot_head_block", 0)
+                  ) == 54_486_035
+                  and int(
+                      provenance.get("partial_run_id", 0)
+                  ) == 33_982_556_591
+                  and int(
+                      provenance.get(upstream_field, 0)
+                  ) == upstream_run_id
+              )
 
           def job_counts(run_id):
               counts = {}
@@ -212,6 +289,9 @@ jobs:
                           candidate.get("artifacts") or []
                       ):
                           continue
+                      if not recovery_manifest_valid(venue, run_id):
+                          continue
+                      candidate["recovery_manifest_valid"] = True
                       candidates.append(candidate)
                       break
               if not candidates:
