@@ -408,7 +408,10 @@ jobs:
           import os
           from pathlib import Path
 
-          from hlp.data.ranges import plan_missing_subranges
+          from hlp.data.ranges import (
+              coalesce_covered_ranges,
+              plan_missing_subranges,
+          )
 
           start = int(os.environ["GENERATION_START"])
           head = int(os.environ["SNAPSHOT_HEAD"])
@@ -452,6 +455,11 @@ jobs:
                   "sha256": manifest["sha256"],
               })
 
+          covered = coalesce_covered_ranges(
+              start,
+              head,
+              covered,
+          )
           gaps = plan_missing_subranges(
               start,
               head,
@@ -863,6 +871,7 @@ jobs:
           import os
           from pathlib import Path
 
+          from hlp.data.ranges import select_contiguous_cover
           from hlp.data.reconstruct import event_order
           from hlp.data.sharded_tape import (
               canonical_jsonl_bytes,
@@ -879,19 +888,28 @@ jobs:
           if not files:
               raise SystemExit("no V4 artifacts available for final merge")
 
-          entries = []
+          candidates = []
           for path in files:
               manifest = json.loads(
                   path.with_suffix(path.suffix + ".manifest.json").read_text()
               )
               prov = manifest["provenance"]
-              entries.append((
+              candidates.append((
                   int(prov["from_block"]),
                   int(prov["to_block"]),
                   path,
                   manifest,
               ))
-          entries.sort(key=lambda item: item[0])
+          selected_indexes = select_contiguous_cover(
+              START,
+              HEAD,
+              [(lo, hi) for lo, hi, _, _ in candidates],
+          )
+          entries = [candidates[index] for index in selected_indexes]
+          candidate_source_files = len(candidates)
+          dropped_overlapping_source_files = (
+              candidate_source_files - len(entries)
+          )
 
           previous_hi = None
           manifests = []
@@ -1017,6 +1035,10 @@ jobs:
               "missing_initialize_pool_ids": 0,
               "tape_sha256": snapshot["sha256"],
               "source_files": len(entries),
+              "candidate_source_files": candidate_source_files,
+              "dropped_overlapping_source_files": (
+                  dropped_overlapping_source_files
+              ),
           }
           Path("artifacts/pons-v2-v4-summary.json").write_text(
               json.dumps(summary, indent=2, sort_keys=True) + "\n"
