@@ -735,9 +735,14 @@ hours** (about **47.22 hours** at max-parallel 2). Request density remains
 remarkably stable, while later shards are materially denser in response and
 artifact bytes; measured checkpoints therefore continue to supersede
 smaller-sample extrapolations. These checkpoints are explicitly non-acceptance
-evidence because the parent acquisition is still incomplete; frozen viability
-still requires its separate bounded route measurement run and
-worst-observed-per-block projection.
+evidence. The source parent is now terminal but still lacks a canonical full
+V1/V3 artifact, so frozen viability still requires the successful recovery,
+its separate bounded route measurements, and the worst-observed-per-block
+projection. Terminal accounting also exposed stale GitHub Actions log blobs and
+one impossible historical job timestamp; current accounting code records those
+as explicit missing-log/invalid-runtime evidence and allows non-acceptance
+checkpoints to publish lower-bound totals, while `require_successful_runs=true`
+continues to fail closed unless the accounting evidence is complete.
 
 The current branch also hardens manual rescue beyond the launch commit's
 single-wave recovery implementation. After the live shard-15 timeout proved
@@ -848,13 +853,25 @@ workflow-heredoc hardening, generation 12 run **34024988902** also passed and
 reported **79 successful jobs**, **1 cancelled**, **2 in progress** and
 **159 queued**, with no evidence run, no recovery plan while the source remained
 active, and the same correct next action. The frozen parent subsequently became
-terminal with top-level conclusion `cancelled`. Terminal readiness generation
-13 run **34207357285** passed and reported next action
-`launch_v1_v3_rescue`: the source has no complete V1/V3, V2/V4 or downstream
-pricing/lifecycle artifact. The pinned one-target rescue launcher was then
-armed for V1/V3 only as run **34207459960**; its terminal-parent preflight
-passed and its V2/V4 branch skipped, leaving the V1/V3 exact-gap planner as the
-sole active recovery path.
+terminal with top-level conclusion `cancelled`. Full pagination shows the
+terminal parent contains **324 jobs** and **314 artifacts**. Its original V1/V3
+matrix lost four shards to the 40-minute runtime ceiling (**15, 131, 132 and
+231**), while the pinned automatic recovery later acquired replacement gap
+artifacts but failed its final merge because one recovery interval overlapped
+successful original shard 14; the merge assertion observed
+`11321657 -> 11297080`. Terminal readiness generation 13 run **34207357285**
+passed and reported next action `launch_v1_v3_rescue`: the source has no
+complete V1/V3, V2/V4 or downstream pricing/lifecycle artifact. The pinned
+one-target rescue launcher was then armed for V1/V3 only as run **34207459960**;
+its terminal-parent preflight passed and its V2/V4 branch skipped. The current
+50k planner derived **70** serialized V1/V3 repair jobs covering **3,439,829
+blocks**. The first 54 jobs redundantly replace the oldest 14 original shards
+because the launch commit's wildcard artifact download only surfaced the newest
+300 artifacts; the remaining 16 jobs cover the four real timeout regions.
+Current code now paginates every source artifact through the GitHub API for
+future V1/V3 retries, so later recovery generations cannot silently lose those
+oldest source shards. The already-running rescue remains valid and is left
+untouched rather than starting a competing archive crawl.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
