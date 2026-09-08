@@ -496,6 +496,27 @@ def test_transition_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "time.sleep(" not in content
 
 
+def test_single_wave_gap_recoveries_retry_transient_artifact_uploads():
+    workflows = (
+        "phase1-pons-v2-curve-recover-gaps.yml",
+        "phase1-pons-weth-usdg-anchor-recover-gaps.yml",
+        "phase1-pons-v2-transition-recover-gaps.yml",
+        "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+        "phase1-pons-v4-quote-fallback-recover-gaps.yml",
+    )
+    for name in workflows:
+        content = _workflow(name)
+        assert content.count("id: upload_gap") == 1, name
+        assert content.count("id: retry_upload_gap") == 1, name
+        assert content.count("name: Retry gap artifact upload") == 1, name
+        assert content.count("name: Final gap artifact upload retry") == 1, name
+        assert content.count("steps.upload_gap.outcome == 'failure'") == 1, name
+        assert (
+            content.count("steps.retry_upload_gap.outcome == 'failure'") == 1
+        ), name
+        assert content.count("overwrite: true") == 2, name
+
+
 def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     content = _workflow("phase1-pons-v2-v4-recover-gaps.yml")
     trigger_block = content.split("\npermissions:", 1)[0]

@@ -248,11 +248,31 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/anchor-gap-${GAP_ID}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_gap
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-anchor-gap-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
+        if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-anchor-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-anchor-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: [plan, recover]
