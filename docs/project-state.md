@@ -906,10 +906,14 @@ successful source shards are not replaced by an unnecessary full venue rerun.
 The readiness audit discovers successful venue artifacts only from the pinned
 `phase1-pons-live-venue-rescue-one-shot` launcher and then publishes those
 exact run IDs in its recovery plan; direct/debug gap workflows are never
-auto-adopted. Recovered completion additionally opens the recovered venue
-manifest itself and verifies chain **4663**, snapshot head **54,486,035**,
-`partial_run_id=33982556591` and the frozen registry/transition upstream run
-before accepting a non-source venue artifact. It also refuses to rerun V2/V4
+auto-adopted. Readiness now also opens the canonical recovered venue manifest
+before adopting a run and verifies recovery source type, chain **4663**,
+snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
+registry/transition upstream run. A malformed successful V1 rescue therefore
+cannot trigger V2 archive work merely because its artifact name exists.
+Recovered completion independently repeats that manifest contract and then
+replays any recursive prior-gap lineage before accepting a non-source venue
+artifact. It also refuses to rerun V2/V4
 or pricing when the source already contains reusable complete artifacts, and
 refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
 The pinned rescue launcher now requires exactly one venue target per launch and
