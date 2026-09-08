@@ -914,9 +914,11 @@ the selected canonical run ID, number of completed-success candidates inspected,
 aggregate rejection counts, and up to 20 rejected candidate run IDs with
 reasons such as missing canonical artifact, invalid manifest, invalid lineage
 or workflow-path mismatch. When a canonical rescue is still nonterminal, the
-same diagnostics capture its run ID, status and paginated job-state counts, so
-the readiness artifact can distinguish "still recovering" from "completed but
-invalid" without launching any additional archive work. Readiness now also opens the canonical recovered venue manifest
+same diagnostics capture its run ID, status and paginated job-state counts.
+Discovery is target-bound by the launch marker, so an active V1/V3 rescue is
+not misreported as V2/V4 merely because both venues share the same launcher
+workflow. The readiness artifact can therefore distinguish "still recovering"
+from "completed but invalid" without launching any additional archive work. Readiness now also opens the canonical recovered venue manifest
 before adopting a run and verifies recovery source type, chain **4663**,
 snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
 registry/transition upstream run. A malformed successful V1 rescue therefore
