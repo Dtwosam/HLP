@@ -931,7 +931,14 @@ the same way: each recursive generation contributes only its small bound
 gap-plan ZIP plus the non-expired artifact inventory, and planning intersects
 the plan's exact `gap_jobs` with observed numeric gap artifacts. It records
 `planning_prior_gap_jsonl_bytes_downloaded=0`, so no prior gap JSONL payload
-is downloaded during planning. Generation 4 run **34228430753** passed
+is downloaded during planning. V1/V3 final merge now mirrors V2/V4's
+multi-generation behavior too: it recursively walks every bound
+`prior_gap_run_id`, paginates exact numeric gap artifacts for each ancestor,
+rejects duplicate or unplanned gap IDs, verifies the current generation's
+observed artifact count against its plan, and materializes ancestors in
+run-scoped directories before exact-cover selection. This closes the latent
+case where recursive planning could reuse an older ancestor but merge only
+downloaded the immediate prior generation. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
 four repair waves, and completed the corrected final merge successfully. Its
