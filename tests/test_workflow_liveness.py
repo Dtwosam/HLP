@@ -1824,6 +1824,11 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"completed_success_candidates": 0' in content
     assert '"selected_run_id": 0' in content
     assert '"active_run": None' in content
+    assert '"launch V1 V3 rescue"' in content
+    assert '"launch V2 V4 rescue"' in content
+    assert "if launch_marker not in display_title:" in content
+    assert 'row.get("display_title") or ""' in content
+    assert '"display_title": display_title' in content
     assert 'diagnostics["active_run"] is None' in content
     assert '"job_counts": job_counts(active_run_id)' in content
     assert "Active rescue {active_run.get('run_id', 0)}" in content
