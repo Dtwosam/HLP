@@ -166,6 +166,10 @@ jobs:
                   f"run is active: {active_siblings}"
               )
 
+          terminal_target_runs.sort(
+              key=lambda row: int(row["id"]),
+              reverse=True,
+          )
           prior_gap_run_id = ""
           for candidate in terminal_target_runs:
               candidate_artifacts = artifacts(candidate["id"])
