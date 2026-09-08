@@ -4,6 +4,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 SOURCE_ELIGIBILITY_RUN_ID = 33_982_556_591
+SOURCE_ELIGIBILITY_WORKFLOW_PATH = (
+    ".github/workflows/phase1-pons-full-eligibility-acquisition-one-shot.yml"
+)
+SOURCE_ELIGIBILITY_BRANCH = "phase1/data-acquisition-spike"
+SOURCE_ELIGIBILITY_HEAD_SHA = (
+    "c53b3a63156976a5873752c332fa7578011249b0"
+)
 
 SOURCE_REQUIRED_ARTIFACTS = (
     "phase1-pons-v1-v3-full",
@@ -308,6 +315,13 @@ def build_phase1_readiness_report(
         raise ValueError("readiness source eligibility run changed")
     if _run_id(source_run) != SOURCE_ELIGIBILITY_RUN_ID:
         raise ValueError("source run payload does not match frozen run ID")
+    source_path = str(source_run.get("path") or "").split("@", 1)[0]
+    if source_path != SOURCE_ELIGIBILITY_WORKFLOW_PATH:
+        raise ValueError("source run workflow path changed")
+    if source_run.get("head_branch") != SOURCE_ELIGIBILITY_BRANCH:
+        raise ValueError("source run branch changed")
+    if str(source_run.get("head_sha") or "") != SOURCE_ELIGIBILITY_HEAD_SHA:
+        raise ValueError("source run launch commit changed")
 
     route_names = list(VIABILITY_ROUTE_WORKFLOW_PATHS)
     if set(viability_runs) != set(route_names):
