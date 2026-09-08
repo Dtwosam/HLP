@@ -2043,6 +2043,13 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
     assert "LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}" in content
+    assert "LAUNCH_VALIDATION_GENERATION: '9'" in content
+    assert "VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}" in content
+    assert 'os.environ["VALIDATION_GENERATION"]' in content
+    assert "requested_generation + 7" in content
+    assert "V2/V4 rescue validation generation changed: " in content
+    assert '"validation_generation": validation_generation' in content
+    assert "# validation-generation:" not in content
     assert "generation_pattern = re.compile(" in content
     assert 'r" generation (\\d+)(?:\\b|$)"' in content
     assert "launch requires an explicit " in content

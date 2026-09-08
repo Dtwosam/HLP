@@ -1,5 +1,4 @@
 name: phase1-pons-live-venue-rescue-one-shot
-# validation-generation: 9
 
 on:
   push:
@@ -9,6 +8,9 @@ on:
 permissions:
   contents: read
   actions: read
+
+env:
+  LAUNCH_VALIDATION_GENERATION: '9'
 
 jobs:
   preflight:
@@ -30,6 +32,7 @@ jobs:
           RESCUE_V1: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
           RESCUE_V2: ${{ startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
           LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}
         run: |
           python - <<'PY'
           import json
@@ -203,6 +206,22 @@ jobs:
           requested_generation = int(
               generation_match.group(1)
           )
+          validation_generation = int(
+              os.environ["VALIDATION_GENERATION"]
+          )
+          if rescue_v2:
+              expected_validation_generation = (
+                  requested_generation + 7
+              )
+              if (
+                  validation_generation
+                  != expected_validation_generation
+              ):
+                  raise SystemExit(
+                      "V2/V4 rescue validation generation changed: "
+                      f"observed={validation_generation} "
+                      f"expected={expected_validation_generation}"
+                  )
           prior_plan_artifact = (
               "phase1-pons-v1-v3-gap-plan"
               if rescue_v1
@@ -601,6 +620,7 @@ jobs:
               "prior_terminal_snapshot": prior_terminal_snapshot,
               "requested_generation": requested_generation,
               "expected_generation": expected_generation,
+              "validation_generation": validation_generation,
               "preflight": "pass",
           }, sort_keys=True))
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
@@ -635,6 +655,8 @@ jobs:
                   f"- target: "
                   f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
                   f"- generation: {requested_generation}\n"
+                  f"- validation generation: "
+                  f"{validation_generation}\n"
                   f"- prior gap run: {prior_gap_run_id or 'none'}\n"
                   f"- prior terminal snapshot: "
                   f"{prior_terminal_snapshot}\n"
