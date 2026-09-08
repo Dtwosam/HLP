@@ -30,6 +30,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import re
           import urllib.parse
           import urllib.request
 
@@ -99,6 +100,9 @@ jobs:
               "phase1-pons-v1-v3-gap-"
               if rescue_v1
               else "phase1-pons-v2-v4-gap-"
+          )
+          prior_gap_pattern = re.compile(
+              "^" + re.escape(prior_gap_prefix) + r"(\d+)$"
           )
           requested_artifact = (
               "phase1-pons-v1-v3-full"
@@ -174,8 +178,7 @@ jobs:
                   )
               has_plan = prior_plan_artifact in candidate_artifacts
               has_gap = any(
-                  name.startswith(prior_gap_prefix)
-                  and name != prior_plan_artifact
+                  prior_gap_pattern.fullmatch(name) is not None
                   for name in candidate_artifacts
               )
               if not prior_gap_run_id and has_plan and has_gap:
