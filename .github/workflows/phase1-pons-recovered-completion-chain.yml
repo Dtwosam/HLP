@@ -148,6 +148,7 @@ jobs:
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
           )
+          from hlp.data.ranges import validate_gap_plan_jobs
 
           source_id = int(os.environ["SOURCE_RUN_ID"])
           v1_id = int(os.environ["V1_V3_RUN_ID"])
@@ -609,6 +610,17 @@ jobs:
                       "recovery venue plan start block changed: "
                       f"run={run_id}"
                   )
+              try:
+                  validate_gap_plan_jobs(
+                      current_plan,
+                      expected_start=expected_start,
+                      expected_end=54_486_035,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "recovery venue plan structure changed: "
+                      f"run={run_id} {exc}"
+                  ) from exc
               if prior_gap_id == 0:
                   return
 
@@ -681,6 +693,17 @@ jobs:
                           raise SystemExit(
                               "recovery venue prior start block changed"
                           )
+                      try:
+                          validate_gap_plan_jobs(
+                              prior_plan,
+                              expected_start=expected_start,
+                              expected_end=54_486_035,
+                          )
+                      except ValueError as exc:
+                          raise SystemExit(
+                              "recovery venue prior plan structure changed: "
+                              f"run={cursor} {exc}"
+                          ) from exc
                       parent = prior_plan.get("prior_gap_run_id")
                       cursor = (
                           int(parent)
