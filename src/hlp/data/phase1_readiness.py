@@ -226,7 +226,11 @@ def _source_recovery_plan(
                     )
                 )
                 if recommended_v2_v4_id <= 0
-                else "launch_recovered_phase1_completion"
+                else (
+                    "wait_for_active_venue_rescue"
+                    if active_v1_v3_id > 0 or active_v2_v4_id > 0
+                    else "launch_recovered_phase1_completion"
+                )
             )
         ),
     }
