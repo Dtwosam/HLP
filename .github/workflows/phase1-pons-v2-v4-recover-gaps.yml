@@ -1130,9 +1130,10 @@ jobs:
               "extracted_files": extracted,
           }, sort_keys=True))
           PY
-      - name: Download paginated V2/V4 gap artifacts
+      - name: Download recursive paginated V2/V4 gap artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
           PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}
@@ -1153,9 +1154,14 @@ jobs:
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
           prior_run_id = int(os.environ["PRIOR_GAP_RUN_ID"] or 0)
           current_run_id = int(os.environ["CURRENT_RUN_ID"])
           current_gap_count = int(os.environ["CURRENT_GAP_COUNT"])
+          plan_artifact = "phase1-pons-v2-v4-gap-plan"
+          plan_name = "v4-gap-plan.json"
+          expected_start = 26_841_846
+          expected_head = 54_486_035
           gap_pattern = re.compile(
               r"^phase1-pons-v2-v4-gap-(\d+)$"
           )
@@ -1172,22 +1178,8 @@ jobs:
               with urllib.request.urlopen(req, timeout=60) as response:
                   return json.load(response)
 
-          def download_gap_artifacts(
-              run_id,
-              target_name,
-              *,
-              required_count=None,
-          ):
-              target = Path(target_name)
-              target.mkdir(parents=True, exist_ok=True)
-              if run_id <= 0:
-                  if required_count not in {None, 0}:
-                      raise SystemExit(
-                          "missing run ID for required V2/V4 gap artifacts"
-                      )
-                  return 0
-
-              selected = []
+          def artifact_rows(run_id):
+              output = []
               page = 1
               while True:
                   payload = request(
@@ -1195,14 +1187,9 @@ jobs:
                       f"?per_page=100&page={page}"
                   )
                   rows = list(payload.get("artifacts") or [])
-                  for row in rows:
-                      match = gap_pattern.fullmatch(
-                          str(row.get("name") or "")
-                      )
-                      if match and not row.get("expired"):
-                          selected.append(
-                              (int(match.group(1)), row)
-                          )
+                  output.extend(
+                      row for row in rows if not row.get("expired")
+                  )
                   if len(rows) < 100:
                       break
                   page += 1
@@ -1211,32 +1198,38 @@ jobs:
                           "V2/V4 merge gap artifact pagination "
                           "exceeded 2000"
                       )
+              return output, page
 
-              selected.sort(key=lambda item: item[0])
+          def artifact_zip(artifact):
+              return fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
+              )
+
+          def gap_rows(rows, run_id):
+              selected = []
+              for row in rows:
+                  match = gap_pattern.fullmatch(
+                      str(row.get("name") or "")
+                  )
+                  if match:
+                      selected.append((match.group(1), row))
+              selected.sort(key=lambda item: int(item[0]))
               gap_ids = [gap_id for gap_id, _ in selected]
               if len(gap_ids) != len(set(gap_ids)):
                   raise SystemExit(
                       "V2/V4 merge contains duplicate gap artifact IDs: "
                       f"run={run_id}"
                   )
-              if (
-                  required_count is not None
-                  and len(selected) != required_count
-              ):
-                  raise SystemExit(
-                      "current V2/V4 gap artifact count does not match "
-                      f"plan: observed={len(selected)} "
-                      f"expected={required_count}"
-                  )
+              return selected
 
+          def extract_rows(selected, target, run_id):
+              target.mkdir(parents=True, exist_ok=True)
               extracted = 0
               for gap_id, artifact in selected:
-                  blob = fetch_github_actions_artifact_zip(
-                      api
-                      + f"/repos/{repo}/actions/artifacts/"
-                      + f"{int(artifact['id'])}/zip",
-                      token,
-                  )
+                  blob = artifact_zip(artifact)
                   with zipfile.ZipFile(io.BytesIO(blob)) as archive:
                       for member in archive.infolist():
                           if member.is_dir():
@@ -1255,28 +1248,121 @@ jobs:
                               archive.read(member)
                           )
                           extracted += 1
+              return extracted
 
+          prior_total = 0
+          prior_generations = 0
+          seen_runs = set()
+          cursor = prior_run_id
+          while cursor:
+              if cursor in seen_runs:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap lineage contains a cycle"
+                  )
+              seen_runs.add(cursor)
+              prior_generations += 1
+              if prior_generations > 20:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap lineage exceeds 20 generations"
+                  )
+
+              rows, pages = artifact_rows(cursor)
+              plan_rows = [
+                  row
+                  for row in rows
+                  if str(row.get("name") or "") == plan_artifact
+              ]
+              if len(plan_rows) != 1:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap plan artifact identity "
+                      f"is ambiguous: run={cursor}"
+                  )
+              payload = artifact_zip(plan_rows[0])
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == plan_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "V2/V4 merge prior gap plan file identity "
+                          f"is ambiguous: run={cursor}"
+                      )
+                  plan = json.loads(archive.read(names[0]))
+
+              if int(plan.get("partial_run_id", 0)) != partial_run_id:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap partial source changed"
+                  )
+              if int(plan.get("snapshot_head", -1)) != expected_head:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap snapshot head changed"
+                  )
+              if int(plan.get("generation_start", -1)) != expected_start:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap start block changed"
+                  )
+
+              planned = {}
+              for job in list(plan.get("gap_jobs") or []):
+                  gap_id = str(job.get("id") or "")
+                  if not gap_id or gap_id in planned:
+                      raise SystemExit(
+                          "V2/V4 merge prior plan has duplicate/empty gap ID"
+                      )
+                  planned[gap_id] = (
+                      int(job["from_block"]),
+                      int(job["to_block"]),
+                  )
+
+              selected = gap_rows(rows, cursor)
+              for gap_id, _ in selected:
+                  if gap_id not in planned:
+                      raise SystemExit(
+                          "V2/V4 merge prior gap artifact is not bound "
+                          f"by its plan: run={cursor} gap={gap_id}"
+                      )
+              target = Path("prior-gaps") / str(cursor)
+              extracted = extract_rows(selected, target, cursor)
+              prior_total += len(selected)
               print(json.dumps({
-                  "run_id": run_id,
-                  "target": target_name,
-                  "artifact_pages": page,
+                  "run_id": cursor,
+                  "artifact_pages": pages,
                   "gap_artifacts": len(selected),
                   "extracted_files": extracted,
               }, sort_keys=True))
-              return len(selected)
 
-          prior_count = download_gap_artifacts(
-              prior_run_id,
-              "prior-gaps",
-          )
-          current_count = download_gap_artifacts(
+              parent = plan.get("prior_gap_run_id")
+              cursor = (
+                  int(parent)
+                  if parent not in {None, "", 0}
+                  else 0
+              )
+
+          current_rows, current_pages = artifact_rows(current_run_id)
+          current_selected = gap_rows(
+              current_rows,
               current_run_id,
-              "gaps",
-              required_count=current_gap_count,
+          )
+          if len(current_selected) != current_gap_count:
+              raise SystemExit(
+                  "current V2/V4 gap artifact count does not match "
+                  f"plan: observed={len(current_selected)} "
+                  f"expected={current_gap_count}"
+              )
+          current_extracted = extract_rows(
+              current_selected,
+              Path("gaps"),
+              current_run_id,
           )
           print(json.dumps({
-              "prior_gap_artifacts": prior_count,
-              "current_gap_artifacts": current_count,
+              "prior_gap_generations": prior_generations,
+              "prior_gap_artifacts": prior_total,
+              "current_run_id": current_run_id,
+              "current_artifact_pages": current_pages,
+              "current_gap_artifacts": len(current_selected),
+              "current_extracted_files": current_extracted,
               "current_gap_count": current_gap_count,
           }, sort_keys=True))
           PY
@@ -1311,7 +1397,7 @@ jobs:
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
           files = (
               list(Path("partial").glob("v4-events-shard-*.jsonl"))
-              + list(Path("prior-gaps").glob("v4-events-gap-*.jsonl"))
+              + list(Path("prior-gaps").rglob("v4-events-gap-*.jsonl"))
               + list(Path("gaps").glob("v4-events-gap-*.jsonl"))
           )
           if not files:
