@@ -524,6 +524,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
+    assert content.count("id: upload_gap") == 4
+    assert content.count("name: Retry gap artifact upload") == 4
+    assert content.count("steps.upload_gap.outcome == 'failure'") == 4
+    assert content.count("overwrite: true") == 4
+    assert content.count("continue-on-error: true") >= 4
     assert "frozen parent recovery is blocked while source is active" in content
     assert "Verify frozen V2 transition input" in content
     assert "V2 transition run ID changed: " in content
@@ -833,6 +838,11 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
+    assert content.count("id: upload_gap") == 4
+    assert content.count("name: Retry gap artifact upload") == 4
+    assert content.count("steps.upload_gap.outcome == 'failure'") == 4
+    assert content.count("overwrite: true") == 4
+    assert content.count("continue-on-error: true") >= 4
     assert "frozen parent recovery is blocked while source is active" in content
     assert "Verify frozen V1 registry input" in content
     assert "V1 registry run ID changed: " in content
