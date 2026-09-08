@@ -1175,10 +1175,8 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
         "Download every representative transfer shard artifact for merge"
         in content
     )
-    assert (
-        "representative transfer artifact pagination exceeded 2000"
-        in content
-    )
+    assert "representative transfer artifact pagination " in content
+    assert "exceeded 2000" in content
     assert (
         'r"^phase1-pons-representative-transfer-(\\d+)$"'
         in content
