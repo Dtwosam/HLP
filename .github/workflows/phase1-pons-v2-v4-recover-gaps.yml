@@ -727,17 +727,19 @@ jobs:
                       "prior gap coverage start block changed"
                   )
 
-              planned = {}
-              for job in list(plan.get("gap_jobs") or []):
-                  gap_id = str(job.get("id") or "")
-                  if not gap_id or gap_id in planned:
-                      raise SystemExit(
-                          "prior gap coverage plan has duplicate/empty gap ID"
-                      )
-                  planned[gap_id] = {
-                      "from_block": int(job["from_block"]),
-                      "to_block": int(job["to_block"]),
-                  }
+              from hlp.data.ranges import validate_gap_plan_jobs
+
+              try:
+                  planned = validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=expected_head,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior gap coverage plan structure changed: "
+                      f"{exc}"
+                  ) from exc
 
               observed = {}
               for row in rows:
@@ -766,8 +768,8 @@ jobs:
                       "artifact_id": int(row["id"]),
                       "artifact_name": str(row["name"]),
                       "gap_id": gap_id,
-                      "from_block": bounds["from_block"],
-                      "to_block": bounds["to_block"],
+                      "from_block": bounds[0],
+                      "to_block": bounds[1],
                   })
 
               parent = plan.get("prior_gap_run_id")
@@ -1541,17 +1543,19 @@ jobs:
                       "V2/V4 merge prior gap start block changed"
                   )
 
-              planned = {}
-              for job in list(plan.get("gap_jobs") or []):
-                  gap_id = str(job.get("id") or "")
-                  if not gap_id or gap_id in planned:
-                      raise SystemExit(
-                          "V2/V4 merge prior plan has duplicate/empty gap ID"
-                      )
-                  planned[gap_id] = (
-                      int(job["from_block"]),
-                      int(job["to_block"]),
+              from hlp.data.ranges import validate_gap_plan_jobs
+
+              try:
+                  planned = validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=expected_head,
                   )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap plan structure changed: "
+                      f"{exc}"
+                  ) from exc
 
               selected = gap_rows(rows, cursor)
               for gap_id, _ in selected:
@@ -1638,18 +1642,19 @@ jobs:
               raise SystemExit(
                   "V2/V4 merge current gap prior lineage changed"
               )
-          current_planned = {}
-          for job in list(current_plan.get("gap_jobs") or []):
-              gap_id = str(job.get("id") or "")
-              if not gap_id or gap_id in current_planned:
-                  raise SystemExit(
-                      "V2/V4 merge current plan has "
-                      "duplicate/empty gap ID"
-                  )
-              current_planned[gap_id] = (
-                  int(job["from_block"]),
-                  int(job["to_block"]),
+          from hlp.data.ranges import validate_gap_plan_jobs
+
+          try:
+              current_planned = validate_gap_plan_jobs(
+                  current_plan,
+                  expected_start=expected_start,
+                  expected_end=expected_head,
               )
+          except ValueError as exc:
+              raise SystemExit(
+                  "V2/V4 merge current gap plan structure changed: "
+                  f"{exc}"
+              ) from exc
 
           current_selected = gap_rows(
               current_rows,
