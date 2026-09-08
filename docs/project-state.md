@@ -1043,7 +1043,10 @@ the selected canonical run ID, number of completed-success candidates inspected,
 aggregate rejection counts, and up to 20 rejected candidate run IDs with
 reasons such as missing canonical artifact, invalid manifest, invalid lineage
 or workflow-path mismatch. When a canonical rescue is still nonterminal, the
-same diagnostics capture its run ID, status and paginated job-state counts.
+same diagnostics capture its run ID, status and paginated job-state counts, plus
+per-wave `recover_1` through `recover_4` state counts when matrix jobs are
+materialized. Long serialized V2/V4 rescues can therefore show exactly which
+wave is advancing without any archive RPC or runner-side polling.
 The latest terminal target-matched rescue is also recorded with conclusion,
 paginated job-state counts and up to 20 failed/cancelled/timed-out problem job
 IDs and names. Discovery uses the same launch-prefix contract, so an active
