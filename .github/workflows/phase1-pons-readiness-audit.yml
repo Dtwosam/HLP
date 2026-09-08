@@ -427,9 +427,34 @@ jobs:
                   payload["job_counts"] = job_counts(run_id)
               return payload
 
+          recovery_discovery = {
+              venue: {
+                  "selected_run_id": 0,
+                  "completed_success_candidates": 0,
+                  "rejection_counts": {},
+                  "rejected_candidates": [],
+              }
+              for venue in RECOVERY_VENUE_ARTIFACTS
+          }
+
+          def reject_recovery_candidate(venue, candidate, reason):
+              diagnostics = recovery_discovery[venue]
+              counts = diagnostics["rejection_counts"]
+              counts[reason] = int(counts.get(reason, 0)) + 1
+              rejected = diagnostics["rejected_candidates"]
+              if len(rejected) < 20:
+                  rejected.append(
+                      {
+                          "run_id": int(candidate["id"]),
+                          "head_sha": candidate.get("head_sha"),
+                          "reason": reason,
+                      }
+                  )
+
           def latest_recovery_run(venue):
               artifact = RECOVERY_VENUE_ARTIFACTS[venue]
               candidates = []
+              diagnostics = recovery_discovery[venue]
               for workflow_path in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
                   workflow_file = workflow_path.rsplit("/", 1)[-1]
                   encoded_workflow = urllib.parse.quote(
@@ -455,22 +480,46 @@ jobs:
                               continue
                           run_id = int(row["id"])
                           candidate = run_payload(run_id)
+                          diagnostics[
+                              "completed_success_candidates"
+                          ] += 1
                           observed_path = str(
                               candidate.get("path") or ""
                           ).split("@", 1)[0]
                           if observed_path != workflow_path:
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "workflow_path_mismatch",
+                              )
                               continue
                           if artifact not in set(
                               candidate.get("artifacts") or []
                           ):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "canonical_artifact_missing",
+                              )
                               continue
                           if not recovery_manifest_valid(venue, run_id):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "manifest_invalid",
+                              )
                               continue
                           if not recovery_lineage_valid(venue, run_id):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "lineage_invalid",
+                              )
                               continue
                           candidate["recovery_manifest_valid"] = True
                           candidate["recovery_lineage_valid"] = True
                           candidates.append(candidate)
+                          diagnostics["selected_run_id"] = run_id
                           found = True
                           break
                       if found or len(rows) < 100:
@@ -677,6 +726,7 @@ jobs:
                   "audit_run_id": int(os.environ["GITHUB_RUN_ID"]),
                   "audit_head_sha": os.environ["GITHUB_SHA"],
                   "audit_branch": branch,
+                  "recovery_discovery": recovery_discovery,
               }
           )
 
@@ -731,6 +781,29 @@ jobs:
                       f"V2/V4={recovery_plan.get('recommended_v2_v4_run_id', 0)}, "
                       f"pricing={recovery_plan.get('recommended_pricing_run_id', 0)}"
                       + "\n"
+                  )
+              for venue, diagnostics in sorted(
+                  (report.get("recovery_discovery") or {}).items()
+              ):
+                  rejection_counts = diagnostics.get(
+                      "rejection_counts"
+                  ) or {}
+                  rejection_summary = (
+                      ", ".join(
+                          f"{reason}={count}"
+                          for reason, count in sorted(
+                              rejection_counts.items()
+                          )
+                      )
+                      if rejection_counts
+                      else "none"
+                  )
+                  summary.write(
+                      f"- Recovery discovery {venue}: "
+                      f"selected={diagnostics.get('selected_run_id', 0)}, "
+                      "completed-success-candidates="
+                      f"{diagnostics.get('completed_success_candidates', 0)}, "
+                      f"rejections={rejection_summary}\n"
                   )
               if report.get("evidence_handoff_errors"):
                   summary.write(
