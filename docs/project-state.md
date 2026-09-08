@@ -926,7 +926,9 @@ additional archive work. Its state-machine next action is now activity-aware:
 when a required V1/V3 or V2/V4 rescue is already nonterminal it reports
 `wait_for_v1_v3_rescue` or `wait_for_v2_v4_rescue` instead of misleadingly
 recommending another launch; if the other venue is unexpectedly active it
-reports `wait_for_active_venue_rescue`. Readiness now also opens the canonical recovered venue manifest
+reports `wait_for_active_venue_rescue`. The same global wait applies before
+recovered completion even when an older valid venue artifact is already
+available, preventing downstream RPC from overlapping a newer active rescue. Readiness now also opens the canonical recovered venue manifest
 before adopting a run and verifies recovery source type, chain **4663**,
 snapshot head **54,486,035**, `partial_run_id=33982556591` and the frozen
 registry/transition upstream run. A malformed successful V1 rescue therefore
