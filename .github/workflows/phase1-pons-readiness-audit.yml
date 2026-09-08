@@ -277,13 +277,15 @@ jobs:
                   return False
               provenance = dict(manifest["provenance"])
               prior_gap = provenance.get("prior_gap_run_id")
-              if prior_gap in {None, "", 0}:
-                  return True
               try:
-                  prior_gap_id = int(prior_gap)
+                  prior_gap_id = (
+                      int(prior_gap)
+                      if prior_gap not in {None, "", 0}
+                      else 0
+                  )
               except (TypeError, ValueError):
                   return False
-              if prior_gap_id <= 0:
+              if prior_gap_id < 0:
                   return False
 
               current_plan = artifact_json(
@@ -293,9 +295,14 @@ jobs:
               )
               if not isinstance(current_plan, dict):
                   return False
+              if (
+                  "partial_run_id" not in current_plan
+                  or "prior_gap_run_id" not in current_plan
+              ):
+                  return False
               try:
                   if int(
-                      current_plan.get("partial_run_id", 0)
+                      current_plan["partial_run_id"]
                   ) != source_run_id:
                       return False
                   if int(
@@ -312,6 +319,8 @@ jobs:
                       return False
               except (TypeError, ValueError):
                   return False
+              if prior_gap_id == 0:
+                  return True
 
               seen = set()
               depth = 0
