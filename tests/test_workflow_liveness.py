@@ -661,6 +661,18 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count('"empty_source_proven"') >= 2
     assert "Discover reusable prior V2/V4 gap coverage" in content
     assert "source-metadata/v2-v4-prior-gap-coverage.json" in content
+    assert "source-metadata/v2-v4-prior-gap-generations.json" in content
+    assert '"planned_ranges": [' in content
+    assert '"reusable_ranges": [' in content
+    assert '"successful_jobs_missing_artifacts"' in content
+    assert '"non_success_gap_artifacts"' in content
+    assert "V2/V4 immediate prior generation metadata " in content
+    assert "expected_retry_cover = coalesce_covered_ranges(" in content
+    assert "observed_retry_cover = coalesce_covered_ranges(" in content
+    assert "V2/V4 retry ranges do not exactly reconstruct " in content
+    assert "V2/V4 retry job accounting changed under " in content
+    assert '"exact_range_reconstruction": True' in content
+    assert '"prior_retry_accounting": prior_retry_accounting' in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
     prior_coverage_block = content.split(
         "Discover reusable prior V2/V4 gap coverage",

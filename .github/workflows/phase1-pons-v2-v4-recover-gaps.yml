@@ -698,6 +698,7 @@ jobs:
               return successful
 
           coverage = []
+          generation_plans = []
           ignored_non_success_artifacts = 0
           seen_runs = set()
           depth = 0
@@ -787,6 +788,7 @@ jobs:
                       )
                   observed[gap_id] = row
 
+              reusable_gap_ids = []
               for gap_id, row in observed.items():
                   if gap_id not in planned:
                       raise SystemExit(
@@ -797,6 +799,7 @@ jobs:
                       ignored_non_success_artifacts += 1
                       continue
                   bounds = planned[gap_id]
+                  reusable_gap_ids.append(gap_id)
                   coverage.append({
                       "run_id": cursor,
                       "artifact_id": int(row["id"]),
@@ -807,6 +810,45 @@ jobs:
                   })
 
               parent = plan.get("prior_gap_run_id")
+              generation_plans.append({
+                  "run_id": cursor,
+                  "prior_gap_run_id": (
+                      int(parent)
+                      if parent not in {None, "", 0}
+                      else None
+                  ),
+                  "max_gap_blocks": int(plan["max_gap_blocks"]),
+                  "planned_gap_count": len(planned),
+                  "planned_ranges": [
+                      {
+                          "gap_id": gap_id,
+                          "from_block": bounds[0],
+                          "to_block": bounds[1],
+                      }
+                      for gap_id, bounds in planned.items()
+                  ],
+                  "reusable_gap_ids": sorted(
+                      reusable_gap_ids,
+                      key=int,
+                  ),
+                  "reusable_ranges": [
+                      {
+                          "gap_id": row["gap_id"],
+                          "from_block": int(row["from_block"]),
+                          "to_block": int(row["to_block"]),
+                      }
+                      for row in coverage
+                      if int(row["run_id"]) == cursor
+                  ],
+                  "successful_jobs_missing_artifacts": sorted(
+                      successful_gap_ids - set(observed),
+                      key=int,
+                  ),
+                  "non_success_gap_artifacts": sorted(
+                      set(observed) - successful_gap_ids,
+                      key=int,
+                  ),
+              })
               cursor = (
                   int(parent)
                   if parent not in {None, "", 0}
@@ -815,6 +857,16 @@ jobs:
 
           Path("source-metadata/v2-v4-prior-gap-coverage.json").write_text(
               json.dumps(coverage, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "source-metadata/v2-v4-prior-gap-generations.json"
+          ).write_text(
+              json.dumps(
+                  generation_plans,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
           )
           print(json.dumps({
               "prior_gap_generations": depth,
@@ -858,6 +910,11 @@ jobs:
           )
           prior_gap_rows = json.loads(
               Path("source-metadata/v2-v4-prior-gap-coverage.json").read_text()
+          )
+          prior_gap_generations = json.loads(
+              Path(
+                  "source-metadata/v2-v4-prior-gap-generations.json"
+              ).read_text()
           )
           if not source_rows and not prior_gap_rows:
               proof_path = Path(
@@ -931,6 +988,88 @@ jobs:
               covered,
               max_blocks=max_blocks,
           )
+
+          prior_retry_accounting = None
+          immediate_prior_id = int(
+              "${{ inputs.prior_gap_run_id }}" or 0
+          )
+          if immediate_prior_id:
+              immediate_rows = [
+                  row
+                  for row in prior_gap_generations
+                  if int(row["run_id"]) == immediate_prior_id
+              ]
+              if len(immediate_rows) != 1:
+                  raise SystemExit(
+                      "V2/V4 immediate prior generation metadata "
+                      "identity is ambiguous"
+                  )
+              immediate = immediate_rows[0]
+              prior_planned_ranges = [
+                  (
+                      int(row["from_block"]),
+                      int(row["to_block"]),
+                  )
+                  for row in immediate["planned_ranges"]
+              ]
+              prior_reusable_ranges = [
+                  (
+                      int(row["from_block"]),
+                      int(row["to_block"]),
+                  )
+                  for row in immediate["reusable_ranges"]
+              ]
+              expected_retry_cover = coalesce_covered_ranges(
+                  start,
+                  head,
+                  prior_planned_ranges,
+              )
+              observed_retry_cover = coalesce_covered_ranges(
+                  start,
+                  head,
+                  [*prior_reusable_ranges, *gaps],
+              )
+              if observed_retry_cover != expected_retry_cover:
+                  raise SystemExit(
+                      "V2/V4 retry ranges do not exactly reconstruct "
+                      "the immediate prior gap plan"
+                  )
+              prior_max_blocks = int(
+                  immediate["max_gap_blocks"]
+              )
+              if max_blocks == prior_max_blocks:
+                  expected_count = int(
+                      immediate["planned_gap_count"]
+                  )
+                  observed_count = (
+                      len(prior_reusable_ranges) + len(gaps)
+                  )
+                  if observed_count != expected_count:
+                      raise SystemExit(
+                          "V2/V4 retry job accounting changed under "
+                          "the same max_gap_blocks"
+                      )
+              prior_retry_accounting = {
+                  "run_id": immediate_prior_id,
+                  "prior_max_gap_blocks": prior_max_blocks,
+                  "prior_planned_gap_count": int(
+                      immediate["planned_gap_count"]
+                  ),
+                  "reusable_gap_count": len(
+                      prior_reusable_ranges
+                  ),
+                  "retry_gap_count": len(gaps),
+                  "successful_jobs_missing_artifacts": (
+                      immediate[
+                          "successful_jobs_missing_artifacts"
+                      ]
+                  ),
+                  "non_success_gap_artifacts": (
+                      immediate["non_success_gap_artifacts"]
+                  ),
+                  "exact_range_reconstruction": True,
+              }
+
           if len(gaps) > 960:
               raise SystemExit(
                   "V4 gap plan exceeds four serialized 240-job waves"
@@ -958,6 +1097,7 @@ jobs:
               ),
               "max_gap_blocks": max_blocks,
               "successful_sources": sources,
+              "prior_retry_accounting": prior_retry_accounting,
               "gap_jobs": include,
               "gap_job_count": len(include),
               "gap_wave_job_counts": [
