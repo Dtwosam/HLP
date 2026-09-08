@@ -519,6 +519,21 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify frozen V2 transition input" in content
+    assert "V2 transition run ID changed: " in content
+    assert "V2 transition run is not successful" in content
+    assert "V2 transition workflow path changed" in content
+    assert "V2 transition branch changed" in content
+    assert "V2 transition launch commit changed" in content
+    assert "V2 transition artifact identity is ambiguous" in content
+    assert "V2 transition manifest identity is ambiguous" in content
+    assert "V2 transition manifest changed: " in content
+    assert "33912452330" in content
+    assert "phase1-pons-v2-transition-full.yml" in content
+    assert "7ce5eac5c1980e8618173e1a8ff0effb06ecb327" in content
+    assert "pons-v2-registrations-full.jsonl.manifest.json" in content
+    assert "8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93" in content
+    assert "3_638" in content
     assert content.count("Download every original V2/V4 shard artifact") == 1
     assert content.count("Discover original V2/V4 shard coverage") == 1
     assert "indexed_shard_bounds" in content
@@ -599,7 +614,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert "pattern: phase1-pons-v2-v4-gap-*" not in content
     assert "pattern: phase1-pons-v2-v4-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 4
+    assert content.count("fetch_github_actions_artifact_zip(") == 5
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
@@ -796,6 +811,21 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V1 V3 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
+    assert "Verify frozen V1 registry input" in content
+    assert "V1 registry run ID changed: " in content
+    assert "V1 registry run is not successful" in content
+    assert "V1 registry workflow path changed" in content
+    assert "V1 registry branch changed" in content
+    assert "V1 registry launch commit changed" in content
+    assert "V1 registry artifact identity is ambiguous" in content
+    assert "V1 registry manifest identity is ambiguous" in content
+    assert "V1 registry manifest changed: " in content
+    assert "33911022718" in content
+    assert "phase1-pons-v1-registry-recovery.yml" in content
+    assert "6506e15224b83b12cfd85b607d3fdb55a0d3b026" in content
+    assert "pons-full-launch-registry.jsonl.manifest.json" in content
+    assert "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed" in content
+    assert "494_639" in content
     assert content.count("Download every original V1/V3 shard artifact") == 1
     assert content.count("Discover original V1/V3 shard coverage") == 1
     assert "indexed_shard_bounds" in content
@@ -857,7 +887,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'Path("prior-gaps").rglob("v1-v3-events-gap-*.jsonl")' in content
     assert "pattern: phase1-pons-v1-v3-gap-*" not in content
     assert "pattern: phase1-pons-v1-v3-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 4
+    assert content.count("fetch_github_actions_artifact_zip(") == 5
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
