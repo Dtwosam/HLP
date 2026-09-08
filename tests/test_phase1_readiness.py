@@ -683,6 +683,39 @@ def test_readiness_waits_for_other_active_venue_before_launching():
     assert report["next_action"] == "wait_for_active_venue_rescue"
 
 
+def test_readiness_waits_before_completion_when_rescue_is_active():
+    artifacts = [
+        name
+        for name in SOURCE_REQUIRED_ARTIFACTS
+        if name != "phase1-pons-v1-v3-full"
+    ]
+    recovered_v1 = _run(
+        700,
+        name="phase1-pons-live-venue-rescue-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-live-venue-rescue-one-shot.yml"
+        ),
+        artifacts=["phase1-pons-v1-v3-full"],
+    )
+
+    report = _report(
+        source_run=_source(
+            status="completed",
+            conclusion="failure",
+            artifacts=artifacts,
+        ),
+        recovery_runs={"v1_v3": recovered_v1, "v2_v4": None},
+        active_recovery_run_ids={"v1_v3": 900, "v2_v4": 0},
+    )
+
+    assert report["source_recovery_plan"]["recommended_v1_v3_run_id"] == 700
+    assert report["source_recovery_plan"]["recommended_v2_v4_run_id"] == (
+        SOURCE_ELIGIBILITY_RUN_ID
+    )
+    assert report["next_action"] == "wait_for_active_venue_rescue"
+
+
 def test_readiness_rejects_unknown_active_recovery_venue():
     with pytest.raises(
         ValueError,
