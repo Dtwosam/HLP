@@ -112,6 +112,16 @@ def test_rpc_counts_transport_attempts():
     )
     assert rpc.chain_id() == 4663
     assert rpc.requests_made == 1
+    request_body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": [],
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert rpc.request_bytes_sent == len(request_body)
     expected = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "result": hex(4663)}
     ).encode()
@@ -141,6 +151,16 @@ def test_rpc_retries_incomplete_http_body():
 
     assert rpc.chain_id() == 4663
     assert rpc.requests_made == 2
+    request_body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": [],
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert rpc.request_bytes_sent == 2 * len(request_body)
     assert calls == 2
 
 

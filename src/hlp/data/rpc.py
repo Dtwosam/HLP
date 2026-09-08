@@ -45,6 +45,7 @@ class RpcClient:
     transport: Callable[[urllib.request.Request, float], bytes] | None = None
     route_label: str = "unclassified"
     requests_made: int = field(default=0, init=False)
+    request_bytes_sent: int = field(default=0, init=False)
     response_bytes_received: int = field(default=0, init=False)
     _last_request_at: float | None = field(default=None, init=False, repr=False)
 
@@ -95,6 +96,7 @@ class RpcClient:
             try:
                 self._pace()
                 self.requests_made += 1
+                self.request_bytes_sent += len(body)
                 response_bytes = self._post(request, self.timeout)
                 self.response_bytes_received += len(response_bytes)
                 payload = json.loads(response_bytes)
@@ -164,6 +166,7 @@ class RpcClient:
             try:
                 self._pace()
                 self.requests_made += 1
+                self.request_bytes_sent += len(body)
                 response_bytes = self._post(request, self.timeout)
                 self.response_bytes_received += len(response_bytes)
                 payload = json.loads(response_bytes)
