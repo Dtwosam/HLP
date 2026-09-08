@@ -947,6 +947,9 @@ expected artifact count. Reused and current gap plans are now structurally
 validated before those bindings are trusted: `gap_job_count`, `gap_blocks`,
 `gap_wave_job_counts`, sequential zero-padded IDs, per-job bounds, max-gap size,
 strict ordering/non-overlap and the four-wave 240-job capacity must all agree.
+Each freshly generated recovery plan now runs through that validator before its
+matrix outputs are emitted, so malformed planning fails before any archive RPC
+job can start.
 The live V2 generation-2 plan passes this validator at its full **553-job**
 `240 / 240 / 73 / 0` scale. The same structural validator now runs again when
 readiness considers a recovered venue canonical and when recovered completion
