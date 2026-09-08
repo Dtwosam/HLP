@@ -554,6 +554,7 @@ jobs:
               if venue == "v1_v3":
                   plan_artifact = "phase1-pons-v1-v3-gap-plan"
                   plan_name = "v1-v3-gap-plan.json"
+                  gap_artifact_prefix = "phase1-pons-v1-v3-gap-"
                   gap_artifact_pattern = re.compile(
                       r"^phase1-pons-v1-v3-gap-(\d{3})$"
                   )
@@ -561,6 +562,7 @@ jobs:
               elif venue == "v2_v4":
                   plan_artifact = "phase1-pons-v2-v4-gap-plan"
                   plan_name = "v4-gap-plan.json"
+                  gap_artifact_prefix = "phase1-pons-v2-v4-gap-"
                   gap_artifact_pattern = re.compile(
                       r"^phase1-pons-v2-v4-gap-(\d{3})$"
                   )
@@ -723,9 +725,7 @@ jobs:
                   match = gap_artifact_pattern.fullmatch(name)
                   if match:
                       observed_artifact_ids.add(match.group(1))
-                  elif name.startswith(
-                      gap_artifact_pattern.pattern.split("(\\d{3})", 1)[0][1:]
-                  ):
+                  elif name.startswith(gap_artifact_prefix):
                       malformed_gap_artifacts.append(name)
 
               missing_success_artifacts = sorted(
