@@ -1017,7 +1017,10 @@ A retry after the active generation can therefore reuse completed gaps and
 reach merge without re-fetching them. The pinned rescue launcher now considers
 a prior run reusable only when it exposes the bound plan plus at least one
 **numeric** gap artifact matching the target venue's exact `...-gap-<id>`
-contract; prefix-only lookalikes no longer qualify as prior lineage.
+contract; prefix-only lookalikes no longer qualify as prior lineage. Candidate
+terminal rescues are explicitly sorted newest-first by run ID before reuse, so
+a retry cannot silently fall back to an older generation merely because API
+ordering changes.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
