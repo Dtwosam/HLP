@@ -1986,7 +1986,18 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "successful_repair_gap_ids" in content
     assert "live venue rescue job pagination exceeded 1000" in content
     assert 'str(row.get("conclusion") or "") == "success"' in content
-    assert "match.group(1) in successful_gap_ids" in content
+    assert "artifact_gap_ids = set()" in content
+    assert "reusable_gap_ids = sorted(" in content
+    assert "successful_gap_ids & artifact_gap_ids" in content
+    assert "successful_gap_ids - artifact_gap_ids" in content
+    assert "artifact_gap_ids - successful_gap_ids" in content
+    assert '"reusable_gap_count": len(reusable_gap_ids)' in content
+    assert '"missing_success_artifacts"' in content
+    assert '"non_success_gap_artifacts"' in content
+    assert "prior_reusable_gap_count=" in content
+    assert "prior_missing_success_artifacts=" in content
+    assert "prior_non_success_gap_artifacts=" in content
+    assert "Venue rescue terminal preflight" in content
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
     assert '"live venue rescue is unnecessary because prior "' in content
@@ -2008,7 +2019,11 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     ) == 2
     assert 'prior_gap_run_id: ""' not in content
     assert "steps.guard.outputs.prior_gap_run_id" in content
+    assert "steps.guard.outputs.prior_reusable_gap_count" in content
+    assert "steps.guard.outputs.prior_missing_success_artifacts" in content
+    assert "steps.guard.outputs.prior_non_success_gap_artifacts" in content
     assert "GITHUB_OUTPUT" in content
+    assert "GITHUB_STEP_SUMMARY" in content
     assert "CURRENT_RUN_ID: ${{ github.run_id }}" in content
     assert "BRANCH: ${{ github.ref_name }}" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml" in content

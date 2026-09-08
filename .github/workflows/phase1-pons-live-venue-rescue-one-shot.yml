@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       prior_gap_run_id: ${{ steps.guard.outputs.prior_gap_run_id }}
+      prior_reusable_gap_count: ${{ steps.guard.outputs.prior_reusable_gap_count }}
+      prior_missing_success_artifacts: ${{ steps.guard.outputs.prior_missing_success_artifacts }}
+      prior_non_success_gap_artifacts: ${{ steps.guard.outputs.prior_non_success_gap_artifacts }}
     steps:
       - id: guard
         name: Refuse rescue while frozen parent is active or already complete
@@ -199,6 +202,11 @@ jobs:
               reverse=True,
           )
           prior_gap_run_id = ""
+          prior_gap_diagnostics = {
+              "reusable_gap_count": 0,
+              "missing_success_artifacts": [],
+              "non_success_gap_artifacts": [],
+          }
           for candidate in terminal_target_runs:
               candidate_artifacts = artifacts(candidate["id"])
               if (
@@ -214,18 +222,36 @@ jobs:
               successful_gap_ids = successful_repair_gap_ids(
                   candidate["id"]
               )
-              has_plan = prior_plan_artifact in candidate_artifacts
-              has_gap = False
+              artifact_gap_ids = set()
               for name in candidate_artifacts:
                   match = prior_gap_pattern.fullmatch(name)
-                  if (
-                      match is not None
-                      and match.group(1) in successful_gap_ids
-                  ):
-                      has_gap = True
-                      break
+                  if match is not None:
+                      artifact_gap_ids.add(match.group(1))
+              reusable_gap_ids = sorted(
+                  successful_gap_ids & artifact_gap_ids,
+                  key=int,
+              )
+              missing_success_artifacts = sorted(
+                  successful_gap_ids - artifact_gap_ids,
+                  key=int,
+              )
+              non_success_gap_artifacts = sorted(
+                  artifact_gap_ids - successful_gap_ids,
+                  key=int,
+              )
+              has_plan = prior_plan_artifact in candidate_artifacts
+              has_gap = bool(reusable_gap_ids)
               if not prior_gap_run_id and has_plan and has_gap:
                   prior_gap_run_id = str(candidate["id"])
+                  prior_gap_diagnostics = {
+                      "reusable_gap_count": len(reusable_gap_ids),
+                      "missing_success_artifacts": (
+                          missing_success_artifacts[:20]
+                      ),
+                      "non_success_gap_artifacts": (
+                          non_success_gap_artifacts[:20]
+                      ),
+                  }
 
           requested_artifacts = {requested_artifact}
 
@@ -262,10 +288,48 @@ jobs:
               ),
               "active_sibling_rescues": active_siblings,
               "prior_gap_run_id": prior_gap_run_id,
+              "prior_gap_diagnostics": prior_gap_diagnostics,
               "preflight": "pass",
           }, sort_keys=True))
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"prior_gap_run_id={prior_gap_run_id}\n")
+              handle.write(
+                  "prior_reusable_gap_count="
+                  f"{prior_gap_diagnostics['reusable_gap_count']}\n"
+              )
+              handle.write(
+                  "prior_missing_success_artifacts="
+                  + json.dumps(
+                      prior_gap_diagnostics[
+                          "missing_success_artifacts"
+                      ],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "prior_non_success_gap_artifacts="
+                  + json.dumps(
+                      prior_gap_diagnostics[
+                          "non_success_gap_artifacts"
+                      ],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(
+                  "### Venue rescue terminal preflight\n\n"
+                  f"- target: "
+                  f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
+                  f"- prior gap run: {prior_gap_run_id or 'none'}\n"
+                  f"- reusable successful gap artifacts: "
+                  f"{prior_gap_diagnostics['reusable_gap_count']}\n"
+                  f"- successful jobs missing artifacts: "
+                  f"{prior_gap_diagnostics['missing_success_artifacts']}\n"
+                  f"- non-success gap artifacts ignored: "
+                  f"{prior_gap_diagnostics['non_success_gap_artifacts']}\n"
+              )
           PY
 
   v1_v3_rescue:
