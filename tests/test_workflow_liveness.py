@@ -1567,6 +1567,13 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "workflow_dispatch:" not in trigger_block
     assert "launch V1 V3 rescue" in content
     assert "launch V2 V4 rescue" in content
+    assert content.count(
+        "startsWith(github.event.head_commit.message, 'launch V1 V3 rescue')"
+    ) == 3
+    assert content.count(
+        "startsWith(github.event.head_commit.message, 'launch V2 V4 rescue')"
+    ) == 3
+    assert "contains(github.event.head_commit.message, 'launch V" not in content
     assert "live venue rescue is blocked while source parent is active" in content
     assert "live venue rescue is unnecessary for complete source " in content
     assert "requested_artifacts" in content
@@ -1826,7 +1833,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"active_run": None' in content
     assert '"launch V1 V3 rescue"' in content
     assert '"launch V2 V4 rescue"' in content
-    assert "if launch_marker not in display_title:" in content
+    assert "if not display_title.startswith(" in content
+    assert "launch_marker" in content
     assert 'row.get("display_title") or ""' in content
     assert '"display_title": display_title' in content
     assert 'diagnostics["active_run"] is None' in content
