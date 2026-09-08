@@ -891,7 +891,10 @@ therefore be retried with `prior_gap_run_id` without re-fetching those blocks
 or failing on duplicate coverage. The V2/V4 gap workflow uses the same
 paginated discovery, overlap coalescing and exact-cover merge, preventing both
 the 300-artifact truncation class and the follow-on overlap class when V2
-recovery is eventually armed. Cross-run artifact ZIP reads
+recovery is eventually armed. Both venue merges now also verify every selected
+shard's manifest filename, record count and exact SHA-256 of the shard bytes
+before composing the aggregate tape, so corrupted or mismatched artifacts fail
+closed rather than being trusted from sidecar metadata alone. Cross-run artifact ZIP reads
 in both venue recovery workflows and recovered completion now use the shared
 safe GitHub Actions downloader: the GitHub API request carries auth, but the
 redirected blob-storage request deliberately does not. Recursive prior-gap
