@@ -1048,8 +1048,14 @@ reasons such as missing canonical artifact, invalid manifest, invalid lineage
 or workflow-path mismatch. When a canonical rescue is still nonterminal, the
 same diagnostics capture its run ID, status and paginated job-state counts, plus
 per-wave `recover_1` through `recover_4` state counts when matrix jobs are
-materialized. Long serialized V2/V4 rescues can therefore show exactly which
-wave is advancing without any archive RPC or runner-side polling.
+materialized. Active and terminal diagnostics now also reopen the bound gap
+plan and reconcile those matrix jobs against its expected wave counts, exposing
+planned/materialized/successful/failed/remaining repairs, current wave,
+percentage progress and any over-materialized or unexpected-wave drift.
+Non-matrix skipped placeholders are excluded from wave accounting. Long
+serialized V2/V4 rescues can therefore report progress against the exact
+**553-job** denominator instead of relying on whichever jobs GitHub has
+materialized so far, without any archive RPC or runner-side polling.
 The latest terminal target-matched rescue is also recorded with conclusion,
 paginated job-state counts and up to 20 failed/cancelled/timed-out problem job
 IDs and names. Discovery uses the same launch-prefix contract, so an active
