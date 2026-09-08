@@ -496,6 +496,38 @@ jobs:
                   artifact,
                   manifest_name,
               )
+              expected_data_name = manifest_name.removesuffix(
+                  ".manifest.json"
+              )
+              try:
+                  manifest_records = int(manifest.get("records", -1))
+              except (TypeError, ValueError):
+                  raise SystemExit(
+                      "recovery venue manifest record count is invalid: "
+                      f"run={run_id}"
+                  )
+              manifest_digest = str(manifest.get("sha256") or "")
+              if manifest.get("path") != expected_data_name:
+                  raise SystemExit(
+                      "recovery venue manifest path changed: "
+                      f"run={run_id}"
+                  )
+              if manifest_records < 0:
+                  raise SystemExit(
+                      "recovery venue manifest record count is invalid: "
+                      f"run={run_id}"
+                  )
+              if (
+                  len(manifest_digest) != 64
+                  or any(
+                      char not in "0123456789abcdef"
+                      for char in manifest_digest
+                  )
+              ):
+                  raise SystemExit(
+                      "recovery venue manifest SHA-256 is invalid: "
+                      f"run={run_id}"
+                  )
               provenance = dict(manifest.get("provenance") or {})
               if provenance.get("source") != expected_source:
                   raise SystemExit(
