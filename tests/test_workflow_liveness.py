@@ -88,6 +88,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-final-acceptance-chain.yml",
         "phase1-pons-acceptance-gate.yml",
         "phase1-pons-readiness-audit.yml",
+        "phase1-pons-v2-v4-filter-comparison.yml",
     )
     for name in critical:
         blocks = _embedded_python_blocks(_workflow(name))
@@ -311,6 +312,7 @@ NETWORK_SMOKE_WORKFLOWS = {
     "phase1-pons-representative-dex-crosscheck.yml",
     "phase1-blockscout-transaction-smoke.yml",
     "phase1-blockscout-v2-smoke.yml",
+    "phase1-pons-v2-v4-filter-comparison.yml",
 }
 
 
@@ -341,6 +343,32 @@ def test_blockscout_transaction_smoke_is_bounded_and_identity_checked():
     assert "Blockscout transaction hash does not match Robinhood RPC" in content
     assert "Blockscout transaction block does not match Robinhood RPC" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "time.sleep(" not in content
+
+
+def test_v2_v4_filter_comparison_is_manual_bounded_and_guarded():
+    content = _workflow("phase1-pons-v2-v4-filter-comparison.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "\n  push:" not in trigger_block
+    assert "\n  workflow_call:" not in trigger_block
+    assert "confirm_comparison" in content
+    assert "V2/V4 filter comparison exceeds 5000-block ceiling" in content
+    assert "blocked while a live venue rescue is active" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
+    assert 'TRANSITION_RUN_ID: \'33912452330\'' in content
+    assert content.count("rpc-v2-v4-tape") == 2
+    assert content.count("--global-pool-scan") == 1
+    assert content.count("--chunk-size 2000") == 2
+    assert '"request_bytes_sent"' in content
+    assert '"response_bytes_received"' in content
+    assert '"exact_data_match": exact_match' in content
+    assert '"server_side_unsupported"' in content
+    assert '"equivalent"' in content
+    assert '"mismatch"' in content
+    assert "digest(global_data) == digest(server_data)" in content
+    assert "if: ${{ always() }}" in content
+    assert "Fail closed on canonical mismatch" in content
     assert "time.sleep(" not in content
 
 
