@@ -2033,6 +2033,14 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "live venue rescue generation is not monotonic: " in content
     assert '"requested_generation": requested_generation' in content
     assert '"expected_generation": expected_generation' in content
+    assert "rescue_v2 and requested_generation == 3" in content
+    assert "expected_prior_run_id = 34_234_471_190" in content
+    assert "0e146b6f46491caab81f00a241fd29611a252c4c" in content
+    assert "launch V2 V4 rescue generation 2" in content
+    assert "V2/V4 generation 3 pinned prior run is unavailable" in content
+    assert "V2/V4 generation 3 prior launch SHA changed" in content
+    assert "V2/V4 generation 3 prior launch title changed" in content
+    assert "V2/V4 generation 3 must reuse pinned generation 2 run" in content
     assert '"live venue rescue is unnecessary because prior "' in content
     assert '"successful canonical rescue is complete: "' in content
     assert 'str(candidate.get("conclusion") or "") == "success"' in content

@@ -292,6 +292,41 @@ jobs:
                       ),
                   }
 
+          if rescue_v2 and requested_generation == 3:
+              expected_prior_run_id = 34_234_471_190
+              expected_prior_head_sha = (
+                  "0e146b6f46491caab81f00a241fd29611a252c4c"
+              )
+              expected_prior_title = (
+                  "launch V2 V4 rescue generation 2"
+              )
+              pinned_prior_rows = [
+                  row
+                  for row in terminal_target_runs
+                  if int(row["id"]) == expected_prior_run_id
+              ]
+              if len(pinned_prior_rows) != 1:
+                  raise SystemExit(
+                      "V2/V4 generation 3 pinned prior run is unavailable"
+                  )
+              pinned_prior = pinned_prior_rows[0]
+              if str(pinned_prior.get("head_sha") or "") != (
+                  expected_prior_head_sha
+              ):
+                  raise SystemExit(
+                      "V2/V4 generation 3 prior launch SHA changed"
+                  )
+              if str(pinned_prior.get("display_title") or "") != (
+                  expected_prior_title
+              ):
+                  raise SystemExit(
+                      "V2/V4 generation 3 prior launch title changed"
+                  )
+              if prior_gap_run_id != str(expected_prior_run_id):
+                  raise SystemExit(
+                      "V2/V4 generation 3 must reuse pinned generation 2 run"
+                  )
+
           requested_artifacts = {requested_artifact}
 
           source_artifacts = artifacts(run_id)
