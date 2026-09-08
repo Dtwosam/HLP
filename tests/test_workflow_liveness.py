@@ -1139,6 +1139,13 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "required: false" in call_block
     assert "max_blocks must be between 1 and 200000" in content
     assert "representative transfer plan exceeds four serialized " in content
+    assert '"sample_sha256": sample_sha256' in content
+    assert '"token_set_sha256": token_set_sha256' in content
+    assert "prior transfer shard sample identity mismatch" in content
+    assert "prior transfer shard token-set identity mismatch" in content
+    assert "representative transfer shard sample identity " in content
+    assert "representative transfer shard token-set identity " in content
+    assert "representative transfer merge requires exactly 10 " in content
     assert content.count("max-parallel: 2") == 4
     assert content.count("timeout-minutes: 30") == 4
     assert content.count("timeout-minutes: 45") == 1
