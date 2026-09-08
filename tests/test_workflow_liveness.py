@@ -1846,7 +1846,9 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert 'row.get("display_title") or ""' in content
     assert '"display_title": display_title' in content
     assert 'diagnostics["active_run"] is None' in content
-    assert '"job_counts": job_counts(active_run_id)' in content
+    assert "active_jobs = job_diagnostics(active_run_id)" in content
+    assert '"**active_jobs"' not in content
+    assert "**active_jobs" in content
     assert "Active rescue {active_run.get('run_id', 0)}" in content
     assert '"rejection_counts": {}' in content
     assert '"rejected_candidates": []' in content
