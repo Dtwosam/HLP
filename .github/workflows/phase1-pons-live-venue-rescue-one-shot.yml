@@ -33,6 +33,8 @@ jobs:
           RESCUE_V2: ${{ startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
           LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
           VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
         run: |
           python - <<'PY'
           import json
@@ -190,7 +192,7 @@ jobs:
           generation_pattern = re.compile(
               "^"
               + re.escape(launch_marker)
-              + r" generation (\d+)(?:\b|$)"
+              + r" generation (\d+)$"
           )
           launch_message = str(
               os.environ["LAUNCH_MESSAGE"]
@@ -209,6 +211,95 @@ jobs:
           validation_generation = int(
               os.environ["VALIDATION_GENERATION"]
           )
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit(
+                  "live venue rescue before SHA is invalid"
+              )
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit(
+                  "live venue rescue current SHA is invalid"
+              )
+
+          launch_commit = get(
+              f"/repos/{repo}/commits/{current_sha}"
+          )
+          parents = list(launch_commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "live venue rescue launch must be a direct "
+                  "single-parent commit"
+              )
+          launch_files = list(launch_commit.get("files") or [])
+          if len(launch_files) != 1:
+              raise SystemExit(
+                  "live venue rescue launch commit must change "
+                  "exactly one file"
+              )
+          launch_file = launch_files[0]
+          expected_launch_file = (
+              ".github/workflows/"
+              "phase1-pons-live-venue-rescue-one-shot.yml"
+          )
+          if str(launch_file.get("filename") or "") != (
+              expected_launch_file
+          ):
+              raise SystemExit(
+                  "live venue rescue launch commit changed the "
+                  "wrong file"
+              )
+          if str(launch_file.get("status") or "") != "modified":
+              raise SystemExit(
+                  "live venue rescue launch wrapper status changed"
+              )
+          patch = str(launch_file.get("patch") or "")
+          changed_lines = [
+              line
+              for line in patch.splitlines()
+              if line.startswith(("+", "-"))
+          ]
+          marker_pattern = re.compile(
+              r"^([+-])  LAUNCH_VALIDATION_GENERATION: '(\d+)'$"
+          )
+          marker_changes = []
+          for line in changed_lines:
+              match = marker_pattern.fullmatch(line)
+              if match is None:
+                  raise SystemExit(
+                      "live venue rescue launch commit contains "
+                      "non-marker changes"
+                  )
+              marker_changes.append(
+                  (match.group(1), int(match.group(2)))
+              )
+          if (
+              len(marker_changes) != 2
+              or marker_changes[0][0] != "-"
+              or marker_changes[1][0] != "+"
+          ):
+              raise SystemExit(
+                  "live venue rescue launch marker diff changed"
+              )
+          old_validation_generation = marker_changes[0][1]
+          new_validation_generation = marker_changes[1][1]
+          if (
+              new_validation_generation
+              != old_validation_generation + 1
+          ):
+              raise SystemExit(
+                  "live venue rescue launch marker must increment "
+                  "by exactly one"
+              )
+          if new_validation_generation != validation_generation:
+              raise SystemExit(
+                  "live venue rescue launch marker does not match "
+                  "workflow validation generation"
+              )
+
           if rescue_v2:
               expected_validation_generation = (
                   requested_generation + 7
@@ -621,6 +712,10 @@ jobs:
               "requested_generation": requested_generation,
               "expected_generation": expected_generation,
               "validation_generation": validation_generation,
+              "launch_commit_sha": current_sha,
+              "launch_parent_sha": before_sha,
+              "launch_marker_from": old_validation_generation,
+              "launch_marker_to": new_validation_generation,
               "preflight": "pass",
           }, sort_keys=True))
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:

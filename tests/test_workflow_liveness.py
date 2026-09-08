@@ -2049,9 +2049,33 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "requested_generation + 7" in content
     assert "V2/V4 rescue validation generation changed: " in content
     assert '"validation_generation": validation_generation' in content
+    assert "BEFORE_SHA: ${{ github.event.before }}" in content
+    assert "CURRENT_SHA: ${{ github.sha }}" in content
+    assert 're.fullmatch(r"[0-9a-f]{40}", before_sha)' in content
+    assert 're.fullmatch(r"[0-9a-f]{40}", current_sha)' in content
+    assert 'f"/repos/{repo}/commits/{current_sha}"' in content
+    assert "launch must be a direct " in content
+    assert "launch commit must change " in content
+    assert "exactly one file" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
+    assert "launch commit changed the " in content
+    assert "launch wrapper status changed" in content
+    assert "changed_lines = [" in content
+    assert "LAUNCH_VALIDATION_GENERATION: '(\\d+)'" in content
+    assert "launch commit contains " in content
+    assert "non-marker changes" in content
+    assert "launch marker diff changed" in content
+    assert "launch marker must increment " in content
+    assert "by exactly one" in content
+    assert "launch marker does not match " in content
+    assert '"launch_commit_sha": current_sha' in content
+    assert '"launch_parent_sha": before_sha' in content
+    assert '"launch_marker_from": old_validation_generation' in content
+    assert '"launch_marker_to": new_validation_generation' in content
     assert "# validation-generation:" not in content
     assert "generation_pattern = re.compile(" in content
-    assert 'r" generation (\\d+)(?:\\b|$)"' in content
+    assert 'r" generation (\\d+)$"' in content
+    assert 'r" generation (\\d+)(?:\\b|$)"' not in content
     assert "launch requires an explicit " in content
     assert "terminal_generations = []" in content
     assert "max(terminal_generations, default=0) + 1" in content
