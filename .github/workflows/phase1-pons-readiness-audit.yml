@@ -166,15 +166,22 @@ jobs:
                   + f"{int(matches[0]['id'])}/zip",
                   token,
               )
-              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-                  names = [
-                      name
-                      for name in archive.namelist()
-                      if name.rsplit("/", 1)[-1] == filename
-                  ]
-                  if len(names) != 1:
-                      return None
-                  return json.loads(archive.read(names[0]))
+              try:
+                  with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                      names = [
+                          name
+                          for name in archive.namelist()
+                          if name.rsplit("/", 1)[-1] == filename
+                      ]
+                      if len(names) != 1:
+                          return None
+                      return json.loads(archive.read(names[0]))
+              except (
+                  zipfile.BadZipFile,
+                  json.JSONDecodeError,
+                  UnicodeDecodeError,
+              ):
+                  return None
 
           def recovery_manifest_valid(venue, run_id):
               if venue == "v1_v3":
@@ -201,20 +208,25 @@ jobs:
               )
               if not isinstance(manifest, dict):
                   return False
-              provenance = dict(manifest.get("provenance") or {})
-              return bool(
-                  provenance.get("source") == expected_source
-                  and int(provenance.get("chain_id", 0)) == 4663
-                  and int(
-                      provenance.get("snapshot_head_block", 0)
-                  ) == 54_486_035
-                  and int(
-                      provenance.get("partial_run_id", 0)
-                  ) == 33_982_556_591
-                  and int(
-                      provenance.get(upstream_field, 0)
-                  ) == upstream_run_id
-              )
+              if not isinstance(manifest.get("provenance"), dict):
+                  return False
+              provenance = dict(manifest["provenance"])
+              try:
+                  return bool(
+                      provenance.get("source") == expected_source
+                      and int(provenance.get("chain_id", 0)) == 4663
+                      and int(
+                          provenance.get("snapshot_head_block", 0)
+                      ) == 54_486_035
+                      and int(
+                          provenance.get("partial_run_id", 0)
+                      ) == 33_982_556_591
+                      and int(
+                          provenance.get(upstream_field, 0)
+                      ) == upstream_run_id
+                  )
+              except (TypeError, ValueError):
+                  return False
 
           def recovery_lineage_valid(venue, run_id):
               if venue == "v1_v3":
@@ -261,7 +273,9 @@ jobs:
               )
               if not isinstance(manifest, dict):
                   return False
-              provenance = dict(manifest.get("provenance") or {})
+              if not isinstance(manifest.get("provenance"), dict):
+                  return False
+              provenance = dict(manifest["provenance"])
               prior_gap = provenance.get("prior_gap_run_id")
               if prior_gap in {None, "", 0}:
                   return True
