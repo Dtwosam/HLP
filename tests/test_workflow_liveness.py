@@ -2175,6 +2175,8 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "generation_pattern = re.compile(" in content
     assert 'r" generation (\\d+)$"' in content
     assert 'r" generation (\\d+)(?:\\b|$)"' not in content
+    assert "generation_pattern.fullmatch(display_title)" in content
+    assert "display_title.startswith(launch_marker)" not in content
     assert "launch requires an explicit " in content
     assert "raw_launch_message = str(" in content
     assert "raw_launch_message != launch_message" in content
