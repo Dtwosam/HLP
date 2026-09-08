@@ -85,6 +85,10 @@ jobs:
 
           current_run_id = int(os.environ["CURRENT_RUN_ID"])
           branch = os.environ["BRANCH"]
+          if branch != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "live venue rescue launch branch changed"
+              )
           workflow_file = urllib.parse.quote(
               "phase1-pons-live-venue-rescue-one-shot.yml",
               safe="",
@@ -141,6 +145,12 @@ jobs:
               raise SystemExit("live venue rescue source workflow path changed")
           if run.get("head_branch") != "phase1/data-acquisition-spike":
               raise SystemExit("live venue rescue source branch changed")
+          if str(run.get("head_sha") or "") != (
+              "c53b3a63156976a5873752c332fa7578011249b0"
+          ):
+              raise SystemExit(
+                  "live venue rescue source launch commit changed"
+              )
 
           print(json.dumps({
               "source_run_id": run_id,
