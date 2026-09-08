@@ -2092,6 +2092,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     ) == 2
     assert "except (TypeError, ValueError):" in content
     assert "recovery_lineage_valid" in content
+    assert "validate_gap_plan_jobs" in content
+    assert content.count("validate_gap_plan_jobs(") == 2
     assert "phase1-pons-v1-v3-gap-plan" in content
     assert "v1-v3-gap-plan.json" in content
     assert "phase1-pons-v2-v4-gap-plan" in content
@@ -2235,6 +2237,10 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "recovery venue plan metadata is invalid" in content
     assert "recovery venue plan snapshot changed" in content
     assert "recovery venue plan start block changed" in content
+    assert "validate_gap_plan_jobs" in content
+    assert content.count("validate_gap_plan_jobs(") == 2
+    assert "recovery venue plan structure changed: " in content
+    assert "recovery venue prior plan structure changed: " in content
     assert "recovery venue prior lineage is invalid" in content
     assert "if prior_gap_id == 0:" in content
     assert content.index("current_plan = recovery_plan(") < content.index(
