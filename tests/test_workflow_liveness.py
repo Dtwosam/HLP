@@ -1185,7 +1185,8 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert content.count("fetch_github_actions_artifact_zip(") == 2
     assert 'CURRENT_RUN_ID: ${{ github.run_id }}' in content
     assert "prior representative transfer run has no shard artifacts" in content
-    assert "current representative transfer run has no shard artifacts" in content
+    assert 'f"{label} representative transfer run has no "' in content
+    assert '"shard artifacts"' in content
     assert content.count("max-parallel: 2") == 4
     assert content.count("timeout-minutes: 30") == 4
     assert content.count("timeout-minutes: 45") == 1
