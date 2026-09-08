@@ -1143,6 +1143,37 @@ jobs:
                               f"observed={observed_bounds} "
                               f"expected={expected_bounds}"
                           )
+                      if str(provenance.get("source") or "") != "evm_json_rpc":
+                          raise SystemExit(
+                              "V1/V3 merge gap source changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if int(provenance.get("chain_id", -1)) != 4663:
+                          raise SystemExit(
+                              "V1/V3 merge gap chain changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(provenance.get("protocol") or "") != (
+                          "uniswap_v3_shared_price_tape"
+                      ):
+                          raise SystemExit(
+                              "V1/V3 merge gap protocol changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(provenance.get("registry") or "") != (
+                          "pons-full-launch-registry.jsonl"
+                      ):
+                          raise SystemExit(
+                              "V1/V3 merge gap frozen input changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(
+                          provenance.get("pool_filter_mode") or ""
+                      ) != "global_topic_then_registry":
+                          raise SystemExit(
+                              "V1/V3 merge gap filter mode changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
                       for member in archive.infolist():
                           if member.is_dir():
                               continue
