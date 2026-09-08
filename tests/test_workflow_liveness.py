@@ -521,6 +521,13 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "frozen parent recovery is blocked while source is active" in content
     assert content.count("Download every original V2/V4 shard artifact") == 2
     assert "V2/V4 source artifact pagination exceeded 2000" in content
+    assert content.count(
+        r'name_pattern = re.compile(r"^phase1-pons-v2-v4-(\d+)$")'
+    ) == 2
+    assert (
+        r'name_pattern = re.compile(r"^phase1-pons-v2-v4-(\\d+)$")'
+        not in content
+    )
     assert "original_shard_artifacts" in content
     assert "duplicate V2/V4 shard file while downloading" in content
     assert "pattern: phase1-pons-v2-v4-*" not in content
@@ -723,6 +730,13 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "frozen parent recovery is blocked while source is active" in content
     assert content.count("Download every original V1/V3 shard artifact") == 2
     assert "V1/V3 source artifact pagination exceeded 2000" in content
+    assert content.count(
+        r'name_pattern = re.compile(r"^phase1-pons-v1-v3-(\d+)$")'
+    ) == 2
+    assert (
+        r'name_pattern = re.compile(r"^phase1-pons-v1-v3-(\\d+)$")'
+        not in content
+    )
     assert "original_shard_artifacts" in content
     assert "duplicate V1/V3 shard file while downloading" in content
     assert "pattern: phase1-pons-v1-v3-*" not in content
