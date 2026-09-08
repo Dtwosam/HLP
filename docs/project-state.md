@@ -882,8 +882,12 @@ because the launch commit's wildcard artifact download only surfaced the newest
 300 artifacts; the remaining 16 jobs cover the four real timeout regions.
 Current code now paginates every source artifact through the GitHub API for
 future V1/V3 retries, so later recovery generations cannot silently lose those
-oldest source shards. The already-running rescue remains valid and is left
-untouched rather than starting a competing archive crawl.
+oldest source shards. The V2/V4 gap workflow now uses the same exact paginated
+source-artifact enumeration in both planning and merge instead of its prior
+wildcard download, preventing the same 300-artifact truncation class from
+reappearing when V2 recovery is eventually armed. The already-running V1/V3
+rescue remains valid and is left untouched rather than starting a competing
+archive crawl.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
