@@ -507,6 +507,10 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "select_contiguous_cover" in content
     assert "candidate_source_files" in content
     assert "dropped_overlapping_source_files" in content
+    assert 'manifest.get("path") == path.name' in content
+    assert 'with path.open("rb") as handle:' in content
+    assert "local_digest = hashlib.sha256()" in content
+    assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v4-events-gap" in content
     assert "manifest_gap_aware_v4_recovery" in content
@@ -704,6 +708,10 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "select_contiguous_cover" in content
     assert "candidate_source_files" in content
     assert "dropped_overlapping_source_files" in content
+    assert 'manifest.get("path") == path.name' in content
+    assert 'with path.open("rb") as handle:' in content
+    assert "local_digest = hashlib.sha256()" in content
+    assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v1-v3-events-gap" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
