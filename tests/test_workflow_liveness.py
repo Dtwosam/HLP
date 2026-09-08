@@ -1816,6 +1816,17 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "launch_route_slot" in content
     assert "launch_ledger_routes" in content
     assert "latest_recovery_run" in content
+    assert "recovery_manifest_valid" in content
+    assert "pons-v1-v3-full.jsonl.manifest.json" in content
+    assert "pons-v2-v4-full.jsonl.manifest.json" in content
+    assert "manifest_gap_aware_v1_v3_recovery" in content
+    assert "manifest_gap_aware_v4_recovery" in content
+    assert '"partial_run_id", 0' in content
+    assert "33_982_556_591" in content
+    assert "33_911_022_718" in content
+    assert "33_912_452_330" in content
+    assert content.count("fetch_github_actions_artifact_zip(") == 1
+    assert '"recovery_manifest_valid"] = True' in content
     assert "RECOVERY_VENUE_ARTIFACTS" in content
     assert "RECOVERY_VENUE_WORKFLOW_PATHS" in content
     assert "recovery_runs=recovery_runs" in content
