@@ -1114,6 +1114,21 @@ jobs:
                           )
                           + "\n"
                       )
+                  repair_progress = active_run.get(
+                      "repair_progress"
+                  ) or {}
+                  if repair_progress:
+                      summary.write(
+                          "    - Repair progress: "
+                          f"status={repair_progress.get('status')}, "
+                          f"success={repair_progress.get('successful_repairs', 0)}/"
+                          f"{repair_progress.get('planned_repairs', 0)}, "
+                          f"failed={repair_progress.get('failed_repairs', 0)}, "
+                          f"remaining={repair_progress.get('remaining_repairs', 0)}, "
+                          f"current-wave={repair_progress.get('current_wave')}, "
+                          f"progress={repair_progress.get('progress_percent', 0.0)}%"
+                          + "\n"
+                      )
                   wave_counts = active_run.get(
                       "repair_wave_counts"
                   ) or {}
@@ -1160,6 +1175,19 @@ jobs:
                           )
                           + "\n"
                       )
+                      terminal_progress = terminal_run.get(
+                          "repair_progress"
+                      ) or {}
+                      if terminal_progress:
+                          summary.write(
+                              "    - Terminal repair progress: "
+                              f"status={terminal_progress.get('status')}, "
+                              f"success={terminal_progress.get('successful_repairs', 0)}/"
+                              f"{terminal_progress.get('planned_repairs', 0)}, "
+                              f"failed={terminal_progress.get('failed_repairs', 0)}, "
+                              f"remaining={terminal_progress.get('remaining_repairs', 0)}"
+                              + "\n"
+                          )
                       problem_jobs = terminal_run.get(
                           "problem_jobs"
                       ) or []
