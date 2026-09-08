@@ -958,7 +958,11 @@ V2/V4 requires successful transition run **33912452330** at launch SHA
 registration manifest SHA
 `8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`.
 Workflow path, branch, chain, snapshot and provenance source are checked in the
-planner before any archive matrix can start. Generation 4 run **34228430753** passed
+planner before any archive matrix can start. The planner also streams the
+actual registry/registration JSONL from the downloaded upstream artifact ZIP,
+recomputes its SHA-256 and counts nonblank records, and requires both to match
+the frozen manifest. A sidecar with the right metadata cannot therefore mask a
+corrupted or substituted upstream payload. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
 four repair waves, and completed the corrected final merge successfully. Its
