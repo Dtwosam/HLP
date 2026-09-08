@@ -216,6 +216,153 @@ jobs:
                   ) == upstream_run_id
               )
 
+          def recovery_lineage_valid(venue, run_id):
+              if venue == "v1_v3":
+                  artifact_name = "phase1-pons-v1-v3-full"
+                  manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
+                  plan_artifact = "phase1-pons-v1-v3-gap-plan"
+                  plan_name = "v1-v3-gap-plan.json"
+                  start_field = "first_v1_launch"
+                  expected_start = 8_621_658
+                  allowed_paths = {
+                      ".github/workflows/"
+                      "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-live-venue-rescue-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-v1-v3-recover-gaps.yml",
+                  }
+              elif venue == "v2_v4":
+                  artifact_name = "phase1-pons-v2-v4-full"
+                  manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
+                  plan_artifact = "phase1-pons-v2-v4-gap-plan"
+                  plan_name = "v4-gap-plan.json"
+                  start_field = "generation_start"
+                  expected_start = 26_841_846
+                  allowed_paths = {
+                      ".github/workflows/"
+                      "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-live-venue-rescue-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-v2-v4-recover-gaps.yml",
+                      ".github/workflows/"
+                      "phase1-pons-recovered-completion-one-shot.yml",
+                  }
+              else:
+                  raise SystemExit(
+                      f"readiness recovery venue changed: {venue}"
+                  )
+
+              manifest = artifact_json(
+                  run_id,
+                  artifact_name,
+                  manifest_name,
+              )
+              if not isinstance(manifest, dict):
+                  return False
+              provenance = dict(manifest.get("provenance") or {})
+              prior_gap = provenance.get("prior_gap_run_id")
+              if prior_gap in {None, "", 0}:
+                  return True
+              try:
+                  prior_gap_id = int(prior_gap)
+              except (TypeError, ValueError):
+                  return False
+              if prior_gap_id <= 0:
+                  return False
+
+              current_plan = artifact_json(
+                  run_id,
+                  plan_artifact,
+                  plan_name,
+              )
+              if not isinstance(current_plan, dict):
+                  return False
+              try:
+                  if int(
+                      current_plan.get("partial_run_id", 0)
+                  ) != source_run_id:
+                      return False
+                  if int(
+                      current_plan.get("prior_gap_run_id") or 0
+                  ) != prior_gap_id:
+                      return False
+                  if int(
+                      current_plan.get("snapshot_head", -1)
+                  ) != 54_486_035:
+                      return False
+                  if int(
+                      current_plan.get(start_field, -1)
+                  ) != expected_start:
+                      return False
+              except (TypeError, ValueError):
+                  return False
+
+              seen = set()
+              depth = 0
+              cursor = prior_gap_id
+              while cursor:
+                  if cursor in seen:
+                      return False
+                  seen.add(cursor)
+                  depth += 1
+                  if depth > 20:
+                      return False
+
+                  prior_run = get(
+                      f"/repos/{repo}/actions/runs/{cursor}"
+                  )
+                  if prior_run.get("status") != "completed":
+                      return False
+                  prior_path = str(
+                      prior_run.get("path") or ""
+                  ).split("@", 1)[0]
+                  if prior_path not in allowed_paths:
+                      return False
+                  if prior_run.get("head_branch") != branch:
+                      return False
+
+                  prior_plan = artifact_json(
+                      cursor,
+                      plan_artifact,
+                      plan_name,
+                  )
+                  if not isinstance(prior_plan, dict):
+                      return False
+                  if (
+                      "partial_run_id" not in prior_plan
+                      or "prior_gap_run_id" not in prior_plan
+                  ):
+                      return False
+                  try:
+                      if int(
+                          prior_plan["partial_run_id"]
+                      ) != source_run_id:
+                          return False
+                      if int(
+                          prior_plan.get("snapshot_head", -1)
+                      ) != 54_486_035:
+                          return False
+                      if int(
+                          prior_plan.get(start_field, -1)
+                      ) != expected_start:
+                          return False
+                  except (TypeError, ValueError):
+                      return False
+
+                  parent = prior_plan.get("prior_gap_run_id")
+                  try:
+                      cursor = (
+                          int(parent)
+                          if parent not in {None, "", 0}
+                          else 0
+                      )
+                  except (TypeError, ValueError):
+                      return False
+
+              return True
+
           def job_counts(run_id):
               counts = {}
               page = 1
@@ -296,7 +443,10 @@ jobs:
                               continue
                           if not recovery_manifest_valid(venue, run_id):
                               continue
+                          if not recovery_lineage_valid(venue, run_id):
+                              continue
                           candidate["recovery_manifest_valid"] = True
+                          candidate["recovery_lineage_valid"] = True
                           candidates.append(candidate)
                           found = True
                           break
