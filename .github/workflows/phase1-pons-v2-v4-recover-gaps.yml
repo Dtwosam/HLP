@@ -81,6 +81,7 @@ jobs:
           UPSTREAM_RUN_ID: ${{ inputs.transition_run_id }}
         run: |
           python - <<'PY'
+          import hashlib
           import io
           import json
           import os
@@ -182,6 +183,22 @@ jobs:
                       "V2 transition manifest identity is ambiguous"
                   )
               manifest = json.loads(archive.read(names[0]))
+              data_names = [
+                  name
+                  for name in archive.namelist()
+                  if name.rsplit("/", 1)[-1] == "pons-v2-registrations-full.jsonl"
+              ]
+              if len(data_names) != 1:
+                  raise SystemExit(
+                      "V2 transition data identity is ambiguous"
+                  )
+              actual_digest = hashlib.sha256()
+              actual_records = 0
+              with archive.open(data_names[0]) as handle:
+                  for raw in handle:
+                      actual_digest.update(raw)
+                      if raw.strip():
+                          actual_records += 1
 
           provenance = manifest.get("provenance") or {}
           checks = {
@@ -203,6 +220,12 @@ jobs:
                   "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f"
               ),
           }
+          checks["actual_sha256"] = (
+              actual_digest.hexdigest() == str(manifest.get("sha256") or "")
+          )
+          checks["actual_records"] = (
+              actual_records == int(manifest.get("records", -1))
+          )
           failed = sorted(
               key for key, passed in checks.items() if not passed
           )
@@ -217,6 +240,8 @@ jobs:
               "manifest": manifest_name,
               "records": int(manifest["records"]),
               "sha256": manifest["sha256"],
+              "actual_records": actual_records,
+              "actual_sha256": actual_digest.hexdigest(),
               "verification": "pass",
           }, sort_keys=True))
           PY
