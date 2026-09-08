@@ -2014,6 +2014,8 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "phase1-pons-v2-v4-full" in content
     assert "live venue rescue requires exactly one venue target" in content
     assert "live venue rescue is blocked while another rescue " in content
+    assert "group: phase1-pons-live-venue-rescue-${{ github.ref }}" in content
+    assert "cancel-in-progress: false" in content
     assert "active_siblings" in content
     assert "fresh_active_siblings = []" in content
     assert "live venue rescue fresh sibling pagination " in content

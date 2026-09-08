@@ -9,6 +9,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: phase1-pons-live-venue-rescue-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   LAUNCH_VALIDATION_GENERATION: '9'
 
