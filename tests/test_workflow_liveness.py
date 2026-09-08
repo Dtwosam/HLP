@@ -1819,6 +1819,13 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "recovery run pagination exceeded 1000" in content
     assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
+    assert "zipfile.BadZipFile" in content
+    assert "json.JSONDecodeError" in content
+    assert "UnicodeDecodeError" in content
+    assert content.count(
+        'if not isinstance(manifest.get("provenance"), dict):'
+    ) == 2
+    assert "except (TypeError, ValueError):" in content
     assert "recovery_lineage_valid" in content
     assert "phase1-pons-v1-v3-gap-plan" in content
     assert "v1-v3-gap-plan.json" in content
