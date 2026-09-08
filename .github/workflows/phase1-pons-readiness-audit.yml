@@ -481,7 +481,9 @@ jobs:
                           display_title = str(
                               row.get("display_title") or ""
                           )
-                          if launch_marker not in display_title:
+                          if not display_title.startswith(
+                              launch_marker
+                          ):
                               continue
                           if (
                               diagnostics["active_run"] is None
