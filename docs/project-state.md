@@ -1092,7 +1092,17 @@ repair and the other **239** wave-1 repairs succeed, the next retry must derive
 exactly **314** missing 50k-or-less jobs — failed gap 053 plus the **313**
 never-materialized wave-2/wave-3 jobs — split **240 / 74 / 0 / 0**. A
 different count under those same terminal conditions is treated as a planning
-or lineage discrepancy rather than accepted silently.
+or lineage discrepancy rather than accepted silently. The rescue launcher now
+also publishes a terminal-reuse preflight before any child recovery starts:
+selected prior run ID, count of successful-job gap artifacts that can actually
+be reused, up to 20 successful repair IDs whose artifacts are missing, and up
+to 20 numeric gap artifacts whose repair job did not conclude `success` and
+will therefore be ignored/replanned. These diagnostics use the same
+successful-job/artifact intersection as the recovery planner. If a later retry
+finishes every one of those **313** previously unmaterialized ranges but gap
+053 fails again, recursive lineage planning is pinned to collapse the following
+generation to exactly the single original **29,491,846-29,541,845** gap rather
+than refetching any other block.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
