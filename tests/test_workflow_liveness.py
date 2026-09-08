@@ -1909,6 +1909,10 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "source already has complete pricing; set pricing_run_id" in content
     assert "source_v2_shards" in content
     assert "recovery_manifest" in content
+    assert content.count("fetch_github_actions_artifact_zip(") == 2
+    assert "decode_json=False" not in content
+    assert "actions/checkout@v4" in content
+    assert "python -m pip install -e ." in content
     assert "pons-v1-v3-full.jsonl.manifest.json" in content
     assert "pons-v2-v4-full.jsonl.manifest.json" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
