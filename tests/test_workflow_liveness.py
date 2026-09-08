@@ -510,6 +510,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content
     assert "frozen parent recovery is blocked while source is active" in content
+    assert content.count("Download every original V2/V4 shard artifact") == 2
+    assert "V2/V4 source artifact pagination exceeded 2000" in content
+    assert "original_shard_artifacts" in content
+    assert "duplicate V2/V4 shard file while downloading" in content
+    assert "pattern: phase1-pons-v2-v4-*" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
     assert "prior recovery partial run does not match current" in content
