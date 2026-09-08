@@ -533,6 +533,10 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 recovery has no source coverage and no " in content
     assert "V2/V4 empty-source proof run ID changed" in content
     assert "V2/V4 empty-source proof job states changed" in content
+    assert "V2/V4 merge source job pagination exceeded 1000" in content
+    assert "V2/V4 merge empty source is not proven by skipped " in content
+    assert '"empty_source_proven": empty_source_proven' in content
+    assert content.count('"empty_source_proven"') >= 2
     assert "Discover reusable prior V2/V4 gap coverage" in content
     assert "source-metadata/v2-v4-prior-gap-coverage.json" in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
