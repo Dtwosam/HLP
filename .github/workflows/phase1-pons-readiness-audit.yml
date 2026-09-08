@@ -938,6 +938,11 @@ jobs:
                   if venue == "v1_v3"
                   else "launch V2 V4 rescue"
               )
+              launch_pattern = re.compile(
+                  "^"
+                  + re.escape(launch_marker)
+                  + r" generation (\\d+)$"
+              )
               candidates = []
               diagnostics = recovery_discovery[venue]
               for workflow_path in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
@@ -960,8 +965,9 @@ jobs:
                           display_title = str(
                               row.get("display_title") or ""
                           )
-                          if not display_title.startswith(
-                              launch_marker
+                          if (
+                              launch_pattern.fullmatch(display_title)
+                              is None
                           ):
                               continue
                           if (
