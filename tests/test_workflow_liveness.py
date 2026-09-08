@@ -557,9 +557,19 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     )
     assert "original_shard_artifacts" in content
     assert "duplicate V2/V4 shard file while downloading" in content
-    assert "Download paginated V2/V4 gap artifacts" in content
+    assert "Download recursive paginated V2/V4 gap artifacts" in content
     assert "V2/V4 merge gap artifact pagination " in content
     assert "V2/V4 merge contains duplicate gap artifact IDs" in content
+    assert "V2/V4 merge prior gap lineage contains a cycle" in content
+    assert "V2/V4 merge prior gap lineage exceeds 20 generations" in content
+    assert "V2/V4 merge prior gap plan artifact identity " in content
+    assert "V2/V4 merge prior gap plan file identity " in content
+    assert "V2/V4 merge prior gap partial source changed" in content
+    assert "V2/V4 merge prior gap snapshot head changed" in content
+    assert "V2/V4 merge prior gap start block changed" in content
+    assert "V2/V4 merge prior gap artifact is not bound " in content
+    assert 'Path("prior-gaps") / str(cursor)' in content
+    assert 'Path("prior-gaps").rglob("v4-events-gap-*.jsonl")' in content
     assert "current V2/V4 gap artifact count does not match " in content
     assert "duplicate V2/V4 gap file while " in content
     assert "CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}" in content
