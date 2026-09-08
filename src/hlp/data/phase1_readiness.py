@@ -149,10 +149,14 @@ def _recovered_venue_run_id(
 def _source_recovery_plan(
     source_artifacts: set[str],
     recovery_runs: Mapping[str, Mapping[str, Any] | None] | None = None,
+    active_recovery_run_ids: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     recovery_runs = recovery_runs or {}
+    active_recovery_run_ids = active_recovery_run_ids or {}
     if set(recovery_runs) - set(RECOVERY_VENUE_ARTIFACTS):
         raise ValueError("readiness recovery venue set changed")
+    if set(active_recovery_run_ids) - set(RECOVERY_VENUE_ARTIFACTS):
+        raise ValueError("readiness active recovery venue set changed")
 
     has_v1_v3 = "phase1-pons-v1-v3-full" in source_artifacts
     has_v2_v4 = "phase1-pons-v2-v4-full" in source_artifacts
@@ -163,6 +167,14 @@ def _source_recovery_plan(
     recovered_v2_v4_id = _recovered_venue_run_id(
         "v2_v4",
         recovery_runs.get("v2_v4"),
+    )
+    active_v1_v3_id = max(
+        0,
+        _safe_int(active_recovery_run_ids.get("v1_v3")),
+    )
+    active_v2_v4_id = max(
+        0,
+        _safe_int(active_recovery_run_ids.get("v2_v4")),
     )
     recommended_v1_v3_id = (
         SOURCE_ELIGIBILITY_RUN_ID if has_v1_v3 else recovered_v1_v3_id
@@ -193,10 +205,26 @@ def _source_recovery_plan(
             SOURCE_ELIGIBILITY_RUN_ID if reusable_pricing else 0
         ),
         "next_action": (
-            "launch_v1_v3_rescue"
+            (
+                "wait_for_v1_v3_rescue"
+                if active_v1_v3_id > 0
+                else (
+                    "wait_for_active_venue_rescue"
+                    if active_v2_v4_id > 0
+                    else "launch_v1_v3_rescue"
+                )
+            )
             if recommended_v1_v3_id <= 0
             else (
-                "launch_v2_v4_rescue"
+                (
+                    "wait_for_v2_v4_rescue"
+                    if active_v2_v4_id > 0
+                    else (
+                        "wait_for_active_venue_rescue"
+                        if active_v1_v3_id > 0
+                        else "launch_v2_v4_rescue"
+                    )
+                )
                 if recommended_v2_v4_id <= 0
                 else "launch_recovered_phase1_completion"
             )
@@ -310,6 +338,7 @@ def build_phase1_readiness_report(
     ledger_route_run_ids: Mapping[str, int],
     evidence_handoff: Mapping[str, Any] | None = None,
     recovery_runs: Mapping[str, Mapping[str, Any] | None] | None = None,
+    active_recovery_run_ids: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     if int(configured_source_run_id) != SOURCE_ELIGIBILITY_RUN_ID:
         raise ValueError("readiness source eligibility run changed")
@@ -388,6 +417,7 @@ def build_phase1_readiness_report(
         _source_recovery_plan(
             source_artifacts,
             recovery_runs=recovery_runs,
+            active_recovery_run_ids=active_recovery_run_ids,
         )
         if source_requires_recovery
         else None
