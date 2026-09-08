@@ -430,6 +430,7 @@ jobs:
           recovery_discovery = {
               venue: {
                   "selected_run_id": 0,
+                  "active_run": None,
                   "completed_success_candidates": 0,
                   "rejection_counts": {},
                   "rejected_candidates": [],
@@ -472,6 +473,18 @@ jobs:
                       )
                       rows = list(payload.get("workflow_runs") or [])
                       for row in rows:
+                          if (
+                              diagnostics["active_run"] is None
+                              and row.get("status") != "completed"
+                              and row.get("head_branch") == branch
+                          ):
+                              active_run_id = int(row["id"])
+                              diagnostics["active_run"] = {
+                                  "run_id": active_run_id,
+                                  "status": row.get("status"),
+                                  "head_sha": row.get("head_sha"),
+                                  "job_counts": job_counts(active_run_id),
+                              }
                           if (
                               row.get("status") != "completed"
                               or row.get("conclusion") != "success"
@@ -805,6 +818,24 @@ jobs:
                       f"{diagnostics.get('completed_success_candidates', 0)}, "
                       f"rejections={rejection_summary}\n"
                   )
+                  active_run = diagnostics.get("active_run") or {}
+                  if active_run:
+                      active_counts = active_run.get("job_counts") or {}
+                      summary.write(
+                          f"  - Active rescue {active_run.get('run_id', 0)}: "
+                          f"status={active_run.get('status')}, jobs="
+                          + (
+                              ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      active_counts.items()
+                                  )
+                              )
+                              if active_counts
+                              else "none"
+                          )
+                          + "\n"
+                      )
               if report.get("evidence_handoff_errors"):
                   summary.write(
                       "- Evidence handoff errors: "
