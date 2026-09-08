@@ -1102,7 +1102,25 @@ successful-job/artifact intersection as the recovery planner. If a later retry
 finishes every one of those **313** previously unmaterialized ranges but gap
 053 fails again, recursive lineage planning is pinned to collapse the following
 generation to exactly the single original **29,491,846-29,541,845** gap rather
-than refetching any other block.
+than refetching any other block. The guarded launcher now also requires an
+explicit monotonic rescue generation number. For V2/V4, completed numbered
+history is generation 1 then generation 2, so the next valid launch message is
+exactly `launch V2 V4 rescue generation 3`; duplicate or skipped generation
+numbers fail preflight. Generation 3 is additionally pinned to immediate prior
+run **34234471190**, launch SHA
+`0e146b6f46491caab81f00a241fd29611a252c4c`, and title
+`launch V2 V4 rescue generation 2`. If that run is not the selected reusable
+lineage after terminal reconciliation, generation 3 fails closed instead of
+falling back to generation 1 or empty lineage. The launcher passes its measured
+reusable-gap count into the V2/V4 child planner; the child independently
+re-discovers successful-job artifacts and must observe the same count. It then
+requires the immediate prior generation's reusable ranges plus newly planned
+retry ranges to exactly reconstruct that prior plan's range union before any
+`recover_1` matrix can materialize. Under unchanged `max_gap_blocks=50000`,
+reusable-count plus retry-job count must also equal the prior plan's declared
+job count. The artifact-only plan step publishes a summary with prior plan size,
+reusable count, retry count/waves and exact-reconstruction result before archive
+work starts.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
