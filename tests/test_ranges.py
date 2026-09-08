@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.ranges import (
     coalesce_covered_ranges,
+    indexed_shard_bounds,
     missing_ranges,
     plan_missing_subranges,
     select_contiguous_cover,
@@ -120,4 +121,24 @@ def test_select_contiguous_cover_rejects_unfillable_overlap():
             20,
             [(1, 10), (10, 20)],
         )
+
+def test_indexed_shard_bounds_matches_full_partition():
+    rows = [
+        indexed_shard_bounds(101, 1100, index, 7)
+        for index in range(7)
+    ]
+    assert rows[0][0] == 101
+    assert rows[-1][1] == 1100
+    for prior, current in zip(rows, rows[1:]):
+        assert current[0] == prior[1] + 1
+
+
+def test_indexed_shard_bounds_rejects_bad_index():
+    with pytest.raises(ValueError, match="shard_index outside"):
+        indexed_shard_bounds(1, 100, 4, 4)
+
+
+def test_indexed_shard_bounds_rejects_more_shards_than_blocks():
+    with pytest.raises(ValueError, match="shard_count exceeds"):
+        indexed_shard_bounds(1, 2, 0, 3)
 
