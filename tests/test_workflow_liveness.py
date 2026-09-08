@@ -1819,6 +1819,20 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "launch_route_slot" in content
     assert "launch_ledger_routes" in content
     assert "latest_recovery_run" in content
+    assert "recovery_discovery" in content
+    assert "reject_recovery_candidate" in content
+    assert '"completed_success_candidates": 0' in content
+    assert '"selected_run_id": 0' in content
+    assert '"rejection_counts": {}' in content
+    assert '"rejected_candidates": []' in content
+    assert "if len(rejected) < 20:" in content
+    assert '"workflow_path_mismatch"' in content
+    assert '"canonical_artifact_missing"' in content
+    assert '"manifest_invalid"' in content
+    assert '"lineage_invalid"' in content
+    assert 'diagnostics["selected_run_id"] = run_id' in content
+    assert "Recovery discovery {venue}" in content
+    assert "completed-success-candidates=" in content
     assert "recovery run pagination exceeded 1000" in content
     assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
