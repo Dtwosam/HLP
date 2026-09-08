@@ -267,33 +267,47 @@ jobs:
                       safe="",
                   )
                   encoded_branch = urllib.parse.quote(branch, safe="")
-                  payload = get(
-                      f"/repos/{repo}/actions/workflows/{encoded_workflow}/runs"
-                      f"?branch={encoded_branch}&per_page=20&page=1"
-                  )
-                  for row in list(payload.get("workflow_runs") or []):
-                      if (
-                          row.get("status") != "completed"
-                          or row.get("conclusion") != "success"
-                          or row.get("head_branch") != branch
-                      ):
-                          continue
-                      run_id = int(row["id"])
-                      candidate = run_payload(run_id)
-                      observed_path = str(
-                          candidate.get("path") or ""
-                      ).split("@", 1)[0]
-                      if observed_path != workflow_path:
-                          continue
-                      if artifact not in set(
-                          candidate.get("artifacts") or []
-                      ):
-                          continue
-                      if not recovery_manifest_valid(venue, run_id):
-                          continue
-                      candidate["recovery_manifest_valid"] = True
-                      candidates.append(candidate)
-                      break
+                  page = 1
+                  found = False
+                  while not found:
+                      payload = get(
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{encoded_workflow}/runs"
+                          f"?branch={encoded_branch}&per_page=100&page={page}"
+                      )
+                      rows = list(payload.get("workflow_runs") or [])
+                      for row in rows:
+                          if (
+                              row.get("status") != "completed"
+                              or row.get("conclusion") != "success"
+                              or row.get("head_branch") != branch
+                          ):
+                              continue
+                          run_id = int(row["id"])
+                          candidate = run_payload(run_id)
+                          observed_path = str(
+                              candidate.get("path") or ""
+                          ).split("@", 1)[0]
+                          if observed_path != workflow_path:
+                              continue
+                          if artifact not in set(
+                              candidate.get("artifacts") or []
+                          ):
+                              continue
+                          if not recovery_manifest_valid(venue, run_id):
+                              continue
+                          candidate["recovery_manifest_valid"] = True
+                          candidates.append(candidate)
+                          found = True
+                          break
+                      if found or len(rows) < 100:
+                          break
+                      page += 1
+                      if page > 10:
+                          raise SystemExit(
+                              "recovery run pagination exceeded 1000: "
+                              f"{venue}"
+                          )
               if not candidates:
                   return None
               return max(candidates, key=lambda row: int(row["id"]))
