@@ -733,6 +733,10 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "expected_prior_reusable_gap_count" in content
     assert "EXPECTED_PRIOR_REUSABLE_GAP_COUNT" in content
     assert "V2/V4 launcher/planner reusable prior-gap " in content
+    assert "expected_prior_reusable_count = None" in content
+    assert "V2/V4 expected reusable prior-gap count " in content
+    assert "immediate_prior_id == 34_234_471_190" in content
+    assert "V2/V4 generation 3 requires launcher-pinned " in content
     assert "launcher_expected_reusable_gap_count" in content
     assert "V2/V4 launcher expected prior reusable gaps " in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content

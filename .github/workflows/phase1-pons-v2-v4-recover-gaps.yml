@@ -1016,6 +1016,27 @@ jobs:
           expected_prior_reusable = os.environ[
               "EXPECTED_PRIOR_REUSABLE_GAP_COUNT"
           ]
+          expected_prior_reusable_count = None
+          if expected_prior_reusable:
+              expected_prior_reusable_count = int(
+                  expected_prior_reusable
+              )
+              if expected_prior_reusable_count < 0:
+                  raise SystemExit(
+                      "V2/V4 expected reusable prior-gap count "
+                      "must be non-negative"
+                  )
+          if (
+              immediate_prior_id == 34_234_471_190
+              and (
+                  expected_prior_reusable_count is None
+                  or expected_prior_reusable_count <= 0
+              )
+          ):
+              raise SystemExit(
+                  "V2/V4 generation 3 requires launcher-pinned "
+                  "reusable prior-gap count"
+              )
           if immediate_prior_id:
               immediate_rows = [
                   row
@@ -1090,10 +1111,7 @@ jobs:
               observed_prior_reusable = len(
                   immediate["reusable_ranges"]
               )
-              if expected_prior_reusable:
-                  expected_prior_reusable_count = int(
-                      expected_prior_reusable
-                  )
+              if expected_prior_reusable_count is not None:
                   if (
                       observed_prior_reusable
                       != expected_prior_reusable_count
@@ -1156,9 +1174,7 @@ jobs:
                       prior_reusable_ranges
                   ),
                   "launcher_expected_reusable_gap_count": (
-                      int(expected_prior_reusable)
-                      if expected_prior_reusable
-                      else None
+                      expected_prior_reusable_count
                   ),
                   "retry_gap_count": len(gaps),
                   "successful_jobs_missing_artifacts": (
@@ -1177,8 +1193,8 @@ jobs:
 
           if (
               not immediate_prior_id
-              and expected_prior_reusable
-              and int(expected_prior_reusable) != 0
+              and expected_prior_reusable_count is not None
+              and expected_prior_reusable_count != 0
           ):
               raise SystemExit(
                   "V2/V4 launcher expected prior reusable gaps "
