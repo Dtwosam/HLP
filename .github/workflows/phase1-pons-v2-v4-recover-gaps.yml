@@ -829,6 +829,14 @@ jobs:
                   ),
                   "max_gap_blocks": int(plan["max_gap_blocks"]),
                   "planned_gap_count": len(planned),
+                  "gap_blocks": int(plan["gap_blocks"]),
+                  "gap_wave_job_counts": [
+                      int(value)
+                      for value in plan["gap_wave_job_counts"]
+                  ],
+                  "successful_sources": list(
+                      plan.get("successful_sources") or []
+                  ),
                   "planned_ranges": [
                       {
                           "gap_id": gap_id,
@@ -903,6 +911,7 @@ jobs:
           from hlp.data.ranges import (
               coalesce_covered_ranges,
               plan_missing_subranges,
+              split_range,
               validate_gap_plan_jobs,
           )
 
@@ -1019,6 +1028,65 @@ jobs:
                       "identity is ambiguous"
                   )
               immediate = immediate_rows[0]
+              if immediate_prior_id == 34_234_471_190:
+                  expected_generation_2_ranges = split_range(
+                      start,
+                      head,
+                      max_blocks=50_000,
+                  )
+                  expected_generation_2_rows = [
+                      {
+                          "gap_id": f"{index:03d}",
+                          "from_block": lo,
+                          "to_block": hi,
+                      }
+                      for index, (lo, hi) in enumerate(
+                          expected_generation_2_ranges
+                      )
+                  ]
+                  if immediate["prior_gap_run_id"] is not None:
+                      raise SystemExit(
+                          "V2/V4 generation 2 prior lineage changed"
+                      )
+                  if immediate["successful_sources"] != []:
+                      raise SystemExit(
+                          "V2/V4 generation 2 successful source set changed"
+                      )
+                  if int(immediate["max_gap_blocks"]) != 50_000:
+                      raise SystemExit(
+                          "V2/V4 generation 2 max gap size changed"
+                      )
+                  if int(immediate["planned_gap_count"]) != 553:
+                      raise SystemExit(
+                          "V2/V4 generation 2 planned job count changed"
+                      )
+                  if int(immediate["gap_blocks"]) != 27_644_190:
+                      raise SystemExit(
+                          "V2/V4 generation 2 planned block count changed"
+                      )
+                  if immediate["gap_wave_job_counts"] != [
+                      240,
+                      240,
+                      73,
+                      0,
+                  ]:
+                      raise SystemExit(
+                          "V2/V4 generation 2 wave shape changed"
+                      )
+                  if immediate["planned_ranges"] != (
+                      expected_generation_2_rows
+                  ):
+                      raise SystemExit(
+                          "V2/V4 generation 2 deterministic plan changed"
+                      )
+                  if immediate["planned_ranges"][53] != {
+                      "gap_id": "053",
+                      "from_block": 29_491_846,
+                      "to_block": 29_541_845,
+                  }:
+                      raise SystemExit(
+                          "V2/V4 generation 2 gap 053 bounds changed"
+                      )
               observed_prior_reusable = len(
                   immediate["reusable_ranges"]
               )
@@ -1102,6 +1170,9 @@ jobs:
                       immediate["non_success_gap_artifacts"]
                   ),
                   "exact_range_reconstruction": True,
+                  "generation_2_plan_fingerprint_valid": (
+                      immediate_prior_id == 34_234_471_190
+                  ),
               }
 
           if (

@@ -663,6 +663,24 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "source-metadata/v2-v4-prior-gap-coverage.json" in content
     assert "source-metadata/v2-v4-prior-gap-generations.json" in content
     assert '"planned_ranges": [' in content
+    assert '"gap_blocks": int(plan["gap_blocks"])' in content
+    assert '"gap_wave_job_counts": [' in content
+    assert '"successful_sources": list(' in content
+    assert "split_range" in content
+    assert "immediate_prior_id == 34_234_471_190" in content
+    assert "expected_generation_2_ranges = split_range(" in content
+    assert "max_blocks=50_000" in content
+    assert "V2/V4 generation 2 prior lineage changed" in content
+    assert "V2/V4 generation 2 successful source set changed" in content
+    assert "V2/V4 generation 2 max gap size changed" in content
+    assert "V2/V4 generation 2 planned job count changed" in content
+    assert "V2/V4 generation 2 planned block count changed" in content
+    assert "V2/V4 generation 2 wave shape changed" in content
+    assert "V2/V4 generation 2 deterministic plan changed" in content
+    assert "V2/V4 generation 2 gap 053 bounds changed" in content
+    assert "29_491_846" in content
+    assert "29_541_845" in content
+    assert '"generation_2_plan_fingerprint_valid": (' in content
     assert '"reusable_ranges": [' in content
     assert '"successful_jobs_missing_artifacts"' in content
     assert '"non_success_gap_artifacts"' in content
