@@ -526,52 +526,96 @@ jobs:
                   )
 
               prior_gap = provenance.get("prior_gap_run_id")
-              if prior_gap not in {None, "", 0}:
-                  if expected_source == "manifest_gap_aware_v1_v3_recovery":
-                      plan_artifact = "phase1-pons-v1-v3-gap-plan"
-                      plan_name = "v1-v3-gap-plan.json"
-                      start_field = "first_v1_launch"
-                      expected_start = 8_621_658
-                      lineage_paths = set(allowed_paths)
-                  else:
-                      plan_artifact = "phase1-pons-v2-v4-gap-plan"
-                      plan_name = "v4-gap-plan.json"
-                      start_field = "generation_start"
-                      expected_start = 26_841_846
-                      lineage_paths = set(allowed_paths) | {
-                          ".github/workflows/"
-                          "phase1-pons-recovered-completion-one-shot.yml"
-                      }
-
-                  current_plan = recovery_plan(
-                      run_id,
-                      plan_artifact,
-                      plan_name,
+              try:
+                  prior_gap_id = (
+                      int(prior_gap)
+                      if prior_gap not in {None, "", 0}
+                      else 0
                   )
-                  if "partial_run_id" not in current_plan or (
-                      "prior_gap_run_id" not in current_plan
-                  ):
-                      raise SystemExit(
-                          "recovery venue plan lacks bound lineage metadata: "
-                          f"run={run_id}"
-                      )
-                  if int(current_plan["partial_run_id"]) != source_id:
-                      raise SystemExit(
-                          "recovery venue plan partial run mismatch: "
-                          f"run={run_id}"
-                      )
-                  if int(
-                      current_plan.get("prior_gap_run_id") or 0
-                  ) != int(prior_gap):
-                      raise SystemExit(
-                          "recovery venue manifest/plan prior lineage "
-                          f"mismatch: run={run_id}"
-                      )
+              except (TypeError, ValueError):
+                  raise SystemExit(
+                      "recovery venue prior lineage is invalid: "
+                      f"run={run_id}"
+                  )
+              if prior_gap_id < 0:
+                  raise SystemExit(
+                      "recovery venue prior lineage is invalid: "
+                      f"run={run_id}"
+                  )
 
-                  seen = set()
-                  depth = 0
-                  cursor = int(prior_gap)
-                  while cursor:
+              if expected_source == "manifest_gap_aware_v1_v3_recovery":
+                  plan_artifact = "phase1-pons-v1-v3-gap-plan"
+                  plan_name = "v1-v3-gap-plan.json"
+                  start_field = "first_v1_launch"
+                  expected_start = 8_621_658
+                  lineage_paths = set(allowed_paths)
+              else:
+                  plan_artifact = "phase1-pons-v2-v4-gap-plan"
+                  plan_name = "v4-gap-plan.json"
+                  start_field = "generation_start"
+                  expected_start = 26_841_846
+                  lineage_paths = set(allowed_paths) | {
+                      ".github/workflows/"
+                      "phase1-pons-recovered-completion-one-shot.yml"
+                  }
+
+              current_plan = recovery_plan(
+                  run_id,
+                  plan_artifact,
+                  plan_name,
+              )
+              if "partial_run_id" not in current_plan or (
+                  "prior_gap_run_id" not in current_plan
+              ):
+                  raise SystemExit(
+                      "recovery venue plan lacks bound lineage metadata: "
+                      f"run={run_id}"
+                  )
+              try:
+                  current_partial_run_id = int(
+                      current_plan["partial_run_id"]
+                  )
+                  current_prior_gap_run_id = int(
+                      current_plan.get("prior_gap_run_id") or 0
+                  )
+                  current_snapshot_head = int(
+                      current_plan.get("snapshot_head", -1)
+                  )
+                  current_start = int(
+                      current_plan.get(start_field, -1)
+                  )
+              except (TypeError, ValueError):
+                  raise SystemExit(
+                      "recovery venue plan metadata is invalid: "
+                      f"run={run_id}"
+                  )
+              if current_partial_run_id != source_id:
+                  raise SystemExit(
+                      "recovery venue plan partial run mismatch: "
+                      f"run={run_id}"
+                  )
+              if current_prior_gap_run_id != prior_gap_id:
+                  raise SystemExit(
+                      "recovery venue manifest/plan prior lineage "
+                      f"mismatch: run={run_id}"
+                  )
+              if current_snapshot_head != 54_486_035:
+                  raise SystemExit(
+                      "recovery venue plan snapshot changed: "
+                      f"run={run_id}"
+                  )
+              if current_start != expected_start:
+                  raise SystemExit(
+                      "recovery venue plan start block changed: "
+                      f"run={run_id}"
+                  )
+              if prior_gap_id == 0:
+                  return
+
+              seen = set()
+              depth = 0
+              cursor = prior_gap_id
+              while cursor:
                       if cursor in seen:
                           raise SystemExit(
                               "recovery venue prior lineage contains a cycle"
