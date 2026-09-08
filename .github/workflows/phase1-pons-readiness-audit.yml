@@ -1324,6 +1324,20 @@ jobs:
                           f"progress={repair_progress.get('progress_percent', 0.0)}%"
                           + "\n"
                       )
+                      artifact_progress = repair_progress.get(
+                          "artifact_progress"
+                      ) or {}
+                      if artifact_progress:
+                          summary.write(
+                              "    - Repair artifacts: "
+                              f"observed={artifact_progress.get('observed_gap_artifacts', 0)}, "
+                              f"successful-jobs={artifact_progress.get('successful_job_ids', 0)}, "
+                              f"missing-success={len(artifact_progress.get('missing_success_artifacts') or [])}, "
+                              f"unexpected={len(artifact_progress.get('unexpected_artifact_ids') or [])}, "
+                              f"malformed={len(artifact_progress.get('malformed_gap_artifacts') or [])}, "
+                              f"duplicate-jobs={len(artifact_progress.get('duplicate_repair_job_ids') or [])}"
+                              + "\n"
+                          )
                   wave_counts = active_run.get(
                       "repair_wave_counts"
                   ) or {}
@@ -1383,6 +1397,18 @@ jobs:
                               f"remaining={terminal_progress.get('remaining_repairs', 0)}"
                               + "\n"
                           )
+                          terminal_artifact_progress = terminal_progress.get(
+                              "artifact_progress"
+                          ) or {}
+                          if terminal_artifact_progress:
+                              summary.write(
+                                  "    - Terminal repair artifacts: "
+                                  f"observed={terminal_artifact_progress.get('observed_gap_artifacts', 0)}, "
+                                  f"successful-jobs={terminal_artifact_progress.get('successful_job_ids', 0)}, "
+                                  f"missing-success={len(terminal_artifact_progress.get('missing_success_artifacts') or [])}, "
+                                  f"unexpected={len(terminal_artifact_progress.get('unexpected_artifact_ids') or [])}"
+                                  + "\n"
+                              )
                       problem_jobs = terminal_run.get(
                           "problem_jobs"
                       ) or []
