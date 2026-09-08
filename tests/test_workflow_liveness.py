@@ -1764,6 +1764,10 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "terminal_target_runs" in content
     assert "prior_plan_artifact" in content
     assert "prior_gap_prefix" in content
+    assert "prior_gap_pattern = re.compile(" in content
+    assert "re.escape(prior_gap_prefix)" in content
+    assert 'r"(\\d+)$"' in content
+    assert "prior_gap_pattern.fullmatch(name) is not None" in content
     assert "requested_artifact" in content
     assert "display_title.startswith(launch_marker)" in content
     assert '"live venue rescue is unnecessary because prior "' in content
