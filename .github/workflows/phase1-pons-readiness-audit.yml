@@ -386,8 +386,17 @@ jobs:
 
               return True
 
-          def job_counts(run_id):
+          def job_diagnostics(run_id):
               counts = {}
+              problem_jobs = []
+              failed_states = {
+                  "failure",
+                  "cancelled",
+                  "timed_out",
+                  "startup_failure",
+                  "action_required",
+                  "stale",
+              }
               page = 1
               while True:
                   payload = get(
@@ -402,6 +411,15 @@ jobs:
                           or "unknown"
                       )
                       counts[key] = counts.get(key, 0) + 1
+                      if key in failed_states and len(problem_jobs) < 20:
+                          problem_jobs.append(
+                              {
+                                  "job_id": int(job["id"]),
+                                  "name": job.get("name"),
+                                  "status": job.get("status"),
+                                  "conclusion": job.get("conclusion"),
+                              }
+                          )
                   if len(jobs) < 100:
                       break
                   page += 1
@@ -409,7 +427,13 @@ jobs:
                       raise SystemExit(
                           f"job pagination exceeded 1000 for run {run_id}"
                       )
-              return counts
+              return {
+                  "job_counts": counts,
+                  "problem_jobs": problem_jobs,
+              }
+
+          def job_counts(run_id):
+              return job_diagnostics(run_id)["job_counts"]
 
           def run_payload(run_id, *, include_jobs=False):
               run = get(f"/repos/{repo}/actions/runs/{run_id}")
@@ -431,6 +455,7 @@ jobs:
               venue: {
                   "selected_run_id": 0,
                   "active_run": None,
+                  "latest_terminal_run": None,
                   "completed_success_candidates": 0,
                   "rejection_counts": {},
                   "rejected_candidates": [],
@@ -491,12 +516,30 @@ jobs:
                               and row.get("head_branch") == branch
                           ):
                               active_run_id = int(row["id"])
+                              active_jobs = job_diagnostics(active_run_id)
                               diagnostics["active_run"] = {
                                   "run_id": active_run_id,
                                   "status": row.get("status"),
                                   "head_sha": row.get("head_sha"),
                                   "display_title": display_title,
-                                  "job_counts": job_counts(active_run_id),
+                                  **active_jobs,
+                              }
+                          if (
+                              diagnostics["latest_terminal_run"] is None
+                              and row.get("status") == "completed"
+                              and row.get("head_branch") == branch
+                          ):
+                              terminal_run_id = int(row["id"])
+                              terminal_jobs = job_diagnostics(
+                                  terminal_run_id
+                              )
+                              diagnostics["latest_terminal_run"] = {
+                                  "run_id": terminal_run_id,
+                                  "status": row.get("status"),
+                                  "conclusion": row.get("conclusion"),
+                                  "head_sha": row.get("head_sha"),
+                                  "display_title": display_title,
+                                  **terminal_jobs,
                               }
                           if (
                               row.get("status") != "completed"
@@ -849,6 +892,42 @@ jobs:
                           )
                           + "\n"
                       )
+                  terminal_run = diagnostics.get(
+                      "latest_terminal_run"
+                  ) or {}
+                  if terminal_run:
+                      terminal_counts = terminal_run.get(
+                          "job_counts"
+                      ) or {}
+                      summary.write(
+                          "  - Latest terminal rescue "
+                          f"{terminal_run.get('run_id', 0)}: "
+                          f"conclusion={terminal_run.get('conclusion')}, jobs="
+                          + (
+                              ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      terminal_counts.items()
+                                  )
+                              )
+                              if terminal_counts
+                              else "none"
+                          )
+                          + "\n"
+                      )
+                      problem_jobs = terminal_run.get(
+                          "problem_jobs"
+                      ) or []
+                      if problem_jobs:
+                          summary.write(
+                              "    - Problem jobs: "
+                              + "; ".join(
+                                  f"{job.get('job_id')}:{job.get('name')}"
+                                  f"={job.get('conclusion')}"
+                                  for job in problem_jobs
+                              )
+                              + "\n"
+                          )
               if report.get("evidence_handoff_errors"):
                   summary.write(
                       "- Evidence handoff errors: "
