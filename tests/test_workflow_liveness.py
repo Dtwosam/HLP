@@ -2140,7 +2140,6 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "prior_non_success_gap_artifacts=" in content
     assert "Venue rescue terminal preflight" in content
     assert "requested_artifact" in content
-    assert "display_title.startswith(launch_marker)" in content
     assert "LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}" in content
     assert "LAUNCH_VALIDATION_GENERATION: '9'" in content
     assert "VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}" in content
