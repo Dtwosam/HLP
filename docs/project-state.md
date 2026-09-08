@@ -739,10 +739,22 @@ evidence. The source parent is now terminal but still lacks a canonical full
 V1/V3 artifact, so frozen viability still requires the successful recovery,
 its separate bounded route measurements, and the worst-observed-per-block
 projection. Terminal accounting also exposed stale GitHub Actions log blobs and
-one impossible historical job timestamp; current accounting code records those
+impossible historical job timestamps; current accounting code records those
 as explicit missing-log/invalid-runtime evidence and allows non-acceptance
 checkpoints to publish lower-bound totals, while `require_successful_runs=true`
-continues to fail closed unless the accounting evidence is complete.
+continues to fail closed unless the accounting evidence is complete. Terminal
+checkpoint generation 9 run **34209333209** completed successfully and measured
+the terminal parent at a lower bound of **482,548 RPC requests**,
+**131,233,318,298 response bytes (122.2206 GiB)** and **7,576,568,933 artifact
+bytes (7.0562 GiB)**, with **52,744,034 reported processed blocks**,
+**382,317.886 reported acquisition seconds** and **399,763 GitHub job-runtime
+seconds**, all observed through `solidrpc_keyless_public`. GitHub no longer
+served **4 completed job logs** and exposed **2 impossible job runtimes**, so
+`accounting_complete=false`; the request/egress figures are therefore strict
+lower bounds rather than final acceptance evidence. At the reference
+**10,000 free method calls/day**, even the counted requests alone correspond to
+at least **49 quota-days** of calls, while the separate route viability
+measurements still determine the final $0 acquisition verdict.
 
 The current branch also hardens manual rescue beyond the launch commit's
 single-wave recovery implementation. After the live shard-15 timeout proved
