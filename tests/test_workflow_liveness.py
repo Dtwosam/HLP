@@ -1816,6 +1816,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "launch_route_slot" in content
     assert "launch_ledger_routes" in content
     assert "latest_recovery_run" in content
+    assert "recovery run pagination exceeded 1000" in content
+    assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
     assert "pons-v1-v3-full.jsonl.manifest.json" in content
     assert "pons-v2-v4-full.jsonl.manifest.json" in content
