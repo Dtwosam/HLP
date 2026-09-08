@@ -357,13 +357,64 @@ jobs:
 
           selected.sort(key=lambda row: row["shard_index"])
           indexes = [row["shard_index"] for row in selected]
-          if not selected:
-              raise SystemExit(
-                  "V2/V4 source has no original shard artifacts"
-              )
           if len(indexes) != len(set(indexes)):
               raise SystemExit(
                   "V2/V4 source contains duplicate shard artifact indexes"
+              )
+
+          empty_source_proof = None
+          if not selected:
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              observed_jobs = {}
+              job_page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={job_page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      name = str(row.get("name") or "")
+                      if name in expected_jobs:
+                          observed_jobs[name] = {
+                              "status": row.get("status"),
+                              "conclusion": row.get("conclusion"),
+                          }
+                  if len(rows) < 100:
+                      break
+                  job_page += 1
+                  if job_page > 10:
+                      raise SystemExit(
+                          "V2/V4 source job pagination exceeded 1000"
+                      )
+              if observed_jobs != expected_jobs:
+                  raise SystemExit(
+                      "V2/V4 empty source is not proven by skipped "
+                      f"frozen-parent jobs: {observed_jobs}"
+                  )
+              empty_source_proof = {
+                  "source_run_id": run_id,
+                  "expected_jobs": expected_jobs,
+                  "observed_jobs": observed_jobs,
+              }
+              Path(
+                  "source-metadata/v2-v4-empty-source-proof.json"
+              ).write_text(
+                  json.dumps(
+                      empty_source_proof,
+                      indent=2,
+                      sort_keys=True,
+                  )
+                  + "\n"
               )
 
           Path(
@@ -375,8 +426,9 @@ jobs:
               "source_run_id": run_id,
               "source_artifact_pages": page,
               "original_shard_artifacts": len(selected),
-              "first_shard_index": indexes[0],
-              "last_shard_index": indexes[-1],
+              "first_shard_index": indexes[0] if indexes else None,
+              "last_shard_index": indexes[-1] if indexes else None,
+              "empty_source_proven": empty_source_proof is not None,
               "planning_source_bytes_downloaded": 0,
           }, sort_keys=True))
           PY
@@ -597,9 +649,37 @@ jobs:
               Path("source-metadata/v2-v4-prior-gap-coverage.json").read_text()
           )
           if not source_rows and not prior_gap_rows:
-              raise SystemExit(
-                  "recovery sources have no successful V4 artifacts"
+              proof_path = Path(
+                  "source-metadata/v2-v4-empty-source-proof.json"
               )
+              if not proof_path.exists():
+                  raise SystemExit(
+                      "V2/V4 recovery has no source coverage and no "
+                      "skipped-source proof"
+                  )
+              proof = json.loads(proof_path.read_text())
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              if int(proof.get("source_run_id", 0)) != int(
+                  "${{ inputs.partial_run_id }}"
+              ):
+                  raise SystemExit(
+                      "V2/V4 empty-source proof run ID changed"
+                  )
+              if proof.get("expected_jobs") != expected_jobs or (
+                  proof.get("observed_jobs") != expected_jobs
+              ):
+                  raise SystemExit(
+                      "V2/V4 empty-source proof job states changed"
+                  )
 
           covered = []
           sources = []
