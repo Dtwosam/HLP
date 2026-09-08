@@ -2132,6 +2132,20 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "v1-v3-gap-plan.json" in content
     assert "phase1-pons-v2-v4-gap-plan" in content
     assert "v4-gap-plan.json" in content
+    assert "pons-v1-v3-summary.json" in content
+    assert "pons-v2-v4-summary.json" in content
+    assert "embedded_plan != current_plan" in content
+    assert 'summary.get("snapshot_head_block", -1)' in content
+    assert 'summary.get("records", -1)' in content
+    assert 'summary.get("tape_sha256") or ""' in content
+    assert 'summary.get(membership_field, -1)' in content
+    assert 'summary.get(matched_field, -1)' in content
+    assert 'summary.get(missing_field, -1)' in content
+    assert 'summary.get("source_files", 0)' in content
+    assert '"registered_pools"' in content
+    assert '"registered_pool_ids"' in content
+    assert "268_688" in content
+    assert "3_638" in content
     assert 'current_plan.get("prior_gap_run_id") or 0' in content
     assert '"partial_run_id" not in current_plan' in content
     assert '"prior_gap_run_id" not in current_plan' in content
@@ -2257,7 +2271,7 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "source already has complete pricing; set pricing_run_id" in content
     assert "source_v2_shards" in content
     assert "recovery_manifest" in content
-    assert content.count("fetch_github_actions_artifact_zip(") == 2
+    assert content.count("fetch_github_actions_artifact_zip(") == 1
     assert "decode_json=False" not in content
     assert "actions/checkout@v4" in content
     assert "python -m pip install -e ." in content
@@ -2280,6 +2294,22 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "validate_gap_plan_jobs" in content
     assert content.count("validate_gap_plan_jobs(") == 2
     assert "recovery venue plan structure changed: " in content
+    assert "recovery_artifact_json" in content
+    assert "recovery venue embedded plan" in content
+    assert "recovery venue summary" in content
+    assert "recovery venue embedded plan does not match lineage " in content
+    assert "recovery venue summary snapshot changed" in content
+    assert "recovery venue summary records changed" in content
+    assert "recovery venue summary tape SHA changed" in content
+    assert "recovery venue summary membership changed" in content
+    assert "recovery venue summary matched membership changed" in content
+    assert "recovery venue summary missing initialize changed" in content
+    assert "recovery venue summary source file count is invalid" in content
+    assert "recovery venue summary metadata is invalid" in content
+    assert "pons-v1-v3-summary.json" in content
+    assert "pons-v2-v4-summary.json" in content
+    assert "268_688" in content
+    assert "3_638" in content
     assert "recovery venue prior plan structure changed: " in content
     assert "recovery venue prior lineage is invalid" in content
     assert "if prior_gap_id == 0:" in content
