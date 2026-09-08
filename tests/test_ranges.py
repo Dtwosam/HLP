@@ -142,3 +142,68 @@ def test_indexed_shard_bounds_rejects_more_shards_than_blocks():
     with pytest.raises(ValueError, match="shard_count exceeds"):
         indexed_shard_bounds(1, 2, 0, 3)
 
+def test_current_v1_rescue_cover_drops_54_redundant_gaps():
+    start = 8_621_658
+    head = 54_486_035
+    missing_original_indexes = {15, 131, 132, 231}
+
+    originals = [
+        indexed_shard_bounds(start, head, index, 240)
+        for index in range(240)
+        if index not in missing_original_indexes
+    ]
+
+    redundant_prefix = split_range(
+        start,
+        indexed_shard_bounds(start, head, 13, 240)[1],
+        max_blocks=50_000,
+    )
+    shard_15 = split_range(
+        *indexed_shard_bounds(start, head, 15, 240),
+        max_blocks=50_000,
+    )
+    shards_131_132 = split_range(
+        indexed_shard_bounds(start, head, 131, 240)[0],
+        indexed_shard_bounds(start, head, 132, 240)[1],
+        max_blocks=50_000,
+    )
+    shard_231 = split_range(
+        *indexed_shard_bounds(start, head, 231, 240),
+        max_blocks=50_000,
+    )
+    prior_gaps = [
+        *redundant_prefix,
+        *shard_15,
+        *shards_131_132,
+        *shard_231,
+    ]
+
+    assert len(originals) == 236
+    assert len(redundant_prefix) == 54
+    assert len(prior_gaps) == 70
+
+    candidates = [*originals, *prior_gaps]
+    selected = select_contiguous_cover(start, head, candidates)
+    selected_ranges = [candidates[index] for index in selected]
+
+    assert len(candidates) == 306
+    assert len(selected) == 252
+    assert len(candidates) - len(selected) == 54
+    assert sum(index < len(originals) for index in selected) == 236
+    assert sum(index >= len(originals) for index in selected) == 16
+    assert all(
+        index < len(originals) + len(redundant_prefix)
+        for index in selected
+        if index < len(originals)
+    )
+    assert not any(
+        len(originals)
+        <= index
+        < len(originals) + len(redundant_prefix)
+        for index in selected
+    )
+    assert selected_ranges[0][0] == start
+    assert selected_ranges[-1][1] == head
+    for prior, current in zip(selected_ranges, selected_ranges[1:]):
+        assert current[0] == prior[1] + 1
+
