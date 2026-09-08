@@ -157,3 +157,131 @@ def test_actions_artifact_redirect_does_not_forward_github_token(monkeypatch):
     assert seen["blob_url"] == blob_url
     assert seen["api_headers"]["Authorization"] == "Bearer secret-token"
     assert "Authorization" not in seen["blob_headers"]
+
+def test_actions_artifact_retries_transient_blob_failure_with_fresh_redirect(
+    monkeypatch,
+):
+    api_url = (
+        "https://api.github.com/repos/Dtwosam/HLP/"
+        "actions/artifacts/900/zip"
+    )
+    blob_urls = [
+        "https://results.blob.core.windows.net/actions/first.zip",
+        "https://results.blob.core.windows.net/actions/second.zip",
+    ]
+    seen = {
+        "api_calls": 0,
+        "blob_calls": 0,
+        "blob_headers": [],
+    }
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            index = seen["api_calls"]
+            seen["api_calls"] += 1
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_urls[index]},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    def flaky_blob(request, timeout):
+        seen["blob_calls"] += 1
+        seen["blob_headers"].append(dict(request.header_items()))
+        if seen["blob_calls"] == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b"retry"),
+            )
+        return _Response(b"PK\x03\x04recovered")
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        flaky_blob,
+    )
+
+    payload = fetch_github_actions_artifact_zip(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert payload == b"PK\x03\x04recovered"
+    assert seen["api_calls"] == 2
+    assert seen["blob_calls"] == 2
+    assert all(
+        "Authorization" not in headers
+        for headers in seen["blob_headers"]
+    )
+
+
+def test_actions_artifact_retries_transient_api_failure(monkeypatch):
+    api_url = (
+        "https://api.github.com/repos/Dtwosam/HLP/"
+        "actions/artifacts/901/zip"
+    )
+    blob_url = (
+        "https://results.blob.core.windows.net/actions/retry.zip"
+    )
+    seen = {"api_calls": 0}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            seen["api_calls"] += 1
+            if seen["api_calls"] == 1:
+                raise urllib.error.HTTPError(
+                    api_url,
+                    503,
+                    "Service Unavailable",
+                    {},
+                    io.BytesIO(b"retry"),
+                )
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_url},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        lambda request, timeout: _Response(b"PK\x03\x04api-recovered"),
+    )
+
+    payload = fetch_github_actions_artifact_zip(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert payload == b"PK\x03\x04api-recovered"
+    assert seen["api_calls"] == 2
+
+
+def test_actions_artifact_attempts_must_be_positive():
+    with pytest.raises(
+        ValueError,
+        match="artifact attempts must be positive",
+    ):
+        fetch_github_actions_artifact_zip(
+            "https://api.github.com/repos/Dtwosam/HLP/"
+            "actions/artifacts/902/zip",
+            "secret-token",
+            attempts=0,
+        )
+
