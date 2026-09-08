@@ -7,6 +7,7 @@ from hlp.data.ranges import (
     plan_missing_subranges,
     select_contiguous_cover,
     split_range,
+    validate_gap_plan_jobs,
 )
 
 
@@ -206,4 +207,102 @@ def test_current_v1_rescue_cover_drops_54_redundant_gaps():
     assert selected_ranges[-1][1] == head
     for prior, current in zip(selected_ranges, selected_ranges[1:]):
         assert current[0] == prior[1] + 1
+
+def test_validate_gap_plan_jobs_accepts_v2_scale():
+    start = 26_841_846
+    end = 54_486_035
+    ranges = split_range(start, end, max_blocks=50_000)
+    jobs = [
+        {
+            "id": f"{index:03d}",
+            "from_block": lo,
+            "to_block": hi,
+        }
+        for index, (lo, hi) in enumerate(ranges)
+    ]
+    plan = {
+        "max_gap_blocks": 50_000,
+        "gap_jobs": jobs,
+        "gap_job_count": len(jobs),
+        "gap_wave_job_counts": [240, 240, 73, 0],
+        "gap_blocks": end - start + 1,
+    }
+
+    bindings = validate_gap_plan_jobs(
+        plan,
+        expected_start=start,
+        expected_end=end,
+    )
+
+    assert len(bindings) == 553
+    assert bindings["000"] == (26_841_846, 26_891_845)
+    assert bindings["552"] == (54_441_846, 54_486_035)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("gap_job_count", 2, "job count mismatch"),
+        ("gap_wave_job_counts", [2, 0, 0, 0], "wave counts mismatch"),
+        ("gap_blocks", 99, "block count mismatch"),
+    ],
+)
+def test_validate_gap_plan_jobs_rejects_inconsistent_accounting(
+    field,
+    value,
+    match,
+):
+    plan = {
+        "max_gap_blocks": 50,
+        "gap_jobs": [
+            {"id": "000", "from_block": 1, "to_block": 50},
+        ],
+        "gap_job_count": 1,
+        "gap_wave_job_counts": [1, 0, 0, 0],
+        "gap_blocks": 50,
+    }
+    plan[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_gap_plan_jobs(
+            plan,
+            expected_start=1,
+            expected_end=100,
+        )
+
+
+def test_validate_gap_plan_jobs_rejects_id_drift():
+    plan = {
+        "max_gap_blocks": 50,
+        "gap_jobs": [
+            {"id": "001", "from_block": 1, "to_block": 50},
+        ],
+        "gap_job_count": 1,
+        "gap_wave_job_counts": [1, 0, 0, 0],
+        "gap_blocks": 50,
+    }
+    with pytest.raises(ValueError, match="job ID changed"):
+        validate_gap_plan_jobs(
+            plan,
+            expected_start=1,
+            expected_end=100,
+        )
+
+
+def test_validate_gap_plan_jobs_rejects_overlap():
+    plan = {
+        "max_gap_blocks": 50,
+        "gap_jobs": [
+            {"id": "000", "from_block": 1, "to_block": 50},
+            {"id": "001", "from_block": 50, "to_block": 99},
+        ],
+        "gap_job_count": 2,
+        "gap_wave_job_counts": [2, 0, 0, 0],
+        "gap_blocks": 100,
+    }
+    with pytest.raises(ValueError, match="overlap or are out of order"):
+        validate_gap_plan_jobs(
+            plan,
+            expected_start=1,
+            expected_end=100,
+        )
 
