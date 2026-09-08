@@ -673,6 +673,13 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2/V4 retry job accounting changed under " in content
     assert '"exact_range_reconstruction": True' in content
     assert '"prior_retry_accounting": prior_retry_accounting' in content
+    assert "V2/V4 retry planner" in content
+    assert "planned retry jobs:" in content
+    assert "retry waves:" in content
+    assert "prior planned gaps:" in content
+    assert "reusable prior gaps:" in content
+    assert "launcher expected reusable gaps:" in content
+    assert "exact prior-plan reconstruction:" in content
     assert "expected_prior_reusable_gap_count" in content
     assert "EXPECTED_PRIOR_REUSABLE_GAP_COUNT" in content
     assert "V2/V4 launcher/planner reusable prior-gap " in content
