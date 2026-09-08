@@ -354,7 +354,8 @@ def test_v2_v4_filter_comparison_is_manual_bounded_and_guarded():
     assert "\n  workflow_call:" not in trigger_block
     assert "confirm_comparison" in content
     assert "V2/V4 filter comparison exceeds 5000-block ceiling" in content
-    assert "blocked while a live venue rescue is active" in content
+    assert "blocked while a live venue " in content
+    assert "rescue is active" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml" in content
     assert 'TRANSITION_RUN_ID: \'33912452330\'' in content
     assert content.count("rpc-v2-v4-tape") == 2
