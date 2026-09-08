@@ -967,8 +967,14 @@ and permits zero original files only under that frozen proof. It also replaces
 the wildcard prior/current gap downloads with paginated exact numeric artifact
 discovery, rejects duplicate gap IDs/files, and requires the current run's
 observed gap-artifact count to equal the plan. This avoids the same artifact
-truncation class at V2's **553-artifact** scale, so a retry after the active
-generation can reuse completed gaps and reach merge without re-fetching them.
+truncation class at V2's **553-artifact** scale. Merge also walks
+`prior_gap_run_id` recursively (cycle-guarded, depth 20), reopens each bound
+gap plan, rejects observed artifacts not named by that plan, and stores each
+generation in a separate directory before recursive exact-cover selection.
+Thus a second or later retry cannot lose successful gaps from an older ancestor
+generation merely because the immediate prior run did not copy them forward.
+A retry after the active generation can therefore reuse completed gaps and
+reach merge without re-fetching them.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
