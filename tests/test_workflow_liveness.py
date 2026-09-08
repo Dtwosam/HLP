@@ -133,6 +133,7 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         if name == "phase1-pons-v2-v4-full.yml":
             assert "SHARD_COUNT: '192'" in content, name
             assert "timeout-minutes: 30" in content, name
+            assert content.count("--global-pool-scan") == 1, name
         elif name == "phase1-pons-v1-v3-full.yml":
             assert "SHARD_COUNT: '240'" in content, name
             assert "timeout-minutes: 40" in content, name
@@ -575,6 +576,8 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'run.get("conclusion")' not in lineage_block
     assert "v4-events-gap" in content
     assert "manifest_gap_aware_v4_recovery" in content
+    assert content.count("--global-pool-scan") == 4
+    assert "server_side_topic1_registered_pool_ids" not in content
     assert 'default: "50000"' in content
     assert "max_gap_blocks must be between 1 and 100000" in content
     assert "V4 gap plan exceeds four serialized 240-job waves" in content

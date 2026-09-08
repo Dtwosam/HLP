@@ -414,7 +414,12 @@ Do not issue one historical API query per coin unless unavoidable.
 Planned high-level scans:
 1. factory launch events -> token/curve/pool registry;
 2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
-3. Uniswap V4 swaps from the single PoolManager with registered Pons pool IDs pushed into indexed topic1 server-side filters;
+3. Uniswap V4 Initialize/Swap events from the single PoolManager through the
+   scalable full-history global topic scan, then filter locally against the
+   frozen 3,638 registered Pons V2 pool IDs. The CLI retains an optional
+   server-side topic1 OR mode for bounded validation, but production
+   full-history/recovery workflows must not adopt that large filter without a
+   provider-safe measured comparison;
 4. V3 Initialize/Swap through block-sharded global topic scans followed by frozen Pons V1 pool membership locally; the 268,688-pool V1 registry is too large to push as one RPC address filter;
 5. first-pass price/mcap reconstruction keeps eligibility evidence for the full launch population without doing holder/wallet backfills;
 6. only after the $100k universe is known, fetch complete market/transfer history for eligible tokens to reconstruct wallet and historical holder state.
