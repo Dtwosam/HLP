@@ -728,6 +728,16 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "needs: [plan, recover_2]" in content
     assert "needs: [plan, recover_3]" in content
     assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
+    for index in range(1, 4):
+        assert (
+            f"needs.recover_{index}.result == 'failure'"
+            in content
+        )
+    merge_gate = content.split(
+        "  merge:",
+        1,
+    )[1].split("    runs-on:", 1)[0]
+    assert "result == 'failure'" not in merge_gate
     assert "time.sleep(" not in content
 
 
@@ -1027,6 +1037,16 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "needs: [plan, recover_2]" in content
     assert "needs: [plan, recover_3]" in content
     assert "needs: [plan, recover_1, recover_2, recover_3, recover_4]" in content
+    for index in range(1, 4):
+        assert (
+            f"needs.recover_{index}.result == 'failure'"
+            in content
+        )
+    merge_gate = content.split(
+        "  merge:",
+        1,
+    )[1].split("    runs-on:", 1)[0]
+    assert "result == 'failure'" not in merge_gate
     assert "time.sleep(" not in content
 
 

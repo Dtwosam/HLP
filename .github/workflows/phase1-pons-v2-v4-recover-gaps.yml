@@ -1049,7 +1049,7 @@ jobs:
 
   recover_2:
     needs: [plan, recover_1]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'failure' || needs.recover_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -1114,7 +1114,7 @@ jobs:
 
   recover_3:
     needs: [plan, recover_2]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_2.result == 'success' || needs.recover_2.result == 'failure' || needs.recover_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -1179,7 +1179,7 @@ jobs:
 
   recover_4:
     needs: [plan, recover_3]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_3.result == 'success' || needs.recover_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_3.result == 'success' || needs.recover_3.result == 'failure' || needs.recover_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
