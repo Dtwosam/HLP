@@ -510,7 +510,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'manifest.get("path") == path.name' in content
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
-    assert content.count("import hashlib") == 2
+    assert content.count("import hashlib") == 3
     assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v4-events-gap" in content
@@ -528,6 +528,13 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V2 transition artifact identity is ambiguous" in content
     assert "V2 transition manifest identity is ambiguous" in content
     assert "V2 transition manifest changed: " in content
+    assert "V2 transition data identity is ambiguous" in content
+    assert "actual_digest = hashlib.sha256()" in content
+    assert "actual_records = 0" in content
+    assert 'checks["actual_sha256"]' in content
+    assert 'checks["actual_records"]' in content
+    assert '"actual_sha256": actual_digest.hexdigest()' in content
+    assert '"actual_records": actual_records' in content
     assert "33912452330" in content
     assert "phase1-pons-v2-transition-full.yml" in content
     assert "7ce5eac5c1980e8618173e1a8ff0effb06ecb327" in content
@@ -802,7 +809,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'manifest.get("path") == path.name' in content
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
-    assert content.count("import hashlib") == 2
+    assert content.count("import hashlib") == 3
     assert 'local_digest.hexdigest() == manifest["sha256"]' in content
     assert "prior_gap_run_id" in content
     assert "v1-v3-events-gap" in content
@@ -820,6 +827,13 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1 registry artifact identity is ambiguous" in content
     assert "V1 registry manifest identity is ambiguous" in content
     assert "V1 registry manifest changed: " in content
+    assert "V1 registry data identity is ambiguous" in content
+    assert "actual_digest = hashlib.sha256()" in content
+    assert "actual_records = 0" in content
+    assert 'checks["actual_sha256"]' in content
+    assert 'checks["actual_records"]' in content
+    assert '"actual_sha256": actual_digest.hexdigest()' in content
+    assert '"actual_records": actual_records' in content
     assert "33911022718" in content
     assert "phase1-pons-v1-registry-recovery.yml" in content
     assert "6506e15224b83b12cfd85b607d3fdb55a0d3b026" in content
