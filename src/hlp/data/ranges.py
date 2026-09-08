@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 
 BlockRange = tuple[int, int]
@@ -84,6 +84,102 @@ def select_contiguous_cover(
         selected.append(index)
         cursor = rows[index][1] + 1
     return selected
+
+
+def validate_gap_plan_jobs(
+    plan: Mapping[str, object],
+    *,
+    expected_start: int,
+    expected_end: int,
+    max_wave_jobs: int = 240,
+    max_waves: int = 4,
+) -> dict[str, BlockRange]:
+    """Validate bounded serialized gap-plan jobs and return ID-to-range bindings."""
+    start = int(expected_start)
+    end = int(expected_end)
+    wave_size = int(max_wave_jobs)
+    wave_count = int(max_waves)
+    if start <= 0 or end < start:
+        raise ValueError(f"invalid expected range: {start}..{end}")
+    if wave_size <= 0 or wave_count <= 0:
+        raise ValueError("wave sizing must be positive")
+
+    max_blocks = int(plan.get("max_gap_blocks", 0) or 0)
+    if not 1 <= max_blocks <= 100_000:
+        raise ValueError("gap plan max_gap_blocks must be between 1 and 100000")
+
+    raw_jobs = plan.get("gap_jobs")
+    if not isinstance(raw_jobs, list):
+        raise ValueError("gap plan jobs must be a list")
+    declared_count = int(plan.get("gap_job_count", -1) or 0)
+    if declared_count != len(raw_jobs):
+        raise ValueError(
+            "gap plan job count mismatch: "
+            f"declared={declared_count} observed={len(raw_jobs)}"
+        )
+    if len(raw_jobs) > wave_size * wave_count:
+        raise ValueError(
+            "gap plan exceeds serialized wave capacity: "
+            f"{len(raw_jobs)} > {wave_size * wave_count}"
+        )
+
+    raw_wave_counts = plan.get("gap_wave_job_counts")
+    if not isinstance(raw_wave_counts, list) or (
+        len(raw_wave_counts) != wave_count
+    ):
+        raise ValueError("gap plan wave counts changed")
+    observed_wave_counts = [int(value) for value in raw_wave_counts]
+    expected_wave_counts = [
+        min(max(len(raw_jobs) - wave_size * index, 0), wave_size)
+        for index in range(wave_count)
+    ]
+    if observed_wave_counts != expected_wave_counts:
+        raise ValueError(
+            "gap plan wave counts mismatch: "
+            f"observed={observed_wave_counts} "
+            f"expected={expected_wave_counts}"
+        )
+
+    bindings: dict[str, BlockRange] = {}
+    previous_hi: int | None = None
+    total_blocks = 0
+    for index, raw_job in enumerate(raw_jobs):
+        if not isinstance(raw_job, Mapping):
+            raise ValueError(f"gap plan job {index} must be an object")
+        gap_id = str(raw_job.get("id") or "")
+        expected_id = f"{index:03d}"
+        if gap_id != expected_id:
+            raise ValueError(
+                "gap plan job ID changed: "
+                f"observed={gap_id!r} expected={expected_id!r}"
+            )
+        lo = int(raw_job.get("from_block", 0) or 0)
+        hi = int(raw_job.get("to_block", -1) or -1)
+        if lo < start or hi > end or hi < lo:
+            raise ValueError(
+                f"gap plan range outside expected bounds: {lo}..{hi}"
+            )
+        if hi - lo + 1 > max_blocks:
+            raise ValueError(
+                "gap plan job exceeds max_gap_blocks: "
+                f"{gap_id} {lo}..{hi}"
+            )
+        if previous_hi is not None and lo <= previous_hi:
+            raise ValueError(
+                "gap plan jobs overlap or are out of order: "
+                f"prior_hi={previous_hi} next_lo={lo}"
+            )
+        bindings[gap_id] = (lo, hi)
+        previous_hi = hi
+        total_blocks += hi - lo + 1
+
+    declared_blocks = int(plan.get("gap_blocks", -1) or 0)
+    if declared_blocks != total_blocks:
+        raise ValueError(
+            "gap plan block count mismatch: "
+            f"declared={declared_blocks} observed={total_blocks}"
+        )
+    return bindings
 
 
 def missing_ranges(
