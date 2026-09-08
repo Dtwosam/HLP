@@ -2585,6 +2585,8 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert '"launch V1 V3 rescue"' in content
     assert '"launch V2 V4 rescue"' in content
     assert "launch_pattern = re.compile(" in content
+    assert 'r" generation (\\d+)$"' in content
+    assert 'r" generation (\\\\d+)$"' not in content
     assert "re.escape(launch_marker)" in content
     assert "launch_pattern.fullmatch(display_title)" in content
     assert "if not display_title.startswith(" not in content
