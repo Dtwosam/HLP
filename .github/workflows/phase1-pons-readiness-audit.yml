@@ -685,6 +685,15 @@ jobs:
               if "phase1-pons-v2-v4-full" not in source_artifacts:
                   recovery_runs["v2_v4"] = latest_recovery_run("v2_v4")
 
+          active_recovery_run_ids = {
+              venue: int(
+                  (
+                      diagnostics.get("active_run") or {}
+                  ).get("run_id", 0)
+              )
+              for venue, diagnostics in recovery_discovery.items()
+          }
+
           evidence_run = (
               run_payload(evidence_run_id)
               if evidence_run_id > 0
@@ -789,6 +798,7 @@ jobs:
               ledger_route_run_ids=route_run_ids,
               evidence_handoff=evidence_handoff,
               recovery_runs=recovery_runs,
+              active_recovery_run_ids=active_recovery_run_ids,
           )
           report.update(
               {
