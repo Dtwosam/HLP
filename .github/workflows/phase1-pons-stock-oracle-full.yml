@@ -77,11 +77,31 @@ jobs:
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
           printf -v SHARD "%02d" "$SHARD_INDEX"
           hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-pons-stock-oracle-lifecycle             --quote-registry quotes/pons-quote-registry.jsonl             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --state-out "artifacts/oracle-state-shard-${SHARD}.jsonl"             --out "artifacts/oracle-updates-shard-${SHARD}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-oracle-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-oracle-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-oracle-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: shard

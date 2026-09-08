@@ -72,11 +72,31 @@ jobs:
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
           printf -v SHARD "%02d" "$SHARD_INDEX"
           hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v2-curve-tape             --registry registry/pons-v2-full-registry.jsonl             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --global-topic-scan             --out "artifacts/v2-curve-shard-${SHARD}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-curve-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: shard
