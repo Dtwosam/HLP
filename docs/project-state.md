@@ -903,9 +903,15 @@ closed rather than being trusted from sidecar metadata alone. Cross-run artifact
 in both venue recovery workflows and recovered completion now use the shared
 safe GitHub Actions downloader: the GitHub API request carries auth, but the
 redirected blob-storage request deliberately does not. Recursive prior-gap
-manifest/plan verification uses the same token-stripping path. The
-already-running V1/V3 rescue remains valid and is left untouched rather than
-starting a competing archive crawl.
+manifest/plan verification uses the same token-stripping path. The first pinned V1/V3 rescue generation **34207459960**
+completed all 70 repair shards successfully but its final merge failed with
+`NameError: hashlib is not defined`: the launch commit imported `hashlib`
+in the planner heredoc but not in the merge heredoc. Current V1/V3 and V2/V4
+merge scripts now import it explicitly, and CI asserts each workflow contains
+the planner and merge imports separately. Run **34207459960** remains reusable:
+it exposes the bound V1/V3 gap plan plus all **70** successful gap artifacts
+and no canonical full artifact, so the next pinned generation can reuse that
+run as `prior_gap_run_id` without another archive fetch.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
