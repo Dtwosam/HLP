@@ -943,7 +943,12 @@ also bind every extracted gap artifact back to the exact block interval assigned
 to its gap ID in the corresponding plan. Prior/current manifest
 `from_block`/`to_block` must match the plan exactly, and the current generation's
 observed numeric gap-ID set must equal its plan rather than merely matching the
-expected artifact count. Generation 4 run **34228430753** passed
+expected artifact count. Gap manifests are also bound to the acquisition
+provenance that generated them: source `evm_json_rpc`, chain **4663**, the
+venue-specific protocol, the frozen registry/registration input filename and
+the required global-scan filter mode must all match before extraction. A
+correctly named and correctly ranged artifact from the wrong acquisition path
+therefore fails closed before final merge. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
 four repair waves, and completed the corrected final merge successfully. Its
