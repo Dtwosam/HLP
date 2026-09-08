@@ -59,33 +59,30 @@ def select_contiguous_cover(
             )
         by_start.setdefault(lo, []).append(index)
 
-    memo: dict[int, list[int] | None] = {}
-
-    def solve(cursor: int) -> list[int] | None:
-        if cursor == end + 1:
-            return []
-        if cursor > end + 1:
-            return None
-        if cursor in memo:
-            return memo[cursor]
-
+    reachable = {end + 1}
+    choice: dict[int, int] = {}
+    for cursor in sorted(by_start, reverse=True):
         indexes = sorted(
-            by_start.get(cursor, ()),
+            by_start[cursor],
             key=lambda index: (-rows[index][1], index),
         )
         for index in indexes:
-            suffix = solve(rows[index][1] + 1)
-            if suffix is not None:
-                memo[cursor] = [index, *suffix]
-                return memo[cursor]
-        memo[cursor] = None
-        return None
+            if rows[index][1] + 1 in reachable:
+                choice[cursor] = index
+                reachable.add(cursor)
+                break
 
-    selected = solve(start)
-    if selected is None:
+    if start not in reachable:
         raise ValueError(
             f"candidate ranges cannot form exact cover: {start}..{end}"
         )
+
+    selected: list[int] = []
+    cursor = start
+    while cursor <= end:
+        index = choice[cursor]
+        selected.append(index)
+        cursor = rows[index][1] + 1
     return selected
 
 
