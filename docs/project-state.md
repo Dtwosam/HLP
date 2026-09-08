@@ -939,9 +939,15 @@ transition, quote-audit and WETH/USDG anchor run IDs, and verify each support
 run is successful, comes from its exact workflow path on the Phase 1 branch,
 and still exposes its required non-expired canonical artifact. The reusable
 representative chain repeats that immutable support preflight before its sample
-job, so direct/manual entry cannot bypass it and reach Transfer RPC. Readiness
-metadata parsing also fails closed on malformed numeric evidence, route-launch
-or finalizer provenance instead of crashing the audit.
+job, so direct/manual entry cannot bypass it and reach Transfer RPC. Resumed
+representative Transfer shards are now bound to the exact frozen sample as
+well: every shard manifest records both the SHA256 of the ten-token sample
+JSONL and a canonical SHA256 of the sorted token-address set, and both the gap
+planner and final merge reject prior shards whose sample or token-set identity
+does not match the current sample. Older prior runs without those bindings fail
+closed instead of being reused by artifact name alone. Readiness metadata
+parsing also fails closed on malformed numeric evidence, route-launch or
+finalizer provenance instead of crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
 evidence preflight in addition to the guarded route launcher. Manual/debug
@@ -959,13 +965,20 @@ representative artifacts must come from the same approved evidence handoff,
 all nine route runs must be distinct, successful, on their exact guarded
 workflow paths and Phase 1 branch, expose their required measurement artifacts,
 and prove at launch that they were bound to source **33982556591**, the same
-evidence run and an empty own ledger slot. The acceptance gate itself is also
-bound to the current final-acceptance caller run: its viability projection must
-come from that same GitHub run, its caller workflow must be the guarded
-finalizer or reusable final-acceptance chain, and its evidence run must remain
-an approved ancestor with the full evidence artifact bundle. Direct manual
-acceptance-gate dispatch therefore cannot create a misleading standalone PASS
-artifact.
+evidence run and an empty own ledger slot. It now also downloads and opens all
+nine primary measurement artifacts plus the Pons-registry V2 secondary
+artifact. Every `phase1-route-measurement.json` must name the expected route,
+exact **54,436,036–54,486,035** 50k-block measurement window, current evidence
+run, frozen source parent, measurement run ID, launch SHA/sequence identity and
+snapshot head; registry primary/secondary must additionally identify V1/V2
+respectively. A mislabeled or malformed measurement artifact therefore fails
+before accounting even if its artifact name and workflow path look valid. The
+acceptance gate itself is also bound to the current final-acceptance caller run:
+its viability projection must come from that same GitHub run, its caller
+workflow must be the guarded finalizer or reusable final-acceptance chain, and
+its evidence run must remain an approved ancestor with the full evidence
+artifact bundle. Direct manual acceptance-gate dispatch therefore cannot create
+a misleading standalone PASS artifact.
 
 A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
 unarmed. After the ledger finalizer produces a real PASS artifact and that run
