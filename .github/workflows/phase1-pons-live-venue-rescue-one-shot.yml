@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   preflight:
-    if: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') || contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    if: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') || startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -21,8 +21,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           BRANCH: ${{ github.ref_name }}
-          RESCUE_V1: ${{ contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
-          RESCUE_V2: ${{ contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+          RESCUE_V1: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+          RESCUE_V2: ${{ startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
         run: |
           python - <<'PY'
           import json
@@ -169,7 +169,7 @@ jobs:
 
   v1_v3_rescue:
     needs: preflight
-    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+    if: ${{ needs.preflight.result == 'success' && startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
     uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
     with:
       source_registry_run_id: "33911022718"
@@ -180,7 +180,7 @@ jobs:
 
   v2_v4_rescue:
     needs: preflight
-    if: ${{ needs.preflight.result == 'success' && contains(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    if: ${{ needs.preflight.result == 'success' && startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
     uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
     with:
       transition_run_id: "33912452330"
