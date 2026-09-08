@@ -943,7 +943,12 @@ also bind every extracted gap artifact back to the exact block interval assigned
 to its gap ID in the corresponding plan. Prior/current manifest
 `from_block`/`to_block` must match the plan exactly, and the current generation's
 observed numeric gap-ID set must equal its plan rather than merely matching the
-expected artifact count. Gap manifests are also bound to the acquisition
+expected artifact count. Reused and current gap plans are now structurally
+validated before those bindings are trusted: `gap_job_count`, `gap_blocks`,
+`gap_wave_job_counts`, sequential zero-padded IDs, per-job bounds, max-gap size,
+strict ordering/non-overlap and the four-wave 240-job capacity must all agree.
+The live V2 generation-2 plan passes this validator at its full **553-job**
+`240 / 240 / 73 / 0` scale. Gap manifests are also bound to the acquisition
 provenance that generated them: source `evm_json_rpc`, chain **4663**, the
 venue-specific protocol, the frozen registry/registration input filename and
 the required global-scan filter mode must all match before extraction. A
