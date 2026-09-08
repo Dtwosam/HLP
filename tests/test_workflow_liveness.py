@@ -515,7 +515,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "original_shard_artifacts" in content
     assert "duplicate V2/V4 shard file while downloading" in content
     assert "pattern: phase1-pons-v2-v4-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip") == 3
+    assert content.count("fetch_github_actions_artifact_zip(") == 3
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
@@ -708,7 +708,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "original_shard_artifacts" in content
     assert "duplicate V1/V3 shard file while downloading" in content
     assert "pattern: phase1-pons-v1-v3-*" not in content
-    assert content.count("fetch_github_actions_artifact_zip") == 3
+    assert content.count("fetch_github_actions_artifact_zip(") == 3
     assert "decode_json=False" not in content
     assert "Verify recursive prior recovery lineage" in content
     assert "prior recovery plan lacks bound lineage metadata" in content
