@@ -426,13 +426,26 @@ def build_phase1_readiness_report(
         if source_requires_recovery
         else None
     )
+    active_recovery_present = bool(
+        source_requires_recovery
+        and any(
+            _safe_int(value) > 0
+            for value in (active_recovery_run_ids or {}).values()
+        )
+    )
 
     if not source_successful:
-        if source_requires_recovery and evidence_valid:
+        if (
+            source_requires_recovery
+            and evidence_valid
+            and not active_recovery_present
+        ):
             pass
         else:
             if not source_completed:
                 next_action = "wait_for_full_eligibility_acquisition"
+            elif active_recovery_present:
+                next_action = str(source_recovery_plan["next_action"])
             elif evidence_id > 0:
                 next_action = "recover_or_rerun_post_eligibility_evidence"
             else:
@@ -440,9 +453,13 @@ def build_phase1_readiness_report(
             return {
                 "phase1_ready": False,
                 "stage": (
-                    "post_eligibility_evidence"
-                    if source_completed and evidence_id > 0
-                    else "eligibility_acquisition"
+                    "eligibility_acquisition"
+                    if active_recovery_present
+                    else (
+                        "post_eligibility_evidence"
+                        if source_completed and evidence_id > 0
+                        else "eligibility_acquisition"
+                    )
                 ),
                 "next_action": next_action,
                 "source_eligibility_run_id": SOURCE_ELIGIBILITY_RUN_ID,
