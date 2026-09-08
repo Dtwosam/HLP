@@ -22,6 +22,11 @@ on:
         required: false
         default: ""
         type: string
+      expected_prior_terminal_snapshot_sha256:
+        description: "Optional launcher-pinned prior terminal snapshot digest"
+        required: false
+        default: ""
+        type: string
       max_gap_blocks:
         description: "Maximum blocks per retry job"
         required: true
@@ -44,6 +49,11 @@ on:
         type: string
       expected_prior_reusable_gap_count:
         description: "Optional launcher-pinned reusable prior-gap artifact count"
+        required: false
+        default: ""
+        type: string
+      expected_prior_terminal_snapshot_sha256:
+        description: "Optional launcher-pinned prior terminal snapshot digest"
         required: false
         default: ""
         type: string
@@ -618,9 +628,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
           PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
+          EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256: ${{ inputs.expected_prior_terminal_snapshot_sha256 }}
         run: |
           mkdir -p source-metadata
           python - <<'PY'
+          import hashlib
           import io
           import json
           import os
@@ -638,6 +650,26 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
           partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
           cursor = int(os.environ["PRIOR_GAP_RUN_ID"] or 0)
+          immediate_prior_id = cursor
+          expected_snapshot_sha256 = os.environ[
+              "EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256"
+          ]
+          if expected_snapshot_sha256 and not re.fullmatch(
+              r"[0-9a-f]{64}",
+              expected_snapshot_sha256,
+          ):
+              raise SystemExit(
+                  "V2/V4 expected prior terminal snapshot SHA-256 "
+                  "is invalid"
+              )
+          if (
+              immediate_prior_id == 34_234_471_190
+              and not expected_snapshot_sha256
+          ):
+              raise SystemExit(
+                  "V2/V4 generation 3 requires launcher-pinned "
+                  "prior terminal snapshot SHA-256"
+              )
           plan_artifact = "phase1-pons-v2-v4-gap-plan"
           plan_name = "v4-gap-plan.json"
           gap_pattern = re.compile(r"^phase1-pons-v2-v4-gap-(\d+)$")
@@ -819,6 +851,59 @@ jobs:
                       "to_block": bounds[1],
                   })
 
+              observed_snapshot_sha256 = None
+              if cursor == immediate_prior_id and expected_snapshot_sha256:
+                  prior_run = request(
+                      f"/repos/{repo}/actions/runs/{cursor}"
+                  )
+                  artifact_names = {
+                      str(row.get("name") or "")
+                      for row in rows
+                  }
+                  terminal_binding = {
+                      "run_id": cursor,
+                      "status": prior_run.get("status"),
+                      "conclusion": prior_run.get("conclusion"),
+                      "head_sha": prior_run.get("head_sha"),
+                      "display_title": prior_run.get(
+                          "display_title"
+                      ),
+                      "run_attempt": prior_run.get("run_attempt"),
+                      "reusable_gap_ids": sorted(
+                          reusable_gap_ids,
+                          key=int,
+                      ),
+                      "missing_success_artifacts": sorted(
+                          successful_gap_ids - set(observed),
+                          key=int,
+                      ),
+                      "non_success_gap_artifacts": sorted(
+                          set(observed) - successful_gap_ids,
+                          key=int,
+                      ),
+                      "plan_artifact_present": (
+                          plan_artifact in artifact_names
+                      ),
+                      "canonical_artifact_present": (
+                          "phase1-pons-v2-v4-full"
+                          in artifact_names
+                      ),
+                  }
+                  observed_snapshot_sha256 = hashlib.sha256(
+                      json.dumps(
+                          terminal_binding,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                  ).hexdigest()
+                  if observed_snapshot_sha256 != (
+                      expected_snapshot_sha256
+                  ):
+                      raise SystemExit(
+                          "V2/V4 launcher/child prior terminal "
+                          "snapshot digest changed"
+                      )
+
               parent = plan.get("prior_gap_run_id")
               generation_plans.append({
                   "run_id": cursor,
@@ -865,6 +950,9 @@ jobs:
                   "non_success_gap_artifacts": sorted(
                       set(observed) - successful_gap_ids,
                       key=int,
+                  ),
+                  "terminal_snapshot_sha256": (
+                      observed_snapshot_sha256
                   ),
               })
               cursor = (

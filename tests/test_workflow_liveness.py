@@ -588,7 +588,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'manifest.get("path") == path.name' in content
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
-    assert content.count("import hashlib") == 3
+    assert content.count("import hashlib") == 4
     merge_block = content.split(
         "- name: Merge recovered V4 event tape",
         1,
@@ -732,6 +732,14 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "exact prior-plan reconstruction:" in content
     assert "expected_prior_reusable_gap_count" in content
     assert "EXPECTED_PRIOR_REUSABLE_GAP_COUNT" in content
+    assert "expected_prior_terminal_snapshot_sha256" in content
+    assert "EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256" in content
+    assert "V2/V4 expected prior terminal snapshot SHA-256 " in content
+    assert "V2/V4 generation 3 requires launcher-pinned " in content
+    assert "terminal_binding = {" in content
+    assert "observed_snapshot_sha256 = hashlib.sha256(" in content
+    assert "V2/V4 launcher/child prior terminal " in content
+    assert '"terminal_snapshot_sha256": (' in content
     assert "V2/V4 launcher/planner reusable prior-gap " in content
     assert "expected_prior_reusable_count = None" in content
     assert "V2/V4 expected reusable prior-gap count " in content
@@ -2168,6 +2176,17 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert '"run_attempt": fresh_prior.get("run_attempt")' in content
     assert '"updated_at": fresh_prior.get("updated_at")' in content
     assert '"prior_terminal_snapshot": prior_terminal_snapshot' in content
+    assert "import hashlib" in content
+    assert "prior_terminal_binding = {" in content
+    assert "prior_terminal_snapshot_sha256 = hashlib.sha256(" in content
+    assert '"snapshot_binding_sha256": (' in content
+    assert "prior_terminal_snapshot_sha256=" in content
+    assert "steps.guard.outputs.prior_terminal_snapshot_sha256" in content
+    assert (
+        "expected_prior_terminal_snapshot_sha256: "
+        "${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}"
+        in content
+    )
     assert "V2/V4 generation 3 fresh prior snapshot is missing" in content
     assert "V2/V4 generation 3 fresh prior launch SHA changed" in content
     assert "V2/V4 generation 3 fresh prior launch title changed" in content

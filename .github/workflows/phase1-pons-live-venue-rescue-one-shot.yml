@@ -26,6 +26,7 @@ jobs:
       prior_reusable_gap_count: ${{ steps.guard.outputs.prior_reusable_gap_count }}
       prior_missing_success_artifacts: ${{ steps.guard.outputs.prior_missing_success_artifacts }}
       prior_non_success_gap_artifacts: ${{ steps.guard.outputs.prior_non_success_gap_artifacts }}
+      prior_terminal_snapshot_sha256: ${{ steps.guard.outputs.prior_terminal_snapshot_sha256 }}
     steps:
       - id: guard
         name: Refuse rescue while frozen parent is active or already complete
@@ -41,6 +42,7 @@ jobs:
           CURRENT_SHA: ${{ github.sha }}
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           import re
@@ -427,6 +429,7 @@ jobs:
           selected_prior_missing_success_artifacts = []
           selected_prior_non_success_gap_artifacts = []
           prior_terminal_snapshot = None
+          prior_terminal_snapshot_sha256 = ""
           prior_gap_diagnostics = {
               "reusable_gap_count": 0,
               "missing_success_artifacts": [],
@@ -594,7 +597,7 @@ jobs:
                       fresh_non_success_gap_artifacts[:20]
                   ),
               }
-              prior_terminal_snapshot = {
+              prior_terminal_binding = {
                   "run_id": int(prior_gap_run_id),
                   "status": fresh_prior.get("status"),
                   "conclusion": fresh_prior.get("conclusion"),
@@ -603,6 +606,29 @@ jobs:
                       "display_title"
                   ),
                   "run_attempt": fresh_prior.get("run_attempt"),
+                  "reusable_gap_ids": fresh_reusable_gap_ids,
+                  "missing_success_artifacts": (
+                      fresh_missing_success_artifacts
+                  ),
+                  "non_success_gap_artifacts": (
+                      fresh_non_success_gap_artifacts
+                  ),
+                  "plan_artifact_present": (
+                      prior_plan_artifact in fresh_artifacts
+                  ),
+                  "canonical_artifact_present": (
+                      requested_artifact in fresh_artifacts
+                  ),
+              }
+              prior_terminal_snapshot_sha256 = hashlib.sha256(
+                  json.dumps(
+                      prior_terminal_binding,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ).encode()
+              ).hexdigest()
+              prior_terminal_snapshot = {
+                  **prior_terminal_binding,
                   "updated_at": fresh_prior.get("updated_at"),
                   "repair_job_count": fresh_job_snapshot[
                       "repair_jobs"
@@ -623,11 +649,8 @@ jobs:
                   "non_success_gap_artifact_count": len(
                       fresh_non_success_gap_artifacts
                   ),
-                  "plan_artifact_present": (
-                      prior_plan_artifact in fresh_artifacts
-                  ),
-                  "canonical_artifact_present": (
-                      requested_artifact in fresh_artifacts
+                  "snapshot_binding_sha256": (
+                      prior_terminal_snapshot_sha256
                   ),
               }
 
@@ -755,6 +778,9 @@ jobs:
               "prior_gap_run_id": prior_gap_run_id,
               "prior_gap_diagnostics": prior_gap_diagnostics,
               "prior_terminal_snapshot": prior_terminal_snapshot,
+              "prior_terminal_snapshot_sha256": (
+                  prior_terminal_snapshot_sha256
+              ),
               "requested_generation": requested_generation,
               "expected_generation": expected_generation,
               "validation_generation": validation_generation,
@@ -790,6 +816,10 @@ jobs:
                   )
                   + "\n"
               )
+              handle.write(
+                  "prior_terminal_snapshot_sha256="
+                  f"{prior_terminal_snapshot_sha256}\n"
+              )
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
               handle.write(
                   "### Venue rescue terminal preflight\n\n"
@@ -803,6 +833,8 @@ jobs:
                   f"- prior gap run: {prior_gap_run_id or 'none'}\n"
                   f"- prior terminal snapshot: "
                   f"{prior_terminal_snapshot}\n"
+                  f"- prior snapshot binding SHA-256: "
+                  f"{prior_terminal_snapshot_sha256 or 'none'}\n"
                   f"- reusable successful gap artifacts: "
                   f"{prior_gap_diagnostics['reusable_gap_count']}\n"
                   f"- successful jobs missing artifacts: "
@@ -832,5 +864,6 @@ jobs:
       partial_run_id: "33982556591"
       prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
       expected_prior_reusable_gap_count: ${{ needs.preflight.outputs.prior_reusable_gap_count }}
+      expected_prior_terminal_snapshot_sha256: ${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}
       max_gap_blocks: "50000"
     secrets: inherit
