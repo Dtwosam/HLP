@@ -69,6 +69,7 @@ jobs:
           import io
           import json
           import os
+          import re
           import urllib.parse
           import urllib.request
           import zipfile
@@ -466,6 +467,7 @@ jobs:
           def job_diagnostics(run_id):
               counts = {}
               repair_wave_counts = {}
+              repair_jobs = {}
               problem_jobs = []
               failed_states = {
                   "failure",
@@ -510,6 +512,21 @@ jobs:
                               wave_counts[key] = (
                                   int(wave_counts.get(key, 0)) + 1
                               )
+                              gap_id = job_name.split(
+                                  matrix_marker,
+                                  1,
+                              )[1].split(",", 1)[0].strip()
+                              repair_jobs.setdefault(
+                                  gap_id,
+                                  [],
+                              ).append(
+                                  {
+                                      "job_id": int(job["id"]),
+                                      "wave": wave_text,
+                                      "state": key,
+                                      "name": job_name,
+                                  }
+                              )
                       if key in failed_states and len(problem_jobs) < 20:
                           problem_jobs.append(
                               {
@@ -529,6 +546,7 @@ jobs:
               return {
                   "job_counts": counts,
                   "repair_wave_counts": repair_wave_counts,
+                  "repair_jobs": repair_jobs,
                   "problem_jobs": problem_jobs,
               }
 
@@ -536,10 +554,16 @@ jobs:
               if venue == "v1_v3":
                   plan_artifact = "phase1-pons-v1-v3-gap-plan"
                   plan_name = "v1-v3-gap-plan.json"
+                  gap_artifact_pattern = re.compile(
+                      r"^phase1-pons-v1-v3-gap-(\d{3})$"
+                  )
                   expected_start = 8_621_658
               elif venue == "v2_v4":
                   plan_artifact = "phase1-pons-v2-v4-gap-plan"
                   plan_name = "v4-gap-plan.json"
+                  gap_artifact_pattern = re.compile(
+                      r"^phase1-pons-v2-v4-gap-(\d{3})$"
+                  )
                   expected_start = 26_841_846
               else:
                   raise SystemExit(
@@ -574,6 +598,10 @@ jobs:
                       for value in plan["gap_wave_job_counts"]
                   ]
                   planned_repairs = int(plan["gap_job_count"])
+                  expected_gap_ids = {
+                      str(job["id"])
+                      for job in plan["gap_jobs"]
+                  }
               except (KeyError, TypeError, ValueError) as exc:
                   return {
                       "status": "plan_invalid",
@@ -667,6 +695,82 @@ jobs:
                       "counts": counts,
                   }
 
+              repair_jobs = diagnostics.get("repair_jobs") or {}
+              duplicate_job_ids = sorted(
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if len(rows) != 1
+              )
+              successful_job_ids = {
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if any(
+                      str(row.get("state") or "") == "success"
+                      for row in rows
+                  )
+              }
+              malformed_job_ids = sorted(
+                  gap_id
+                  for gap_id in repair_jobs
+                  if gap_id not in expected_gap_ids
+              )
+
+              observed_artifact_ids = set()
+              malformed_gap_artifacts = []
+              for name in artifact_names(run_id):
+                  if "-gap-" not in name:
+                      continue
+                  match = gap_artifact_pattern.fullmatch(name)
+                  if match:
+                      observed_artifact_ids.add(match.group(1))
+                  elif name.startswith(
+                      gap_artifact_pattern.pattern.split("(\\d{3})", 1)[0][1:]
+                  ):
+                      malformed_gap_artifacts.append(name)
+
+              missing_success_artifacts = sorted(
+                  successful_job_ids - observed_artifact_ids
+              )
+              unexpected_artifact_ids = sorted(
+                  observed_artifact_ids - expected_gap_ids
+              )
+              artifact_drift = []
+              if duplicate_job_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "duplicate_repair_job_ids",
+                          "gap_ids": duplicate_job_ids[:20],
+                      }
+                  )
+              if malformed_job_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "unexpected_repair_job_ids",
+                          "gap_ids": malformed_job_ids[:20],
+                      }
+                  )
+              if missing_success_artifacts:
+                  artifact_drift.append(
+                      {
+                          "reason": "successful_job_artifact_missing",
+                          "gap_ids": missing_success_artifacts[:20],
+                      }
+                  )
+              if unexpected_artifact_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "unexpected_gap_artifacts",
+                          "gap_ids": unexpected_artifact_ids[:20],
+                      }
+                  )
+              if malformed_gap_artifacts:
+                  artifact_drift.append(
+                      {
+                          "reason": "malformed_gap_artifact_names",
+                          "artifacts": malformed_gap_artifacts[:20],
+                      }
+                  )
+
               remaining_repairs = max(
                   0,
                   planned_repairs - successful_repairs,
@@ -685,7 +789,11 @@ jobs:
                   "status": (
                       "job_plan_drift"
                       if drift
-                      else "ok"
+                      else (
+                          "artifact_drift"
+                          if artifact_drift
+                          else "ok"
+                      )
                   ),
                   "planned_repairs": planned_repairs,
                   "materialized_repairs": materialized_repairs,
@@ -695,7 +803,28 @@ jobs:
                   "progress_percent": progress_percent,
                   "current_wave": current_wave,
                   "waves": waves,
+                  "artifact_progress": {
+                      "observed_gap_artifacts": len(
+                          observed_artifact_ids
+                      ),
+                      "successful_job_ids": len(
+                          successful_job_ids
+                      ),
+                      "missing_success_artifacts": (
+                          missing_success_artifacts[:20]
+                      ),
+                      "unexpected_artifact_ids": (
+                          unexpected_artifact_ids[:20]
+                      ),
+                      "malformed_gap_artifacts": (
+                          malformed_gap_artifacts[:20]
+                      ),
+                      "duplicate_repair_job_ids": (
+                          duplicate_job_ids[:20]
+                      ),
+                  },
                   "drift": drift,
+                  "artifact_drift": artifact_drift,
               }
 
           def job_counts(run_id):
