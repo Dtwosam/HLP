@@ -1186,8 +1186,11 @@ later repair/upload/merge stage fails, because archive recovery work may already
 have materialized. Consumed-generation history is also one-to-one: if two
 distinct launcher run IDs ever contain successful target `plan` jobs for the
 same generation number, preflight treats the history as ambiguous and fails
-closed instead of choosing one. The preflight summary records the exact
-generation-to-run-ID mapping alongside terminal-but-unconsumed generations.
+closed instead of choosing one. Historical reuse now applies the same exact
+`launch <venue> rescue generation N` title grammar as generation accounting;
+completed runs that merely start with the launch prefix are ignored instead of
+being eligible as prior plan/gap sources. The preflight summary records the
+exact generation-to-run-ID mapping alongside terminal-but-unconsumed generations.
 
 This reduces the chance that a single platform/network blip consumes the
 generation-3 marker commit before child handoff.
