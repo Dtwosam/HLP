@@ -306,3 +306,28 @@ def test_validate_gap_plan_jobs_rejects_overlap():
             expected_end=100,
         )
 
+def test_v2_full_range_retry_reuses_all_553_prior_gaps():
+    start = 26_841_846
+    end = 54_486_035
+    prior_gaps = split_range(start, end, max_blocks=50_000)
+
+    assert len(prior_gaps) == 553
+    assert coalesce_covered_ranges(
+        start,
+        end,
+        prior_gaps,
+    ) == [(start, end)]
+    assert plan_missing_subranges(
+        start,
+        end,
+        prior_gaps,
+        max_blocks=50_000,
+    ) == []
+
+    selected = select_contiguous_cover(
+        start,
+        end,
+        prior_gaps,
+    )
+    assert selected == list(range(553))
+
