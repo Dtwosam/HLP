@@ -407,7 +407,7 @@ jobs:
           cursor = int(os.environ["PRIOR_GAP_RUN_ID"] or 0)
           plan_artifact = "phase1-pons-v2-v4-gap-plan"
           plan_name = "v4-gap-plan.json"
-          gap_pattern = re.compile(r"^phase1-pons-v2-v4-gap-(\\d+)$")
+          gap_pattern = re.compile(r"^phase1-pons-v2-v4-gap-(\d+)$")
           expected_start = 26_841_846
           expected_head = 54_486_035
 
