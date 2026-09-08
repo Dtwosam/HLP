@@ -1287,11 +1287,31 @@ jobs:
                   )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_plan
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v2-v4-gap-plan
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_plan
+        name: Retry V2/V4 gap-plan artifact upload
+        if: ${{ steps.upload_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V2/V4 gap-plan artifact upload retry
+        if: ${{ steps.retry_upload_plan.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   recover_1:
     needs: plan

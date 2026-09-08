@@ -616,8 +616,25 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("name: Final gap artifact upload retry") == 4
     assert content.count("steps.upload_gap.outcome == 'failure'") == 4
     assert content.count("steps.retry_upload_gap.outcome == 'failure'") == 4
-    assert content.count("overwrite: true") == 10
-    assert content.count("continue-on-error: true") >= 10
+    assert content.count("overwrite: true") == 12
+    assert content.count("continue-on-error: true") >= 12
+    assert content.count("id: upload_plan") == 1
+    assert content.count("id: retry_upload_plan") == 1
+    assert content.count(
+        "name: Retry V2/V4 gap-plan artifact upload"
+    ) == 1
+    assert content.count(
+        "name: Final V2/V4 gap-plan artifact upload retry"
+    ) == 1
+    assert content.count("steps.upload_plan.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_plan.outcome == 'failure'"
+    ) == 1
+    plan_upload_block = content.split(
+        "id: upload_plan",
+        1,
+    )[1].split("  recover_1:", 1)[0]
+    assert plan_upload_block.count("overwrite: true") == 2
     assert content.count("id: upload_full") == 1
     assert content.count("id: retry_upload_full") == 1
     assert content.count("name: Retry canonical V2/V4 artifact upload") == 1
