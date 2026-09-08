@@ -948,7 +948,17 @@ provenance that generated them: source `evm_json_rpc`, chain **4663**, the
 venue-specific protocol, the frozen registry/registration input filename and
 the required global-scan filter mode must all match before extraction. A
 correctly named and correctly ranged artifact from the wrong acquisition path
-therefore fails closed before final merge. Generation 4 run **34228430753** passed
+therefore fails closed before final merge. Recovery planning now fails even
+earlier on frozen upstream drift: V1/V3 requires successful registry run
+**33911022718** at launch SHA `6506e15224b83b12cfd85b607d3fdb55a0d3b026`
+and verifies the **494,639**-row registry manifest SHA
+`c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed`;
+V2/V4 requires successful transition run **33912452330** at launch SHA
+`7ce5eac5c1980e8618173e1a8ff0effb06ecb327` and verifies the **3,638**-row
+registration manifest SHA
+`8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`.
+Workflow path, branch, chain, snapshot and provenance source are checked in the
+planner before any archive matrix can start. Generation 4 run **34228430753** passed
 recursive lineage to **34207459960**, rediscovered all **236** surviving
 original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
 four repair waves, and completed the corrected final merge successfully. Its
