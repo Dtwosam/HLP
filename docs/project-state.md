@@ -1031,7 +1031,16 @@ skipped and archive concurrency remains two jobs. Its launch SHA still has one
 known end-of-run incompatibility: the merge-side original-shard downloader
 rejects the same intentionally empty V2 source before reading recovered gaps.
 The active run is left untouched because every successful repair artifact is
-reusable. Current branch merge code now independently re-proves the exact
+reusable. Reuse is now job-state-bound as well as plan-bound: the launcher,
+prior-gap planner and recursive merge all paginate the prior run's repair jobs
+and only count a numeric gap artifact as reusable when the matching
+`recover_1`..`recover_4` matrix job concluded `success`. A plan-bound artifact
+from a failed/non-success repair job is ignored for coverage so its block range
+is replanned, while an artifact not named by the bound gap plan still fails
+closed before job-state filtering. This matches readiness reconciliation and
+prevents a failed job that happened to upload an artifact before terminating
+from silently becoming canonical recovery evidence. Current branch merge code
+now independently re-proves the exact
 `acquire / v2_v4` and `acquire / v2_v4_recovery` terminal/skipped states
 and permits zero original files only under that frozen proof. It also replaces
 the wildcard prior/current gap downloads with paginated exact numeric artifact
