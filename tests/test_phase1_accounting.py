@@ -254,3 +254,42 @@ def test_phase1_summary_marks_missing_logs_incomplete_accounting():
     assert result["runs_with_missing_job_logs"] == [3]
     assert result["all_completed_job_logs_available"] is False
     assert result["accounting_complete"] is False
+
+
+def test_summarize_action_run_flags_impossible_job_runtime():
+    run = {
+        "id": 127,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    jobs = [
+        {
+            "id": 9,
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-08T10:00:00Z",
+            "completed_at": "2026-09-08T09:59:59Z",
+        }
+    ]
+    result = summarize_action_run(run, jobs, [], {9: ""})
+    assert result["job_runtime_seconds"] == 0
+    assert result["invalid_job_runtimes"] == 1
+    assert result["invalid_job_runtime_ids"] == [9]
+    assert result["all_job_runtimes_valid"] is False
+
+
+def test_phase1_summary_marks_invalid_runtime_incomplete_accounting():
+    result = summarize_phase1_runs(
+        [
+            {
+                "run_id": 4,
+                "status": "completed",
+                "conclusion": "success",
+                "invalid_job_runtimes": 1,
+            }
+        ]
+    )
+    assert result["invalid_job_runtimes"] == 1
+    assert result["runs_with_invalid_job_runtimes"] == [4]
+    assert result["all_job_runtimes_valid"] is False
+    assert result["accounting_complete"] is False
