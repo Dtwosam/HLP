@@ -1145,7 +1145,15 @@ materialize recovery jobs. When the immediate prior run is specifically
 to be explicitly present and greater than zero; an omitted/zero count fails
 before planning rather than falling back to manual-style prior reuse. The count
 is parsed once, must be non-negative, and must equal the child planner's own
-successful-job/artifact intersection.
+successful-job/artifact intersection. The handoff is also cryptographically
+bound: the launcher hashes a canonical sorted-JSON terminal binding containing
+the prior run ID/status/conclusion/head SHA/title/run attempt, the **full**
+reusable/missing/non-success gap-ID sets, and plan/canonical artifact-presence
+flags. It passes that SHA-256 into the child. The child independently re-fetches
+the same run/jobs/artifacts, rebuilds the same 11-field binding and must produce
+the identical digest before it accepts prior coverage. The binding schema and
+canonical JSON/SHA-256 construction are pinned by CI on both workflow sides, so
+a one-sided field change cannot silently weaken the launch contract.
 
 The actual V2/V4 generation-3 launch is intentionally reduced to a one-line
 wrapper mutation. The current launcher marker is
