@@ -77,6 +77,7 @@ jobs:
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
           )
+          from hlp.data.ranges import validate_gap_plan_jobs
           from hlp.data.phase1_readiness import (
               RECOVERY_VENUE_ARTIFACTS,
               RECOVERY_VENUE_WORKFLOW_PATHS,
@@ -317,6 +318,11 @@ jobs:
                       current_plan.get(start_field, -1)
                   ) != expected_start:
                       return False
+                  validate_gap_plan_jobs(
+                      current_plan,
+                      expected_start=expected_start,
+                      expected_end=54_486_035,
+                  )
               except (TypeError, ValueError):
                   return False
               if prior_gap_id == 0:
@@ -371,6 +377,11 @@ jobs:
                           prior_plan.get(start_field, -1)
                       ) != expected_start:
                           return False
+                      validate_gap_plan_jobs(
+                          prior_plan,
+                          expected_start=expected_start,
+                          expected_end=54_486_035,
+                      )
                   except (TypeError, ValueError):
                       return False
 
