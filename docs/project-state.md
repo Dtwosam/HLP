@@ -1,6 +1,6 @@
 # HLP Project State
 
-Updated: 2026-09-05
+Updated: 2026-09-08
 Repository: Dtwosam/HLP
 Current phase: Phase 1 — Historical/Live Data Acquisition Spike
 Status: ACTIVE
@@ -1033,6 +1033,33 @@ contract; prefix-only lookalikes no longer qualify as prior lineage. Candidate
 terminal rescues are explicitly sorted newest-first by run ID before reuse, so
 a retry cannot silently fall back to an older generation merely because API
 ordering changes.
+
+During active V2/V4 generation 2, repair gap **053** for blocks
+**29,491,846-29,541,845** completed the archive scan successfully and produced
+**1,000** matched Pons V4 events after **455** RPC requests and
+**116,699,009** response bytes, but `actions/upload-artifact@v4` failed while
+finalizing the artifact with an intermediary **HTTP 403**. No
+`phase1-pons-v2-v4-gap-053` artifact was registered, so this is an artifact
+transport failure rather than an unexplained RPC/event-reconstruction gap.
+Current branch recovery jobs now retry expensive gap/shard artifact uploads up
+to three total attempts without repeating the already-completed RPC scan inside
+the job. The same protection is applied across V1/V3 and V2/V4 gap recovery,
+the other Phase 1 gap-recovery families, exact-range repair helpers and every
+archive matrix shard workflow.
+
+Generation 2 itself is pinned to its older launch SHA, so its serialized
+`recover_2` and `recover_3` jobs still require the immediately preceding wave
+to finish successfully. Because wave 1 already contains the gap-053 failure,
+that pinned run will stop after wave 1 and leave its planned **240 / 73** later
+waves unmaterialized. Current branch recovery graphs now allow a later repair
+wave to run after a prior wave concludes `failure` while still refusing the
+final merge unless every wave is `success` or `skipped`. A terminal retry can
+therefore reuse every plan-bound successful generation-2 gap artifact, rescan
+only uncovered ranges (including gap 053 and the never-materialized later
+waves), and continue through all remaining waves without one isolated failure
+blocking unrelated ranges. Readiness reporting now distinguishes a terminal
+failed wave from a genuinely active wave and prefers an actually running later
+wave as `current_wave`.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
