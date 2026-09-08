@@ -910,8 +910,15 @@ in the planner heredoc but not in the merge heredoc. Current V1/V3 and V2/V4
 merge scripts now import it explicitly, and CI asserts each workflow contains
 the planner and merge imports separately. Run **34207459960** remains reusable:
 it exposes the bound V1/V3 gap plan plus all **70** successful gap artifacts
-and no canonical full artifact, so the next pinned generation can reuse that
-run as `prior_gap_run_id` without another archive fetch.
+and no canonical full artifact. Generation 3 run **34228101146** correctly
+adopted that run as `prior_gap_run_id` and passed recursive lineage without
+launching any repair matrix, but its plan then failed before RPC because the
+new V1/V3 paginated source selector used raw regex `\\d+` instead of
+`\d+`, so none of the 236 numeric original shard artifact names matched.
+The frozen parent still exposes all **314** non-expired artifacts. Current
+V1/V3 planning and merge now use the correct numeric regex in both source
+downloads; V2/V4 already had the correct pattern. Regression tests pin both
+patterns so this escaping error cannot recur.
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
