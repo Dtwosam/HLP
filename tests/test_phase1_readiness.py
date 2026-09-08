@@ -4,7 +4,10 @@ from hlp.data.phase1_readiness import (
     EVIDENCE_REQUIRED_ARTIFACTS,
     FINAL_ACCEPTANCE_ARTIFACT,
     FINALIZER_WORKFLOW_PATH,
+    SOURCE_ELIGIBILITY_BRANCH,
+    SOURCE_ELIGIBILITY_HEAD_SHA,
     SOURCE_ELIGIBILITY_RUN_ID,
+    SOURCE_ELIGIBILITY_WORKFLOW_PATH,
     SOURCE_REQUIRED_ARTIFACTS,
     VIABILITY_ROUTE_REQUIRED_ARTIFACTS,
     VIABILITY_ROUTE_WORKFLOW_PATHS,
@@ -22,12 +25,14 @@ def _run(
     job_counts=None,
     path=None,
     head_branch="phase1/data-acquisition-spike",
+    head_sha=None,
 ):
     return {
         "id": run_id,
         "name": name,
         "path": path,
         "head_branch": head_branch,
+        "head_sha": head_sha,
         "status": status,
         "conclusion": conclusion,
         "artifacts": list(artifacts),
@@ -39,6 +44,9 @@ def _source(**overrides):
     values = {
         "run_id": SOURCE_ELIGIBILITY_RUN_ID,
         "artifacts": SOURCE_REQUIRED_ARTIFACTS,
+        "path": SOURCE_ELIGIBILITY_WORKFLOW_PATH,
+        "head_branch": SOURCE_ELIGIBILITY_BRANCH,
+        "head_sha": SOURCE_ELIGIBILITY_HEAD_SHA,
     }
     values.update(overrides)
     return _run(**values)
@@ -167,6 +175,25 @@ def _report(
         evidence_handoff=evidence_handoff,
         recovery_runs=recovery_runs,
     )
+
+
+def test_readiness_rejects_frozen_source_workflow_drift():
+    with pytest.raises(ValueError, match="source run workflow path changed"):
+        _report(
+            source_run=_source(
+                path=".github/workflows/unapproved-source.yml",
+            )
+        )
+
+
+def test_readiness_rejects_frozen_source_branch_drift():
+    with pytest.raises(ValueError, match="source run branch changed"):
+        _report(source_run=_source(head_branch="main"))
+
+
+def test_readiness_rejects_frozen_source_launch_commit_drift():
+    with pytest.raises(ValueError, match="source run launch commit changed"):
+        _report(source_run=_source(head_sha="0" * 40))
 
 
 def test_readiness_waits_for_full_eligibility_source():
