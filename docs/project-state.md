@@ -582,10 +582,15 @@ research threshold or starting another archive crawl:
   size and workflow-run binding; non-equivalent duplicates fail closed.
   Accounting and viability-projection artifacts use the same retry/exact-ID
   pattern, and the acceptance-gate plus PASS-closeout outputs also receive
-  three upload attempts. Closeout opens the exact equivalent acceptance
-  artifact by ID before auditing it. This removes the known single-attempt
-  artifact-finalization failure class from the completed evidence -> viability
-  -> acceptance -> closeout chain.
+  three upload attempts. Exact accounting/evidence/projection/acceptance reads
+  now retry up to three times with partial target directories removed between
+  attempts. The final-acceptance join applies the same read retry contract to
+  its evidence handoff plus all ten primary/secondary viability artifacts, so a
+  transient GitHub artifact read cannot invalidate an already-complete nine-run
+  measurement ledger. Closeout opens the exact equivalent acceptance artifact
+  by ID before auditing it. This removes the known single-attempt
+  artifact-finalization/read failure class from the completed evidence ->
+  viability -> acceptance -> closeout chain.
   Its guarded one-shot watches
   `.github/phase1-pons-evidence-launch.txt`; inert validation run
   **33988716778** skipped cleanly while compiling the nested graph.
