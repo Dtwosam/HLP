@@ -498,9 +498,13 @@ research threshold or starting another archive crawl:
   and refuses completion unless `explorer_verified_tokens == 10`. The normal
   and recovered evidence chains both pass this switch through, so explicitly
   supplied explorer evidence is binding all the way into the Phase 1 PASS
-  evidence path. Complete 10-token coverage and exact agreement with the
-  GeckoTerminal checkpoint set are therefore mandatory whenever explorer
-  evidence is enabled;
+  evidence path. Final acceptance independently reads
+  `explorer_evidence_required` and `explorer_crosscheck_run_id`; when the
+  flag is true it requires a positive explorer run ID plus complete supplied
+  counts before PASS, and rejects a declared explorer run with no evidence.
+  Complete 10-token coverage and exact agreement with the GeckoTerminal
+  checkpoint set are therefore mandatory whenever explorer evidence is
+  enabled;
 - V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
   events so an Initialize-only price cannot masquerade as independent trade
   evidence;
