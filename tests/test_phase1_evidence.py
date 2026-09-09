@@ -56,6 +56,8 @@ def _fixtures():
             "sample_sha256": sample_sha,
             "token_set_sha256": token_set_sha,
             "source_coverage_sha256": source_coverage_sha,
+            "explorer_evidence_required": False,
+            "explorer_crosscheck_run_id": 0,
             "runner_smoke_run_id": 33_920_762_592,
             "runner_smoke_universe_sha256": (
                 "4861b2af1d549eb41c53341a07f6de71dce4d9486"
@@ -76,6 +78,8 @@ def _fixtures():
         "sample_sha256": sample_sha,
         "token_set_sha256": token_set_sha,
         "source_coverage_sha256": source_coverage_sha,
+        "explorer_evidence_required": False,
+        "explorer_crosscheck_run_id": 0,
         "runner_smoke_run_id": 33_920_762_592,
         "runner_smoke_universe_sha256": (
             "4861b2af1d549eb41c53341a07f6de71dce4d9486"
@@ -114,6 +118,8 @@ def test_post_eligibility_evidence_bundle_accepts_consistent_provenance():
         "representative_sample_sha256": "5" * 64,
         "representative_token_set_sha256": "6" * 64,
         "representative_source_coverage_sha256": "7" * 64,
+        "explorer_evidence_required": False,
+        "explorer_crosscheck_run_id": 0,
         "runner_smoke_run_id": 33_920_762_592,
         "runner_smoke_universe_sha256": (
             "4861b2af1d549eb41c53341a07f6de71dce4d9486"
@@ -126,6 +132,55 @@ def test_post_eligibility_evidence_bundle_accepts_consistent_provenance():
         "v1_eligibility_sha256": "1" * 64,
         "v2_eligibility_sha256": "2" * 64,
     }
+
+
+def test_post_eligibility_evidence_preserves_required_explorer_identity():
+    fixtures = _fixtures()
+    fixtures["representative_summary"].update(
+        {
+            "explorer_evidence_required": True,
+            "explorer_crosscheck_run_id": 123456,
+        }
+    )
+    fixtures["representative_manifest"]["provenance"].update(
+        {
+            "explorer_evidence_required": True,
+            "explorer_crosscheck_run_id": 123456,
+        }
+    )
+
+    report = validate_post_eligibility_evidence_bundle(**fixtures)
+
+    assert report["explorer_evidence_required"] is True
+    assert report["explorer_crosscheck_run_id"] == 123456
+
+
+def test_post_eligibility_evidence_rejects_explorer_requirement_mismatch():
+    fixtures = _fixtures()
+    fixtures["representative_summary"]["explorer_evidence_required"] = True
+    fixtures["representative_summary"]["explorer_crosscheck_run_id"] = 123456
+
+    with pytest.raises(ValueError, match="explorer requirement disagrees"):
+        validate_post_eligibility_evidence_bundle(**fixtures)
+
+
+def test_post_eligibility_evidence_rejects_required_explorer_without_run():
+    fixtures = _fixtures()
+    fixtures["representative_summary"]["explorer_evidence_required"] = True
+    fixtures["representative_manifest"]["provenance"][
+        "explorer_evidence_required"
+    ] = True
+
+    with pytest.raises(ValueError, match="required without a run"):
+        validate_post_eligibility_evidence_bundle(**fixtures)
+
+
+def test_post_eligibility_evidence_rejects_explorer_run_mismatch():
+    fixtures = _fixtures()
+    fixtures["representative_summary"]["explorer_crosscheck_run_id"] = 123456
+
+    with pytest.raises(ValueError, match="explorer run disagrees"):
+        validate_post_eligibility_evidence_bundle(**fixtures)
 
 
 def test_post_eligibility_evidence_bundle_rejects_venue_routing_drift():
