@@ -39,6 +39,11 @@ on:
         description: "Successful representative DEX cross-check run"
         required: true
         type: string
+      explorer_crosscheck_run_id:
+        description: "Optional successful representative Blockscout cross-check run"
+        required: false
+        default: ""
+        type: string
       registry_run_id:
         description: "Canonical full Pons registry run"
         required: true
@@ -95,6 +100,10 @@ on:
         type: string
       dex_crosscheck_run_id:
         required: true
+        type: string
+      explorer_crosscheck_run_id:
+        required: false
+        default: ""
         type: string
       registry_run_id:
         required: true
@@ -361,6 +370,39 @@ jobs:
           path: dex
           run-id: ${{ inputs.dex_crosscheck_run_id }}
           github-token: ${{ github.token }}
+      - id: download_explorer
+        if: ${{ inputs.explorer_crosscheck_run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: explorer
+          run-id: ${{ inputs.explorer_crosscheck_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative explorer cross-check download before retry
+        if: ${{ inputs.explorer_crosscheck_run_id != '' && steps.download_explorer.outcome == 'failure' }}
+        run: rm -rf explorer
+      - id: retry_download_explorer
+        name: Retry representative explorer cross-check artifact download
+        if: ${{ inputs.explorer_crosscheck_run_id != '' && steps.download_explorer.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: explorer
+          run-id: ${{ inputs.explorer_crosscheck_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative explorer cross-check download before final retry
+        if: ${{ inputs.explorer_crosscheck_run_id != '' && steps.retry_download_explorer.outcome == 'failure' }}
+        run: rm -rf explorer
+      - name: Final representative explorer cross-check artifact download retry
+        if: ${{ inputs.explorer_crosscheck_run_id != '' && steps.retry_download_explorer.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: explorer
+          run-id: ${{ inputs.explorer_crosscheck_run_id }}
+          github-token: ${{ github.token }}
       - name: Validate representative evidence provenance
         run: |
           python - <<'PY'
@@ -385,6 +427,8 @@ jobs:
           anchor_run = int("${{ inputs.anchor_run_id }}")
           oracle_run = int("${{ inputs.oracle_run_id }}")
           fallback_run = int("${{ inputs.fallback_run_id }}")
+          explorer_run_text = "${{ inputs.explorer_crosscheck_run_id }}".strip()
+          explorer_run = int(explorer_run_text) if explorer_run_text else 0
 
           sample_path = Path(
               "sample/pons-representative-sample.jsonl"
@@ -588,6 +632,35 @@ jobs:
               raise SystemExit(
                   "representative DEX transition run mismatch"
               )
+          if explorer_run:
+              explorer_manifest, explorer = manifest_and_provenance(
+                  "explorer/"
+                  "pons-representative-explorer-token-summary.jsonl.manifest.json",
+                  snapshot=False,
+              )
+              if int(explorer.get("sample_run_id", -1)) != sample_run:
+                  raise SystemExit(
+                      "representative explorer sample run mismatch"
+                  )
+              if int(explorer.get("market_path_run_id", -1)) != market_path_run:
+                  raise SystemExit(
+                      "representative explorer market-path run mismatch"
+                  )
+              if int(explorer.get("priced_path_run_id", -1)) != int(
+                  "${{ inputs.priced_path_run_id }}"
+              ):
+                  raise SystemExit(
+                      "representative explorer priced-path run mismatch"
+                  )
+              if not str(
+                  explorer.get("explorer_crosscheck_sha256") or ""
+              ):
+                  raise SystemExit(
+                      "representative explorer transaction snapshot binding missing"
+                  )
+          else:
+              explorer_manifest = None
+
           print(json.dumps({
               "sample_run_id": sample_run,
               "v1_eligibility_run_id": v1_run,
@@ -604,6 +677,7 @@ jobs:
               "dex_crosscheck_run_id": int(
                   "${{ inputs.dex_crosscheck_run_id }}"
               ),
+              "explorer_crosscheck_run_id": explorer_run,
               "v1_eligibility_sha256": v1_lifecycle_manifest["sha256"],
               "v2_eligibility_sha256": v2_lifecycle_manifest["sha256"],
               "provenance_consistent": True,
@@ -736,6 +810,16 @@ jobs:
                   "representative holder validation does not cover 10 tokens"
               )
 
+          explorer_run_text = "${{ inputs.explorer_crosscheck_run_id }}".strip()
+          explorer_summary_rows = (
+              read_jsonl(
+                  "explorer/"
+                  "pons-representative-explorer-token-summary.jsonl"
+              )
+              if explorer_run_text
+              else None
+          )
+
           rows = build_representative_validation_rows(
               sample,
               v1_lifecycle_rows=read_jsonl(
@@ -750,6 +834,7 @@ jobs:
               dex_crosscheck_rows=read_jsonl(
                   "dex/pons-representative-dex-crosscheck.jsonl"
               ),
+              explorer_summary_rows=explorer_summary_rows,
               market_path_summary_rows=read_jsonl(
                   "market-paths/"
                   "pons-representative-market-path-summary.jsonl"
@@ -777,6 +862,10 @@ jobs:
               "source_coverage_sha256": coverage_snapshot["sha256"],
               "sample_sha256": sample_identity["sample_sha256"],
               "token_set_sha256": sample_identity["token_set_sha256"],
+              "explorer_crosscheck_run_id": (
+                  int(explorer_run_text) if explorer_run_text else 0
+              ),
+              "explorer_evidence_required": bool(explorer_run_text),
               "runner_smoke_run_id": int(
                   sample_summary["runner_smoke_run_id"]
               ),
@@ -838,6 +927,10 @@ jobs:
                   "dex_crosscheck_run_id": int(
                       "${{ inputs.dex_crosscheck_run_id }}"
                   ),
+                  "explorer_crosscheck_run_id": (
+                      int(explorer_run_text) if explorer_run_text else 0
+                  ),
+                  "explorer_evidence_required": bool(explorer_run_text),
                   "registry_run_id": int(
                       "${{ inputs.registry_run_id }}"
                   ),
