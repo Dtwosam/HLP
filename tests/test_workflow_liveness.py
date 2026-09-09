@@ -2184,7 +2184,10 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance normal evidence is marked recovered" in content
     assert "final acceptance normal evidence routing changed" in content
     assert "final acceptance recovered evidence is not marked " in content
-    assert "urllib.request.Request(" in content
+    assert content.count("fetch_github_actions_json(") == 3
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
+    assert "PYTHONPATH: src" in content
     assert 'GITHUB_TOKEN: ${{ github.token }}' in content
     assert "final acceptance evidence hash is invalid" in content
     assert "representative_sample_sha256" in content
@@ -2516,6 +2519,9 @@ def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     )
     assert "acceptance current run is missing viability projection" in content
     assert "artifact_rows_cache = {}" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "acceptance viability projection retry artifacts " in content
     assert "are not equivalent" in content
     assert "viability_artifact_id" in content
@@ -3736,6 +3742,10 @@ def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
     assert "id: retry_upload_closeout" in content
     assert "Retry Phase 1 closeout artifact upload" in content
     assert "Final Phase 1 closeout artifact upload retry" in content
+    assert content.count("fetch_github_actions_json(") == 2
+    assert content.count("PYTHONPATH: src") == 2
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "time.sleep(" not in content
