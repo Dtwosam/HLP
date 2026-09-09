@@ -1450,6 +1450,8 @@ jobs:
                       summary.write(
                           "    - Repair progress: "
                           f"status={repair_progress.get('status')}, "
+                          f"materialized={repair_progress.get('materialized_repairs', 0)}/"
+                          f"{repair_progress.get('planned_repairs', 0)}, "
                           f"success={repair_progress.get('successful_repairs', 0)}/"
                           f"{repair_progress.get('planned_repairs', 0)}, "
                           f"failed={repair_progress.get('failed_repairs', 0)}, "
@@ -1527,6 +1529,8 @@ jobs:
                           summary.write(
                               "    - Terminal repair progress: "
                               f"status={terminal_progress.get('status')}, "
+                              f"materialized={terminal_progress.get('materialized_repairs', 0)}/"
+                              f"{terminal_progress.get('planned_repairs', 0)}, "
                               f"success={terminal_progress.get('successful_repairs', 0)}/"
                               f"{terminal_progress.get('planned_repairs', 0)}, "
                               f"failed={terminal_progress.get('failed_repairs', 0)}, "
