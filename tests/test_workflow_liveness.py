@@ -61,6 +61,25 @@ ARTIFACT_WORKFLOWS = tuple(
 )
 
 
+SHARED_METADATA_WORKFLOWS = (
+    "phase1-pons-v1-v3-recover-gaps.yml",
+    "phase1-pons-v2-v4-recover-gaps.yml",
+    "phase1-pons-recovered-completion-chain.yml",
+    "phase1-pons-recovered-completion-one-shot.yml",
+    "phase1-pons-post-eligibility-evidence-chain.yml",
+    "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-acquisition-accounting.yml",
+    "phase1-pons-acquisition-viability-projection.yml",
+    "phase1-pons-viability-route-measurement.yml",
+    "phase1-pons-viability-guarded-route.yml",
+    "phase1-pons-viability-ledger-finalize-one-shot.yml",
+    "phase1-pons-final-acceptance-chain.yml",
+    "phase1-pons-acceptance-gate.yml",
+    "phase1-pons-pass-closeout-one-shot.yml",
+    "phase1-pons-readiness-audit.yml",
+)
+
+
 def _workflow(name: str) -> str:
     return (
         Path(__file__).parents[1] / ".github" / "workflows" / name
@@ -188,6 +207,14 @@ def test_critical_upload_artifact_steps_have_local_configuration():
                 index + 1,
                 block,
             )
+
+
+def test_critical_actions_metadata_reads_use_shared_helper():
+    for name in SHARED_METADATA_WORKFLOWS:
+        content = _workflow(name)
+        assert "fetch_github_actions_json(" in content, name
+        assert "urllib.request.Request(" not in content, name
+        assert "urllib.request.urlopen" not in content, name
 
 
 def test_pons_heavy_workflows_never_poll_other_runs():
