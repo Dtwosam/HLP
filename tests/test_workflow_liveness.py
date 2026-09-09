@@ -127,6 +127,8 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-skhy-v4-known-pool-segmented.yml",
         "phase1-pons-v3-quote-fallback-full.yml",
         "phase1-pons-v4-quote-fallback-full.yml",
+        "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+        "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     )
     for name in critical:
         blocks = _embedded_python_blocks(_workflow(name))
@@ -1154,6 +1156,45 @@ def test_single_wave_gap_recoveries_retry_transient_artifact_uploads():
             6 if "quote-fallback" in name else 2
         )
         assert content.count("overwrite: true") == expected_overwrites, name
+
+
+def test_quote_gap_recovery_merge_reads_are_retry_safe():
+    for name in (
+        "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+        "phase1-pons-v4-quote-fallback-recover-gaps.yml",
+    ):
+        content = _workflow(name)
+        for source in (
+            "partial",
+            "prior_gaps",
+            "current_gaps",
+            "routes",
+            "plan",
+        ):
+            assert content.count(
+                f"id: download_merge_{source}"
+            ) == 1, (name, source)
+            assert content.count(
+                f"id: retry_download_merge_{source}"
+            ) == 1, (name, source)
+            assert content.count(
+                f"steps.download_merge_{source}.outcome == 'failure'"
+            ) == 2, (name, source)
+            assert content.count(
+                f"steps.retry_download_merge_{source}.outcome == 'failure'"
+            ) == 2, (name, source)
+
+        for directory in (
+            "partial",
+            "prior-gaps",
+            "gaps",
+            "routes",
+            "plan",
+        ):
+            assert content.count(f"rm -rf {directory}") == 2, (
+                name,
+                directory,
+            )
 
 
 def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
