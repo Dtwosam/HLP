@@ -247,8 +247,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_universe
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-eligible-universe
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_universe
+        name: Retry eligible universe artifact upload
+        if: ${{ steps.upload_universe.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final eligible universe artifact upload retry
+        if: ${{ steps.retry_upload_universe.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
