@@ -1561,6 +1561,17 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance eligible and representative runs must" in content
     assert "final acceptance evidence workflow path is not allowed" in content
     assert "final acceptance evidence artifacts missing" in content
+    assert "Validate full evidence handoff identity before acceptance" in content
+    assert "final acceptance evidence handoff is not ready" in content
+    assert "final acceptance evidence handoff run mismatch" in content
+    assert "final acceptance evidence handoff source changed" in content
+    assert "final acceptance evidence hash is invalid" in content
+    assert "representative_sample_sha256" in content
+    assert "representative_token_set_sha256" in content
+    assert "representative_source_coverage_sha256" in content
+    assert "final acceptance runner-smoke run changed" in content
+    assert "final acceptance runner-smoke universe SHA changed" in content
+    assert "final acceptance runner-smoke outcomes SHA changed" in content
     assert "final acceptance route workflow path mismatch" in content
     assert "final acceptance route measurement artifacts missing" in content
     assert "Verify route measurement artifact contents" in content
