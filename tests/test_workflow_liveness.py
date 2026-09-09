@@ -2356,6 +2356,16 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "--runners 5 --failures 5" in content
     assert "representative sample must freeze exactly five runners" in content
     assert "representative sample must contain both Pons generations" in content
+    for source in ("v1", "v2", "smoke"):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(f"rm -rf {source}") == 2, source
     assert "time.sleep(" not in content
 
 def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
