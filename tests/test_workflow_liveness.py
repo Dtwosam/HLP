@@ -2713,6 +2713,7 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert 'default: "33911022718"' in content
     assert 'default: "33936232604"' in content
     assert 'default: "33912452330"' in content
+    lines = content.splitlines()
     for source in (
         "sample",
         "registry",
@@ -2727,8 +2728,10 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
         "v2v4_partial",
         "v2v4_prior",
     ):
-        assert content.count(f"id: download_{source}") == 1, source
-        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert lines.count(f"      - id: download_{source}") == 1, source
+        assert lines.count(
+            f"      - id: retry_download_{source}"
+        ) == 1, source
         assert content.count(
             f"steps.download_{source}.outcome == 'failure'"
         ) == 2, source
