@@ -1447,6 +1447,21 @@ def test_representative_evidence_one_shot_is_guarded_and_unarmed():
     assert "phase1-pons-v2-lifecycle-eligibility" in content
     assert "phase1-pons-quote-fallback-full" in content
     assert "phase1-pons-eligible-universe" in content
+    assert "Download frozen eligible universe" in content
+    assert "pons-eligible-universe-summary.json" in content
+    assert "pons-eligible-100k-universe.jsonl.manifest.json" in content
+    assert "representative eligibility V1/V3 provenance mismatch" in content
+    assert "representative eligibility V2/V4 provenance mismatch" in content
+    assert "representative eligibility universe remains incomplete" in content
+    assert "representative eligibility universe SHA mismatch" in content
+    assert "representative eligibility V1 lifecycle run mismatch" in content
+    assert "representative eligibility V2 lifecycle run mismatch" in content
+    assert "representative eligibility manifest V1/V3 mismatch" in content
+    assert "representative eligibility manifest V2/V4 mismatch" in content
+    assert 'summary.get("all_pons_launches", -1)' in content
+    assert "494_639" in content
+    assert "268_688" in content
+    assert "225_951" in content
     assert "phase1-pons-v1-v3-full" in content
     assert "phase1-pons-v2-v4-full" in content
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
