@@ -582,11 +582,14 @@ research threshold or starting another archive crawl:
   size and workflow-run binding; non-equivalent duplicates fail closed.
   Accounting and viability-projection artifacts use the same retry/exact-ID
   pattern, and the acceptance-gate plus PASS-closeout outputs also receive
-  three upload attempts. Accounting's shared GitHub Actions job-log downloader
-  now also retries transient API/blob failures up to three times with a fresh
-  redirect on each attempt while preserving the existing no-token-to-blob
-  guarantee; terminal 404/410 historical-log loss remains explicitly
-  classified unavailable. Exact accounting/evidence/projection/acceptance reads
+  three upload attempts. Accounting now uses the shared bounded-retry Actions
+  JSON reader for run/job/artifact pagination in addition to its shared job-log
+  downloader; viability projection uses the same JSON reader when resolving its
+  exact accounting artifact. The job-log downloader retries transient API/blob
+  failures up to three times with a fresh redirect on each attempt while
+  preserving the existing no-token-to-blob guarantee; terminal 404/410
+  historical-log loss remains explicitly classified unavailable. Exact
+  accounting/evidence/projection/acceptance reads
   now retry up to three times with partial target directories removed between
   attempts. The final-acceptance join applies the same read retry contract to
   its evidence handoff plus all ten primary/secondary viability artifacts, so a
