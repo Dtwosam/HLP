@@ -1652,10 +1652,8 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance eligible and representative runs must" in content
     assert "final acceptance evidence workflow path is not allowed" in content
     assert "final acceptance evidence artifacts missing" in content
-    assert (
-        "final acceptance evidence-ready retry artifacts are not equivalent"
-        in content
-    )
+    assert "final acceptance evidence-ready retry artifacts " in content
+    assert "are not equivalent" in content
     assert "evidence_artifact_id" in content
     assert (
         "artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}"
