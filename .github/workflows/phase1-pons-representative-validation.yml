@@ -185,6 +185,10 @@ jobs:
           import json
           from pathlib import Path
 
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
+
           HEAD = 54_486_035
           sample_run = int("${{ inputs.sample_run_id }}")
           v1_run = int("${{ inputs.v1_eligibility_run_id }}")
@@ -200,10 +204,17 @@ jobs:
           oracle_run = int("${{ inputs.oracle_run_id }}")
           fallback_run = int("${{ inputs.fallback_run_id }}")
 
+          sample_path = Path(
+              "sample/pons-representative-sample.jsonl"
+          )
           sample_summary = json.loads(
               Path(
                   "sample/pons-representative-sample-summary.json"
               ).read_text()
+          )
+          sample_identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
           )
           if int(sample_summary["v1_eligibility_run_id"]) != v1_run:
               raise SystemExit(
@@ -317,6 +328,12 @@ jobs:
                   raise SystemExit(
                       f"representative {label} sample run mismatch"
                   )
+              for field in ("sample_sha256", "token_set_sha256"):
+                  if prov.get(field) != sample_identity[field]:
+                      raise SystemExit(
+                          f"representative {label} sample identity "
+                          f"mismatch: {field}"
+                      )
 
           if int(
               market.get("v1_v3_run_id", -1)
@@ -409,6 +426,9 @@ jobs:
               summarize_sharded_manifest_coverage,
               validate_representative_coverage_report,
           )
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
           from hlp.data.pons_representative_validation import (
               build_representative_validation_rows,
               summarize_representative_validation,
@@ -422,13 +442,18 @@ jobs:
                   if line.strip()
               ]
 
-          sample = read_jsonl(
+          sample_path = Path(
               "sample/pons-representative-sample.jsonl"
           )
+          sample = read_jsonl(sample_path)
           sample_summary = json.loads(
               Path(
                   "sample/pons-representative-sample-summary.json"
               ).read_text()
+          )
+          sample_identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
           )
           if len(sample) != 10:
               raise SystemExit(
@@ -480,6 +505,8 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": 54_486_035,
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "sample_sha256": sample_identity["sample_sha256"],
+                  "token_set_sha256": sample_identity["token_set_sha256"],
                   "transfer_run_id": int(
                       "${{ inputs.transfer_run_id }}"
                   ),
@@ -554,6 +581,8 @@ jobs:
                   coverage["no_unexplained_block_gaps"]
               ),
               "source_coverage_sha256": coverage_snapshot["sha256"],
+              "sample_sha256": sample_identity["sample_sha256"],
+              "token_set_sha256": sample_identity["token_set_sha256"],
               "runner_smoke_run_id": int(
                   sample_summary["runner_smoke_run_id"]
               ),
@@ -580,6 +609,8 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": 54_486_035,
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "sample_sha256": sample_identity["sample_sha256"],
+                  "token_set_sha256": sample_identity["token_set_sha256"],
                   "runner_smoke_run_id": int(
                       sample_summary["runner_smoke_run_id"]
                   ),
