@@ -149,6 +149,9 @@ jobs:
               fetch_github_actions_artifact_zip,
               select_equivalent_artifact_retry,
           )
+          from hlp.data.pons_v1_v3_artifacts import (
+              resolve_v1_v3_canonical_shard_bindings,
+          )
           from hlp.data.pons_v2_v4_artifacts import (
               resolve_v2_v4_canonical_shard_bindings,
           )
@@ -568,42 +571,51 @@ jobs:
                       f"run={run_id} field={expected_upstream_field}"
                   )
 
-              if expected_source == "manifest_gap_aware_v4_recovery":
+              venue_label = (
+                  "V1/V3"
+                  if expected_source
+                  == "manifest_gap_aware_v1_v3_recovery"
+                  else "V2/V4"
+              )
+              shard_resolver = (
+                  resolve_v1_v3_canonical_shard_bindings
+                  if venue_label == "V1/V3"
+                  else resolve_v2_v4_canonical_shard_bindings
+              )
+              try:
+                  venue_bindings = shard_resolver(
+                      manifest,
+                      current_run_id=run_id,
+                  )
+              except (TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"recovery {venue_label} canonical shard geometry "
+                      f"is invalid: run={run_id}: {exc}"
+                  ) from exc
+              for binding in venue_bindings:
+                  matches = [
+                      row
+                      for row in artifact_rows(binding["run_id"])
+                      if str(row.get("name") or "")
+                      == binding["artifact_name"]
+                  ]
                   try:
-                      v2_v4_bindings = (
-                          resolve_v2_v4_canonical_shard_bindings(
-                              manifest,
-                              current_run_id=run_id,
-                          )
-                      )
-                  except (TypeError, ValueError) as exc:
-                      raise SystemExit(
-                          "recovery V2/V4 canonical shard geometry "
-                          f"is invalid: run={run_id}: {exc}"
-                      ) from exc
-                  for binding in v2_v4_bindings:
-                      matches = [
-                          row
-                          for row in artifact_rows(binding["run_id"])
-                          if str(row.get("name") or "")
-                          == binding["artifact_name"]
-                      ]
-                      try:
-                          select_equivalent_artifact_retry(
-                              matches,
-                              label=(
-                                  "recovered completion selected V2/V4 "
-                                  f"shard run={binding['run_id']} "
-                                  f"artifact={binding['artifact_name']}"
-                              ),
-                          )
-                      except ValueError as exc:
-                          raise SystemExit(
-                              "recovery V2/V4 selected shard artifact "
-                              "is unavailable or ambiguous: "
+                      select_equivalent_artifact_retry(
+                          matches,
+                          label=(
+                              "recovered completion selected "
+                              f"{venue_label} shard "
                               f"run={binding['run_id']} "
-                              f"artifact={binding['artifact_name']}: {exc}"
-                          ) from exc
+                              f"artifact={binding['artifact_name']}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          f"recovery {venue_label} selected shard artifact "
+                          "is unavailable or ambiguous: "
+                          f"run={binding['run_id']} "
+                          f"artifact={binding['artifact_name']}: {exc}"
+                      ) from exc
 
               prior_gap = provenance.get("prior_gap_run_id")
               try:
