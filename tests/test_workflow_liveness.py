@@ -64,6 +64,8 @@ ARTIFACT_WORKFLOWS = tuple(
 SHARED_METADATA_WORKFLOWS = (
     "phase1-pons-v1-v3-recover-gaps.yml",
     "phase1-pons-v2-v4-recover-gaps.yml",
+    "phase1-pons-v1-lifecycle-eligibility.yml",
+    "phase1-pons-v2-lifecycle-eligibility.yml",
     "phase1-pons-recovered-completion-chain.yml",
     "phase1-pons-recovered-completion-one-shot.yml",
     "phase1-pons-post-eligibility-evidence-chain.yml",
@@ -1997,6 +1999,9 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert "resolve_v1_v3_canonical_shard_bindings" in content
     assert "resolve_v1_v3_canonical_shard_bindings" in content
     assert "select_equivalent_artifact_retry" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "V1 lifecycle canonical V1/V3 artifact" in content
     assert "V1 lifecycle selected V1/V3 shard " in content
     assert "canonical_manifest_exact_artifacts" in content
@@ -2064,6 +2069,9 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "Resolve canonical V2 V4 selected shard artifacts" in content
     assert "resolve_v2_v4_canonical_shard_bindings" in content
     assert "select_equivalent_artifact_retry" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "V2 lifecycle canonical V2/V4 artifact" in content
     assert "V2 lifecycle selected V2/V4 shard " in content
     assert "canonical_manifest_exact_artifacts" in content
