@@ -847,13 +847,16 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "Download recursive paginated V2/V4 gap artifacts" in content
     assert "V2/V4 merge gap artifact pagination " in content
     assert "select_equivalent_artifact_retry" in content
+    assert content.count("select_equivalent_artifact_retry(") >= 5
     assert "prior gap coverage duplicate retry artifacts " in content
     assert "are not equivalent" in content
     assert "collapsed_equivalent_retry_artifacts" in content
     assert "V2/V4 merge duplicate retry artifacts " in content
     assert "V2/V4 merge prior gap lineage contains a cycle" in content
     assert "V2/V4 merge prior gap lineage exceeds 20 generations" in content
-    assert "V2/V4 merge prior gap plan artifact identity " in content
+    assert "prior recovery plan retry artifacts are not " in content
+    assert "prior gap coverage plan retry artifacts are not " in content
+    assert "V2/V4 merge prior plan retry artifacts are not " in content
     assert "V2/V4 merge prior gap plan file identity " in content
     assert "V2/V4 merge prior gap partial source changed" in content
     assert "V2/V4 merge prior gap snapshot head changed" in content
@@ -889,7 +892,7 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "pons-v2-registrations-full.jsonl" in content
     assert "global_poolmanager_topic_then_registry" in content
     assert "observed_bounds != expected_bounds" in content
-    assert "V2/V4 merge current gap plan artifact identity " in content
+    assert "V2/V4 merge current plan retry artifacts are not " in content
     assert "V2/V4 merge current gap plan file identity " in content
     assert "V2/V4 merge current gap partial source changed" in content
     assert "V2/V4 merge current gap snapshot head changed" in content
