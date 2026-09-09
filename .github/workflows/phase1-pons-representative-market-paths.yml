@@ -73,19 +73,97 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
           run-id: ${{ inputs.sample_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_registry
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-full-registry-recovered
           path: registry
           run-id: ${{ inputs.registry_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V1 registry download before retry
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - id: retry_download_registry
+        name: Retry V1 registry artifact download
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before final retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - name: Final V1 registry artifact download retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v1v3
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: v1v3
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial canonical V1/V3 download before retry
+        if: ${{ steps.download_v1v3.outcome == 'failure' }}
+        run: rm -rf v1v3
+      - id: retry_download_v1v3
+        name: Retry canonical V1/V3 artifact download
+        if: ${{ steps.download_v1v3.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: v1v3
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial canonical V1/V3 download before final retry
+        if: ${{ steps.retry_download_v1v3.outcome == 'failure' }}
+        run: rm -rf v1v3
+      - name: Final canonical V1/V3 artifact download retry
+        if: ${{ steps.retry_download_v1v3.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v1-v3-full
           path: v1v3
@@ -110,42 +188,204 @@ jobs:
                   value = provenance.get(key)
                   handle.write(f"{key}={'' if value is None else int(value)}\n")
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_v1v3_current
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v1-v3-*
           path: v1v3-shards/current
           merge-multiple: true
           run-id: ${{ inputs.v1_v3_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial current V1/V3 shard bundle download before retry
+        if: ${{ steps.download_v1v3_current.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/current
+      - id: retry_download_v1v3_current
+        name: Retry current V1/V3 shard bundle artifact download
+        if: ${{ steps.download_v1v3_current.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial current V1/V3 shard bundle download before final retry
+        if: ${{ steps.retry_download_v1v3_current.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/current
+      - name: Final current V1/V3 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v1v3_current.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v1v3_partial
         if: ${{ steps.v1v3_sources.outputs.partial_run_id != '' && steps.v1v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v1-v3-*
           path: v1v3-shards/partial
           merge-multiple: true
           run-id: ${{ steps.v1v3_sources.outputs.partial_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial partial V1/V3 shard bundle download before retry
+        if: ${{ steps.download_v1v3_partial.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/partial
+      - id: retry_download_v1v3_partial
+        name: Retry partial V1/V3 shard bundle artifact download
+        if: ${{ steps.download_v1v3_partial.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial partial V1/V3 shard bundle download before final retry
+        if: ${{ steps.retry_download_v1v3_partial.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/partial
+      - name: Final partial V1/V3 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v1v3_partial.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v1v3_prior
         if: ${{ steps.v1v3_sources.outputs.prior_gap_run_id != '' && steps.v1v3_sources.outputs.prior_gap_run_id != inputs.v1_v3_run_id }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v1-v3-*
           path: v1v3-shards/prior
           merge-multiple: true
           run-id: ${{ steps.v1v3_sources.outputs.prior_gap_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial prior V1/V3 shard bundle download before retry
+        if: ${{ steps.download_v1v3_prior.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/prior
+      - id: retry_download_v1v3_prior
+        name: Retry prior V1/V3 shard bundle artifact download
+        if: ${{ steps.download_v1v3_prior.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial prior V1/V3 shard bundle download before final retry
+        if: ${{ steps.retry_download_v1v3_prior.outcome == 'failure' }}
+        run: rm -rf v1v3-shards/prior
+      - name: Final prior V1/V3 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v1v3_prior.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v1-v3-*
+          path: v1v3-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v1v3_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2curve
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-curve-full
           path: v2curve
           run-id: ${{ inputs.v2_curve_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V2 curve download before retry
+        if: ${{ steps.download_v2curve.outcome == 'failure' }}
+        run: rm -rf v2curve
+      - id: retry_download_v2curve
+        name: Retry V2 curve artifact download
+        if: ${{ steps.download_v2curve.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: v2curve
+          run-id: ${{ inputs.v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 curve download before final retry
+        if: ${{ steps.retry_download_v2curve.outcome == 'failure' }}
+        run: rm -rf v2curve
+      - name: Final V2 curve artifact download retry
+        if: ${{ steps.retry_download_v2curve.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: v2curve
+          run-id: ${{ inputs.v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-transition-full
           path: transition
           run-id: ${{ inputs.transition_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2v4
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: v2v4
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial canonical V2/V4 download before retry
+        if: ${{ steps.download_v2v4.outcome == 'failure' }}
+        run: rm -rf v2v4
+      - id: retry_download_v2v4
+        name: Retry canonical V2/V4 artifact download
+        if: ${{ steps.download_v2v4.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: v2v4
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial canonical V2/V4 download before final retry
+        if: ${{ steps.retry_download_v2v4.outcome == 'failure' }}
+        run: rm -rf v2v4
+      - name: Final canonical V2/V4 artifact download retry
+        if: ${{ steps.retry_download_v2v4.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-v4-full
           path: v2v4
@@ -170,23 +410,107 @@ jobs:
                   value = provenance.get(key)
                   handle.write(f"{key}={'' if value is None else int(value)}\n")
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_v2v4_current
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v2-v4-*
           path: v2v4-shards/current
           merge-multiple: true
           run-id: ${{ inputs.v2_v4_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial current V2/V4 shard bundle download before retry
+        if: ${{ steps.download_v2v4_current.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/current
+      - id: retry_download_v2v4_current
+        name: Retry current V2/V4 shard bundle artifact download
+        if: ${{ steps.download_v2v4_current.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial current V2/V4 shard bundle download before final retry
+        if: ${{ steps.retry_download_v2v4_current.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/current
+      - name: Final current V2/V4 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v2v4_current.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/current
+          merge-multiple: true
+          run-id: ${{ inputs.v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2v4_partial
         if: ${{ steps.v2v4_sources.outputs.partial_run_id != '' && steps.v2v4_sources.outputs.partial_run_id != inputs.v2_v4_run_id }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v2-v4-*
           path: v2v4-shards/partial
           merge-multiple: true
           run-id: ${{ steps.v2v4_sources.outputs.partial_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial partial V2/V4 shard bundle download before retry
+        if: ${{ steps.download_v2v4_partial.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/partial
+      - id: retry_download_v2v4_partial
+        name: Retry partial V2/V4 shard bundle artifact download
+        if: ${{ steps.download_v2v4_partial.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial partial V2/V4 shard bundle download before final retry
+        if: ${{ steps.retry_download_v2v4_partial.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/partial
+      - name: Final partial V2/V4 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v2v4_partial.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/partial
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.partial_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2v4_prior
         if: ${{ steps.v2v4_sources.outputs.prior_gap_run_id != '' && steps.v2v4_sources.outputs.prior_gap_run_id != inputs.v2_v4_run_id }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial prior V2/V4 shard bundle download before retry
+        if: ${{ steps.download_v2v4_prior.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/prior
+      - id: retry_download_v2v4_prior
+        name: Retry prior V2/V4 shard bundle artifact download
+        if: ${{ steps.download_v2v4_prior.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/prior
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.prior_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial prior V2/V4 shard bundle download before final retry
+        if: ${{ steps.retry_download_v2v4_prior.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/prior
+      - name: Final prior V2/V4 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v2v4_prior.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-v2-v4-*
           path: v2v4-shards/prior
