@@ -572,7 +572,21 @@ research threshold or starting another archive crawl:
   SHA and both lifecycle SHAs; the viability guard requires that full
   fingerprint plus snapshot **54,486,035** before any route RPC can start. This
   moves cheap evidence-consistency failures ahead of the nine measured runs
-  rather than discovering them only at final acceptance. Its guarded one-shot watches
+  rather than discovering them only at final acceptance. The post-eligibility
+  artifact path is now retry-safe against GitHub artifact-finalization
+  failures: eligible-universe, representative-validation and evidence-ready
+  outputs each receive up to three upload attempts without rerunning their
+  completed computation. Normal/recovered evidence joins, readiness,
+  guarded/direct viability and final acceptance select same-name retries by an
+  exact artifact ID only when GitHub reports equivalent SHA-256 digest, byte
+  size and workflow-run binding; non-equivalent duplicates fail closed.
+  Accounting and viability-projection artifacts use the same retry/exact-ID
+  pattern, and the acceptance-gate plus PASS-closeout outputs also receive
+  three upload attempts. Closeout opens the exact equivalent acceptance
+  artifact by ID before auditing it. This removes the known single-attempt
+  artifact-finalization failure class from the completed evidence -> viability
+  -> acceptance -> closeout chain.
+  Its guarded one-shot watches
   `.github/phase1-pons-evidence-launch.txt`; inert validation run
   **33988716778** skipped cleanly while compiling the nested graph.
 
@@ -1532,8 +1546,11 @@ acceptance gate itself is also bound to the current final-acceptance caller run:
 its viability projection must come from that same GitHub run, its caller
 workflow must be the guarded finalizer or reusable final-acceptance chain, and
 its evidence run must remain an approved ancestor with the full evidence
-artifact bundle. Direct manual acceptance-gate dispatch therefore cannot create
-a misleading standalone PASS artifact.
+artifact bundle. Eligible-universe, representative-validation and
+viability-projection inputs are opened by exact metadata-reconciled artifact
+IDs, so same-name retry artifacts cannot make PASS evaluation ambiguous.
+Direct manual acceptance-gate dispatch therefore cannot create a misleading
+standalone PASS artifact.
 
 A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
 unarmed. After the ledger finalizer produces a real PASS artifact and that run
