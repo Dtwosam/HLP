@@ -19,6 +19,8 @@ WORKFLOWS = [
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v3-weth-continuation.yml",
+    "phase1-pons-skhy-v3-weth-segmented.yml",
     "phase1-pons-skhy-v4-known-pool-continuation.yml",
     "phase1-pons-skhy-v4-known-pool-segmented.yml",
     "phase1-pons-representative-transfers-full.yml",
@@ -172,6 +174,65 @@ def test_archive_matrix_workflows_are_small_and_bounded():
         assert content.count("overwrite: true") == 2, name
 
 
+def test_downstream_pricing_artifact_uploads_are_retry_safe():
+    segment_workflows = (
+        "phase1-pons-skhy-v3-weth-continuation.yml",
+        "phase1-pons-skhy-v4-known-pool-continuation.yml",
+    )
+    for name in segment_workflows:
+        content = _workflow(name)
+        assert content.count("id: upload_segment") == 1, name
+        assert content.count("id: retry_upload_segment") == 1, name
+        assert content.count("steps.upload_segment.outcome == 'failure'") == 1, name
+        assert content.count(
+            "steps.retry_upload_segment.outcome == 'failure'"
+        ) == 1, name
+        assert content.count("overwrite: true") == 2, name
+
+    segmented_workflows = (
+        "phase1-pons-skhy-v3-weth-segmented.yml",
+        "phase1-pons-skhy-v4-known-pool-segmented.yml",
+    )
+    for name in segmented_workflows:
+        content = _workflow(name)
+        assert content.count("id: upload_segmented") == 1, name
+        assert content.count("id: retry_upload_segmented") == 1, name
+        assert content.count(
+            "steps.upload_segmented.outcome == 'failure'"
+        ) == 1, name
+        assert content.count(
+            "steps.retry_upload_segmented.outcome == 'failure'"
+        ) == 1, name
+        assert content.count("overwrite: true") == 2, name
+
+    quote_workflows = (
+        "phase1-pons-v3-quote-fallback-full.yml",
+        "phase1-pons-v4-quote-fallback-full.yml",
+    )
+    for name in quote_workflows:
+        content = _workflow(name)
+        for upload_id in ("routes", "shard", "full"):
+            assert content.count(f"id: upload_{upload_id}") == 1, (
+                name,
+                upload_id,
+            )
+            assert content.count(f"id: retry_upload_{upload_id}") == 1, (
+                name,
+                upload_id,
+            )
+            assert content.count(
+                f"steps.upload_{upload_id}.outcome == 'failure'"
+            ) == 1, (name, upload_id)
+            assert content.count(
+                f"steps.retry_upload_{upload_id}.outcome == 'failure'"
+            ) == 1, (name, upload_id)
+        assert content.count("overwrite: true") == 6, name
+        assert (
+            "      - uses: actions/upload-artifact@v4\n"
+            "      - uses: actions/upload-artifact@v4"
+        ) not in content, name
+
+
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
@@ -296,6 +357,8 @@ BACKFILL_WORKFLOWS = {
     "phase1-pons-v4-quote-fallback-full.yml",
     "phase1-pons-quote-fallback-full.yml",
     "phase1-pons-v4-quote-continuation.yml",
+    "phase1-pons-skhy-v3-weth-continuation.yml",
+    "phase1-pons-skhy-v3-weth-segmented.yml",
     "phase1-pons-skhy-v4-known-pool-continuation.yml",
     "phase1-pons-skhy-v4-known-pool-segmented.yml",
     "phase1-pons-v2-curve-recover-tail-one-shot.yml",
