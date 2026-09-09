@@ -150,6 +150,70 @@ def fetch_github_actions_job_log(
 
 
 
+def fetch_github_actions_json(
+    api_url: str,
+    token: str,
+    *,
+    timeout: float = 60,
+    attempts: int = 3,
+):
+    """Fetch one GitHub Actions JSON resource with bounded transient retries."""
+    parsed_api = urllib.parse.urlparse(api_url)
+    if (
+        parsed_api.scheme != "https"
+        or parsed_api.netloc.lower() != "api.github.com"
+    ):
+        raise ValueError(
+            "Actions metadata API URL must use api.github.com HTTPS"
+        )
+    if not token:
+        raise ValueError("GitHub token is required for Actions metadata")
+    if timeout <= 0:
+        raise ValueError("Actions metadata timeout must be positive")
+    attempt_count = int(attempts)
+    if attempt_count <= 0:
+        raise ValueError("Actions metadata attempts must be positive")
+
+    opener = urllib.request.build_opener(_NoRedirect())
+    for attempt in range(attempt_count):
+        request = urllib.request.Request(
+            api_url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "hlp-phase1-actions-metadata",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                payload = response.read()
+            return json.loads(payload)
+        except urllib.error.HTTPError as exc:
+            if exc.code in _REDIRECT_CODES:
+                raise RuntimeError(
+                    "GitHub Actions metadata request unexpectedly redirected"
+                ) from exc
+            if (
+                exc.code in _TRANSIENT_ARTIFACT_HTTP_CODES
+                and attempt + 1 < attempt_count
+            ):
+                continue
+            body = exc.read().decode(errors="replace")
+            raise RuntimeError(
+                f"GitHub Actions metadata request failed: HTTP {exc.code}: "
+                f"{body[:500]}"
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            if attempt + 1 < attempt_count:
+                continue
+            raise RuntimeError(
+                f"GitHub Actions metadata request failed: {exc}"
+            ) from exc
+
+    raise RuntimeError("GitHub Actions metadata retry loop exhausted")
+
+
 def fetch_github_actions_artifact_zip(
     api_url: str,
     token: str,
