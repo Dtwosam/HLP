@@ -138,6 +138,8 @@ def _handoff(run_id, *, recovered=False):
         "representative_sample_sha256": "e" * 64,
         "representative_token_set_sha256": "f" * 64,
         "representative_source_coverage_sha256": "1" * 64,
+        "explorer_evidence_required": False,
+        "explorer_crosscheck_run_id": 0,
         "v1_eligibility_sha256": "c" * 64,
         "v2_eligibility_sha256": "d" * 64,
         "runner_smoke_run_id": RUNNER_SMOKE_RUN_ID,
@@ -598,6 +600,68 @@ def test_readiness_rejects_route_launched_with_nonempty_ledger_slot():
             "observed": 1234,
         }
     ]
+
+
+def test_readiness_accepts_required_explorer_identity():
+    handoff = _handoff(400)
+    handoff["explorer_evidence_required"] = True
+    handoff["explorer_crosscheck_run_id"] = 123456
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["evidence_handoff_errors"] == []
+
+
+def test_readiness_rejects_required_explorer_without_run():
+    handoff = _handoff(400)
+    handoff["explorer_evidence_required"] = True
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert (
+        "evidence handoff explorer evidence is required without a run"
+        in report["evidence_handoff_errors"]
+    )
+
+
+def test_readiness_rejects_explorer_run_while_optional():
+    handoff = _handoff(400)
+    handoff["explorer_crosscheck_run_id"] = 123456
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert (
+        "evidence handoff explorer run is present while optional"
+        in report["evidence_handoff_errors"]
+    )
+
+
+def test_readiness_rejects_nonboolean_explorer_requirement():
+    handoff = _handoff(400)
+    handoff["explorer_evidence_required"] = "yes"
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert (
+        "evidence handoff explorer requirement must be boolean"
+        in report["evidence_handoff_errors"]
+    )
 
 
 def test_readiness_rejects_malformed_evidence_handoff_fingerprint():
