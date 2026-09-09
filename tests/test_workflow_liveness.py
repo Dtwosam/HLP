@@ -896,6 +896,9 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "observed_bounds != expected_bounds" in content
     assert "V2/V4 merge current plan retry artifacts are not " in content
     assert "V2/V4 merge current gap plan file identity " in content
+    assert "current_plan_bytes = archive.read(" in content
+    assert '(Path("plan") / plan_name).write_bytes(current_plan_bytes)' in content
+    assert "name: phase1-pons-v2-v4-gap-plan\n          path: plan" not in content
     assert "V2/V4 merge current gap partial source changed" in content
     assert "V2/V4 merge current gap snapshot head changed" in content
     assert "V2/V4 merge current gap start block changed" in content
@@ -1250,6 +1253,9 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "observed_bounds != expected_bounds" in content
     assert "V1/V3 merge current gap plan artifact " in content
     assert "V1/V3 merge current gap plan file identity " in content
+    assert "current_plan_bytes = archive.read(" in content
+    assert '(Path("plan") / plan_name).write_bytes(current_plan_bytes)' in content
+    assert "name: phase1-pons-v1-v3-gap-plan\n          path: plan" not in content
     assert "V1/V3 merge current gap partial source changed" in content
     assert "V1/V3 merge current gap snapshot head changed" in content
     assert "V1/V3 merge current gap start block changed" in content
