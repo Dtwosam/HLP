@@ -387,6 +387,26 @@ def test_representative_transfer_recovery_preserves_successful_work():
     assert "result == 'failure'" not in merge_line
 
 
+def test_representative_intermediate_outputs_are_retry_safe():
+    workflows = (
+        "phase1-pons-representative-sample-freeze.yml",
+        "phase1-pons-representative-market-paths.yml",
+        "phase1-pons-representative-priced-paths.yml",
+        "phase1-pons-representative-dex-crosscheck.yml",
+    )
+    for name in workflows:
+        content = _workflow(name)
+        assert content.count("id: upload_output") == 1, name
+        assert content.count("id: retry_upload_output") == 1, name
+        assert content.count(
+            "steps.upload_output.outcome == 'failure'"
+        ) == 1, name
+        assert content.count(
+            "steps.retry_upload_output.outcome == 'failure'"
+        ) == 1, name
+        assert content.count("overwrite: true") == 2, name
+
+
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
