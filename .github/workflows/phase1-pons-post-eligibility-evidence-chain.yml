@@ -13,6 +13,11 @@ on:
         required: false
         default: ""
         type: string
+      explorer_access_reverified:
+        description: "Run supplementary Blockscout representative checks only after GitHub-runner access is explicitly reverified"
+        required: false
+        default: false
+        type: boolean
       oracle_run_id:
         required: true
         default: "33974681334"
@@ -54,6 +59,10 @@ on:
         required: false
         default: ""
         type: string
+      explorer_access_reverified:
+        required: false
+        default: false
+        type: boolean
       oracle_run_id:
         required: false
         default: "33974681334"
@@ -341,6 +350,7 @@ jobs:
       eligibility_run_id: ${{ inputs.source_eligibility_run_id }}
       oracle_run_id: ${{ inputs.oracle_run_id }}
       prior_transfer_run_id: ${{ inputs.prior_transfer_run_id }}
+      explorer_access_reverified: ${{ inputs.explorer_access_reverified }}
       runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
       registry_run_id: ${{ inputs.registry_run_id }}
       v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
