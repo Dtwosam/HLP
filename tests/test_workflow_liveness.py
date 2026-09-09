@@ -84,6 +84,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-recovered-completion-chain.yml",
         "phase1-pons-post-eligibility-evidence-chain.yml",
         "phase1-pons-representative-evidence-chain.yml",
+        "phase1-pons-representative-evidence-one-shot.yml",
         "phase1-pons-viability-route-measurement.yml",
         "phase1-pons-final-acceptance-chain.yml",
         "phase1-pons-acceptance-gate.yml",
