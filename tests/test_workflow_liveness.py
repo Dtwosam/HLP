@@ -90,6 +90,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-viability-route-measurement.yml",
         "phase1-pons-final-acceptance-chain.yml",
         "phase1-pons-acceptance-gate.yml",
+        "phase1-pons-pass-closeout-one-shot.yml",
         "phase1-pons-readiness-audit.yml",
         "phase1-pons-v2-v4-filter-comparison.yml",
     )
@@ -1967,6 +1968,10 @@ def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     assert "build_phase1_acceptance_report" in content
     assert "REQUIRED_PHASE1_ACQUISITION_ROUTES" in content
     assert 'phase1_acceptance_status"] != "pass"' in content
+    assert "id: upload_acceptance" in content
+    assert "id: retry_upload_acceptance" in content
+    assert "Retry Phase 1 acceptance artifact upload" in content
+    assert "Final Phase 1 acceptance artifact upload retry" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
@@ -3032,6 +3037,14 @@ def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
     assert "launch Phase 1 PASS closeout" in content
     assert "phase1-pons-acceptance-gate" in content
     assert "phase1-acceptance-report.json" in content
+    assert "Read frozen PASS run and exact acceptance artifact" in content
+    assert "Phase 1 closeout acceptance retry artifacts " in content
+    assert "are not equivalent" in content
+    assert "acceptance_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}"
+        in content
+    )
     assert 'report.get("phase1_acceptance_status") != "pass"' in content
     assert "hlp-v1-phase1-data-viability" in content
     assert "331_011_903" in content
@@ -3052,6 +3065,10 @@ def test_phase1_pass_closeout_is_guarded_artifact_only_and_pr_pinned():
     assert "safe_to_mark_pr_ready" in content
     assert "safe_to_merge_after_required_checks" in content
     assert "phase1-pons-pass-closeout" in content
+    assert "id: upload_closeout" in content
+    assert "id: retry_upload_closeout" in content
+    assert "Retry Phase 1 closeout artifact upload" in content
+    assert "Final Phase 1 closeout artifact upload retry" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "time.sleep(" not in content
