@@ -846,7 +846,11 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "duplicate V2/V4 shard file while downloading" in content
     assert "Download recursive paginated V2/V4 gap artifacts" in content
     assert "V2/V4 merge gap artifact pagination " in content
-    assert "V2/V4 merge contains duplicate gap artifact IDs" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "prior gap coverage duplicate retry artifacts " in content
+    assert "are not equivalent" in content
+    assert "collapsed_equivalent_retry_artifacts" in content
+    assert "V2/V4 merge duplicate retry artifacts " in content
     assert "V2/V4 merge prior gap lineage contains a cycle" in content
     assert "V2/V4 merge prior gap lineage exceeds 20 generations" in content
     assert "V2/V4 merge prior gap plan artifact identity " in content
