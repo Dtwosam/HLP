@@ -186,11 +186,31 @@ jobs:
               handle.write(f"gap_count={len(include)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_plan
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v4-quote-fallback-gap-plan
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_plan
+        name: Retry V4 quote gap plan artifact upload
+        if: ${{ steps.upload_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V4 quote gap plan artifact upload retry
+        if: ${{ steps.retry_upload_plan.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   recover:
     needs: plan
@@ -450,8 +470,28 @@ jobs:
             --v4-events artifacts/pons-v4-quote-fallback-events-full.jsonl \
             --state-out artifacts/pons-v4-quote-fallback-initial.jsonl \
             --out artifacts/pons-v4-quote-fallback-updates.jsonl
-      - uses: actions/upload-artifact@v4
+      - id: upload_full
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v4-quote-fallback-full
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_full
+        name: Retry V4 recovered quote fallback artifact upload
+        if: ${{ steps.upload_full.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V4 recovered quote fallback artifact upload retry
+        if: ${{ steps.retry_upload_full.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
