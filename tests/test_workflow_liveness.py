@@ -2945,6 +2945,8 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "source already has complete pricing; set pricing_run_id" in content
     assert "source_v2_shards" in content
     assert "recovery_manifest" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "recovery venue retry artifacts are not equivalent" in content
     assert content.count("fetch_github_actions_artifact_zip(") == 1
     assert "decode_json=False" not in content
     assert "actions/checkout@v4" in content
