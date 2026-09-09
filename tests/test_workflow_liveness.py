@@ -3515,6 +3515,12 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "evidence handoff Pons launch count changed" in content
     assert "evidence handoff eligible universe is empty" in content
     assert "evidence handoff representative token count changed" in content
+    assert "explorer_evidence_required" in content
+    assert "explorer_crosscheck_run_id" in content
+    assert "evidence handoff explorer requirement must be boolean" in content
+    assert "evidence handoff explorer run ID is invalid" in content
+    assert "evidence handoff explorer evidence is required without a run" in content
+    assert "evidence handoff explorer run is present while optional" in content
     for field in (
         "eligible_universe_sha256",
         "representative_validation_sha256",
