@@ -1358,7 +1358,11 @@ three upload attempts using the already-computed local output, so a transient
 GitHub artifact failure does not force a multi-GB replay to start over. The
 generic V3+V4 quote-fallback join now applies the same three-attempt contract to
 both venue inputs and its merged output, preventing a late artifact-service
-failure from discarding two already-completed 128-shard fallback scans.
+failure from discarding two already-completed 128-shard fallback scans. Both
+V3 and V4 manifest-gap recovery workflows now retry their gap-plan and final
+canonical uploads too; their per-gap RPC artifacts were already retry-safe.
+A recovered fallback generation therefore does not need another generation
+solely because GitHub artifact finalization failed after planning or merge.
 
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
