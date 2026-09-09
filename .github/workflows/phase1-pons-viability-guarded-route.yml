@@ -228,8 +228,13 @@ jobs:
           for field in (
               "eligible_universe_sha256",
               "representative_validation_sha256",
+              "representative_sample_sha256",
+              "representative_token_set_sha256",
+              "representative_source_coverage_sha256",
               "v1_eligibility_sha256",
               "v2_eligibility_sha256",
+              "runner_smoke_universe_sha256",
+              "runner_smoke_outcomes_sha256",
           ):
               value = str(report.get(field) or "").lower()
               if len(value) != 64:
@@ -243,6 +248,26 @@ jobs:
                       f"evidence handoff hash is invalid: {field}"
                   ) from exc
               evidence_hashes[field] = value
+
+          if int(report.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "evidence handoff runner-smoke run changed"
+              )
+          if evidence_hashes["runner_smoke_universe_sha256"] != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "evidence handoff runner-smoke universe SHA changed"
+              )
+          if evidence_hashes["runner_smoke_outcomes_sha256"] != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "evidence handoff runner-smoke outcomes SHA changed"
+              )
+
           if not recovery_mode and (
               lifecycle_run_id != source_run_id
               or int(report["v1_v3_run_id"]) != source_run_id
