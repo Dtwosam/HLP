@@ -116,6 +116,55 @@ def test_critical_phase1_workflow_python_heredocs_compile():
             )
 
 
+def test_critical_upload_artifact_steps_have_local_configuration():
+    for name in WORKFLOWS:
+        lines = _workflow(name).splitlines()
+        for index, line in enumerate(lines):
+            if "uses: actions/upload-artifact@v4" not in line:
+                continue
+
+            use_indent = len(line) - len(line.lstrip())
+            if line.lstrip().startswith("- uses:"):
+                step_indent = use_indent
+                step_start = index
+            else:
+                step_indent = use_indent - 2
+                step_start = index
+                while step_start >= 0:
+                    candidate = lines[step_start]
+                    candidate_indent = len(candidate) - len(candidate.lstrip())
+                    if (
+                        candidate_indent == step_indent
+                        and candidate.lstrip().startswith("- ")
+                    ):
+                        break
+                    step_start -= 1
+                assert step_start >= 0, (name, index + 1)
+
+            step_end = len(lines)
+            for end in range(index + 1, len(lines)):
+                candidate = lines[end]
+                candidate_indent = len(candidate) - len(candidate.lstrip())
+                if (
+                    candidate_indent == step_indent
+                    and candidate.lstrip().startswith("- ")
+                ):
+                    step_end = end
+                    break
+
+            block = lines[step_start:step_end]
+            assert any(row.strip() == "with:" for row in block), (
+                name,
+                index + 1,
+                block,
+            )
+            assert any(row.strip().startswith("path:") for row in block), (
+                name,
+                index + 1,
+                block,
+            )
+
+
 def test_pons_heavy_workflows_never_poll_other_runs():
     forbidden = (
         "time.sleep(",
