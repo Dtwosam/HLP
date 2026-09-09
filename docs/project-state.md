@@ -977,7 +977,12 @@ new repair matrix. Manual dispatch may omit both binding inputs together, but
 a one-sided binding is rejected.
 
 Readiness recovery progress is also plan-derived rather than job-list-derived.
-It reads and structurally validates the bound gap-plan artifact, uses
+The readiness audit now uses the shared bounded-retry Actions metadata reader
+for both armed-evidence resolution and the full source/recovery/viability state
+scan, and retries the exact evidence-handoff artifact three times with partial
+directory cleanup. A transient GitHub API or artifact read therefore cannot
+misclassify the state machine or suppress the correct next action. It reads and
+structurally validates the bound gap-plan artifact, uses
 `gap_job_count` as the total planned repair count, and tracks currently
 materialized Actions jobs separately. The audit summary reports
 `materialized/planned` alongside successful/planned repairs, so serialized
