@@ -97,6 +97,12 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-pass-closeout-one-shot.yml",
         "phase1-pons-readiness-audit.yml",
         "phase1-pons-v2-v4-filter-comparison.yml",
+        "phase1-pons-skhy-v3-weth-continuation.yml",
+        "phase1-pons-skhy-v3-weth-segmented.yml",
+        "phase1-pons-skhy-v4-known-pool-continuation.yml",
+        "phase1-pons-skhy-v4-known-pool-segmented.yml",
+        "phase1-pons-v3-quote-fallback-full.yml",
+        "phase1-pons-v4-quote-fallback-full.yml",
     )
     for name in critical:
         blocks = _embedded_python_blocks(_workflow(name))
@@ -188,6 +194,15 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
             "steps.retry_upload_segment.outcome == 'failure'"
         ) == 1, name
         assert content.count("overwrite: true") == 2, name
+        assert content.count("id: download_input") == 1, name
+        assert content.count("id: retry_download_input") == 1, name
+        assert content.count(
+            "steps.download_input.outcome == 'failure'"
+        ) == 2, name
+        assert content.count(
+            "steps.retry_download_input.outcome == 'failure'"
+        ) == 2, name
+        assert content.count("rm -rf audit") + content.count("rm -rf prior") == 2, name
 
     segmented_workflows = (
         "phase1-pons-skhy-v3-weth-segmented.yml",
@@ -204,6 +219,15 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
             "steps.retry_upload_segmented.outcome == 'failure'"
         ) == 1, name
         assert content.count("overwrite: true") == 2, name
+        assert content.count("id: download_segments") == 1, name
+        assert content.count("id: retry_download_segments") == 1, name
+        assert content.count(
+            "steps.download_segments.outcome == 'failure'"
+        ) == 2, name
+        assert content.count(
+            "steps.retry_download_segments.outcome == 'failure'"
+        ) == 2, name
+        assert content.count("rm -rf segments") == 2, name
 
     quote_workflows = (
         "phase1-pons-v3-quote-fallback-full.yml",
