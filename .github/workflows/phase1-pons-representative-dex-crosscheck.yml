@@ -124,6 +124,9 @@ jobs:
               reconcile_external_pool,
               reconcile_price_against_ohlcv,
           )
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
           from hlp.data.pons_representative_prices import (
               select_representative_dex_price_checkpoints,
           )
@@ -138,9 +141,10 @@ jobs:
                   if line.strip()
               ]
 
-          sample = read_jsonl(
+          sample_path = Path(
               "sample/pons-representative-sample.jsonl"
           )
+          sample = read_jsonl(sample_path)
           if len(sample) != 10:
               raise SystemExit(
                   "representative DEX cross-check requires exactly 10 "
@@ -151,6 +155,10 @@ jobs:
               Path(
                   "sample/pons-representative-sample-summary.json"
               ).read_text()
+          )
+          sample_identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
           )
           expected_v1_run = int("${{ inputs.v1_eligibility_run_id }}")
           expected_v2_run = int("${{ inputs.v2_eligibility_run_id }}")
@@ -211,6 +219,12 @@ jobs:
               raise SystemExit(
                   "representative priced-path snapshot mismatch"
               )
+          for field in ("sample_sha256", "token_set_sha256"):
+              if priced_provenance.get(field) != sample_identity[field]:
+                  raise SystemExit(
+                      "representative DEX priced-path sample identity "
+                      f"mismatch: {field}"
+                  )
           if int(
               priced_provenance.get("sample_run_id", -1)
           ) != int("${{ inputs.sample_run_id }}"):
@@ -463,6 +477,8 @@ jobs:
                   "ohlcv_aggregate": 1,
                   "ohlcv_tolerance_bps": "0",
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
+                  "sample_sha256": sample_identity["sample_sha256"],
+                  "token_set_sha256": sample_identity["token_set_sha256"],
                   "priced_path_run_id": int(
                       "${{ inputs.priced_path_run_id }}"
                   ),
@@ -478,6 +494,8 @@ jobs:
           )
           summary = {
               "sample_tokens": len(rows),
+              "sample_sha256": sample_identity["sample_sha256"],
+              "token_set_sha256": sample_identity["token_set_sha256"],
               "targeted_canonical_dex_pools": len(targeted),
               "matched_canonical_dex_pools": sum(
                   row.get("external_match") is True for row in rows
