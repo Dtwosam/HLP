@@ -2917,6 +2917,12 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert 'summary.get(matched_field, -1)' in content
     assert 'summary.get(missing_field, -1)' in content
     assert 'summary.get("source_files", 0)' in content
+    assert 'provenance.get("shards")' in content
+    assert 'summary.get("candidate_source_files", -1)' in content
+    assert '"dropped_overlapping_source_files"' in content
+    assert "source_files != len(shards)" in content
+    assert "candidate_source_files < source_files" in content
+    assert "candidate_source_files - source_files" in content
     assert '"registered_pools"' in content
     assert '"registered_pool_ids"' in content
     assert "268_688" in content
@@ -3113,7 +3119,14 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "recovery venue summary membership changed" in content
     assert "recovery venue summary matched membership changed" in content
     assert "recovery venue summary missing initialize changed" in content
-    assert "recovery venue summary source file count is invalid" in content
+    assert "recovery venue summary shard provenance changed" in content
+    assert "recovery venue summary source file count changed" in content
+    assert "recovery venue summary candidate file count " in content
+    assert "recovery venue summary overlap accounting changed" in content
+    assert 'summary.get("candidate_source_files", -1)' in content
+    assert '"dropped_overlapping_source_files"' in content
+    assert "source_files != len(shards)" in content
+    assert "candidate_source_files - source_files" in content
     assert "recovery venue summary metadata is invalid" in content
     assert "pons-v1-v3-summary.json" in content
     assert "pons-v2-v4-summary.json" in content
