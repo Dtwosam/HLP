@@ -45,13 +45,65 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_v3
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v3-quote-fallback-full
           path: v3
           run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V3 quote fallback download before retry
+        if: ${{ steps.download_v3.outcome == 'failure' }}
+        run: rm -rf v3
+      - id: retry_download_v3
+        name: Retry V3 quote fallback artifact download
+        if: ${{ steps.download_v3.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: v3
+          run-id: ${{ inputs.v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V3 quote fallback download before final retry
+        if: ${{ steps.retry_download_v3.outcome == 'failure' }}
+        run: rm -rf v3
+      - name: Final V3 quote fallback artifact download retry
+        if: ${{ steps.retry_download_v3.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: v3
+          run-id: ${{ inputs.v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v4
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: v4
+          run-id: ${{ inputs.v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V4 quote fallback download before retry
+        if: ${{ steps.download_v4.outcome == 'failure' }}
+        run: rm -rf v4
+      - id: retry_download_v4
+        name: Retry V4 quote fallback artifact download
+        if: ${{ steps.download_v4.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: v4
+          run-id: ${{ inputs.v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V4 quote fallback download before final retry
+        if: ${{ steps.retry_download_v4.outcome == 'failure' }}
+        run: rm -rf v4
+      - name: Final V4 quote fallback artifact download retry
+        if: ${{ steps.retry_download_v4.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v4-quote-fallback-full
           path: v4
@@ -183,8 +235,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_merged
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-quote-fallback-full
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_merged
+        name: Retry merged quote fallback artifact upload
+        if: ${{ steps.upload_merged.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final merged quote fallback artifact upload retry
+        if: ${{ steps.retry_upload_merged.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
