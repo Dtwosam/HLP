@@ -1355,7 +1355,10 @@ oracle downloads before replay; V2 retries registry, curve, transition, anchor,
 stock oracle and merged quote-fallback downloads. Partial target directories are
 removed between attempts. Both final lifecycle eligibility artifacts also get
 three upload attempts using the already-computed local output, so a transient
-GitHub artifact failure does not force a multi-GB replay to start over.
+GitHub artifact failure does not force a multi-GB replay to start over. The
+generic V3+V4 quote-fallback join now applies the same three-attempt contract to
+both venue inputs and its merged output, preventing a late artifact-service
+failure from discarding two already-completed 128-shard fallback scans.
 
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
