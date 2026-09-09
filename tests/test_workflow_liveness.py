@@ -1732,7 +1732,8 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert '"token_set_sha256": identity["token_set_sha256"]' in content
     assert '"validated_v1_v3_run_id": v1_v3_run_id' in content
     assert '"validated_v2_v4_run_id": v2_v4_run_id' in content
-    assert "representative sample lifecycle venue provenance missing" in content
+    assert "representative sample lifecycle venue " in content
+    assert "provenance missing: {field} " in content
     assert "representative sample lifecycle venue run " in content
     assert 'versions != {"v1": 4, "v2": 1}' in content
     assert "--runners 5 --failures 5" in content
@@ -2149,8 +2150,7 @@ def test_representative_chain_preflights_frozen_support_before_sample():
     assert "representative eligibility run is not successful" in content
     assert "representative eligibility branch changed" in content
     assert "representative eligibility artifacts missing" in content
-    assert "representative V1/V3 artifact missing" in content
-    assert "representative V2/V4 artifact missing" in content
+    assert "representative {label} artifact missing" in content
     assert "phase1-pons-live-venue-rescue-one-shot.yml/runs" in content
     assert "representative chain cannot overlap active venue rescue" in content
     assert "Verify lifecycle venue provenance before representative RPC" in content
