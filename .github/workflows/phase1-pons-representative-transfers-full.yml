@@ -63,7 +63,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -342,11 +368,31 @@ jobs:
               handle.write(f"gap_count={len(include)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_plan
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfer-plan
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_plan
+        name: Retry representative transfer plan artifact upload
+        if: ${{ steps.upload_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer plan artifact upload retry
+        if: ${{ steps.retry_upload_plan.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   acquire_1:
     needs: plan
@@ -366,7 +412,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -386,15 +458,35 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfer-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry representative transfer shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   acquire_2:
     needs: [plan, acquire_1]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_1.result == 'success' || needs.acquire_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_1.result == 'success' || needs.acquire_1.result == 'failure' || needs.acquire_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -410,7 +502,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -430,15 +548,35 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfer-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry representative transfer shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   acquire_3:
     needs: [plan, acquire_2]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_2.result == 'success' || needs.acquire_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_2.result == 'success' || needs.acquire_2.result == 'failure' || needs.acquire_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -454,7 +592,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -474,15 +638,35 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfer-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry representative transfer shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   acquire_4:
     needs: [plan, acquire_3]
-    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_3.result == 'success' || needs.acquire_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.acquire_3.result == 'success' || needs.acquire_3.result == 'failure' || needs.acquire_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -498,7 +682,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -518,11 +728,31 @@ jobs:
             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
             --chunk-size "$CHUNK" --min-chunk-size 25 \
             --out "artifacts/representative-transfers-${RANGE_ID}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - id: upload_shard
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfer-${{ matrix.id }}
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_shard
+        name: Retry representative transfer shard artifact upload
+        if: ${{ steps.upload_shard.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer shard artifact upload retry
+        if: ${{ steps.retry_upload_shard.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   merge:
     needs: [plan, acquire_1, acquire_2, acquire_3, acquire_4]
@@ -536,7 +766,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
@@ -679,7 +935,29 @@ jobs:
               )
           print(json.dumps(reports, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_plan
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: plan
+      - name: Clean partial representative transfer plan download before retry
+        if: ${{ steps.download_plan.outcome == 'failure' }}
+        run: rm -rf plan
+      - id: retry_download_plan
+        name: Retry representative transfer plan artifact download
+        if: ${{ steps.download_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-transfer-plan
+          path: plan
+      - name: Clean partial representative transfer plan download before final retry
+        if: ${{ steps.retry_download_plan.outcome == 'failure' }}
+        run: rm -rf plan
+      - name: Final representative transfer plan artifact download retry
+        if: ${{ steps.retry_download_plan.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-transfer-plan
           path: plan
@@ -944,8 +1222,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_full
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-transfers-full
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_full
+        name: Retry representative transfer full artifact upload
+        if: ${{ steps.upload_full.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfers-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative transfer full artifact upload retry
+        if: ${{ steps.retry_upload_full.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-transfers-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
