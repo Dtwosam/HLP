@@ -1663,6 +1663,10 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "evidence: expected=" in content
     assert '"runner_tokens": sorted(sample_runner_tokens)' in content
     assert '"failure_tokens": failure_tokens' in content
+    assert "representative_sample_identity" in content
+    assert "pons-representative-sample-identity.json" in content
+    assert '"sample_sha256": identity["sample_sha256"]' in content
+    assert '"token_set_sha256": identity["token_set_sha256"]' in content
     assert 'versions != {"v1": 4, "v2": 1}' in content
     assert "--runners 5 --failures 5" in content
     assert "representative sample must freeze exactly five runners" in content
@@ -1686,6 +1690,8 @@ def test_representative_transfer_backfill_is_manual_resumable_and_bounded():
     assert "required: false" in call_block
     assert "max_blocks must be between 1 and 200000" in content
     assert "representative transfer plan exceeds four serialized " in content
+    assert "require_representative_sample_identity" in content
+    assert "pons-representative-sample-summary.json" in content
     assert '"sample_sha256": sample_sha256' in content
     assert '"token_set_sha256": token_set_sha256' in content
     assert "prior transfer shard sample identity mismatch" in content
@@ -1916,6 +1922,10 @@ def test_representative_dex_crosscheck_is_manual_independent_and_bounded():
     assert "max_gecko_attempts = logical_gecko_requests * client.attempts" in content
     assert "representative DEX logical request budget exceeded" in content
     assert "representative DEX HTTP attempt budget exceeded" in content
+    assert "require_representative_sample_identity" in content
+    assert "priced-path sample identity" in content
+    assert '"sample_sha256": sample_identity["sample_sha256"]' in content
+    assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "geckoterminal_logical_request_budget" in content
     assert "geckoterminal_http_attempt_budget" in content
     assert 'default: "33911022718"' in content
@@ -1941,6 +1951,9 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert "summarize_representative_market_paths" in content
     assert "summarize_sharded_manifest_coverage" in content
     assert "pons-representative-market-source-coverage.json" in content
+    assert "require_representative_sample_identity" in content
+    assert '"sample_sha256": sample_identity["sample_sha256"]' in content
+    assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "no provider requests" in content
     assert 'default: "33911022718"' in content
     assert 'default: "33936232604"' in content
@@ -1971,6 +1984,10 @@ def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
     assert "summarize_sharded_manifest_coverage" in content
     assert "summarize_snapshot_manifest_coverage" in content
     assert "pons-representative-pricing-source-coverage.json" in content
+    assert "require_representative_sample_identity" in content
+    assert "market-path sample identity mismatch" in content
+    assert '"sample_sha256": sample_identity["sample_sha256"]' in content
+    assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
@@ -2032,6 +2049,10 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative validation runner smoke run mismatch" in content
     assert "representative validation runner smoke universe SHA mismatch" in content
     assert "representative validation runner smoke outcomes SHA mismatch" in content
+    assert "require_representative_sample_identity" in content
+    assert "sample identity mismatch" in content
+    assert '"sample_sha256": sample_identity["sample_sha256"]' in content
+    assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "representative validation must contain exactly 10" in content
