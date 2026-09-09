@@ -2146,6 +2146,18 @@ def test_representative_chain_preflights_frozen_support_before_sample():
     assert "representative support workflow path changed" in content
     assert "representative support branch changed" in content
     assert "representative support artifact missing or expired" in content
+    assert "representative eligibility run is not successful" in content
+    assert "representative eligibility branch changed" in content
+    assert "representative eligibility artifacts missing" in content
+    assert "representative V1/V3 artifact missing" in content
+    assert "representative V2/V4 artifact missing" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml/runs" in content
+    assert "representative chain cannot overlap active venue rescue" in content
+    assert "Verify lifecycle venue provenance before representative RPC" in content
+    assert "representative lifecycle venue provenance missing" in content
+    assert "representative lifecycle venue provenance mismatch" in content
+    assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
+    assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "sample:" in content
     assert "needs: preflight" in content
     assert "needs.preflight.result == 'success'" in content
