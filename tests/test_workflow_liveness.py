@@ -1152,7 +1152,18 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("steps.upload_gap.outcome == 'failure'") == 4
     assert content.count("steps.retry_upload_gap.outcome == 'failure'") == 4
     assert content.count("overwrite: true") == 12
-    assert content.count("continue-on-error: true") >= 12
+    assert content.count("continue-on-error: true") >= 17
+    assert content.count("fetch_github_actions_json(") == 7
+    assert "urllib.request.urlopen" not in content
+    assert content.count("id: download_transition") == 5
+    assert content.count("id: retry_download_transition") == 5
+    assert content.count(
+        "steps.download_transition.outcome == 'failure'"
+    ) == 10
+    assert content.count(
+        "steps.retry_download_transition.outcome == 'failure'"
+    ) == 10
+    assert content.count("rm -rf transition") == 10
     assert content.count("id: upload_plan") == 1
     assert content.count("id: retry_upload_plan") == 1
     assert content.count(
