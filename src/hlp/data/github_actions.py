@@ -330,7 +330,10 @@ def build_rescue_terminal_binding(
 
     def gap_ids(values, *, label):
         normalized = [str(value) for value in values]
-        if any(not value.isdigit() for value in normalized):
+        if any(
+            len(value) != 3 or not value.isdigit()
+            for value in normalized
+        ):
             raise ValueError(
                 f"rescue terminal binding {label} contains invalid gap ID"
             )
@@ -340,6 +343,29 @@ def build_rescue_terminal_binding(
             )
         return sorted(normalized, key=int)
 
+    reusable = gap_ids(
+        reusable_gap_ids,
+        label="reusable gaps",
+    )
+    missing = gap_ids(
+        missing_success_artifacts,
+        label="missing success artifacts",
+    )
+    non_success = gap_ids(
+        non_success_gap_artifacts,
+        label="non-success gap artifacts",
+    )
+    overlap = (
+        (set(reusable) & set(missing))
+        | (set(reusable) & set(non_success))
+        | (set(missing) & set(non_success))
+    )
+    if overlap:
+        raise ValueError(
+            "rescue terminal binding gap classifications overlap: "
+            f"{sorted(overlap, key=int)}"
+        )
+
     binding = {
         "run_id": observed_run_id,
         "status": status,
@@ -347,18 +373,9 @@ def build_rescue_terminal_binding(
         "head_sha": head_sha,
         "display_title": display_title,
         "run_attempt": run_attempt,
-        "reusable_gap_ids": gap_ids(
-            reusable_gap_ids,
-            label="reusable gaps",
-        ),
-        "missing_success_artifacts": gap_ids(
-            missing_success_artifacts,
-            label="missing success artifacts",
-        ),
-        "non_success_gap_artifacts": gap_ids(
-            non_success_gap_artifacts,
-            label="non-success gap artifacts",
-        ),
+        "reusable_gap_ids": reusable,
+        "missing_success_artifacts": missing,
+        "non_success_gap_artifacts": non_success,
         "plan_artifact_present": bool(plan_artifact_present),
         "canonical_artifact_present": bool(canonical_artifact_present),
     }
