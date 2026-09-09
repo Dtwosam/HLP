@@ -845,6 +845,13 @@ jobs:
               ),
           )
           summary = summarize_representative_validation(rows)
+          if (
+              explorer_run_text
+              and int(summary.get("explorer_verified_tokens", 0)) != 10
+          ):
+              raise SystemExit(
+                  "representative explorer evidence must verify all 10 tokens"
+              )
           summary.update({
               "coverage_sources": coverage["sources"],
               "continuous_sharded_sources": (
