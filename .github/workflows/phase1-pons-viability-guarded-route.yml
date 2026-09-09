@@ -123,7 +123,7 @@ jobs:
           if run.get("head_branch") != "phase1/data-acquisition-spike":
               raise SystemExit("evidence handoff branch changed")
 
-          names = set()
+          live_artifacts = []
           page = 1
           while True:
               payload = get(
@@ -131,10 +131,10 @@ jobs:
                   f"?per_page=100&page={page}"
               )
               artifacts = list(payload.get("artifacts") or [])
-              names.update(
-                  str(a.get("name"))
-                  for a in artifacts
-                  if not a.get("expired")
+              live_artifacts.extend(
+                  artifact
+                  for artifact in artifacts
+                  if not artifact.get("expired")
               )
               if len(artifacts) < 100:
                   break
@@ -142,6 +142,10 @@ jobs:
               if page > 10:
                   raise SystemExit("evidence artifact pagination exceeded 1000")
 
+          names = {
+              str(artifact.get("name") or "")
+              for artifact in live_artifacts
+          }
           required = {
               "phase1-pons-post-eligibility-evidence-ready",
               "phase1-pons-eligible-universe",
@@ -153,9 +157,65 @@ jobs:
                   f"evidence handoff is missing required artifacts: {missing}"
               )
 
+          handoff_rows = [
+              artifact
+              for artifact in live_artifacts
+              if str(artifact.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get(
+                              "head_sha"
+                          )
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get(
+                              "head_branch"
+                          )
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "evidence-ready retry artifacts are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "evidence-ready artifact ID is invalid"
+              )
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"source_eligibility_run_id={source_run_id}\n")
               output.write(f"evidence_run_id={evidence_run_id}\n")
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
           print(json.dumps({
               "generation": generation,
               "evidence_run_id": evidence_run_id,
@@ -167,7 +227,7 @@ jobs:
           PY
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-post-eligibility-evidence-ready
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
           path: handoff
           run-id: ${{ steps.check.outputs.evidence_run_id }}
           github-token: ${{ github.token }}
