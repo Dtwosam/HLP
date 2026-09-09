@@ -320,6 +320,63 @@ def test_phase1_acceptance_accepts_complete_supplementary_explorer():
     assert report["representative_explorer_verified_transactions"] == 30
 
 
+def test_phase1_acceptance_accepts_required_supplementary_explorer():
+    fixtures = list(_fixtures())
+    fixtures[2].update(
+        {
+            "explorer_evidence_required": True,
+            "explorer_crosscheck_run_id": 123456,
+            "explorer_verified_tokens": 10,
+            "explorer_verified_launch_transactions": 10,
+            "explorer_verified_dex_swap_transactions": 20,
+            "explorer_verified_transactions": 30,
+        }
+    )
+
+    report = build_phase1_acceptance_report(*fixtures)
+
+    assert report["representative_explorer_evidence_required"] is True
+    assert report["representative_explorer_crosscheck_run_id"] == 123456
+    assert report["representative_explorer_evidence_status"] == "verified"
+
+
+def test_phase1_acceptance_rejects_required_explorer_without_evidence():
+    fixtures = list(_fixtures())
+    fixtures[2].update(
+        {
+            "explorer_evidence_required": True,
+            "explorer_crosscheck_run_id": 123456,
+        }
+    )
+
+    with pytest.raises(ValueError, match="required supplementary explorer evidence is missing"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_required_explorer_without_run_id():
+    fixtures = list(_fixtures())
+    fixtures[2].update(
+        {
+            "explorer_evidence_required": True,
+            "explorer_verified_tokens": 10,
+            "explorer_verified_launch_transactions": 10,
+            "explorer_verified_dex_swap_transactions": 20,
+            "explorer_verified_transactions": 30,
+        }
+    )
+
+    with pytest.raises(ValueError, match="required supplementary explorer evidence has no run ID"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_explorer_run_without_evidence():
+    fixtures = list(_fixtures())
+    fixtures[2]["explorer_crosscheck_run_id"] = 123456
+
+    with pytest.raises(ValueError, match="run ID is present without evidence"):
+        build_phase1_acceptance_report(*fixtures)
+
+
 def test_phase1_acceptance_rejects_partial_supplementary_explorer():
     fixtures = list(_fixtures())
     fixtures[2].update(
