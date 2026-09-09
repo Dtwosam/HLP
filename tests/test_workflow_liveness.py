@@ -1116,7 +1116,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert 'manifest.get("path") == path.name' in content
     assert 'with path.open("rb") as handle:' in content
     assert "local_digest = hashlib.sha256()" in content
-    assert content.count("import hashlib") == 3
+    assert content.count("import hashlib") == 4
     merge_block = content.split(
         "- name: Merge recovered V1 V3 event tape",
         1,
@@ -1176,6 +1176,18 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert '"planning_source_bytes_downloaded": 0' in content
     assert "Discover reusable prior V1/V3 gap coverage" in content
     assert "source-metadata/v1-v3-prior-gap-coverage.json" in content
+    assert "expected_prior_reusable_gap_count" in content
+    assert "EXPECTED_PRIOR_REUSABLE_GAP_COUNT" in content
+    assert "expected_prior_terminal_snapshot_sha256" in content
+    assert "EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256" in content
+    assert "V1/V3 launcher prior binding inputs must be supplied " in content
+    assert "V1/V3 expected prior terminal snapshot SHA-256 " in content
+    assert "V1/V3 launcher prior binding requires prior gap run" in content
+    assert "V1/V3 launcher/planner reusable prior-gap " in content
+    assert "terminal_binding = {" in content
+    assert "observed_snapshot_sha256 = hashlib.sha256(" in content
+    assert "V1/V3 launcher/child prior terminal " in content
+    assert '"phase1-pons-v1-v3-full"' in content
     assert "observed_groups = {}" in content
     assert "collapsed_retry_artifacts = 0" in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
@@ -2487,6 +2499,14 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
         "${{ needs.preflight.outputs.prior_reusable_gap_count }}"
         in content
     )
+    assert content.count(
+        "expected_prior_reusable_gap_count: "
+        "${{ needs.preflight.outputs.prior_reusable_gap_count }}"
+    ) == 2
+    assert content.count(
+        "expected_prior_terminal_snapshot_sha256: "
+        "${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}"
+    ) == 2
     assert 'prior_gap_run_id: ""' not in content
     assert "steps.guard.outputs.prior_gap_run_id" in content
     assert "steps.guard.outputs.prior_reusable_gap_count" in content
