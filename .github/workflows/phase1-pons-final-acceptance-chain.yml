@@ -96,7 +96,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Verify evidence and nine route provenance before acceptance work
+      - id: provenance
+        name: Verify evidence and nine route provenance before acceptance work
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
@@ -211,8 +212,13 @@ jobs:
                   base64.b64decode(payload.get("content") or "")
               )
 
-          def artifact_names(run_id):
-              names = set()
+          artifact_rows_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
+              output = []
               page = 1
               while True:
                   payload = get(
@@ -220,10 +226,8 @@ jobs:
                       f"?per_page=100&page={page}"
                   )
                   rows = list(payload.get("artifacts") or [])
-                  names.update(
-                      str(row.get("name"))
-                      for row in rows
-                      if not row.get("expired")
+                  output.extend(
+                      row for row in rows if not row.get("expired")
                   )
                   if len(rows) < 100:
                       break
@@ -233,7 +237,14 @@ jobs:
                           "final acceptance artifact pagination exceeded "
                           f"1000: run={run_id}"
                       )
-              return names
+              artifact_rows_cache[run_id] = output
+              return output
+
+          def artifact_names(run_id):
+              return {
+                  str(row.get("name") or "")
+                  for row in artifact_rows(run_id)
+              }
 
           def require_ancestor(label, sha):
               if len(sha) != 40:
@@ -284,13 +295,68 @@ jobs:
               "phase1-pons-eligible-universe",
               "phase1-pons-representative-validation",
           }
+          evidence_artifacts = artifact_rows(evidence_run_id)
           missing_evidence = sorted(
-              required_evidence - artifact_names(evidence_run_id)
+              required_evidence
+              - {
+                  str(row.get("name") or "")
+                  for row in evidence_artifacts
+              }
           )
           if missing_evidence:
               raise SystemExit(
                   "final acceptance evidence artifacts missing: "
                   f"{missing_evidence}"
+              )
+
+          handoff_rows = [
+              row
+              for row in evidence_artifacts
+              if str(row.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "final acceptance evidence-ready retry artifacts "
+                      "are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "final acceptance evidence-ready artifact ID is invalid"
               )
 
           for route, run_id in route_run_ids.items():
@@ -381,8 +447,13 @@ jobs:
                       f"{route}"
                   )
 
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
           print(json.dumps({
               "evidence_run_id": evidence_run_id,
+              "evidence_artifact_id": evidence_artifact_id,
               "route_run_ids": route_run_ids,
               "source_eligibility_run_id": 33_982_556_591,
               "status": "ready_for_acceptance_work",
@@ -390,7 +461,7 @@ jobs:
           PY
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-post-eligibility-evidence-ready
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
           path: evidence-handoff
           run-id: ${{ inputs.eligibility_run_id }}
           github-token: ${{ github.token }}
