@@ -3782,6 +3782,11 @@ def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
     assert "pricing_run_id" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "phase1-pons-recovered-completion-chain.yml" in content
+    assert "import urllib.error" in content
+    assert "transient_http_codes = {" in content
+    assert "for attempt in range(3):" in content
+    assert "recovered completion metadata retry loop exhausted" in content
+    assert "time.sleep(" not in content
 
 
 def test_viability_accepts_only_approved_evidence_workflow_paths():
