@@ -26,6 +26,11 @@ on:
         required: false
         default: ""
         type: string
+      explorer_access_reverified:
+        description: "Run supplementary Blockscout cross-check only after GitHub-runner access is explicitly reverified"
+        required: false
+        default: false
+        type: boolean
       runner_smoke_run_id:
         description: "Frozen five-runner research-smoke evidence"
         required: true
@@ -81,6 +86,10 @@ on:
         required: false
         default: ""
         type: string
+      explorer_access_reverified:
+        required: false
+        default: false
+        type: boolean
       runner_smoke_run_id:
         required: false
         default: "33920762592"
@@ -606,13 +615,25 @@ jobs:
       transition_run_id: ${{ inputs.transition_run_id }}
     secrets: inherit
 
+  explorer_crosscheck:
+    needs: priced_paths
+    if: ${{ inputs.explorer_access_reverified == true && needs.priced_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-explorer-crosscheck.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      access_reverified: true
+    secrets: inherit
+
   validate:
     needs:
       - market_paths
       - priced_paths
       - dex_crosscheck
+      - explorer_crosscheck
       - transfers
-    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && needs.transfers.result == 'success' }}
+    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && needs.transfers.result == 'success' && ((inputs.explorer_access_reverified == true && needs.explorer_crosscheck.result == 'success') || (inputs.explorer_access_reverified != true && needs.explorer_crosscheck.result == 'skipped')) }}
     uses: ./.github/workflows/phase1-pons-representative-validation.yml
     with:
       sample_run_id: ${{ format('{0}', github.run_id) }}
@@ -624,6 +645,7 @@ jobs:
       market_path_run_id: ${{ format('{0}', github.run_id) }}
       priced_path_run_id: ${{ format('{0}', github.run_id) }}
       dex_crosscheck_run_id: ${{ format('{0}', github.run_id) }}
+      explorer_crosscheck_run_id: ${{ inputs.explorer_access_reverified == true && format('{0}', github.run_id) || '' }}
       registry_run_id: ${{ inputs.registry_run_id }}
       v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
       transition_run_id: ${{ inputs.transition_run_id }}
