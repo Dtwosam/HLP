@@ -428,14 +428,24 @@ def test_venue_terminal_snapshot_binding_schema_matches_launcher():
         launcher,
         "prior_terminal_binding = {",
     ) == expected
+
     for recovery in recoveries:
-        assert binding_keys(
-            recovery,
-            "terminal_binding = {",
-        ) == expected
-        assert "observed_snapshot_sha256 = hashlib.sha256(" in recovery
-        assert "sort_keys=True" in recovery
-        assert 'separators=(",", ":")' in recovery
+        assert "build_rescue_terminal_binding" in recovery
+        assert "rescue_terminal_binding_sha256" in recovery
+        assert "terminal_binding = build_rescue_terminal_binding(" in recovery
+        for key in expected:
+            assert f"{key}=" in recovery
+        assert (
+            "observed_snapshot_sha256 = (\n"
+            "                      rescue_terminal_binding_sha256("
+            in recovery
+        )
+        coverage = recovery.split(
+            "Discover reusable prior ",
+            1,
+        )[1].split("- id: plan", 1)[0]
+        assert "hashlib.sha256(" not in coverage
+        assert 'separators=(",", ":")' not in coverage
 
     assert "prior_terminal_snapshot_sha256 = hashlib.sha256(" in launcher
     assert "sort_keys=True" in launcher
