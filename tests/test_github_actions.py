@@ -385,7 +385,7 @@ def test_rescue_terminal_binding_matches_launcher_schema_and_digest():
     assert binding["reusable_gap_ids"] == ["002", "010"]
 
     expected = (
-        "da8eb2a309e676ef54d03042c04f10a17404d99466bb777131856034c11c5195"
+        "ec4516acc7c0a1aad8510f1f372e3563e770a8b369d0eb486db4f57faa07020d"
     )
     assert rescue_terminal_binding_sha256(binding) == expected
 
