@@ -45,6 +45,7 @@ def fetch_github_actions_job_log(
     token: str,
     *,
     timeout: float = 60,
+    attempts: int = 3,
 ) -> str:
     """Download one Actions job log without leaking auth across redirects."""
     parsed_api = urllib.parse.urlparse(api_url)
@@ -57,69 +58,95 @@ def fetch_github_actions_job_log(
         raise ValueError("GitHub token is required for Actions job logs")
     if timeout <= 0:
         raise ValueError("Actions job log timeout must be positive")
+    attempt_count = int(attempts)
+    if attempt_count <= 0:
+        raise ValueError("Actions job log attempts must be positive")
 
-    request = urllib.request.Request(
-        api_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "hlp-phase1-accounting",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
     opener = urllib.request.build_opener(_NoRedirect())
-    redirect_url = None
-    try:
-        with opener.open(request, timeout=timeout) as response:
-            payload = response.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code not in _REDIRECT_CODES:
-            body = exc.read().decode(errors="replace")
+    for attempt in range(attempt_count):
+        request = urllib.request.Request(
+            api_url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "hlp-phase1-accounting",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        redirect_url = None
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                payload = response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in _REDIRECT_CODES:
+                redirect_url = exc.headers.get("Location")
+                if not redirect_url:
+                    raise RuntimeError(
+                        "GitHub Actions log redirect is missing Location"
+                    ) from exc
+            elif (
+                exc.code in _TRANSIENT_ARTIFACT_HTTP_CODES
+                and attempt + 1 < attempt_count
+            ):
+                continue
+            else:
+                body = exc.read().decode(errors="replace")
+                raise RuntimeError(
+                    f"GitHub Actions log request failed: HTTP {exc.code}: "
+                    f"{body[:500]}"
+                ) from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt + 1 < attempt_count:
+                continue
             raise RuntimeError(
-                f"GitHub Actions log request failed: HTTP {exc.code}: "
-                f"{body[:500]}"
+                f"GitHub Actions log request failed: {exc}"
             ) from exc
-        redirect_url = exc.headers.get("Location")
-        if not redirect_url:
+        else:
+            return payload.decode(errors="replace")
+
+        parsed_redirect = urllib.parse.urlparse(redirect_url)
+        if (
+            parsed_redirect.scheme != "https"
+            or not parsed_redirect.netloc
+            or parsed_redirect.username is not None
+            or parsed_redirect.password is not None
+        ):
+            raise RuntimeError("GitHub Actions log redirect is not safe HTTPS")
+
+        blob_request = urllib.request.Request(
+            redirect_url,
+            headers={"User-Agent": "hlp-phase1-accounting"},
+        )
+        try:
+            with urllib.request.urlopen(
+                blob_request,
+                timeout=timeout,
+            ) as response:
+                payload = response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in {404, 410}:
+                raise GitHubActionsJobLogUnavailable(
+                    "GitHub Actions redirected log blob is unavailable: "
+                    f"HTTP {exc.code}"
+                ) from exc
+            if (
+                exc.code in _TRANSIENT_ARTIFACT_HTTP_CODES
+                and attempt + 1 < attempt_count
+            ):
+                continue
             raise RuntimeError(
-                "GitHub Actions log redirect is missing Location"
+                "GitHub Actions redirected log download failed: "
+                f"HTTP {exc.code}: {exc.reason}"
             ) from exc
-    else:
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt + 1 < attempt_count:
+                continue
+            raise RuntimeError(
+                f"GitHub Actions redirected log download failed: {exc}"
+            ) from exc
         return payload.decode(errors="replace")
 
-    parsed_redirect = urllib.parse.urlparse(redirect_url)
-    if (
-        parsed_redirect.scheme != "https"
-        or not parsed_redirect.netloc
-        or parsed_redirect.username is not None
-        or parsed_redirect.password is not None
-    ):
-        raise RuntimeError("GitHub Actions log redirect is not safe HTTPS")
-
-    blob_request = urllib.request.Request(
-        redirect_url,
-        headers={"User-Agent": "hlp-phase1-accounting"},
-    )
-    try:
-        with urllib.request.urlopen(
-            blob_request,
-            timeout=timeout,
-        ) as response:
-            payload = response.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code in {404, 410}:
-            raise GitHubActionsJobLogUnavailable(
-                "GitHub Actions redirected log blob is unavailable: "
-                f"HTTP {exc.code}"
-            ) from exc
-        raise RuntimeError(
-            f"GitHub Actions redirected log download failed: {exc}"
-        ) from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError(
-            f"GitHub Actions redirected log download failed: {exc}"
-        ) from exc
-    return payload.decode(errors="replace")
+    raise RuntimeError("GitHub Actions job log download retry loop exhausted")
 
 
 
