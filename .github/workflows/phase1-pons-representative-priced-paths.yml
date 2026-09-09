@@ -549,8 +549,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_output
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-priced-paths
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_output
+        name: Retry representative priced paths artifact upload
+        if: ${{ steps.upload_output.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative priced paths artifact upload retry
+        if: ${{ steps.retry_upload_output.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
