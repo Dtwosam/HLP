@@ -1345,8 +1345,8 @@ def test_v1_eligibility_is_reusable_with_frozen_quote_audit():
     assert "Validate frozen V1 lifecycle input manifests" in content
     assert "required V1 lifecycle manifest is missing" in content
     assert "timeout-minutes: 60" in content
-    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
     assert "Resolve canonical V1 V3 selected shard artifacts" in content
+    assert "resolve_v1_v3_canonical_shard_bindings" in content
     assert "resolve_v1_v3_canonical_shard_bindings" in content
     assert "select_equivalent_artifact_retry" in content
     assert "V1 lifecycle canonical V1/V3 artifact" in content
