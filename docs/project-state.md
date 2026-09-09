@@ -1530,9 +1530,17 @@ can span up to four 240-job waves, so prior-run planning and final merge no
 longer use wildcard artifact downloads either: they paginate exact numeric
 `phase1-pons-representative-transfer-<id>` artifacts through the API, and
 merge independently paginates the current caller run as well. Those ZIP reads
-also use the token-stripping safe downloader. Readiness metadata parsing also
-fails closed on malformed numeric evidence, route-launch or finalizer
-provenance instead of crashing the audit.
+also use the token-stripping safe downloader. Transfer acquisition is now
+artifact-finalization resilient too: the plan, each of the four 240-job shard
+waves and the final holder bundle retry uploads up to three total attempts
+without repeating completed RPC/replay work, while sample/plan downloads clear
+partial directories and retry before failing. A failed earlier acquisition wave
+no longer prevents later planned waves from materializing, so unrelated
+successful ranges remain reusable by the next recovery generation; final merge
+still requires every wave to be success or skipped and therefore remains
+fail-closed on incomplete coverage. Readiness metadata parsing also fails closed
+on malformed numeric evidence, route-launch or finalizer provenance instead of
+crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
 evidence preflight in addition to the guarded route launcher. The post-
