@@ -498,10 +498,15 @@ research threshold or starting another archive crawl:
   and refuses completion unless `explorer_verified_tokens == 10`. The normal
   and recovered evidence chains both pass this switch through, so explicitly
   supplied explorer evidence is binding all the way into the Phase 1 PASS
-  evidence path. Final acceptance independently reads
-  `explorer_evidence_required` and `explorer_crosscheck_run_id`; when the
-  flag is true it requires a positive explorer run ID plus complete supplied
-  counts before PASS, and rejects a declared explorer run with no evidence.
+  evidence path. The evidence-ready handoff now also compares the explorer
+  requirement and run ID between the representative summary and manifest,
+  rejects mismatches or impossible optional/required states, and carries the
+  normalized pair forward. Final acceptance independently validates those
+  handoff fields before any acceptance work, then reads
+  `explorer_evidence_required` and `explorer_crosscheck_run_id` again from
+  the representative summary during PASS evaluation; when the flag is true it
+  requires a positive explorer run ID plus complete supplied counts before
+  PASS, and rejects a declared explorer run with no evidence.
   Complete 10-token coverage and exact agreement with the GeckoTerminal
   checkpoint set are therefore mandatory whenever explorer evidence is
   enabled;
