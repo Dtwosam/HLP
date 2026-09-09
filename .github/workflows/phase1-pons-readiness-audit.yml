@@ -79,6 +79,9 @@ jobs:
               fetch_github_actions_artifact_zip,
               select_equivalent_artifact_retry,
           )
+          from hlp.data.pons_v1_v3_artifacts import (
+              resolve_v1_v3_canonical_shard_bindings,
+          )
           from hlp.data.pons_v2_v4_artifacts import (
               resolve_v2_v4_canonical_shard_bindings,
           )
@@ -203,15 +206,27 @@ jobs:
               ):
                   return None
 
-          def v2_v4_selected_shards_resolvable(run_id, manifest):
+          def selected_recovery_shards_resolvable(
+              venue,
+              run_id,
+              manifest,
+          ):
+              resolver = (
+                  resolve_v1_v3_canonical_shard_bindings
+                  if venue == "v1_v3"
+                  else resolve_v2_v4_canonical_shard_bindings
+              )
               try:
-                  bindings = resolve_v2_v4_canonical_shard_bindings(
+                  bindings = resolver(
                       manifest,
                       current_run_id=run_id,
                   )
               except (TypeError, ValueError):
                   return False
 
+              venue_label = (
+                  "V1/V3" if venue == "v1_v3" else "V2/V4"
+              )
               for binding in bindings:
                   matches = [
                       row
@@ -223,7 +238,7 @@ jobs:
                       select_equivalent_artifact_retry(
                           matches,
                           label=(
-                              "readiness selected V2/V4 shard "
+                              f"readiness selected {venue_label} shard "
                               f"run={binding['run_id']} "
                               f"artifact={binding['artifact_name']}"
                           ),
@@ -297,12 +312,11 @@ jobs:
                   return False
               if not envelope_valid:
                   return False
-              if venue == "v2_v4":
-                  return v2_v4_selected_shards_resolvable(
-                      run_id,
-                      manifest,
-                  )
-              return True
+              return selected_recovery_shards_resolvable(
+                  venue,
+                  run_id,
+                  manifest,
+              )
 
           def recovery_lineage_valid(venue, run_id):
               if venue == "v1_v3":
