@@ -3333,6 +3333,18 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "evidence handoff runner-smoke universe SHA changed" in content
     assert "evidence handoff runner-smoke outcomes SHA changed" in content
     assert '"evidence_hashes": evidence_hashes' in content
+    assert content.count("fetch_github_actions_json(") == 2
+    assert content.count("PYTHONPATH: src") == 2
+    assert "urllib.request.urlopen" not in content
+    assert content.count("id: download_handoff") == 1
+    assert content.count("id: retry_download_handoff") == 1
+    assert content.count(
+        "steps.download_handoff.outcome == 'failure'"
+    ) == 2
+    assert content.count(
+        "steps.retry_download_handoff.outcome == 'failure'"
+    ) == 2
+    assert content.count("rm -rf handoff") == 2
     assert "evidence lifecycle/pricing workflow path is not allowed" in content
     assert "evidence lifecycle/pricing run is missing fallback" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
@@ -3439,6 +3451,9 @@ def test_viability_ledger_finalizer_validates_nine_distinct_runs():
     assert "artifact_names(run_id)" in content
     assert 'run.get("name") != expected[route]' not in content
     assert "phase1-pons-final-acceptance-chain.yml" in content
+    assert "fetch_github_actions_json(" in content
+    assert "PYTHONPATH: src" in content
+    assert "urllib.request.urlopen" not in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
 
