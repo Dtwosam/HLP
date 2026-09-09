@@ -390,6 +390,133 @@ jobs:
           PY
       - uses: actions/download-artifact@v4
         with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate full evidence handoff identity before acceptance
+        env:
+          EVIDENCE_RUN_ID: ${{ inputs.eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(
+              Path(
+                  "evidence-handoff/"
+                  "phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          if report.get("status") != "ready":
+              raise SystemExit(
+                  "final acceptance evidence handoff is not ready"
+              )
+          if int(report.get("evidence_run_id", -1)) != evidence_run_id:
+              raise SystemExit(
+                  "final acceptance evidence handoff run mismatch"
+              )
+          if int(
+              report.get("source_eligibility_run_id", -1)
+          ) != 33_982_556_591:
+              raise SystemExit(
+                  "final acceptance evidence handoff source changed"
+              )
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit(
+                  "final acceptance evidence handoff snapshot changed"
+              )
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit(
+                  "final acceptance evidence handoff launch count changed"
+              )
+          if int(report.get("eligible_tokens", 0)) <= 0:
+              raise SystemExit(
+                  "final acceptance evidence eligible universe is empty"
+              )
+          if int(report.get("representative_tokens", -1)) != 10:
+              raise SystemExit(
+                  "final acceptance representative count changed"
+              )
+          for field in (
+              "lifecycle_run_id",
+              "v1_v3_run_id",
+              "v2_v4_run_id",
+          ):
+              if int(report.get(field, 0)) <= 0:
+                  raise SystemExit(
+                      "final acceptance evidence routing is invalid: "
+                      f"{field}"
+                  )
+          if not isinstance(report.get("recovery_mode"), bool):
+              raise SystemExit(
+                  "final acceptance evidence recovery mode changed"
+              )
+
+          hashes = {}
+          for field in (
+              "eligible_universe_sha256",
+              "representative_validation_sha256",
+              "representative_sample_sha256",
+              "representative_token_set_sha256",
+              "representative_source_coverage_sha256",
+              "v1_eligibility_sha256",
+              "v2_eligibility_sha256",
+              "runner_smoke_universe_sha256",
+              "runner_smoke_outcomes_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value) != 64:
+                  raise SystemExit(
+                      "final acceptance evidence hash is invalid: "
+                      f"{field}"
+                  )
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "final acceptance evidence hash is invalid: "
+                      f"{field}"
+                  ) from exc
+              hashes[field] = value
+
+          if int(report.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "final acceptance runner-smoke run changed"
+              )
+          if hashes["runner_smoke_universe_sha256"] != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "final acceptance runner-smoke universe SHA changed"
+              )
+          if hashes["runner_smoke_outcomes_sha256"] != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "final acceptance runner-smoke outcomes SHA changed"
+              )
+
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "representative_sample_sha256": hashes[
+                  "representative_sample_sha256"
+              ],
+              "representative_token_set_sha256": hashes[
+                  "representative_token_set_sha256"
+              ],
+              "representative_source_coverage_sha256": hashes[
+                  "representative_source_coverage_sha256"
+              ],
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
           name: phase1-pons-viability-measurement-pons_registry-primary
           path: route-artifacts/pons_registry/primary
           run-id: ${{ inputs.pons_registry_run_id }}
