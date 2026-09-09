@@ -1548,9 +1548,12 @@ can span up to four 240-job waves, so prior-run planning and final merge no
 longer use wildcard artifact downloads either: they paginate exact numeric
 `phase1-pons-representative-transfer-<id>` artifacts through the API, and
 merge independently paginates the current caller run as well. Those ZIP reads
-also use the token-stripping safe downloader. Transfer acquisition is now
-artifact-finalization resilient too: the plan, each of the four 240-job shard
-waves and the final holder bundle retry uploads up to three total attempts
+also use the token-stripping safe downloader. The planner and final merge now
+also retry their paginated GitHub artifact-inventory API reads up to three times
+for transient 403/408/409/425/429/5xx or URL/timeout failures, with no
+runner-side sleep/poll loop. Transfer acquisition is now artifact-finalization
+resilient too: the plan, each of the four 240-job shard waves and the final
+holder bundle retry uploads up to three total attempts
 without repeating completed RPC/replay work, while sample/plan downloads clear
 partial directories and retry before failing. A failed earlier acquisition wave
 no longer prevents later planned waves from materializing, so unrelated
