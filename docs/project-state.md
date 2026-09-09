@@ -1345,9 +1345,11 @@ also retry route/shard artifact reads three times, clearing partial `routes/`
 or `downloads/` directories between attempts so artifact-service failures do
 not masquerade as missing chain coverage or trigger unnecessary archive
 rescans. During this audit a stray empty `actions/upload-artifact@v4` step was
-found immediately before the real V3 quote-route upload; it has been removed
-and CI now pins both the absence of that malformed duplicate step and the retry
-contracts across all six downstream pricing workflows.
+found immediately before the real V3 quote-route upload; it has been removed.
+CI now pins the retry contracts across all six downstream pricing workflows and
+also structurally checks every critical `upload-artifact` step for its own
+`with:` and `path:` configuration, so an adjacent valid upload cannot mask a
+future malformed empty step.
 
 The two 60-minute lifecycle replay workflows are now protected by the same
 artifact-service discipline. V1 retries registry, quote-audit, anchor and stock
