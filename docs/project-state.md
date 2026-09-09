@@ -1157,7 +1157,7 @@ a one-sided field change cannot silently weaken the launch contract.
 
 The actual V2/V4 generation-3 launch is intentionally reduced to a one-line
 wrapper mutation. The current launcher marker is
-`LAUNCH_VALIDATION_GENERATION: '9'`; generation 3 requires marker **10**
+`LAUNCH_VALIDATION_GENERATION: '10'`; generation 3 is now the active consumed generation
 because V2/V4 enforces `validation_generation = rescue_generation + 7`.
 The launch commit message must be exactly the single line
 `launch V2 V4 rescue generation 3`. Preflight reopens the launch commit through
@@ -1197,6 +1197,28 @@ terminal-but-unconsumed generations.
 
 This reduces the chance that a single platform/network blip consumes the
 generation-3 marker commit before child handoff.
+
+Observed generation-2 terminal state is now **312** reusable successful V2/V4
+gap artifacts out of the deterministic **553**-gap plan, with gap **053** failed
+and the contiguous prior-plan gaps **240–479** never materialized. GitHub also
+exposed three live artifacts with the exact name
+`phase1-pons-v2-v4-gap-060`, all carrying the same GitHub artifact SHA-256,
+size and workflow binding. The first generation-3 launch
+(`34330433107`, SHA `29168d893bd0510626eda8f0efd90e4593bf8bff`)
+therefore failed in its artifact-only child plan before any repair RPC because
+the child still rejected duplicate artifact names. That plan failure did not
+consume generation 3. Recovery now collapses same-name upload-retry artifacts
+only when their GitHub SHA-256 digest, byte size and workflow run binding are
+identical; non-equivalent duplicates still fail closed, and final merge still
+validates the selected ZIP's embedded manifest/range/content digest. After the
+marker was reset and the same generation relaunched, run **34331335575** at
+launch SHA `c568f9dc2c3bdda18c2f1b6415affe4c6eaec904` passed preflight and
+plan. Its plan reuses exactly **312** prior gaps and retries exactly **241**
+missing ranges totaling **12,050,000** blocks in waves **240 / 1 / 0 / 0**.
+The first retry range is **29,491,846–29,541,845** (the former gap 053), followed
+by the previously unmaterialized **38,841,846–50,841,845** middle coverage.
+Because the child plan succeeded, generation 3 is now consumed and its repair
+jobs are live.
 
 The launcher workflow is now serialized by branch with
 `cancel-in-progress: false`, so two rescue launchers cannot execute preflight
