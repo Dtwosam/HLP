@@ -7,6 +7,7 @@ from hlp.data.github_actions import (
     GitHubActionsJobLogUnavailable,
     fetch_github_actions_artifact_zip,
     fetch_github_actions_job_log,
+    select_equivalent_artifact_retry,
 )
 
 
@@ -285,3 +286,66 @@ def test_actions_artifact_attempts_must_be_positive():
             attempts=0,
         )
 
+
+
+
+def _artifact_row(
+    artifact_id,
+    *,
+    digest="sha256:" + "a" * 64,
+    size=123,
+    run_id=77,
+    head_sha="b" * 40,
+    head_branch="phase1/data-acquisition-spike",
+):
+    return {
+        "id": artifact_id,
+        "name": "phase1-gap-060",
+        "digest": digest,
+        "size_in_bytes": size,
+        "workflow_run": {
+            "id": run_id,
+            "head_sha": head_sha,
+            "head_branch": head_branch,
+        },
+    }
+
+
+def test_select_equivalent_artifact_retry_uses_highest_id():
+    selected = select_equivalent_artifact_retry(
+        [_artifact_row(10), _artifact_row(12), _artifact_row(11)],
+        label="gap 060",
+    )
+    assert selected["id"] == 12
+
+
+def test_select_equivalent_artifact_retry_rejects_digest_drift():
+    rows = [
+        _artifact_row(10),
+        _artifact_row(11, digest="sha256:" + "c" * 64),
+    ]
+    with pytest.raises(
+        ValueError,
+        match="duplicate artifact digests disagree",
+    ):
+        select_equivalent_artifact_retry(rows, label="gap 060")
+
+
+def test_select_equivalent_artifact_retry_rejects_workflow_drift():
+    rows = [
+        _artifact_row(10),
+        _artifact_row(11, run_id=78),
+    ]
+    with pytest.raises(
+        ValueError,
+        match="workflow bindings disagree",
+    ):
+        select_equivalent_artifact_retry(rows, label="gap 060")
+
+
+def test_select_equivalent_artifact_retry_allows_single_legacy_row():
+    row = {"id": 10, "name": "phase1-gap-060"}
+    assert select_equivalent_artifact_retry(
+        [row],
+        label="gap 060",
+    ) == row
