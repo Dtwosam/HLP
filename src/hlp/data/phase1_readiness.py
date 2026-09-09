@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from hlp.data.phase1_evidence import (
+    RUNNER_SMOKE_OUTCOMES_SHA256,
+    RUNNER_SMOKE_RUN_ID,
+    RUNNER_SMOKE_UNIVERSE_SHA256,
+)
+
 SOURCE_ELIGIBILITY_RUN_ID = 33_982_556_591
 SOURCE_ELIGIBILITY_WORKFLOW_PATH = (
     ".github/workflows/phase1-pons-full-eligibility-acquisition-one-shot.yml"
@@ -289,11 +295,17 @@ def _evidence_handoff_errors(
     if representative_tokens != 10:
         errors.append("evidence handoff representative token count changed")
 
+    handoff_hashes: dict[str, str] = {}
     for field in (
         "eligible_universe_sha256",
         "representative_validation_sha256",
+        "representative_sample_sha256",
+        "representative_token_set_sha256",
+        "representative_source_coverage_sha256",
         "v1_eligibility_sha256",
         "v2_eligibility_sha256",
+        "runner_smoke_universe_sha256",
+        "runner_smoke_outcomes_sha256",
     ):
         value = str(handoff.get(field) or "").lower()
         if len(value) != 64:
@@ -303,6 +315,24 @@ def _evidence_handoff_errors(
             int(value, 16)
         except ValueError:
             errors.append(f"evidence handoff hash is invalid: {field}")
+            continue
+        handoff_hashes[field] = value
+
+    if _safe_int(
+        handoff.get("runner_smoke_run_id"),
+        default=-1,
+    ) != RUNNER_SMOKE_RUN_ID:
+        errors.append("evidence handoff runner-smoke run changed")
+    if (
+        handoff_hashes.get("runner_smoke_universe_sha256")
+        != RUNNER_SMOKE_UNIVERSE_SHA256
+    ):
+        errors.append("evidence handoff runner-smoke universe SHA changed")
+    if (
+        handoff_hashes.get("runner_smoke_outcomes_sha256")
+        != RUNNER_SMOKE_OUTCOMES_SHA256
+    ):
+        errors.append("evidence handoff runner-smoke outcomes SHA changed")
 
     lifecycle_run_id = _safe_int(handoff.get("lifecycle_run_id"))
     v1_v3_run_id = _safe_int(handoff.get("v1_v3_run_id"))
