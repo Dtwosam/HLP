@@ -1346,12 +1346,20 @@ generation **0**. A future launch must be the exact one-line commit
 config, advance its generation by exactly one, name successful canonical
 eligibility plus V1/V3 and V2/V4 runs with all required artifacts still
 present, and observe zero active exact-title venue-rescue generations before
-the representative chain can start. This prevents the Transfer backfill from
-competing with a live venue rescue while allowing a clean post-recovery
-end-to-end retry path. Resumed representative Transfer shards are now bound to
-the exact frozen sample as well: the sample freeze publishes the SHA256 of the exact ten-token JSONL plus
-a canonical SHA256 of the sorted token-address set, and every downstream
-representative stage revalidates those identities. Transfer planning/reuse,
+the representative chain can start. The launcher also opens the eligible
+universe before any representative RPC and proves its exact **494,639** launch
+geometry, zero unknown tokens, universe SHA, lifecycle run identity, and
+embedded V1/V3 plus V2/V4 provenance against the configured venue runs. This
+prevents the Transfer backfill from competing with a live venue rescue or
+starting from a mixed/stale eligibility bundle while allowing a clean
+post-recovery end-to-end retry path. Resumed representative Transfer shards are
+now bound to the exact frozen sample as well: the sample freeze publishes the
+SHA256 of the exact ten-token JSONL plus a canonical SHA256 of the sorted
+token-address set, and records the validated V1/V3 and V2/V4 venue run lineage
+from its lifecycle manifests. Market-path extraction checks that venue lineage
+before building paths, and final representative validation rechecks it at the
+join. Every downstream representative stage also revalidates the sample
+identity digests. Transfer planning/reuse,
 artifact-only market-path extraction, causal priced-path replay, the independent
 DEX cross-check and final representative validation all carry the same two
 digests in their provenance and fail closed on any mismatch. Every Transfer
