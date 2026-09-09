@@ -435,11 +435,8 @@ def test_venue_terminal_snapshot_binding_schema_matches_launcher():
         assert "terminal_binding = build_rescue_terminal_binding(" in recovery
         for key in expected:
             assert f"{key}=" in recovery
-        assert (
-            "observed_snapshot_sha256 = (\n"
-            "                      rescue_terminal_binding_sha256("
-            in recovery
-        )
+        assert "observed_snapshot_sha256 = (" in recovery
+        assert "rescue_terminal_binding_sha256(" in recovery
         coverage = recovery.split(
             "Discover reusable prior ",
             1,
@@ -815,8 +812,9 @@ def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256" in content
     assert "V2/V4 expected prior terminal snapshot SHA-256 " in content
     assert "V2/V4 generation 3 requires launcher-pinned " in content
-    assert "terminal_binding = {" in content
-    assert "observed_snapshot_sha256 = hashlib.sha256(" in content
+    assert "terminal_binding = build_rescue_terminal_binding(" in content
+    assert "rescue_terminal_binding_sha256(" in content
+    assert "observed_snapshot_sha256 = hashlib.sha256(" not in content
     assert "V2/V4 launcher/child prior terminal " in content
     assert '"terminal_snapshot_sha256": (' in content
     assert "V2/V4 launcher/planner reusable prior-gap " in content
@@ -1194,8 +1192,9 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "V1/V3 expected prior terminal snapshot SHA-256 " in content
     assert "V1/V3 launcher prior binding requires prior gap run" in content
     assert "V1/V3 launcher/planner reusable prior-gap " in content
-    assert "terminal_binding = {" in content
-    assert "observed_snapshot_sha256 = hashlib.sha256(" in content
+    assert "terminal_binding = build_rescue_terminal_binding(" in content
+    assert "rescue_terminal_binding_sha256(" in content
+    assert "observed_snapshot_sha256 = hashlib.sha256(" not in content
     assert "V1/V3 launcher/child prior terminal " in content
     assert '"phase1-pons-v1-v3-full"' in content
     assert "observed_groups = {}" in content
