@@ -1596,14 +1596,18 @@ all six frozen input artifacts before any external pool/price reconciliation,
 clearing partial directories between attempts so transient GitHub reads cannot
 waste the bounded independent check. This closes the remaining single-attempt
 finalization points before the already retry-hardened representative validation
-join. Readiness metadata parsing also fails closed on
-malformed numeric evidence, route-launch or finalizer provenance instead of
-crashing the audit.
+join. The representative chain's frozen-support metadata preflight now uses
+the shared bounded-retry GitHub Actions JSON reader rather than an inline
+runner loop, preserving the global fail-fast/no-polling workflow contract while
+still tolerating transient API failures. Readiness metadata parsing also fails
+closed on malformed numeric evidence, route-launch or finalizer provenance
+instead of crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
 evidence preflight in addition to the guarded route launcher. That preflight
-retries transient evidence-run metadata reads without sleeps, and the exact
-evidence handoff plus every route-specific frozen registry/transition/quote
+uses the same shared bounded-retry GitHub Actions JSON reader, with no
+runner-side polling or sleeps, and the exact evidence handoff plus every
+route-specific frozen registry/transition/quote
 input receive three download attempts with partial-directory cleanup before any
 RPC can start. Each bounded route measurement then retries its primary artifact
 upload up to three total attempts without repeating the completed RPC scan; the
