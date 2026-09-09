@@ -316,19 +316,97 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_eligible
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
           path: eligible
           run-id: ${{ inputs.eligible_universe_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial eligible universe download before retry
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_eligible
+        name: Retry eligible universe artifact download
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial eligible universe download before final retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final eligible universe artifact download retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_representative
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
           path: representative
           run-id: ${{ inputs.representative_validation_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative validation download before retry
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - id: retry_download_representative
+        name: Retry representative validation artifact download
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative validation download before final retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - name: Final representative validation artifact download retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_viability
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability projection download before retry
+        if: ${{ steps.download_viability.outcome == 'failure' }}
+        run: rm -rf viability
+      - id: retry_download_viability
+        name: Retry viability projection artifact download
+        if: ${{ steps.download_viability.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability projection download before final retry
+        if: ${{ steps.retry_download_viability.outcome == 'failure' }}
+        run: rm -rf viability
+      - name: Final viability projection artifact download retry
+        if: ${{ steps.retry_download_viability.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
           path: viability
