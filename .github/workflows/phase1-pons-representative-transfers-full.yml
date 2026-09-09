@@ -183,11 +183,13 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
-          import hashlib
           import json
           import os
           from pathlib import Path
 
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
           from hlp.data.ranges import plan_missing_subranges
 
           sample = [
@@ -202,20 +204,21 @@ jobs:
                   f"representative transfer sample must contain 10 tokens, "
                   f"got {len(sample)}"
               )
-          tokens = {row["token"].lower() for row in sample}
-          if len(tokens) != 10:
-              raise SystemExit(
-                  "representative transfer sample contains duplicate tokens"
-              )
           sample_path = Path(
               "sample/pons-representative-sample.jsonl"
           )
-          sample_sha256 = hashlib.sha256(
-              sample_path.read_bytes()
-          ).hexdigest()
-          token_set_sha256 = hashlib.sha256(
-              ("\n".join(sorted(tokens)) + "\n").encode()
-          ).hexdigest()
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
+          )
+          tokens = set(identity["tokens"])
+          sample_sha256 = identity["sample_sha256"]
+          token_set_sha256 = identity["token_set_sha256"]
 
           start = min(int(row["launch_block"]) for row in sample)
           head = int(os.environ["SNAPSHOT_HEAD"])
