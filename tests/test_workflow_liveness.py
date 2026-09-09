@@ -52,6 +52,7 @@ ARTIFACT_WORKFLOWS = tuple(
             "phase1-pons-representative-dex-crosscheck.yml",
             "phase1-pons-representative-validation.yml",
             "phase1-pons-acquisition-viability-projection.yml",
+            "phase1-pons-v4-quote-continuation.yml",
             "phase1-pons-final-acceptance-chain.yml",
             "phase1-pons-acceptance-gate.yml",
             "phase1-pons-pass-closeout-one-shot.yml",
@@ -150,6 +151,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-skhy-v4-known-pool-segmented.yml",
         "phase1-pons-v3-quote-fallback-full.yml",
         "phase1-pons-v4-quote-fallback-full.yml",
+        "phase1-pons-v4-quote-continuation.yml",
         "phase1-pons-v3-quote-fallback-recover-gaps.yml",
         "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     )
@@ -2447,6 +2449,12 @@ def test_v4_quote_continuation_is_reusable_without_push_trigger():
     assert "\n  push:" not in trigger_block
     assert "known_pool_only" in content
     assert "EXTRA+=(--known-pool-only)" in content
+    assert content.count("id: download_prior") == 1
+    assert content.count("id: retry_download_prior") == 1
+    assert content.count("rm -rf prior") == 2
+    assert content.count("id: upload_continuation") == 1
+    assert content.count("id: retry_upload_continuation") == 1
+    assert content.count("overwrite: true") == 2
 
 def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transfers():
     content = _workflow("phase1-pons-representative-evidence-chain.yml")
