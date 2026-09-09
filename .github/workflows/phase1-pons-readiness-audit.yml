@@ -80,7 +80,7 @@ jobs:
               select_equivalent_artifact_retry,
           )
           from hlp.data.pons_v2_v4_artifacts import (
-              resolve_v2_v4_shard_artifact,
+              resolve_v2_v4_canonical_shard_bindings,
           )
           from hlp.data.ranges import validate_gap_plan_jobs
           from hlp.data.phase1_readiness import (
@@ -204,73 +204,15 @@ jobs:
                   return None
 
           def v2_v4_selected_shards_resolvable(run_id, manifest):
-              provenance = manifest.get("provenance") or {}
-              if not isinstance(provenance, dict):
-                  return False
-              if provenance.get("storage_mode") != "sharded_artifacts":
-                  return False
-
-              partial_value = provenance.get("partial_run_id")
               try:
-                  partial_run_id = (
-                      int(partial_value)
-                      if partial_value not in {None, "", 0}
-                      else None
+                  bindings = resolve_v2_v4_canonical_shard_bindings(
+                      manifest,
+                      current_run_id=run_id,
                   )
               except (TypeError, ValueError):
                   return False
 
-              shards = provenance.get("shards")
-              if not isinstance(shards, list) or not shards:
-                  return False
-
-              previous_hi = None
-              selected_records = 0
-              seen_bindings = set()
-              for shard in shards:
-                  if not isinstance(shard, dict):
-                      return False
-                  try:
-                      binding = resolve_v2_v4_shard_artifact(
-                          shard,
-                          current_run_id=run_id,
-                          partial_run_id=partial_run_id,
-                      )
-                  except (TypeError, ValueError):
-                      return False
-
-                  digest = str(binding.get("sha256") or "")
-                  records = int(binding.get("records", -1))
-                  lo = int(binding.get("from_block", -1))
-                  hi = int(binding.get("to_block", -1))
-                  if (
-                      len(digest) != 64
-                      or any(
-                          char not in "0123456789abcdef"
-                          for char in digest
-                      )
-                      or records < 0
-                      or lo <= 0
-                      or hi < lo
-                  ):
-                      return False
-                  if previous_hi is None:
-                      if lo != 26_841_846:
-                          return False
-                  elif lo != previous_hi + 1:
-                      return False
-                  previous_hi = hi
-                  selected_records += records
-
-                  key = (
-                      int(binding["run_id"]),
-                      str(binding["artifact_name"]),
-                      str(binding["file"]),
-                  )
-                  if key in seen_bindings:
-                      return False
-                  seen_bindings.add(key)
-
+              for binding in bindings:
                   matches = [
                       row
                       for row in artifact_rows(binding["run_id"])
@@ -288,17 +230,7 @@ jobs:
                       )
                   except ValueError:
                       return False
-
-              try:
-                  aggregate_records = int(
-                      manifest.get("records", -1)
-                  )
-              except (TypeError, ValueError):
-                  return False
-              return bool(
-                  previous_hi == 54_486_035
-                  and selected_records == aggregate_records
-              )
+              return True
 
           def recovery_manifest_valid(venue, run_id):
               if venue == "v1_v3":
