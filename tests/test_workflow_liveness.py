@@ -4082,6 +4082,8 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
         "format('{0}', github.run_id)"
     ) in content
     assert "phase1-pons-representative-evidence-chain.yml" in content
+    assert "explorer_access_reverified" in content
+    assert "default: false" in content
     assert "v1_v3_run_id: ${{ inputs.v1_v3_run_id }}" in content
     assert (
         "inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || "
