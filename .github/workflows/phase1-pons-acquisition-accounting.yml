@@ -209,9 +209,29 @@ jobs:
                   "unsuccessful, or missing-log evidence"
               )
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_accounting
         if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-acquisition-accounting
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_accounting
+        name: Retry acquisition accounting artifact upload
+        if: ${{ always() && steps.upload_accounting.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acquisition-accounting
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final acquisition accounting artifact upload retry
+        if: ${{ always() && steps.retry_upload_accounting.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acquisition-accounting
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
