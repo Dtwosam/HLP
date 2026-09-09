@@ -50,6 +50,7 @@ ARTIFACT_WORKFLOWS = tuple(
             "phase1-pons-representative-market-paths.yml",
             "phase1-pons-representative-priced-paths.yml",
             "phase1-pons-representative-dex-crosscheck.yml",
+            "phase1-pons-representative-explorer-crosscheck.yml",
             "phase1-pons-representative-validation.yml",
             "phase1-pons-acquisition-viability-projection.yml",
             "phase1-pons-v4-quote-continuation.yml",
@@ -134,6 +135,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-post-eligibility-evidence-chain.yml",
         "phase1-pons-representative-evidence-chain.yml",
         "phase1-pons-representative-evidence-one-shot.yml",
+        "phase1-pons-representative-explorer-crosscheck.yml",
         "phase1-pons-representative-transfers-full.yml",
         "phase1-pons-acquisition-accounting.yml",
         "phase1-pons-acquisition-viability-projection.yml",
@@ -2825,6 +2827,23 @@ def test_representative_explorer_crosscheck_is_manual_public_and_bounded():
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
+    assert 'default: false' in content
+    assert "inputs.access_reverified == true" in content
+    for source in ("sample", "market_paths", "priced_paths"):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+    assert content.count("rm -rf sample") == 2
+    assert content.count("rm -rf market-paths") == 2
+    assert content.count("rm -rf priced-paths") == 2
+    assert content.count("id: upload_explorer") == 1
+    assert content.count("id: retry_upload_explorer") == 1
+    assert content.count("overwrite: true") == 2
     assert "time.sleep(" not in content
 
 
