@@ -147,6 +147,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
           from hlp.data.ranges import validate_gap_plan_jobs
 
@@ -325,12 +326,20 @@ jobs:
                   for row in artifact_rows(run_id)
                   if str(row.get("name")) == artifact_name
               ]
-              if len(matches) != 1:
-                  raise SystemExit(
-                      "recovery venue artifact identity is ambiguous: "
-                      f"{artifact_name} run={run_id}"
+              try:
+                  artifact_row = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "recovery venue artifact "
+                          f"{artifact_name} run={run_id}"
+                      ),
                   )
-              artifact_id = int(matches[0]["id"])
+              except ValueError as exc:
+                  raise SystemExit(
+                      "recovery venue retry artifacts are not equivalent: "
+                      f"{artifact_name} run={run_id}: {exc}"
+                  ) from exc
+              artifact_id = int(artifact_row["id"])
               payload = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/{artifact_id}/zip",
