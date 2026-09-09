@@ -2121,6 +2121,10 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative validation runner smoke run mismatch" in content
     assert "representative validation runner smoke universe SHA mismatch" in content
     assert "representative validation runner smoke outcomes SHA mismatch" in content
+    assert "representative validation sample V1/V3 lineage mismatch" in content
+    assert "representative validation sample V2/V4 lineage mismatch" in content
+    assert 'sample_summary.get("validated_v1_v3_run_id", -1)' in content
+    assert 'sample_summary.get("validated_v2_v4_run_id", -1)' in content
     assert "require_representative_sample_identity" in content
     assert "sample identity " in content
     assert "mismatch: {field}" in content
