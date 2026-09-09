@@ -1730,6 +1730,10 @@ def test_representative_sample_freeze_is_reusable_and_pinned():
     assert "pons-representative-sample-identity.json" in content
     assert '"sample_sha256": identity["sample_sha256"]' in content
     assert '"token_set_sha256": identity["token_set_sha256"]' in content
+    assert '"validated_v1_v3_run_id": v1_v3_run_id' in content
+    assert '"validated_v2_v4_run_id": v2_v4_run_id' in content
+    assert "representative sample lifecycle venue provenance missing" in content
+    assert "representative sample lifecycle venue run " in content
     assert 'versions != {"v1": 4, "v2": 1}' in content
     assert "--runners 5 --failures 5" in content
     assert "representative sample must freeze exactly five runners" in content
@@ -2017,6 +2021,10 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert "require_representative_sample_identity" in content
     assert '"sample_sha256": sample_identity["sample_sha256"]' in content
     assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
+    assert "representative market-path sample V1/V3 lineage mismatch" in content
+    assert "representative market-path sample V2/V4 lineage mismatch" in content
+    assert 'sample_summary.get("validated_v1_v3_run_id", -1)' in content
+    assert 'sample_summary.get("validated_v2_v4_run_id", -1)' in content
     assert "no provider requests" in content
     assert 'default: "33911022718"' in content
     assert 'default: "33936232604"' in content
