@@ -230,6 +230,10 @@ jobs:
           from collections import Counter
           from pathlib import Path
 
+          from hlp.data.pons_representative_identity import (
+              representative_sample_identity,
+          )
+
           rows = [
               json.loads(line)
               for line in Path(
@@ -271,9 +275,20 @@ jobs:
               raise SystemExit(
                   "representative sample must contain both Pons generations"
               )
+          sample_path = Path(
+              "artifacts/pons-representative-sample.jsonl"
+          )
+          identity = representative_sample_identity(sample_path)
+          Path(
+              "artifacts/pons-representative-sample-identity.json"
+          ).write_text(
+              json.dumps(identity, indent=2, sort_keys=True) + "\n"
+          )
           report = {
               "snapshot_head_block": 54_486_035,
               "tokens": len(rows),
+              "sample_sha256": identity["sample_sha256"],
+              "token_set_sha256": identity["token_set_sha256"],
               "groups": dict(sorted(groups.items())),
               "versions": dict(sorted(versions.items())),
               "runner_tokens": sorted(sample_runner_tokens),
