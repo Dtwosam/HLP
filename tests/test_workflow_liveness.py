@@ -466,6 +466,12 @@ def test_representative_transfer_recovery_preserves_successful_work():
         "steps.retry_upload_full.outcome == 'failure'"
     ) == 1
     assert content.count("overwrite: true") == 12
+    assert content.count("TRANSIENT_METADATA_HTTP_CODES = {") == 2
+    assert content.count("for retry_index in range(3):") == 2
+    assert content.count(
+        "representative transfer metadata retry loop exhausted"
+    ) == 2
+    assert content.count("import urllib.error") == 2
 
     for prior in ("acquire_1", "acquire_2", "acquire_3"):
         assert content.count(
