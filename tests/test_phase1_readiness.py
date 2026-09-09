@@ -1,5 +1,10 @@
 import pytest
 
+from hlp.data.phase1_evidence import (
+    RUNNER_SMOKE_OUTCOMES_SHA256,
+    RUNNER_SMOKE_RUN_ID,
+    RUNNER_SMOKE_UNIVERSE_SHA256,
+)
 from hlp.data.phase1_readiness import (
     EVIDENCE_REQUIRED_ARTIFACTS,
     FINAL_ACCEPTANCE_ARTIFACT,
@@ -130,8 +135,14 @@ def _handoff(run_id, *, recovered=False):
         "representative_tokens": 10,
         "eligible_universe_sha256": "a" * 64,
         "representative_validation_sha256": "b" * 64,
+        "representative_sample_sha256": "e" * 64,
+        "representative_token_set_sha256": "f" * 64,
+        "representative_source_coverage_sha256": "1" * 64,
         "v1_eligibility_sha256": "c" * 64,
         "v2_eligibility_sha256": "d" * 64,
+        "runner_smoke_run_id": RUNNER_SMOKE_RUN_ID,
+        "runner_smoke_universe_sha256": RUNNER_SMOKE_UNIVERSE_SHA256,
+        "runner_smoke_outcomes_sha256": RUNNER_SMOKE_OUTCOMES_SHA256,
     }
 
 
@@ -605,6 +616,54 @@ def test_readiness_rejects_malformed_evidence_handoff_fingerprint():
         "evidence handoff hash is invalid: "
         "representative_validation_sha256"
     ]
+
+
+def test_readiness_rejects_missing_representative_sample_identity():
+    handoff = _handoff(400)
+    handoff.pop("representative_sample_sha256")
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
+    assert report["evidence_handoff_errors"] == [
+        "evidence handoff hash is invalid: representative_sample_sha256"
+    ]
+
+
+def test_readiness_rejects_runner_smoke_run_drift():
+    handoff = _handoff(400)
+    handoff["runner_smoke_run_id"] = RUNNER_SMOKE_RUN_ID + 1
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
+    assert "evidence handoff runner-smoke run changed" in (
+        report["evidence_handoff_errors"]
+    )
+
+
+def test_readiness_rejects_runner_smoke_digest_drift():
+    handoff = _handoff(400)
+    handoff["runner_smoke_outcomes_sha256"] = "0" * 64
+
+    report = _report(
+        evidence_run=_evidence(),
+        evidence_run_id=400,
+        evidence_handoff=handoff,
+    )
+
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
+    assert "evidence handoff runner-smoke outcomes SHA changed" in (
+        report["evidence_handoff_errors"]
+    )
 
 
 def test_readiness_rejects_normal_handoff_marked_recovered():
