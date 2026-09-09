@@ -224,3 +224,68 @@ def fetch_github_actions_artifact_zip(
             ) from exc
 
     raise RuntimeError("GitHub Actions artifact download retry loop exhausted")
+
+
+
+def select_equivalent_artifact_retry(
+    rows,
+    *,
+    label: str,
+):
+    """Collapse duplicate retry artifacts only when GitHub proves equivalence."""
+    candidates = [dict(row) for row in rows]
+    if not candidates:
+        raise ValueError(f"{label} has no artifact candidates")
+    if len(candidates) == 1:
+        return candidates[0]
+
+    names = {str(row.get("name") or "") for row in candidates}
+    if len(names) != 1 or "" in names:
+        raise ValueError(f"{label} duplicate artifact names disagree")
+
+    digests = {str(row.get("digest") or "").lower() for row in candidates}
+    if len(digests) != 1:
+        raise ValueError(f"{label} duplicate artifact digests disagree")
+    digest = next(iter(digests))
+    if not digest.startswith("sha256:") or len(digest) != 71:
+        raise ValueError(f"{label} duplicate artifact digest is invalid")
+    try:
+        int(digest.removeprefix("sha256:"), 16)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label} duplicate artifact digest is invalid"
+        ) from exc
+
+    sizes = {int(row.get("size_in_bytes", -1)) for row in candidates}
+    if len(sizes) != 1 or next(iter(sizes)) < 0:
+        raise ValueError(f"{label} duplicate artifact sizes disagree")
+
+    workflow_bindings = set()
+    for row in candidates:
+        workflow_run = row.get("workflow_run")
+        if not isinstance(workflow_run, dict):
+            raise ValueError(
+                f"{label} duplicate artifact workflow binding is missing"
+            )
+        workflow_bindings.add((
+            int(workflow_run.get("id", 0)),
+            str(workflow_run.get("head_sha") or ""),
+            str(workflow_run.get("head_branch") or ""),
+        ))
+    if len(workflow_bindings) != 1:
+        raise ValueError(
+            f"{label} duplicate artifact workflow bindings disagree"
+        )
+
+    ids = []
+    for row in candidates:
+        artifact_id = int(row.get("id", 0))
+        if artifact_id <= 0:
+            raise ValueError(
+                f"{label} duplicate artifact ID is invalid"
+            )
+        ids.append(artifact_id)
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"{label} duplicate artifact IDs repeat")
+
+    return max(candidates, key=lambda row: int(row["id"]))
