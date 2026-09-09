@@ -1,6 +1,7 @@
 import pytest
 
 from hlp.data.pons_v2_v4_artifacts import (
+    resolve_v2_v4_canonical_shard_bindings,
     resolve_v2_v4_shard_artifact,
 )
 
@@ -84,4 +85,140 @@ def test_gap_rejects_unknown_source_label():
             _row("v4-events-gap-007.jsonl", source="partial"),
             current_run_id=123,
             partial_run_id=456,
+        )
+
+
+
+def test_canonical_v2_v4_bindings_validate_recursive_geometry():
+    manifest = {
+        "records": 15,
+        "provenance": {
+            "storage_mode": "sharded_artifacts",
+            "partial_run_id": 456,
+            "shards": [
+                {
+                    **_row(
+                        "v4-events-shard-007.jsonl",
+                        source="partial",
+                    ),
+                    "from_block": 100,
+                    "to_block": 199,
+                },
+                {
+                    **_row(
+                        "v4-events-gap-000.jsonl",
+                        source="34234471190",
+                    ),
+                    "from_block": 200,
+                    "to_block": 299,
+                },
+                {
+                    **_row(
+                        "v4-events-gap-001.jsonl",
+                        source="gaps",
+                    ),
+                    "from_block": 300,
+                    "to_block": 399,
+                },
+            ],
+        },
+    }
+
+    bindings = resolve_v2_v4_canonical_shard_bindings(
+        manifest,
+        current_run_id=123,
+        expected_start=100,
+        expected_end=399,
+    )
+
+    assert [row["run_id"] for row in bindings] == [
+        456,
+        34_234_471_190,
+        123,
+    ]
+    assert [row["artifact_name"] for row in bindings] == [
+        "phase1-pons-v2-v4-7",
+        "phase1-pons-v2-v4-gap-000",
+        "phase1-pons-v2-v4-gap-001",
+    ]
+
+
+def test_canonical_v2_v4_bindings_reject_discontinuous_coverage():
+    manifest = {
+        "records": 10,
+        "provenance": {
+            "storage_mode": "sharded_artifacts",
+            "shards": [
+                {
+                    **_row("v4-events-gap-000.jsonl", source="gaps"),
+                    "from_block": 100,
+                    "to_block": 199,
+                },
+                {
+                    **_row("v4-events-gap-001.jsonl", source="gaps"),
+                    "from_block": 201,
+                    "to_block": 300,
+                },
+            ],
+        },
+    }
+    with pytest.raises(ValueError, match="coverage is discontinuous"):
+        resolve_v2_v4_canonical_shard_bindings(
+            manifest,
+            current_run_id=123,
+            expected_start=100,
+            expected_end=300,
+        )
+
+
+def test_canonical_v2_v4_bindings_reject_record_drift():
+    manifest = {
+        "records": 11,
+        "provenance": {
+            "storage_mode": "sharded_artifacts",
+            "shards": [
+                {
+                    **_row("v4-events-gap-000.jsonl", source="gaps"),
+                    "from_block": 100,
+                    "to_block": 199,
+                },
+                {
+                    **_row("v4-events-gap-001.jsonl", source="gaps"),
+                    "from_block": 200,
+                    "to_block": 299,
+                },
+            ],
+        },
+    }
+    with pytest.raises(ValueError, match="do not match aggregate"):
+        resolve_v2_v4_canonical_shard_bindings(
+            manifest,
+            current_run_id=123,
+            expected_start=100,
+            expected_end=299,
+        )
+
+
+def test_canonical_v2_v4_bindings_reject_duplicate_binding():
+    shard = {
+        **_row("v4-events-gap-000.jsonl", source="gaps"),
+        "from_block": 100,
+        "to_block": 199,
+    }
+    manifest = {
+        "records": 10,
+        "provenance": {
+            "storage_mode": "sharded_artifacts",
+            "shards": [shard, dict(shard)],
+        },
+    }
+    with pytest.raises(
+        ValueError,
+        match="coverage is discontinuous|binding is duplicated",
+    ):
+        resolve_v2_v4_canonical_shard_bindings(
+            manifest,
+            current_run_id=123,
+            expected_start=100,
+            expected_end=199,
         )
