@@ -501,6 +501,18 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "viability measurement source eligibility run changed" in content
     assert "viability measurement evidence run ID cannot be negative" in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
+    assert content.count("id: upload_primary") == 1
+    assert content.count("id: retry_upload_primary") == 1
+    assert content.count("steps.upload_primary.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_primary.outcome == 'failure'"
+    ) == 1
+    assert content.count("id: upload_secondary") == 1
+    assert content.count("id: retry_upload_secondary") == 1
+    assert content.count("steps.upload_secondary.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_secondary.outcome == 'failure'"
+    ) == 1
     assert "timeout-minutes: 30" in content
 
 def test_full_quote_audit_has_short_fail_fast_bound():
