@@ -1643,8 +1643,9 @@ lifecycle inputs plus the frozen runner-smoke artifact before fixing the exact
 ten-token cohort. Artifact-only market-path extraction now retries all twelve
 sample/registry/venue and current/partial/prior shard inputs; priced-path replay
 retries all six sample/market/quote/anchor/oracle/fallback inputs; final
-representative validation retries all seven sample/lifecycle/transfer/path/DEX
-inputs before joining evidence. The DEX cross-check also retries
+representative validation retries all seven required sample/lifecycle/transfer/path/DEX
+inputs before joining evidence, plus the optional explorer artifact when that
+path is explicitly enabled. The DEX cross-check also retries
 all six frozen input artifacts before any external pool/price reconciliation,
 clearing partial directories between attempts so transient GitHub reads cannot
 waste the bounded independent check. This closes the remaining single-attempt
