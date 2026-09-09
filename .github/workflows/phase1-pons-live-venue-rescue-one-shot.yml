@@ -1021,6 +1021,8 @@ jobs:
       source_registry_run_id: "33911022718"
       partial_run_id: "33982556591"
       prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
+      expected_prior_reusable_gap_count: ${{ needs.preflight.outputs.prior_reusable_gap_count }}
+      expected_prior_terminal_snapshot_sha256: ${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}
       max_gap_blocks: "50000"
     secrets: inherit
 
