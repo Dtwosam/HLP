@@ -534,6 +534,23 @@ jobs:
                   f"expected={expected_generation}"
               )
 
+          expected_prior_consumed_run_id = ""
+          if rescue_v2 and requested_generation >= 4:
+              prior_generation = requested_generation - 1
+              prior_consumed_runs = sorted(set(
+                  consumed_generation_runs.get(prior_generation, [])
+              ))
+              if len(prior_consumed_runs) != 1:
+                  raise SystemExit(
+                      "V2/V4 next cleanup generation requires exactly "
+                      "one consumed immediate prior generation: "
+                      f"generation={prior_generation} "
+                      f"runs={prior_consumed_runs}"
+                  )
+              expected_prior_consumed_run_id = str(
+                  prior_consumed_runs[0]
+              )
+
           prior_gap_run_id = ""
           selected_prior_row = None
           selected_prior_reusable_gap_ids = []
@@ -580,8 +597,22 @@ jobs:
               )
               has_plan = prior_plan_artifact in candidate_artifacts
               has_gap = bool(reusable_gap_ids)
-              if not prior_gap_run_id and has_plan and has_gap:
-                  prior_gap_run_id = str(candidate["id"])
+              candidate_id = str(candidate["id"])
+              is_expected_consumed_prior = (
+                  not expected_prior_consumed_run_id
+                  or candidate_id == expected_prior_consumed_run_id
+              )
+              can_select_plan_only = bool(
+                  expected_prior_consumed_run_id
+                  and candidate_id == expected_prior_consumed_run_id
+              )
+              if (
+                  not prior_gap_run_id
+                  and is_expected_consumed_prior
+                  and has_plan
+                  and (has_gap or can_select_plan_only)
+              ):
+                  prior_gap_run_id = candidate_id
                   selected_prior_row = dict(candidate)
                   selected_prior_reusable_gap_ids = list(
                       reusable_gap_ids
@@ -601,6 +632,16 @@ jobs:
                           non_success_gap_artifacts[:20]
                       ),
                   }
+
+          if expected_prior_consumed_run_id and (
+              prior_gap_run_id != expected_prior_consumed_run_id
+          ):
+              raise SystemExit(
+                  "V2/V4 next cleanup generation did not select "
+                  "the immediate consumed prior run: "
+                  f"selected={prior_gap_run_id or None} "
+                  f"expected={expected_prior_consumed_run_id}"
+              )
 
           if prior_gap_run_id:
               fresh_prior = get(
