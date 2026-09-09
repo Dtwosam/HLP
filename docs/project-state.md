@@ -1399,12 +1399,14 @@ measurements serialized.
 The reusable final-acceptance chain now repeats the ledger finalizer's core
 provenance checks before any accounting or acceptance work: eligibility and
 representative artifacts must come from the same approved evidence handoff,
-all nine route runs must be distinct, successful, on their exact guarded
-workflow paths and Phase 1 branch, expose their required measurement artifacts,
-and prove at launch that they were bound to source **33982556591**, the same
-evidence run and an empty own ledger slot. It now also downloads and opens all
-nine primary measurement artifacts plus the Pons-registry V2 secondary
-artifact. Every `phase1-route-measurement.json` must name the expected route,
+and that handoff is downloaded and revalidated for the exact representative
+sample SHA, token-set SHA, source-coverage SHA, lifecycle/venue routing and
+frozen runner-smoke identity before acceptance can proceed. All nine route runs
+must be distinct, successful, on their exact guarded workflow paths and Phase 1
+branch, expose their required measurement artifacts, and prove at launch that
+they were bound to source **33982556591**, the same evidence run and an empty
+own ledger slot. It also downloads and opens all nine primary measurement
+artifacts plus the Pons-registry V2 secondary artifact. Every `phase1-route-measurement.json` must name the expected route,
 exact **54,436,036–54,486,035** 50k-block measurement window, current evidence
 run, frozen source parent, measurement run ID, launch SHA/sequence identity and
 snapshot head; registry primary/secondary must additionally identify V1/V2
