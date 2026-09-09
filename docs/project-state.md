@@ -501,8 +501,10 @@ research threshold or starting another archive crawl:
   evidence path. The evidence-ready handoff now also compares the explorer
   requirement and run ID between the representative summary and manifest,
   rejects mismatches or impossible optional/required states, and carries the
-  normalized pair forward. Final acceptance independently validates those
-  handoff fields before any acceptance work, then reads
+  normalized pair forward. The guarded viability route and the independent
+  readiness audit both revalidate that same boolean/run-ID pair before route
+  execution or readiness can advance. Final acceptance independently validates
+  those handoff fields before any acceptance work, then reads
   `explorer_evidence_required` and `explorer_crosscheck_run_id` again from
   the representative summary during PASS evaluation; when the flag is true it
   requires a positive explorer run ID plus complete supplied counts before
