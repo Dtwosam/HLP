@@ -149,6 +149,9 @@ jobs:
               fetch_github_actions_artifact_zip,
               select_equivalent_artifact_retry,
           )
+          from hlp.data.pons_v2_v4_artifacts import (
+              resolve_v2_v4_canonical_shard_bindings,
+          )
           from hlp.data.ranges import validate_gap_plan_jobs
 
           source_id = int(os.environ["SOURCE_RUN_ID"])
@@ -253,7 +256,12 @@ jobs:
           def get(path):
               return request(path)
 
+          artifact_rows_cache = {}
+
           def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
               output = []
               page = 1
               while True:
@@ -272,6 +280,7 @@ jobs:
                       raise SystemExit(
                           f"artifact pagination exceeded 2000 for run {run_id}"
                       )
+              artifact_rows_cache[run_id] = output
               return output
 
           def artifacts(run_id):
@@ -558,6 +567,43 @@ jobs:
                       "recovery venue upstream provenance changed: "
                       f"run={run_id} field={expected_upstream_field}"
                   )
+
+              if expected_source == "manifest_gap_aware_v4_recovery":
+                  try:
+                      v2_v4_bindings = (
+                          resolve_v2_v4_canonical_shard_bindings(
+                              manifest,
+                              current_run_id=run_id,
+                          )
+                      )
+                  except (TypeError, ValueError) as exc:
+                      raise SystemExit(
+                          "recovery V2/V4 canonical shard geometry "
+                          f"is invalid: run={run_id}: {exc}"
+                      ) from exc
+                  for binding in v2_v4_bindings:
+                      matches = [
+                          row
+                          for row in artifact_rows(binding["run_id"])
+                          if str(row.get("name") or "")
+                          == binding["artifact_name"]
+                      ]
+                      try:
+                          select_equivalent_artifact_retry(
+                              matches,
+                              label=(
+                                  "recovered completion selected V2/V4 "
+                                  f"shard run={binding['run_id']} "
+                                  f"artifact={binding['artifact_name']}"
+                              ),
+                          )
+                      except ValueError as exc:
+                          raise SystemExit(
+                              "recovery V2/V4 selected shard artifact "
+                              "is unavailable or ambiguous: "
+                              f"run={binding['run_id']} "
+                              f"artifact={binding['artifact_name']}: {exc}"
+                          ) from exc
 
               prior_gap = provenance.get("prior_gap_run_id")
               try:
