@@ -1000,7 +1000,10 @@ def test_single_wave_gap_recoveries_retry_transient_artifact_uploads():
         assert (
             content.count("steps.retry_upload_gap.outcome == 'failure'") == 1
         ), name
-        assert content.count("overwrite: true") == 2, name
+        expected_overwrites = (
+            6 if "quote-fallback" in name else 2
+        )
+        assert content.count("overwrite: true") == expected_overwrites, name
 
 
 def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
