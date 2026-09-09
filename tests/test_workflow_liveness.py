@@ -1972,6 +1972,16 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "id: retry_upload_universe" in content
     assert "Retry eligible universe artifact upload" in content
     assert "Final eligible universe artifact upload retry" in content
+    for source in ("v1", "v2"):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(f"rm -rf {source}") == 2, source
 
 
 def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
