@@ -1356,9 +1356,11 @@ carry the already-verified current plan bytes directly into the final canonical
 artifact instead of performing a second name-based `download-artifact` lookup.
 
 The downstream pricing handoff is now hardened before the live V2/V4 rescue
-reaches it. Both bounded SKHY continuation primitives and their segmented final
-artifacts retry GitHub artifact finalization up to three total attempts without
-repeating the completed archive scan. Their frozen-input and accumulated-segment
+reaches it. The standalone V4 quote-continuation path now retries its frozen
+prior probe artifact and final continuation artifact up to three times as well.
+Both bounded SKHY continuation primitives and their segmented final artifacts
+retry GitHub artifact finalization up to three total attempts without repeating
+the completed archive scan. Their frozen-input and accumulated-segment
 artifact downloads now also get three attempts, deleting any partial download
 directory between tries so a transient artifact read cannot force completed
 100k-block segments to be repeated. The 128-shard V3 and V4 quote-fallback
