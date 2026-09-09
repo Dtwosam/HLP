@@ -29,12 +29,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ROUTE: ${{ inputs.route }}
+          PYTHONPATH: src
         run: |
           python - <<'PY'
           import json
           import os
-          import urllib.request
           from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
 
           config = json.loads(
               Path(".github/phase1-pons-viability-ready.json").read_text()
@@ -91,16 +93,11 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def get(path):
-              req = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  return json.load(response)
 
           run = get(f"/repos/{repo}/actions/runs/{evidence_run_id}")
           if run.get("status") != "completed" or run.get("conclusion") != "success":
@@ -225,7 +222,33 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_handoff
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff before retry
+        if: ${{ steps.download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - id: retry_download_handoff
+        name: Retry viability evidence handoff artifact download
+        if: ${{ steps.download_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff before final retry
+        if: ${{ steps.retry_download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - name: Final viability evidence handoff artifact download retry
+        if: ${{ steps.retry_download_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
           path: handoff
@@ -237,12 +260,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           EVIDENCE_RUN_ID: ${{ steps.check.outputs.evidence_run_id }}
           SOURCE_RUN_ID: ${{ steps.check.outputs.source_eligibility_run_id }}
+          PYTHONPATH: src
         run: |
           python - <<'PY'
           import json
           import os
-          import urllib.request
           from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
 
           evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
           source_run_id = int(os.environ["SOURCE_RUN_ID"])
@@ -264,16 +289,11 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           evidence = get(
               f"/repos/{repo}/actions/runs/{evidence_run_id}"
