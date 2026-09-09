@@ -56,19 +56,97 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
           run-id: ${{ inputs.sample_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_market_paths
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-market-paths
           path: market-paths
           run-id: ${{ inputs.market_path_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative market paths download before retry
+        if: ${{ steps.download_market_paths.outcome == 'failure' }}
+        run: rm -rf market-paths
+      - id: retry_download_market_paths
+        name: Retry representative market paths artifact download
+        if: ${{ steps.download_market_paths.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative market paths download before final retry
+        if: ${{ steps.retry_download_market_paths.outcome == 'failure' }}
+        run: rm -rf market-paths
+      - name: Final representative market paths artifact download retry
+        if: ${{ steps.retry_download_market_paths.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_priced_paths
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative priced paths download before retry
+        if: ${{ steps.download_priced_paths.outcome == 'failure' }}
+        run: rm -rf priced-paths
+      - id: retry_download_priced_paths
+        name: Retry representative priced paths artifact download
+        if: ${{ steps.download_priced_paths.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative priced paths download before final retry
+        if: ${{ steps.retry_download_priced_paths.outcome == 'failure' }}
+        run: rm -rf priced-paths
+      - name: Final representative priced paths artifact download retry
+        if: ${{ steps.retry_download_priced_paths.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-priced-paths
           path: priced-paths
@@ -257,8 +335,28 @@ jobs:
           )
           print(json.dumps(summary, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_explorer
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-explorer-crosscheck
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_explorer
+        name: Retry representative explorer cross-check artifact upload
+        if: ${{ steps.upload_explorer.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative explorer cross-check artifact upload retry
+        if: ${{ steps.retry_upload_explorer.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-explorer-crosscheck
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
