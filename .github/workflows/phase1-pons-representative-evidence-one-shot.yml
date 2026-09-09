@@ -1,24 +1,359 @@
 name: phase1-pons-representative-evidence-one-shot
-# validation-generation: 11
 
 on:
   push:
     branches:
       - phase1/data-acquisition-spike
     paths:
-      - .github/workflows/phase1-pons-representative-evidence-one-shot.yml
+      - .github/phase1-pons-representative-evidence.json
 
 permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: phase1-pons-representative-evidence-one-shot-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  validate:
-    if: ${{ contains(github.event.head_commit.message, 'launch representative evidence') }}
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch representative evidence generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      eligibility_run_id: ${{ steps.validate.outputs.eligibility_run_id }}
+      v1_v3_run_id: ${{ steps.validate.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ steps.validate.outputs.v2_v4_run_id }}
+      prior_transfer_run_id: ${{ steps.validate.outputs.prior_transfer_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: validate
+        name: Validate representative launch contract and inputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          config_path = ".github/phase1-pons-representative-evidence.json"
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "validation_generation",
+              "eligibility_run_id",
+              "v1_v3_run_id",
+              "v2_v4_run_id",
+              "prior_transfer_run_id",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit(
+                  "representative evidence config schema changed: "
+                  f"{sorted(config)}"
+              )
+
+          if os.environ["BRANCH"] != "phase1/data-acquisition-spike":
+              raise SystemExit("representative evidence launch branch changed")
+
+          raw_launch_message = str(os.environ["LAUNCH_MESSAGE"])
+          launch_message = raw_launch_message.splitlines()[0]
+          if raw_launch_message != launch_message:
+              raise SystemExit(
+                  "representative evidence launch message must be exactly one line"
+              )
+          launch_match = re.fullmatch(
+              r"launch representative evidence generation (\d+)",
+              launch_message,
+          )
+          if launch_match is None:
+              raise SystemExit(
+                  "representative evidence launch requires an exact generation"
+              )
+          requested_generation = int(launch_match.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("representative evidence before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("representative evidence current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          launch_commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(launch_commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "representative evidence launch must be a direct "
+                  "single-parent commit"
+              )
+          launch_files = list(launch_commit.get("files") or [])
+          if (
+              len(launch_files) != 1
+              or str(launch_files[0].get("filename") or "") != config_path
+              or str(launch_files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "representative evidence launch must modify exactly "
+                  "the guarded config file"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          previous_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if previous_payload.get("encoding") != "base64":
+              raise SystemExit(
+                  "representative evidence previous config encoding changed"
+              )
+          previous_config = json.loads(
+              base64.b64decode(previous_payload.get("content") or "")
+          )
+          if set(previous_config) != expected_keys:
+              raise SystemExit(
+                  "representative evidence previous config schema changed"
+              )
+
+          generation = int(config.get("generation", 0))
+          previous_generation = int(previous_config.get("generation", -1))
+          validation_generation = int(config.get("validation_generation", -1))
+          previous_validation_generation = int(
+              previous_config.get("validation_generation", -1)
+          )
+          eligibility_run_id = int(config.get("eligibility_run_id", 0))
+          v1_v3_run_id = int(config.get("v1_v3_run_id", 0))
+          v2_v4_run_id = int(config.get("v2_v4_run_id", 0))
+          prior_transfer_run_id = int(config.get("prior_transfer_run_id", 0))
+
+          if generation <= 0:
+              raise SystemExit("representative evidence config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "representative evidence launch/config generation mismatch"
+              )
+          if generation != previous_generation + 1:
+              raise SystemExit(
+                  "representative evidence generation must increment "
+                  "by exactly one"
+              )
+          if (
+              validation_generation != 1
+              or previous_validation_generation != 1
+          ):
+              raise SystemExit(
+                  "representative evidence validation generation changed"
+              )
+          if min(
+              eligibility_run_id,
+              v1_v3_run_id,
+              v2_v4_run_id,
+          ) <= 0:
+              raise SystemExit(
+                  "representative evidence required run IDs must be positive"
+              )
+          if prior_transfer_run_id < 0:
+              raise SystemExit(
+                  "representative evidence prior transfer run ID is invalid"
+              )
+
+          active_statuses = {
+              "queued",
+              "in_progress",
+              "waiting",
+              "requested",
+              "pending",
+          }
+          rescue_pattern = re.compile(
+              r"launch (?:V1 V3|V2 V4) rescue generation \d+"
+          )
+          page = 1
+          active_rescues = []
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/"
+                  "phase1-pons-live-venue-rescue-one-shot.yml/runs"
+                  f"?branch=phase1%2Fdata-acquisition-spike"
+                  f"&per_page=100&page={page}"
+              )
+              runs = list(payload.get("workflow_runs") or [])
+              for run in runs:
+                  title = str(run.get("display_title") or "")
+                  if (
+                      rescue_pattern.fullmatch(title) is not None
+                      and str(run.get("status") or "") in active_statuses
+                  ):
+                      active_rescues.append({
+                          "id": int(run["id"]),
+                          "status": run.get("status"),
+                          "title": title,
+                      })
+              if len(runs) < 100:
+                  break
+              page += 1
+              if page > 5:
+                  raise SystemExit(
+                      "representative evidence rescue scan exceeded 500 runs"
+                  )
+          if active_rescues:
+              raise SystemExit(
+                  "representative evidence cannot overlap active venue rescue: "
+                  f"{active_rescues}"
+              )
+
+          def artifact_names(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  artifacts = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in artifacts
+                      if not row.get("expired")
+                  )
+                  if len(artifacts) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "representative evidence artifact pagination "
+                          f"exceeded 2000: run={run_id}"
+                      )
+              return names
+
+          def require_run(
+              label,
+              run_id,
+              *,
+              allowed_paths,
+              required_artifacts,
+          ):
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"representative evidence {label} run is not successful"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"representative evidence {label} branch changed"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path not in allowed_paths:
+                  raise SystemExit(
+                      f"representative evidence {label} workflow path changed: "
+                      f"{path}"
+                  )
+              names = artifact_names(run_id)
+              missing = sorted(set(required_artifacts) - names)
+              if missing:
+                  raise SystemExit(
+                      f"representative evidence {label} artifacts missing: "
+                      f"{missing}"
+                  )
+
+          eligibility_paths = {
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          require_run(
+              "eligibility",
+              eligibility_run_id,
+              allowed_paths=eligibility_paths,
+              required_artifacts={
+                  "phase1-pons-v1-lifecycle-eligibility",
+                  "phase1-pons-v2-lifecycle-eligibility",
+                  "phase1-pons-quote-fallback-full",
+                  "phase1-pons-eligible-universe",
+              },
+          )
+
+          venue_paths = {
+              ".github/workflows/"
+              "phase1-pons-live-venue-rescue-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+          }
+          require_run(
+              "V1/V3",
+              v1_v3_run_id,
+              allowed_paths=venue_paths,
+              required_artifacts={"phase1-pons-v1-v3-full"},
+          )
+          require_run(
+              "V2/V4",
+              v2_v4_run_id,
+              allowed_paths=venue_paths,
+              required_artifacts={"phase1-pons-v2-v4-full"},
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"eligibility_run_id={eligibility_run_id}\n")
+              output.write(f"v1_v3_run_id={v1_v3_run_id}\n")
+              output.write(f"v2_v4_run_id={v2_v4_run_id}\n")
+              output.write(
+                  "prior_transfer_run_id="
+                  + (
+                      str(prior_transfer_run_id)
+                      if prior_transfer_run_id
+                      else ""
+                  )
+                  + "\n"
+              )
+          print(json.dumps({
+              "generation": generation,
+              "eligibility_run_id": eligibility_run_id,
+              "v1_v3_run_id": v1_v3_run_id,
+              "v2_v4_run_id": v2_v4_run_id,
+              "prior_transfer_run_id": prior_transfer_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  representative:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
     uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
     with:
-      eligibility_run_id: "33982556591"
+      eligibility_run_id: ${{ needs.preflight.outputs.eligibility_run_id }}
+      v1_v3_run_id: ${{ needs.preflight.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ needs.preflight.outputs.v2_v4_run_id }}
       oracle_run_id: "33974681334"
+      prior_transfer_run_id: ${{ needs.preflight.outputs.prior_transfer_run_id }}
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
       v2_curve_run_id: "33936232604"
