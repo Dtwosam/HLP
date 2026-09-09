@@ -3002,9 +3002,14 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "priced_path_run_id" in content
     assert "pons-representative-priced-path-summary.jsonl" in content
     assert "phase1-pons-representative-dex-crosscheck" in content
-    assert "phase1-pons-representative-explorer-crosscheck" not in content
-    assert "explorer_crosscheck_run_id" not in content
-    assert "pons-representative-explorer-token-summary.jsonl" not in content
+    assert "phase1-pons-representative-explorer-crosscheck" in content
+    assert "explorer_crosscheck_run_id" in content
+    assert "pons-representative-explorer-token-summary.jsonl" in content
+    assert "representative explorer evidence must verify all 10 tokens" in content
+    assert "explorer_summary_rows=explorer_summary_rows" in content
+    assert content.count("id: download_explorer") == 1
+    assert content.count("id: retry_download_explorer") == 1
+    assert content.count("rm -rf explorer") == 2
     assert "build_representative_validation_rows" in content
     assert "summarize_representative_validation" in content
     assert "validate_representative_coverage_report" in content
