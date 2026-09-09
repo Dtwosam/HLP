@@ -2801,9 +2801,12 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "def recovery_progress(venue, run_id, diagnostics):" in content
     assert '"repair_progress": active_progress' in content
     assert '"repair_progress": terminal_progress' in content
+    assert 'planned_repairs = int(plan["gap_job_count"])' in content
     assert '"planned_repairs": planned_repairs' in content
     assert '"materialized_repairs": materialized_repairs' in content
     assert '"successful_repairs": successful_repairs' in content
+    assert "materialized={repair_progress.get('materialized_repairs', 0)}/" in content
+    assert "materialized={terminal_progress.get('materialized_repairs', 0)}/" in content
     assert '"failed_repairs": failed_repairs' in content
     assert '"remaining_repairs": remaining_repairs' in content
     assert '"progress_percent": progress_percent' in content
