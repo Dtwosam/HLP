@@ -1,4 +1,5 @@
 import json
+import urllib.error
 import urllib.parse
 
 import pytest
@@ -46,6 +47,61 @@ class FakeBlockscout(BlockscoutClient):
                 "timestamp": "2026-08-01T00:00:00.000000Z",
             }
         raise AssertionError(url)
+
+
+def test_transient_http_retry_counts_every_attempt():
+    calls = []
+
+    def transport(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                503,
+                "Service Unavailable",
+                {},
+                None,
+            )
+        return json.dumps({"hash": TX, "block": 12345}).encode()
+
+    client = BlockscoutClient(
+        transport=transport,
+        attempts=3,
+        backoff_seconds=0,
+    )
+    row = client.transaction(TX)
+
+    assert row["hash"] == TX
+    assert len(calls) == 2
+    assert client.requests_made == 2
+    assert client.bytes_received > 0
+
+
+def test_permanent_http_failure_does_not_retry():
+    calls = []
+
+    def transport(request, timeout):
+        calls.append(request.full_url)
+        raise urllib.error.HTTPError(
+            request.full_url,
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+
+    client = BlockscoutClient(
+        transport=transport,
+        attempts=3,
+        backoff_seconds=0,
+    )
+
+    with pytest.raises(BlockscoutError, match="HTTP 404"):
+        client.transaction(TX)
+
+    assert len(calls) == 1
+    assert client.requests_made == 1
+    assert client.bytes_received == 0
 
 
 def test_contract_deployment_joins_creation_and_transaction():
