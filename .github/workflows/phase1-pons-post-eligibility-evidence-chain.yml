@@ -100,6 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Verify completed source parent and canonical artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -112,11 +113,13 @@ jobs:
           QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
           ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
           QUOTE_AUDIT_ARTIFACT_NAME: ${{ inputs.quote_audit_artifact_name }}
+          PYTHONPATH: src
         run: |
           python - <<'PY'
           import json
           import os
-          import urllib.request
+
+          from hlp.data.github_actions import fetch_github_actions_json
 
           api = os.environ["GITHUB_API_URL"]
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -200,16 +203,11 @@ jobs:
               )
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           def artifact_names(target_run_id):
               names = set()
@@ -374,9 +372,9 @@ jobs:
           python - <<'PY'
           import json
           import os
-          import urllib.request
 
           from hlp.data.github_actions import (
+              fetch_github_actions_json,
               select_equivalent_artifact_retry,
           )
 
@@ -386,16 +384,11 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           rows = []
           page = 1
@@ -453,13 +446,65 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_eligible
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
           path: eligible
           run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial post-eligibility eligible universe download before retry
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_eligible
+        name: Retry post-eligibility eligible universe artifact download
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial post-eligibility eligible universe download before final retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final post-eligibility eligible universe artifact download retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - id: download_representative
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial post-eligibility representative validation download before retry
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - id: retry_download_representative
+        name: Retry post-eligibility representative validation artifact download
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial post-eligibility representative validation download before final retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - name: Final post-eligibility representative validation artifact download retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
           path: representative
