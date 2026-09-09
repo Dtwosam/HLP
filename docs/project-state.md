@@ -1628,6 +1628,14 @@ primary route job and the V2 registry companion job depend on that preflight,
 while the existing global viability concurrency group keeps all route
 measurements serialized.
 
+The guarded viability route now also uses the shared bounded-retry Actions
+metadata reader for both evidence-run validation and lifecycle-routing
+resolution, and retries the exact evidence-handoff artifact three times with
+partial-directory cleanup before any route RPC. The ledger finalizer uses the
+same shared metadata reader for evidence/route runs, frozen config-at-ref reads
+and ancestry comparisons, so transient GitHub API failures cannot invalidate an
+otherwise complete nine-route ledger.
+
 The reusable final-acceptance chain now repeats the ledger finalizer's core
 provenance checks before any accounting or acceptance work: eligibility and
 representative artifacts must come from the same approved evidence handoff,
