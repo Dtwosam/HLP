@@ -388,9 +388,12 @@ def test_v2_v4_filter_comparison_is_manual_bounded_and_guarded():
     assert "time.sleep(" not in content
 
 
-def test_v2_generation3_terminal_snapshot_binding_schema_matches_launcher():
+def test_venue_terminal_snapshot_binding_schema_matches_launcher():
     launcher = _workflow("phase1-pons-live-venue-rescue-one-shot.yml")
-    recovery = _workflow("phase1-pons-v2-v4-recover-gaps.yml")
+    recoveries = (
+        _workflow("phase1-pons-v1-v3-recover-gaps.yml"),
+        _workflow("phase1-pons-v2-v4-recover-gaps.yml"),
+    )
 
     def binding_keys(content, marker):
         lines = content.splitlines()
@@ -425,16 +428,18 @@ def test_v2_generation3_terminal_snapshot_binding_schema_matches_launcher():
         launcher,
         "prior_terminal_binding = {",
     ) == expected
-    assert binding_keys(
-        recovery,
-        "terminal_binding = {",
-    ) == expected
+    for recovery in recoveries:
+        assert binding_keys(
+            recovery,
+            "terminal_binding = {",
+        ) == expected
+        assert "observed_snapshot_sha256 = hashlib.sha256(" in recovery
+        assert "sort_keys=True" in recovery
+        assert 'separators=(",", ":")' in recovery
 
     assert "prior_terminal_snapshot_sha256 = hashlib.sha256(" in launcher
-    assert "observed_snapshot_sha256 = hashlib.sha256(" in recovery
-    for content in (launcher, recovery):
-        assert "sort_keys=True" in content
-        assert 'separators=(",", ":")' in content
+    assert "sort_keys=True" in launcher
+    assert 'separators=(",", ":")' in launcher
 
 
 def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
