@@ -8,6 +8,7 @@ from hlp.data.github_actions import (
     build_rescue_terminal_binding,
     fetch_github_actions_artifact_zip,
     fetch_github_actions_job_log,
+    fetch_github_actions_json,
     rescue_terminal_binding_sha256,
     select_equivalent_artifact_retry,
 )
@@ -224,6 +225,101 @@ def test_actions_log_attempts_must_be_positive():
     ):
         fetch_github_actions_job_log(
             "https://api.github.com/repos/Dtwosam/HLP/actions/jobs/459/logs",
+            "secret-token",
+            attempts=0,
+        )
+
+
+def test_actions_metadata_retries_transient_api_failure(monkeypatch):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/runs/123"
+    seen = {"calls": 0}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            seen["calls"] += 1
+            if seen["calls"] == 1:
+                raise urllib.error.HTTPError(
+                    api_url,
+                    503,
+                    "Service Unavailable",
+                    {},
+                    io.BytesIO(b"retry"),
+                )
+            return _Response(b'{"id": 123, "status": "completed"}')
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    payload = fetch_github_actions_json(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert payload == {"id": 123, "status": "completed"}
+    assert seen["calls"] == 2
+
+
+def test_actions_metadata_retries_malformed_json(monkeypatch):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/runs/124"
+    payloads = [
+        b'{"id":',
+        b'{"id": 124, "status": "completed"}',
+    ]
+    seen = {"calls": 0}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            payload = payloads[seen["calls"]]
+            seen["calls"] += 1
+            return _Response(payload)
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    payload = fetch_github_actions_json(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert payload["id"] == 124
+    assert seen["calls"] == 2
+
+
+def test_actions_metadata_rejects_redirect(monkeypatch):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/runs/125"
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": "https://example.com/redirect"},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    with pytest.raises(RuntimeError, match="unexpectedly redirected"):
+        fetch_github_actions_json(api_url, "secret-token")
+
+
+def test_actions_metadata_attempts_must_be_positive():
+    with pytest.raises(
+        ValueError,
+        match="metadata attempts must be positive",
+    ):
+        fetch_github_actions_json(
+            "https://api.github.com/repos/Dtwosam/HLP/actions/runs/126",
             "secret-token",
             attempts=0,
         )
