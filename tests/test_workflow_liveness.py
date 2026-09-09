@@ -89,6 +89,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-post-eligibility-evidence-chain.yml",
         "phase1-pons-representative-evidence-chain.yml",
         "phase1-pons-representative-evidence-one-shot.yml",
+        "phase1-pons-representative-transfers-full.yml",
         "phase1-pons-acquisition-accounting.yml",
         "phase1-pons-acquisition-viability-projection.yml",
         "phase1-pons-viability-route-measurement.yml",
@@ -323,6 +324,67 @@ def test_lifecycle_artifact_handoffs_are_retry_safe():
             "steps.retry_upload_lifecycle.outcome == 'failure'"
         ) == 1, name
         assert content.count("overwrite: true") == 2, name
+
+
+def test_representative_transfer_recovery_preserves_successful_work():
+    content = _workflow("phase1-pons-representative-transfers-full.yml")
+
+    assert content.count("id: download_sample") == 6
+    assert content.count("id: retry_download_sample") == 6
+    assert content.count(
+        "steps.download_sample.outcome == 'failure'"
+    ) == 12
+    assert content.count(
+        "steps.retry_download_sample.outcome == 'failure'"
+    ) == 12
+    assert content.count("rm -rf sample") == 12
+
+    assert content.count("id: upload_plan") == 1
+    assert content.count("id: retry_upload_plan") == 1
+    assert content.count("steps.upload_plan.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_plan.outcome == 'failure'"
+    ) == 1
+
+    assert content.count("id: upload_shard") == 4
+    assert content.count("id: retry_upload_shard") == 4
+    assert content.count(
+        "steps.upload_shard.outcome == 'failure'"
+    ) == 4
+    assert content.count(
+        "steps.retry_upload_shard.outcome == 'failure'"
+    ) == 4
+
+    assert content.count("id: download_plan") == 1
+    assert content.count("id: retry_download_plan") == 1
+    assert content.count(
+        "steps.download_plan.outcome == 'failure'"
+    ) == 2
+    assert content.count(
+        "steps.retry_download_plan.outcome == 'failure'"
+    ) == 2
+    assert content.count("rm -rf plan") == 2
+
+    assert content.count("id: upload_full") == 1
+    assert content.count("id: retry_upload_full") == 1
+    assert content.count("steps.upload_full.outcome == 'failure'") == 1
+    assert content.count(
+        "steps.retry_upload_full.outcome == 'failure'"
+    ) == 1
+    assert content.count("overwrite: true") == 12
+
+    for prior in ("acquire_1", "acquire_2", "acquire_3"):
+        assert content.count(
+            f"needs.{prior}.result == 'failure'"
+        ) == 1, prior
+
+    merge_line = next(
+        line
+        for line in content.splitlines()
+        if line.strip().startswith("if: ${{ always()")
+        and "needs.acquire_4.result" in line
+    )
+    assert "result == 'failure'" not in merge_line
 
 
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
