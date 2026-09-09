@@ -569,6 +569,26 @@ jobs:
               raise SystemExit(
                   "final acceptance representative count changed"
               )
+          explorer_required = report.get("explorer_evidence_required", False)
+          if not isinstance(explorer_required, bool):
+              raise SystemExit(
+                  "final acceptance explorer requirement changed type"
+              )
+          explorer_run_id = int(
+              report.get("explorer_crosscheck_run_id", 0)
+          )
+          if explorer_run_id < 0:
+              raise SystemExit(
+                  "final acceptance explorer run ID is invalid"
+              )
+          if explorer_required and explorer_run_id <= 0:
+              raise SystemExit(
+                  "final acceptance explorer evidence is required without a run"
+              )
+          if not explorer_required and explorer_run_id != 0:
+              raise SystemExit(
+                  "final acceptance explorer run is present while optional"
+              )
           for field in (
               "lifecycle_run_id",
               "v1_v3_run_id",
@@ -664,6 +684,8 @@ jobs:
               "representative_source_coverage_sha256": hashes[
                   "representative_source_coverage_sha256"
               ],
+              "explorer_evidence_required": explorer_required,
+              "explorer_crosscheck_run_id": explorer_run_id,
               "preflight": "pass",
           }, sort_keys=True))
           PY
