@@ -1555,9 +1555,12 @@ still requires every wave to be success or skipped and therefore remains
 fail-closed on incomplete coverage. The representative sample freeze,
 artifact-only market-path extraction, causal priced-path replay and bounded DEX
 cross-check now also retry their final artifact uploads up to three total
-attempts using already-computed local evidence. This closes the remaining
-single-attempt finalization points before the already retry-hardened
-representative validation join. Readiness metadata parsing also fails closed on
+attempts using already-computed local evidence. The DEX cross-check also retries
+all six frozen input artifacts before any external pool/price reconciliation,
+clearing partial directories between attempts so transient GitHub reads cannot
+waste the bounded independent check. This closes the remaining single-attempt
+finalization points before the already retry-hardened representative validation
+join. Readiness metadata parsing also fails closed on
 malformed numeric evidence, route-launch or finalizer provenance instead of
 crashing the audit.
 
