@@ -144,7 +144,33 @@ jobs:
               "acceptance_artifact_id": artifact_id,
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_acceptance
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
+          path: acceptance
+          run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial Phase 1 acceptance download before retry
+        if: ${{ steps.download_acceptance.outcome == 'failure' }}
+        run: rm -rf acceptance
+      - id: retry_download_acceptance
+        name: Retry Phase 1 acceptance artifact download
+        if: ${{ steps.download_acceptance.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
+          path: acceptance
+          run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial Phase 1 acceptance download before final retry
+        if: ${{ steps.retry_download_acceptance.outcome == 'failure' }}
+        run: rm -rf acceptance
+      - name: Final Phase 1 acceptance artifact download retry
+        if: ${{ steps.retry_download_acceptance.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
           path: acceptance
