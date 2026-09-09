@@ -2326,6 +2326,20 @@ def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transf
     assert "transfers_retry:" not in content
     assert "needs.transfers.result == 'success'" in content
     assert content.count("format('{0}', github.run_id)") >= 10
+    assert "import urllib.error" in content
+    assert "transient_http_codes = {" in content
+    assert "for attempt in range(3):" in content
+    assert "representative preflight metadata retry loop exhausted" in content
+    for source in ("preflight_v1", "preflight_v2"):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+    assert "time.sleep(" not in content
 
 def test_representative_sample_freeze_is_reusable_and_pinned():
     content = _workflow("phase1-pons-representative-sample-freeze.yml")
