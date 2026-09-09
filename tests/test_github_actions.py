@@ -410,3 +410,38 @@ def test_rescue_terminal_binding_rejects_duplicate_gap_ids():
 def test_rescue_terminal_binding_hash_rejects_schema_drift():
     with pytest.raises(ValueError, match="keys changed"):
         rescue_terminal_binding_sha256({"run_id": 1})
+
+
+
+def test_rescue_terminal_binding_rejects_noncanonical_gap_width():
+    with pytest.raises(ValueError, match="invalid gap ID"):
+        build_rescue_terminal_binding(
+            run_id=1,
+            status="completed",
+            conclusion="failure",
+            head_sha="a" * 40,
+            display_title="launch V1 V3 rescue generation 2",
+            run_attempt=1,
+            reusable_gap_ids=["1"],
+            missing_success_artifacts=[],
+            non_success_gap_artifacts=[],
+            plan_artifact_present=True,
+            canonical_artifact_present=False,
+        )
+
+
+def test_rescue_terminal_binding_rejects_overlapping_gap_classes():
+    with pytest.raises(ValueError, match="classifications overlap"):
+        build_rescue_terminal_binding(
+            run_id=1,
+            status="completed",
+            conclusion="failure",
+            head_sha="a" * 40,
+            display_title="launch V1 V3 rescue generation 2",
+            run_attempt=1,
+            reusable_gap_ids=["001"],
+            missing_success_artifacts=["001"],
+            non_success_gap_artifacts=[],
+            plan_artifact_present=True,
+            canonical_artifact_present=False,
+        )
