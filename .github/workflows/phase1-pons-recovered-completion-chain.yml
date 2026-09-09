@@ -477,6 +477,7 @@ jobs:
               *,
               manifest_name,
               expected_source,
+              expected_filter_semantics,
               expected_upstream_field,
               expected_upstream_run_id,
           ):
@@ -545,6 +546,13 @@ jobs:
               if provenance.get("source") != expected_source:
                   raise SystemExit(
                       "recovery venue manifest source changed: "
+                      f"run={run_id}"
+                  )
+              if provenance.get("filter_semantics") != (
+                  expected_filter_semantics
+              ):
+                  raise SystemExit(
+                      "recovery venue manifest filter semantics changed: "
                       f"run={run_id}"
                   )
               if int(provenance.get("chain_id", 0)) != 4663:
@@ -878,6 +886,10 @@ jobs:
               allowed_v1,
               manifest_name="pons-v1-v3-full.jsonl.manifest.json",
               expected_source="manifest_gap_aware_v1_v3_recovery",
+              expected_filter_semantics=(
+                  "global V3 Initialize/Swap topic scan followed by "
+                  "frozen Pons V1 pool membership"
+              ),
               expected_upstream_field="source_registry_run_id",
               expected_upstream_run_id=33_911_022_718,
           )
@@ -888,6 +900,10 @@ jobs:
                   allowed_v2,
                   manifest_name="pons-v2-v4-full.jsonl.manifest.json",
                   expected_source="manifest_gap_aware_v4_recovery",
+                  expected_filter_semantics=(
+                      "PoolManager Initialize/Swap global topic scan followed "
+                      "by frozen Pons V2 registration membership"
+                  ),
                   expected_upstream_field="transition_run_id",
                   expected_upstream_run_id=33_912_452_330,
               )
