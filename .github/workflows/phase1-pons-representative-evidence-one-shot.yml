@@ -343,6 +343,145 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
+      - name: Download frozen eligible universe
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+          run-id: ${{ steps.validate.outputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify eligible universe binds configured venue runs
+        env:
+          ELIGIBILITY_RUN_ID: ${{ steps.validate.outputs.eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ steps.validate.outputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ steps.validate.outputs.v2_v4_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(
+              Path(
+                  "eligible/pons-eligible-universe-summary.json"
+              ).read_text()
+          )
+          manifest = json.loads(
+              Path(
+                  "eligible/"
+                  "pons-eligible-100k-universe.jsonl.manifest.json"
+              ).read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+
+          eligibility_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          expected_v1_v3 = int(os.environ["V1_V3_RUN_ID"])
+          expected_v2_v4 = int(os.environ["V2_V4_RUN_ID"])
+
+          if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit(
+                  "representative eligibility snapshot head changed"
+              )
+          if int(summary.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit(
+                  "representative eligibility launch universe changed"
+              )
+          if int(summary.get("v1_launches", -1)) != 268_688:
+              raise SystemExit(
+                  "representative eligibility V1 launch count changed"
+              )
+          if int(summary.get("v2_launches", -1)) != 225_951:
+              raise SystemExit(
+                  "representative eligibility V2 launch count changed"
+              )
+          if int(summary.get("unknown_tokens", -1)) != 0:
+              raise SystemExit(
+                  "representative eligibility universe remains incomplete"
+              )
+
+          eligible_tokens = int(summary.get("eligible_tokens", -1))
+          eligible_v1 = int(summary.get("eligible_v1", -1))
+          eligible_v2 = int(summary.get("eligible_v2", -1))
+          if eligible_tokens < 5:
+              raise SystemExit(
+                  "representative eligibility has fewer than five runners"
+              )
+          if (
+              eligible_v1 < 0
+              or eligible_v2 < 0
+              or eligible_v1 + eligible_v2 != eligible_tokens
+          ):
+              raise SystemExit(
+                  "representative eligibility generation counts are invalid"
+              )
+
+          if int(
+              summary.get("validated_v1_v3_run_id", -1)
+          ) != expected_v1_v3:
+              raise SystemExit(
+                  "representative eligibility V1/V3 provenance mismatch"
+              )
+          if int(
+              summary.get("validated_v2_v4_run_id", -1)
+          ) != expected_v2_v4:
+              raise SystemExit(
+                  "representative eligibility V2/V4 provenance mismatch"
+              )
+
+          if int(manifest.get("records", -1)) != eligible_tokens:
+              raise SystemExit(
+                  "representative eligibility manifest record mismatch"
+              )
+          if manifest.get("sha256") != summary.get("universe_sha256"):
+              raise SystemExit(
+                  "representative eligibility universe SHA mismatch"
+              )
+          if int(provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit(
+                  "representative eligibility manifest chain changed"
+              )
+          if int(
+              provenance.get("snapshot_head_block", -1)
+          ) != 54_486_035:
+              raise SystemExit(
+                  "representative eligibility manifest snapshot changed"
+              )
+          if int(
+              provenance.get("v1_eligibility_run_id", -1)
+          ) != eligibility_run_id:
+              raise SystemExit(
+                  "representative eligibility V1 lifecycle run mismatch"
+              )
+          if int(
+              provenance.get("v2_eligibility_run_id", -1)
+          ) != eligibility_run_id:
+              raise SystemExit(
+                  "representative eligibility V2 lifecycle run mismatch"
+              )
+          if int(
+              provenance.get("v1_v3_run_id", -1)
+          ) != expected_v1_v3:
+              raise SystemExit(
+                  "representative eligibility manifest V1/V3 mismatch"
+              )
+          if int(
+              provenance.get("v2_v4_run_id", -1)
+          ) != expected_v2_v4:
+              raise SystemExit(
+                  "representative eligibility manifest V2/V4 mismatch"
+              )
+
+          print(json.dumps({
+              "eligibility_run_id": eligibility_run_id,
+              "eligible_tokens": eligible_tokens,
+              "eligible_v1": eligible_v1,
+              "eligible_v2": eligible_v2,
+              "universe_sha256": manifest["sha256"],
+              "v1_v3_run_id": expected_v1_v3,
+              "v2_v4_run_id": expected_v2_v4,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
 
   representative:
     needs: preflight
