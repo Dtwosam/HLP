@@ -1340,11 +1340,14 @@ artifact downloads now also get three attempts, deleting any partial download
 directory between tries so a transient artifact read cannot force completed
 100k-block segments to be repeated. The 128-shard V3 and V4 quote-fallback
 workflows apply the same upload retry pattern independently to route-selection,
-per-shard and final merged artifacts. During this audit a stray empty
-`actions/upload-artifact@v4` step was found immediately before the real V3
-quote-route upload; it has been removed and CI now pins both the absence of that
-malformed duplicate step and the retry contracts across all six downstream
-pricing workflows.
+per-shard and final merged artifacts. Their shard workers and final merges now
+also retry route/shard artifact reads three times, clearing partial `routes/`
+or `downloads/` directories between attempts so artifact-service failures do
+not masquerade as missing chain coverage or trigger unnecessary archive
+rescans. During this audit a stray empty `actions/upload-artifact@v4` step was
+found immediately before the real V3 quote-route upload; it has been removed
+and CI now pins both the absence of that malformed duplicate step and the retry
+contracts across all six downstream pricing workflows.
 
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
