@@ -2413,8 +2413,8 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert 'str(candidate.get("conclusion") or "") == "success"' in content
     assert "requested_artifact in candidate_artifacts" in content
     assert "requested_artifacts = {requested_artifact}" in content
-    assert "not prior_gap_run_id and has_plan and has_gap" in content
-    assert 'prior_gap_run_id = str(candidate["id"])' in content
+    assert "and (has_gap or can_select_plan_only)" in content
+    assert "prior_gap_run_id = candidate_id" in content
     prior_selection = content.split(
         "successful_gap_ids = successful_repair_gap_ids(",
         1,
