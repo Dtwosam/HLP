@@ -943,7 +943,12 @@ before composing the aggregate tape, so corrupted or mismatched artifacts fail
 closed rather than being trusted from sidecar metadata alone. Cross-run artifact ZIP reads
 in both venue recovery workflows and recovered completion now use the shared
 safe GitHub Actions downloader: the GitHub API request carries auth, but the
-redirected blob-storage request deliberately does not. Recursive prior-gap
+redirected blob-storage request deliberately does not. V2/V4 recovery now also
+uses the shared bounded-retry Actions metadata reader for all source, lineage,
+job and artifact pagination calls instead of raw single-attempt `urlopen`.
+Its four repair waves plus final merge retry the frozen V2-transition artifact
+three times with partial-directory cleanup, preventing transient GitHub reads
+from blocking or wasting otherwise valid repair work. Recursive prior-gap
 manifest/plan verification uses the same token-stripping path. The first pinned V1/V3 rescue generation **34207459960** is exact-title
 generation **2** and its child `v1_v3_rescue / plan` job succeeded, so
 generation 2 is a **consumed** V1/V3 recovery generation. Exact-title generation
