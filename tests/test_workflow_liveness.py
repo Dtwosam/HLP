@@ -81,6 +81,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
     critical = (
         "phase1-pons-v1-v3-recover-gaps.yml",
         "phase1-pons-v2-v4-recover-gaps.yml",
+        "phase1-pons-v2-lifecycle-eligibility.yml",
         "phase1-pons-recovered-completion-chain.yml",
         "phase1-pons-post-eligibility-evidence-chain.yml",
         "phase1-pons-representative-evidence-chain.yml",
@@ -1374,10 +1375,22 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "required lifecycle manifest is missing" in content
     assert "timeout-minutes: 60" in content
     assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
-    assert 'for key in ("partial_run_id", "prior_gap_run_id")' in content
-    assert "v4-shards/current" in content
-    assert "v4-shards/partial" in content
-    assert "v4-shards/prior" in content
+    assert "Resolve canonical V2 V4 selected shard artifacts" in content
+    assert "resolve_v2_v4_shard_artifact" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "V2 lifecycle canonical V2/V4 artifact" in content
+    assert "V2 lifecycle selected V2/V4 shard " in content
+    assert "canonical_manifest_exact_artifacts" in content
+    assert "selected_shards_by_run" in content
+    assert "ThreadPoolExecutor" in content
+    assert "max_workers=4" in content
+    assert "V2 lifecycle canonical shard binding changed" in content
+    assert "selected V2/V4 shard data SHA changed" in content
+    assert "selected V2/V4 shard data record count changed" in content
+    assert "pattern: phase1-pons-v2-v4-*" not in content
+    assert "v4-shards/current" not in content
+    assert "v4-shards/partial" not in content
+    assert "v4-shards/prior" not in content
     assert "--v4-events-dir v4-shards" in content
     assert "--v4-events-manifest v4/pons-v2-v4-full.jsonl.manifest.json" in content
     assert "lifecycle manifest snapshot mismatch" in content
