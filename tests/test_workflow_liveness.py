@@ -1416,14 +1416,61 @@ def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
     assert "time.sleep(" not in content
 
 
-def test_representative_evidence_one_shot_is_guarded_and_pinned():
+def test_representative_evidence_one_shot_is_guarded_and_unarmed():
     content = _workflow("phase1-pons-representative-evidence-one-shot.yml")
+    trigger_block = content.split("\npermissions:", 1)[0]
+    assert "push:" in trigger_block
+    assert "workflow_dispatch:" not in trigger_block
+    assert ".github/phase1-pons-representative-evidence.json" in content
+    assert "startsWith(github.event.head_commit.message" in content
+    assert "contains(github.event.head_commit.message" not in content
+    assert "launch representative evidence generation " in content
+    assert 'r"launch representative evidence generation (\\d+)"' in content
+    assert "launch message must be exactly one line" in content
+    assert "launch requires an exact generation" in content
+    assert "launch/config generation mismatch" in content
+    assert "generation must increment " in content
+    assert "by exactly one" in content
+    assert "launch must be a direct " in content
+    assert "single-parent commit" in content
+    assert "launch must modify exactly " in content
+    assert "the guarded config file" in content
+    assert "representative evidence config is not armed" in content
+    assert "validation_generation != 1" in content
+    assert "previous_validation_generation != 1" in content
+    assert "required run IDs must be positive" in content
+    assert "phase1-pons-live-venue-rescue-one-shot.yml/runs" in content
+    assert "cannot overlap active venue rescue" in content
+    assert "rescue_pattern.fullmatch(title)" in content
+    assert "phase1-pons-v1-lifecycle-eligibility" in content
+    assert "phase1-pons-v2-lifecycle-eligibility" in content
+    assert "phase1-pons-quote-fallback-full" in content
+    assert "phase1-pons-eligible-universe" in content
+    assert "phase1-pons-v1-v3-full" in content
+    assert "phase1-pons-v2-v4-full" in content
+    assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in content
+    assert "phase1-pons-recovered-completion-one-shot.yml" in content
     assert "phase1-pons-representative-evidence-chain.yml" in content
-    assert "launch representative evidence" in content
-    assert 'eligibility_run_id: "33982556591"' in content
     assert 'oracle_run_id: "33974681334"' in content
     assert 'runner_smoke_run_id: "33920762592"' in content
-    assert "workflow_dispatch:" not in content
+    assert 'registry_run_id: "33911022718"' in content
+    assert 'v2_curve_run_id: "33936232604"' in content
+    assert 'transition_run_id: "33912452330"' in content
+    assert 'quote_audit_run_id: "33923299711"' in content
+    assert 'anchor_run_id: "33972109927"' in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+
+    config = (
+        Path(__file__).parents[1]
+        / ".github"
+        / "phase1-pons-representative-evidence.json"
+    ).read_text()
+    assert '"generation": 0' in config
+    assert '"validation_generation": 1' in config
+    assert '"eligibility_run_id": 0' in config
+    assert '"v1_v3_run_id": 0' in config
+    assert '"v2_v4_run_id": 0' in config
+    assert '"prior_transfer_run_id": 0' in config
 
 
 def test_viability_pons_registry_launcher_is_guarded_and_pinned():
