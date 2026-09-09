@@ -2781,6 +2781,17 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "recovery run pagination exceeded 1000" in content
     assert "per_page=100&page={page}" in content
     assert "recovery_manifest_valid" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "resolve_v2_v4_shard_artifact" in content
+    assert "artifact_rows_cache = {}" in content
+    assert "if run_id in artifact_rows_cache:" in content
+    assert "v2_v4_selected_shards_resolvable" in content
+    assert "readiness selected V2/V4 shard " in content
+    assert "selected_records == aggregate_records" in content
+    assert "previous_hi == 54_486_035" in content
+    assert "seen_bindings = set()" in content
+    assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
+    assert "return v2_v4_selected_shards_resolvable(" in content
     assert '"pons-v1-v3-full.jsonl"' in content
     assert '"pons-v2-v4-full.jsonl"' in content
     assert 'records = int(manifest.get("records", -1))' in content
