@@ -1480,8 +1480,11 @@ generation-bound too: its future arming commit must be exactly
 `launch recovered Phase 1 completion generation N`, be a direct
 single-parent commit that modifies only the guarded recovery config, preserve
 the exact seven-key config schema and validation marker **7**, and advance the
-config generation by exactly one. The staged config remains unarmed at
-generation **0**. Any other nonterminal pinned rescue run blocks the new launch,
+config generation by exactly one. Its pure-stdlib five-minute preflight now
+retries transient GitHub commit/content metadata reads up to three times
+without sleeps, so a temporary API failure cannot consume or strand the guarded
+completion launch. The staged config remains unarmed at generation **0**. Any
+other nonterminal pinned rescue run blocks the new launch,
 so V1/V3 and V2/V4 recovery cannot overlap archive concurrency even across
 separate manual pushes.
 The low-level V1/V3 and V2/V4 gap workflows independently refuse
