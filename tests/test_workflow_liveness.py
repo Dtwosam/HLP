@@ -2470,7 +2470,14 @@ def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transf
     assert content.count("phase1-pons-representative-transfers-full.yml") == 1
     assert "phase1-pons-representative-priced-paths.yml" in content
     assert "phase1-pons-representative-dex-crosscheck.yml" in content
+    assert "phase1-pons-representative-explorer-crosscheck.yml" in content
     assert "phase1-pons-representative-validation.yml" in content
+    assert "explorer_access_reverified" in content
+    assert "default: false" in content
+    assert "inputs.explorer_access_reverified == true" in content
+    assert "needs.explorer_crosscheck.result == 'success'" in content
+    assert "needs.explorer_crosscheck.result == 'skipped'" in content
+    assert "explorer_crosscheck_run_id:" in content
     assert content.count("v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
     assert content.count("v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}") == 3
     assert "v1_v3_run_id:" in content
@@ -3435,6 +3442,8 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert "source eligibility parent is not completed successfully" in chain
     assert "phase1-pons-eligible-universe-promote.yml" in chain
     assert "phase1-pons-representative-evidence-chain.yml" in chain
+    assert "explorer_access_reverified" in chain
+    assert "default: false" in chain
     assert "phase1-pons-post-eligibility-evidence-ready" in chain
     assert '"recovery_mode": False' in chain
     assert "validate_post_eligibility_evidence_bundle" in chain
