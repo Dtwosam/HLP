@@ -698,6 +698,30 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "viability measurement source eligibility run changed" in content
     assert "viability measurement evidence run ID cannot be negative" in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
+    assert "import urllib.error" in content
+    assert "transient_http_codes = {" in content
+    assert "for attempt in range(3):" in content
+    assert "viability evidence metadata retry loop exhausted" in content
+    lines = content.splitlines()
+    for source in (
+        "evidence",
+        "registry",
+        "v2_registry",
+        "transition",
+        "quotes",
+        "v3_fallback",
+        "v4_fallback",
+    ):
+        assert lines.count(f"      - id: download_{source}") == 1, source
+        assert lines.count(
+            f"      - id: retry_download_{source}"
+        ) == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
     assert content.count("id: upload_primary") == 1
     assert content.count("id: retry_upload_primary") == 1
     assert content.count("steps.upload_primary.outcome == 'failure'") == 1
