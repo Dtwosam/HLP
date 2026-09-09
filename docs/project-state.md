@@ -1349,6 +1349,14 @@ found immediately before the real V3 quote-route upload; it has been removed
 and CI now pins both the absence of that malformed duplicate step and the retry
 contracts across all six downstream pricing workflows.
 
+The two 60-minute lifecycle replay workflows are now protected by the same
+artifact-service discipline. V1 retries registry, quote-audit, anchor and stock
+oracle downloads before replay; V2 retries registry, curve, transition, anchor,
+stock oracle and merged quote-fallback downloads. Partial target directories are
+removed between attempts. Both final lifecycle eligibility artifacts also get
+three upload attempts using the already-computed local output, so a transient
+GitHub artifact failure does not force a multi-GB replay to start over.
+
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
 run. It first resolves an equivalent canonical
