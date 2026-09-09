@@ -2638,7 +2638,14 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-post-eligibility-evidence-ready.json" in content
     assert "evidence handoff lifecycle run ID must be positive" in content
+    assert "normal_evidence_path = (" in content
+    assert "recovered_evidence_path = (" in content
+    assert "viability handoff evidence workflow path changed" in content
+    assert "viability normal evidence is marked recovered" in content
     assert "normal evidence handoff routing changed" in content
+    assert "viability recovered evidence is not marked recovered" in content
+    assert 'evidence = get(' in content
+    assert "evidence_path = str(" in content
     assert "evidence handoff snapshot head changed" in content
     assert "evidence handoff Pons launch count changed" in content
     assert "evidence handoff eligible universe is empty" in content
