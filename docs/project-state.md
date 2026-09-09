@@ -1465,9 +1465,14 @@ workflow family, branch, cycle guard and a 20-generation depth bound. Malformed
 recovery ZIP/JSON or non-numeric provenance is treated as an invalid discovery
 candidate instead of aborting the readiness audit. Recovered completion
 independently requires the same current-plan contract, then replays any
-recursive prior-gap lineage before accepting a non-source venue artifact. It also refuses to rerun V2/V4
-or pricing when the source already contains reusable complete artifacts, and
-refuses a fresh V2/V4 run when reusable source V2/V4 shard artifacts exist.
+recursive prior-gap lineage before accepting a non-source venue artifact. Its
+chain now uses the shared bounded-retry Actions metadata reader for support,
+venue and evidence artifact inventories, retries a reused eligible-universe
+download, and retries the exact eligible/representative evidence artifacts with
+partial-directory cleanup before publishing the recovered evidence handoff. It
+also refuses to rerun V2/V4 or pricing when the source already contains reusable
+complete artifacts, and refuses a fresh V2/V4 run when reusable source V2/V4
+shard artifacts exist.
 The pinned rescue launcher now requires exactly one venue target per launch,
 accepts rescue arming only from an exact one-line
 `launch <venue> rescue generation N` commit title, runs only on the
