@@ -1242,6 +1242,36 @@ GitHub API or redirected blob failures (including 403/408/409/425/429 and
 5xx), obtains a fresh signed redirect on each retry, and still never forwards
 the GitHub bearer token to blob storage. This protects the generation-2 plan
 and preserved-gap reads without weakening identity or digest validation.
+Same-name retry artifacts are now reconciled consistently beyond individual
+gap outputs. V2/V4 prior/current **gap-plan** artifacts, final merge inputs and
+recovered-completion canonical venue/lineage artifacts collapse to one
+deterministic artifact only when GitHub reports the same artifact name,
+SHA-256 digest, byte size and workflow-run binding; otherwise they still fail
+closed. Future V2/V4 cleanup generations are also chained to the immediately
+preceding **consumed** generation's successful plan rather than merely the
+newest older run that happens to expose reusable gaps. A consumed prior
+generation with zero successful repair artifacts remains the required parent
+plan, allowing recursive lineage to recover older reusable artifacts without
+silently skipping that generation.
+
+The V2 lifecycle replay no longer wildcard-downloads
+`phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
+run. It first resolves an equivalent canonical
+`phase1-pons-v2-v4-full` artifact, reads that aggregate manifest's exact
+ordered `shards` list, maps every selected
+`v4-events-shard-NNN.jsonl` or `v4-events-gap-NNN.jsonl` back to its exact
+source run/artifact, and downloads only those artifacts. This supports original
+full runs, current recovery gaps, the frozen partial source and arbitrarily
+deep numeric prior-gap sources recorded by the canonical merge. Each selected
+ZIP is checked against the aggregate shard SHA/record/range identity plus its
+embedded chain **4663**, protocol, registration input and filter-mode
+provenance before being materialized under a source-run-specific directory.
+Equivalent upload-retry duplicates are collapsed through the same GitHub
+metadata contract, while non-equivalent duplicates fail closed. Four bounded
+download workers provide concurrency without reintroducing wildcard artifact
+identity. The sharded-tape reader then independently revalidates every selected
+file and the aggregate record/SHA before lifecycle replay.
+
 The readiness state machine only switches to recovery after the frozen parent
 is terminal; a terminal failed parent may advance only through a successful
 approved recovered-completion evidence run. A terminal parent that reports
