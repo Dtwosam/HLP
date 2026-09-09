@@ -68,6 +68,7 @@ SHARED_METADATA_WORKFLOWS = (
     "phase1-pons-recovered-completion-one-shot.yml",
     "phase1-pons-post-eligibility-evidence-chain.yml",
     "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-representative-evidence-one-shot.yml",
     "phase1-pons-representative-transfers-full.yml",
     "phase1-pons-acquisition-accounting.yml",
     "phase1-pons-acquisition-viability-projection.yml",
@@ -2179,6 +2180,13 @@ def test_representative_evidence_one_shot_is_guarded_and_unarmed():
     assert "phase1-pons-quote-fallback-full" in content
     assert "phase1-pons-eligible-universe" in content
     assert "Download frozen eligible universe" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert "PYTHONPATH: src" in content
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
+    assert content.count("id: download_eligible") == 1
+    assert content.count("id: retry_download_eligible") == 1
+    assert content.count("rm -rf eligible") == 2
     assert "pons-eligible-universe-summary.json" in content
     assert "pons-eligible-100k-universe.jsonl.manifest.json" in content
     assert "representative eligibility V1/V3 provenance mismatch" in content
