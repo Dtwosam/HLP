@@ -142,7 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify approved evidence before any viability RPC
+      - id: evidence
+        name: Verify approved evidence before any viability RPC
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
@@ -208,7 +209,7 @@ jobs:
                   "viability measurement evidence branch changed"
               )
 
-          names = set()
+          live_artifacts = []
           page = 1
           while True:
               payload = get(
@@ -216,10 +217,8 @@ jobs:
                   f"?per_page=100&page={page}"
               )
               rows = list(payload.get("artifacts") or [])
-              names.update(
-                  str(row.get("name"))
-                  for row in rows
-                  if not row.get("expired")
+              live_artifacts.extend(
+                  row for row in rows if not row.get("expired")
               )
               if len(rows) < 100:
                   break
@@ -229,6 +228,10 @@ jobs:
                       "viability measurement evidence artifact pagination "
                       "exceeded 1000"
                   )
+          names = {
+              str(row.get("name") or "")
+              for row in live_artifacts
+          }
           required = {
               "phase1-pons-post-eligibility-evidence-ready",
               "phase1-pons-eligible-universe",
@@ -241,6 +244,61 @@ jobs:
                   f"{missing}"
               )
 
+          handoff_rows = [
+              row
+              for row in live_artifacts
+              if str(row.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "viability measurement evidence-ready retry "
+                      "artifacts are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "viability measurement evidence-ready artifact ID "
+                  "is invalid"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
+
           print(json.dumps({
               "source_eligibility_run_id": source_run_id,
               "evidence_run_id": evidence_run_id,
@@ -250,7 +308,7 @@ jobs:
           PY
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-post-eligibility-evidence-ready
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
           path: evidence-handoff
           run-id: ${{ inputs.evidence_run_id }}
           github-token: ${{ github.token }}
