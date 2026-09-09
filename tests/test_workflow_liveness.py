@@ -2562,6 +2562,9 @@ def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
     assert "id: retry_upload_projection" in content
     assert "Retry acquisition viability projection upload" in content
     assert "Final acquisition viability projection upload retry" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "build_phase1_route_plan" in content
     assert "project_phase1_acquisition_plan" in content
     assert "route_plan_json" in content
@@ -2589,6 +2592,10 @@ def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     assert "id: retry_upload_accounting" in content
     assert "Retry acquisition accounting artifact upload" in content
     assert "Final acquisition accounting artifact upload retry" in content
+    assert content.count("fetch_github_actions_json(") == 1
+    assert content.count("fetch_github_actions_job_log(") >= 1
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
     assert "steps.upload_accounting.outcome == 'failure'" in content
     assert "steps.retry_upload_accounting.outcome == 'failure'" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
