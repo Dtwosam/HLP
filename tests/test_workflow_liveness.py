@@ -3272,6 +3272,13 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert "id: retry_upload_evidence_ready" in chain
     assert "Retry evidence-ready artifact upload" in chain
     assert "Final evidence-ready artifact upload retry" in chain
+    assert chain.count("fetch_github_actions_json(") == 2
+    assert "urllib.request.urlopen" not in chain
+    assert chain.count("PYTHONPATH: src") == 1
+    for source in ("eligible", "representative"):
+        assert chain.count(f"id: download_{source}") == 1, source
+        assert chain.count(f"id: retry_download_{source}") == 1, source
+        assert chain.count(f"rm -rf {source}") == 2, source
 
     launcher = _workflow(
         "phase1-pons-post-eligibility-evidence-one-shot.yml"
