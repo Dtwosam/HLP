@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -289,3 +291,92 @@ def select_equivalent_artifact_retry(
         raise ValueError(f"{label} duplicate artifact IDs repeat")
 
     return max(candidates, key=lambda row: int(row["id"]))
+
+
+
+_RESCUE_TERMINAL_BINDING_KEYS = (
+    "run_id",
+    "status",
+    "conclusion",
+    "head_sha",
+    "display_title",
+    "run_attempt",
+    "reusable_gap_ids",
+    "missing_success_artifacts",
+    "non_success_gap_artifacts",
+    "plan_artifact_present",
+    "canonical_artifact_present",
+)
+
+
+def build_rescue_terminal_binding(
+    *,
+    run_id,
+    status,
+    conclusion,
+    head_sha,
+    display_title,
+    run_attempt,
+    reusable_gap_ids,
+    missing_success_artifacts,
+    non_success_gap_artifacts,
+    plan_artifact_present,
+    canonical_artifact_present,
+):
+    """Build the canonical launcher/child rescue terminal-state binding."""
+    observed_run_id = int(run_id)
+    if observed_run_id <= 0:
+        raise ValueError("rescue terminal binding run ID must be positive")
+
+    def gap_ids(values, *, label):
+        normalized = [str(value) for value in values]
+        if any(not value.isdigit() for value in normalized):
+            raise ValueError(
+                f"rescue terminal binding {label} contains invalid gap ID"
+            )
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(
+                f"rescue terminal binding {label} contains duplicate gap ID"
+            )
+        return sorted(normalized, key=int)
+
+    binding = {
+        "run_id": observed_run_id,
+        "status": status,
+        "conclusion": conclusion,
+        "head_sha": head_sha,
+        "display_title": display_title,
+        "run_attempt": run_attempt,
+        "reusable_gap_ids": gap_ids(
+            reusable_gap_ids,
+            label="reusable gaps",
+        ),
+        "missing_success_artifacts": gap_ids(
+            missing_success_artifacts,
+            label="missing success artifacts",
+        ),
+        "non_success_gap_artifacts": gap_ids(
+            non_success_gap_artifacts,
+            label="non-success gap artifacts",
+        ),
+        "plan_artifact_present": bool(plan_artifact_present),
+        "canonical_artifact_present": bool(canonical_artifact_present),
+    }
+    if tuple(binding) != _RESCUE_TERMINAL_BINDING_KEYS:
+        raise AssertionError("rescue terminal binding schema changed")
+    return binding
+
+
+def rescue_terminal_binding_sha256(binding) -> str:
+    """Hash a canonical rescue terminal binding exactly as the launcher does."""
+    if not isinstance(binding, dict):
+        raise ValueError("rescue terminal binding must be a dictionary")
+    if tuple(binding) != _RESCUE_TERMINAL_BINDING_KEYS:
+        raise ValueError("rescue terminal binding keys changed")
+    return hashlib.sha256(
+        json.dumps(
+            binding,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
