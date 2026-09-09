@@ -1340,11 +1340,16 @@ and still exposes its required non-expired canonical artifact. The reusable
 representative chain repeats that immutable support preflight before its sample
 job, so direct/manual entry cannot bypass it and reach Transfer RPC. Resumed
 representative Transfer shards are now bound to the exact frozen sample as
-well: every shard manifest records both the SHA256 of the ten-token sample
-JSONL and a canonical SHA256 of the sorted token-address set, and both the gap
-planner and final merge reject prior shards whose sample or token-set identity
-does not match the current sample. Older prior runs without those bindings fail
-closed instead of being reused by artifact name alone. The Transfer backfill
+well: the sample freeze publishes the SHA256 of the exact ten-token JSONL plus
+a canonical SHA256 of the sorted token-address set, and every downstream
+representative stage revalidates those identities. Transfer planning/reuse,
+artifact-only market-path extraction, causal priced-path replay, the independent
+DEX cross-check and final representative validation all carry the same two
+digests in their provenance and fail closed on any mismatch. Every Transfer
+shard manifest records both identities too, and both the gap planner and final
+merge reject prior shards whose sample or token-set identity does not match the
+current sample. Older prior runs without those bindings fail closed instead of
+being reused by artifact name alone. The Transfer backfill
 can span up to four 240-job waves, so prior-run planning and final merge no
 longer use wildcard artifact downloads either: they paginate exact numeric
 `phase1-pons-representative-transfer-<id>` artifacts through the API, and
