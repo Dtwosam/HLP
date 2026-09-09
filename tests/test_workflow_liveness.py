@@ -87,6 +87,8 @@ def test_critical_phase1_workflow_python_heredocs_compile():
         "phase1-pons-post-eligibility-evidence-chain.yml",
         "phase1-pons-representative-evidence-chain.yml",
         "phase1-pons-representative-evidence-one-shot.yml",
+        "phase1-pons-acquisition-accounting.yml",
+        "phase1-pons-acquisition-viability-projection.yml",
         "phase1-pons-viability-route-measurement.yml",
         "phase1-pons-final-acceptance-chain.yml",
         "phase1-pons-acceptance-gate.yml",
@@ -1965,6 +1967,14 @@ def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     assert "acceptance evidence workflow path is not allowed" in content
     assert "acceptance evidence artifacts missing" in content
     assert "acceptance current run is missing viability projection" in content
+    assert "artifact_rows_cache = {}" in content
+    assert "acceptance viability projection retry artifacts " in content
+    assert "are not equivalent" in content
+    assert "viability_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}"
+        in content
+    )
     assert "build_phase1_acceptance_report" in content
     assert "REQUIRED_PHASE1_ACQUISITION_ROUTES" in content
     assert 'phase1_acceptance_status"] != "pass"' in content
@@ -1987,6 +1997,17 @@ def test_phase1_viability_projection_is_manual_artifact_only_and_fail_closed():
     assert "workflow_call:" in trigger_block
     assert "\n  push:" not in trigger_block
     assert "phase1-pons-acquisition-accounting" in content
+    assert "Resolve exact acquisition accounting artifact" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "viability accounting retry artifacts are not equivalent" in content
+    assert (
+        "artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}"
+        in content
+    )
+    assert "id: upload_projection" in content
+    assert "id: retry_upload_projection" in content
+    assert "Retry acquisition viability projection upload" in content
+    assert "Final acquisition viability projection upload retry" in content
     assert "build_phase1_route_plan" in content
     assert "project_phase1_acquisition_plan" in content
     assert "route_plan_json" in content
@@ -2010,6 +2031,12 @@ def test_phase1_acquisition_accounting_is_manual_github_only_and_bounded():
     assert "at most 50 positive integer run IDs" in content
     assert "summarize_action_run" in content
     assert "summarize_phase1_runs" in content
+    assert "id: upload_accounting" in content
+    assert "id: retry_upload_accounting" in content
+    assert "Retry acquisition accounting artifact upload" in content
+    assert "Final acquisition accounting artifact upload retry" in content
+    assert "steps.upload_accounting.outcome == 'failure'" in content
+    assert "steps.retry_upload_accounting.outcome == 'failure'" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "max-parallel:" not in content
     assert "time.sleep(" not in content
