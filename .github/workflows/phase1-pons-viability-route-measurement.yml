@@ -612,11 +612,31 @@ jobs:
               hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v4-quote-route-tape                 --routes canonical-v4/pons-v4-quote-routes.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/quote-v4-fallback-measurement.jsonl
               ;;
           esac
-      - uses: actions/upload-artifact@v4
+      - id: upload_primary
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_primary
+        name: Retry primary viability measurement artifact upload
+        if: ${{ steps.upload_primary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final primary viability measurement artifact upload retry
+        if: ${{ steps.retry_upload_primary.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   registry_v2:
     needs: preflight
@@ -703,8 +723,28 @@ jobs:
           mkdir -p artifacts
           if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
           hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v2-registry-window             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --out artifacts/pons-registry-v2-measurement.jsonl
-      - uses: actions/upload-artifact@v4
+      - id: upload_secondary
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_registry-secondary
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_secondary
+        name: Retry secondary registry viability artifact upload
+        if: ${{ steps.upload_secondary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final secondary registry viability artifact upload retry
+        if: ${{ steps.retry_upload_secondary.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
