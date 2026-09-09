@@ -278,6 +278,28 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
         ) not in content, name
 
 
+def test_quote_fallback_recovery_plan_and_final_artifacts_are_retry_safe():
+    for name in (
+        "phase1-pons-v3-quote-fallback-recover-gaps.yml",
+        "phase1-pons-v4-quote-fallback-recover-gaps.yml",
+    ):
+        content = _workflow(name)
+        for output_id in ("plan", "full"):
+            assert content.count(f"id: upload_{output_id}") == 1, (
+                name,
+                output_id,
+            )
+            assert content.count(
+                f"id: retry_upload_{output_id}"
+            ) == 1, (name, output_id)
+            assert content.count(
+                f"steps.upload_{output_id}.outcome == 'failure'"
+            ) == 1, (name, output_id)
+            assert content.count(
+                f"steps.retry_upload_{output_id}.outcome == 'failure'"
+            ) == 1, (name, output_id)
+
+
 def test_generic_quote_fallback_artifact_handoff_is_retry_safe():
     content = _workflow("phase1-pons-quote-fallback-full.yml")
     for venue in ("v3", "v4"):
