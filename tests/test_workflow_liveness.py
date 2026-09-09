@@ -501,6 +501,79 @@ def test_representative_intermediate_outputs_are_retry_safe():
         assert content.count("overwrite: true") == 2, name
 
 
+def test_post_viability_artifact_reads_retry_transient_failures():
+    projection = _workflow(
+        "phase1-pons-acquisition-viability-projection.yml"
+    )
+    assert projection.count("id: download_accounting") == 1
+    assert projection.count("id: retry_download_accounting") == 1
+    assert projection.count(
+        "steps.download_accounting.outcome == 'failure'"
+    ) == 2
+    assert projection.count(
+        "steps.retry_download_accounting.outcome == 'failure'"
+    ) == 2
+    assert projection.count("rm -rf accounting") == 2
+
+    gate = _workflow("phase1-pons-acceptance-gate.yml")
+    for source in ("eligible", "representative", "viability"):
+        assert gate.count(f"id: download_{source}") == 1, source
+        assert gate.count(f"id: retry_download_{source}") == 1, source
+        assert gate.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert gate.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert gate.count(f"rm -rf {source}") == 2, source
+
+    closeout = _workflow("phase1-pons-pass-closeout-one-shot.yml")
+    assert closeout.count("id: download_acceptance") == 1
+    assert closeout.count("id: retry_download_acceptance") == 1
+    assert closeout.count(
+        "steps.download_acceptance.outcome == 'failure'"
+    ) == 2
+    assert closeout.count(
+        "steps.retry_download_acceptance.outcome == 'failure'"
+    ) == 2
+    assert closeout.count("rm -rf acceptance") == 2
+
+    final = _workflow("phase1-pons-final-acceptance-chain.yml")
+    assert final.count("id: download_evidence_handoff") == 1
+    assert final.count("id: retry_download_evidence_handoff") == 1
+    assert final.count(
+        "steps.download_evidence_handoff.outcome == 'failure'"
+    ) == 2
+    assert final.count(
+        "steps.retry_download_evidence_handoff.outcome == 'failure'"
+    ) == 2
+    assert final.count("rm -rf evidence-handoff") == 2
+
+    route_downloads = (
+        "pons_registry_primary",
+        "pons_registry_secondary",
+        "pons_v1_v3",
+        "pons_v2_curve",
+        "pons_v2_transition",
+        "pons_v2_v4",
+        "weth_usdg_anchor",
+        "stock_oracle",
+        "quote_v3_fallback",
+        "quote_v4_fallback",
+    )
+    for route in route_downloads:
+        assert final.count(f"id: download_route_{route}") == 1, route
+        assert final.count(
+            f"id: retry_download_route_{route}"
+        ) == 1, route
+        assert final.count(
+            f"steps.download_route_{route}.outcome == 'failure'"
+        ) == 2, route
+        assert final.count(
+            f"steps.retry_download_route_{route}.outcome == 'failure'"
+        ) == 2, route
+
+
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
