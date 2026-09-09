@@ -1,6 +1,6 @@
 # HLP Project State
 
-Updated: 2026-09-08
+Updated: 2026-09-09
 Repository: Dtwosam/HLP
 Current phase: Phase 1 — Historical/Live Data Acquisition Spike
 Status: ACTIVE
@@ -936,11 +936,24 @@ V1/V3 now also uses the same launcher-to-child terminal snapshot binding as
 V2/V4. The launcher passes both the reusable-gap count and a SHA-256 over the
 canonical 11-field terminal binding (run/status/conclusion/head SHA/title/run
 attempt, reusable/missing/non-success gap IDs, and plan/canonical artifact
-presence). The V1 child independently re-fetches the immediate prior run,
-jobs and artifacts, rebuilds the same sorted-JSON binding, verifies the reusable
+presence). Both child recovery workflows now build and hash that binding through
+the shared `hlp.data.github_actions` helper; the launcher deliberately remains
+a pure-stdlib independent implementation because its five-minute preflight has
+no checkout/install dependency. CI freezes the helper's exact field order and
+digest fixture and separately proves both children invoke the helper with all
+11 fields while the launcher emits the same schema. Each child independently
+re-fetches the immediate prior run, jobs and artifacts, verifies the reusable
 count, and must reproduce the launcher digest before it can derive or emit any
 new repair matrix. Manual dispatch may omit both binding inputs together, but
 a one-sided binding is rejected.
+
+Readiness recovery progress is also plan-derived rather than job-list-derived.
+It reads and structurally validates the bound gap-plan artifact, uses
+`gap_job_count` as the total planned repair count, and tracks currently
+materialized Actions jobs separately. The audit summary reports
+`materialized/planned` alongside successful/planned repairs, so serialized
+later waves cannot disappear from progress accounting merely because GitHub has
+not materialized those matrix jobs yet.
 
 The first pinned V1/V3 rescue generation **34207459960**
 completed all 70 repair shards successfully but its final merge failed with
