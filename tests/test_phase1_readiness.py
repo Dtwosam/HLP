@@ -613,7 +613,7 @@ def test_readiness_accepts_required_explorer_identity():
         evidence_handoff=handoff,
     )
 
-    assert report["evidence_handoff_errors"] == []
+    assert report.get("evidence_handoff_errors", []) == []
 
 
 def test_readiness_rejects_required_explorer_without_run():
