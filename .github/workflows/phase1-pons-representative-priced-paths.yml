@@ -127,6 +127,9 @@ jobs:
               summarize_sharded_manifest_coverage,
               summarize_snapshot_manifest_coverage,
           )
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
           from hlp.data.pons_representative_prices import (
               summarize_representative_priced_paths,
               validate_representative_priced_path_rows,
@@ -169,8 +172,18 @@ jobs:
                   )
               return manifest
 
-          sample = load_jsonl(
+          sample_path = Path(
               "sample/pons-representative-sample.jsonl"
+          )
+          sample = load_jsonl(sample_path)
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          sample_identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
           )
           if len(sample) != 10:
               raise SystemExit(
@@ -182,6 +195,12 @@ jobs:
               "pons-representative-market-paths.jsonl.manifest.json"
           )
           market_provenance = market_manifest.get("provenance") or {}
+          for field in ("sample_sha256", "token_set_sha256"):
+              if market_provenance.get(field) != sample_identity[field]:
+                  raise SystemExit(
+                      "representative priced path market-path sample "
+                      f"identity mismatch: {field}"
+                  )
           if int(
               market_provenance.get("sample_run_id", -1)
           ) != int("${{ inputs.sample_run_id }}"):
@@ -459,6 +478,10 @@ jobs:
                   "representative priced-path summary is not exactly 10"
               )
 
+          sample_binding = {
+              "sample_sha256": sample_identity["sample_sha256"],
+              "token_set_sha256": sample_identity["token_set_sha256"],
+          }
           source_runs = {
               "sample_run_id": int("${{ inputs.sample_run_id }}"),
               "market_path_run_id": int(
@@ -481,6 +504,7 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "market_path_sha256": market_manifest["sha256"],
+                  **sample_binding,
                   **source_runs,
               },
           )
@@ -495,6 +519,7 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": HEAD,
                   "priced_paths_sha256": snapshot["sha256"],
+                  **sample_binding,
                   **source_runs,
               },
           )
@@ -514,6 +539,7 @@ jobs:
               "pricing_source_coverage": len(pricing_source_coverage),
               "priced_paths_sha256": snapshot["sha256"],
               "summary_sha256": summary_snapshot["sha256"],
+              **sample_binding,
               **source_runs,
           }
           Path(
