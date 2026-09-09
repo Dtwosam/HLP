@@ -26,11 +26,14 @@ jobs:
         with:
           fetch-depth: 0
       - id: config
-        name: Read frozen PASS run
+        name: Read frozen PASS run and exact acceptance artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
           import json
           import os
+          import urllib.request
           from pathlib import Path
 
           config = json.loads(
@@ -42,16 +45,108 @@ jobs:
               raise SystemExit("Phase 1 PASS closeout is not armed")
           if run_id <= 0:
               raise SystemExit("final acceptance run ID must be positive")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          matches = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              matches.extend(
+                  row
+                  for row in rows
+                  if not row.get("expired")
+                  and str(row.get("name") or "")
+                  == "phase1-pons-acceptance-gate"
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "Phase 1 closeout acceptance artifact pagination "
+                      "exceeded 1000"
+                  )
+
+          if not matches:
+              raise SystemExit(
+                  "Phase 1 closeout acceptance artifact is missing"
+              )
+          if len(matches) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in matches
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in matches
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in matches
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "Phase 1 closeout acceptance retry artifacts "
+                      "are not equivalent"
+                  )
+
+          artifact_id = max(
+              int(row.get("id", 0))
+              for row in matches
+          )
+          if artifact_id <= 0:
+              raise SystemExit(
+                  "Phase 1 closeout acceptance artifact ID is invalid"
+              )
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"final_acceptance_run_id={run_id}\n")
+              output.write(f"acceptance_artifact_id={artifact_id}\n")
           print(json.dumps({
               "generation": generation,
               "final_acceptance_run_id": run_id,
+              "acceptance_artifact_id": artifact_id,
           }, sort_keys=True))
           PY
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-acceptance-gate
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
           path: acceptance
           run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
           github-token: ${{ github.token }}
@@ -216,8 +311,28 @@ jobs:
           )
           print(json.dumps(closeout, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_closeout
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-pass-closeout
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_closeout
+        name: Retry Phase 1 closeout artifact upload
+        if: ${{ steps.upload_closeout.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-pass-closeout
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final Phase 1 closeout artifact upload retry
+        if: ${{ steps.retry_upload_closeout.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-pass-closeout
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
