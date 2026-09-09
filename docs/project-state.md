@@ -1332,6 +1332,17 @@ artifacts are collapsed under that same fail-closed rule. Both venue merges now
 carry the already-verified current plan bytes directly into the final canonical
 artifact instead of performing a second name-based `download-artifact` lookup.
 
+The downstream pricing handoff is now hardened before the live V2/V4 rescue
+reaches it. Both bounded SKHY continuation primitives and their segmented final
+artifacts retry GitHub artifact finalization up to three total attempts without
+repeating the completed archive scan. The 128-shard V3 and V4 quote-fallback
+workflows apply the same retry pattern independently to route-selection,
+per-shard and final merged artifacts. During this audit a stray empty
+`actions/upload-artifact@v4` step was found immediately before the real V3
+quote-route upload; it has been removed and CI now pins both the absence of that
+malformed duplicate step and the retry contract across all six downstream
+pricing workflows.
+
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
 run. It first resolves an equivalent canonical
