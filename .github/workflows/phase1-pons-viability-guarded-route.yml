@@ -343,6 +343,26 @@ jobs:
               raise SystemExit(
                   "evidence handoff representative token count changed"
               )
+          explorer_required = report.get("explorer_evidence_required", False)
+          if not isinstance(explorer_required, bool):
+              raise SystemExit(
+                  "evidence handoff explorer requirement must be boolean"
+              )
+          explorer_run_id = int(
+              report.get("explorer_crosscheck_run_id", 0)
+          )
+          if explorer_run_id < 0:
+              raise SystemExit(
+                  "evidence handoff explorer run ID is invalid"
+              )
+          if explorer_required and explorer_run_id <= 0:
+              raise SystemExit(
+                  "evidence handoff explorer evidence is required without a run"
+              )
+          if not explorer_required and explorer_run_id != 0:
+              raise SystemExit(
+                  "evidence handoff explorer run is present while optional"
+              )
           evidence_hashes = {}
           for field in (
               "eligible_universe_sha256",
