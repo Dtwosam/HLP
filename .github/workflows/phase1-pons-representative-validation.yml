@@ -699,8 +699,28 @@ jobs:
           )
           print(json.dumps(summary, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_representative
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-representative-validation
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_representative
+        name: Retry representative validation artifact upload
+        if: ${{ steps.upload_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final representative validation artifact upload retry
+        if: ${{ steps.retry_upload_representative.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
