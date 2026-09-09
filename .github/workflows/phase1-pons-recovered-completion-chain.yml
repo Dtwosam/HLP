@@ -147,6 +147,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
               select_equivalent_artifact_retry,
           )
           from hlp.data.pons_v1_v3_artifacts import (
@@ -242,19 +243,16 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def request(path, *, decode_json=True):
-              req = urllib.request.Request(
+              payload = fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  payload = response.read()
               if not decode_json:
-                  return payload
-              return json.loads(payload)
+                  raise SystemExit(
+                      "raw metadata reads are not supported here"
+                  )
+              return payload
 
           def get(path):
               return request(path)
@@ -1041,7 +1039,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - id: download_reused_eligible
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+      - name: Clean partial reused eligible universe download before retry
+        if: ${{ steps.download_reused_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_reused_eligible
+        name: Retry reused eligible universe artifact download
+        if: ${{ steps.download_reused_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+      - name: Clean partial reused eligible universe download before final retry
+        if: ${{ steps.retry_download_reused_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final reused eligible universe artifact download retry
+        if: ${{ steps.retry_download_reused_eligible.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-eligible-universe
           path: eligible
@@ -1144,6 +1164,7 @@ jobs:
           import urllib.request
 
           from hlp.data.github_actions import (
+              fetch_github_actions_json,
               select_equivalent_artifact_retry,
           )
 
@@ -1153,16 +1174,11 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           rows = []
           page = 1
@@ -1220,13 +1236,65 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_evidence_eligible
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
           path: eligible
           run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial recovered eligible universe download before retry
+        if: ${{ steps.download_evidence_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_evidence_eligible
+        name: Retry recovered eligible universe artifact download
+        if: ${{ steps.download_evidence_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial recovered eligible universe download before final retry
+        if: ${{ steps.retry_download_evidence_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final recovered eligible universe artifact download retry
+        if: ${{ steps.retry_download_evidence_eligible.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - id: download_evidence_representative
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial recovered representative validation download before retry
+        if: ${{ steps.download_evidence_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - id: retry_download_evidence_representative
+        name: Retry recovered representative validation artifact download
+        if: ${{ steps.download_evidence_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial recovered representative validation download before final retry
+        if: ${{ steps.retry_download_evidence_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - name: Final recovered representative validation artifact download retry
+        if: ${{ steps.retry_download_evidence_representative.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence_inputs.outputs.representative_artifact_id }}
           path: representative
