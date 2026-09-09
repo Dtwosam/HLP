@@ -1254,6 +1254,26 @@ generation with zero successful repair artifacts remains the required parent
 plan, allowing recursive lineage to recover older reusable artifacts without
 silently skipping that generation.
 
+V1/V3 now uses the same canonical-manifest artifact discipline.
+The V1 lifecycle replay no longer wildcard-downloads current, partial and one
+immediate-prior `phase1-pons-v1-v3-*` artifacts. It resolves the canonical
+`phase1-pons-v1-v3-full` artifact, validates the aggregate shard geometry,
+maps each selected original/recovered shard back to its exact source run and
+artifact name, collapses only equivalent GitHub retry duplicates, validates the
+embedded chain/protocol/frozen-registry/filter/range/record/SHA identity and
+materializes shards under source-run-specific directories. Readiness and
+recovered completion independently require every shard named by a recovered
+V1/V3 canonical manifest to remain backed by a non-expired equivalent artifact
+before adopting or executing the venue handoff.
+
+V1/V3 gap recovery is retry-hardened symmetrically with V2/V4 as well. Gap-plan
+and final canonical uploads receive up to three attempts using the already
+generated local files, prior/current plan reads reconcile same-name artifacts
+only when GitHub digest/size/run binding is equivalent, and same-name gap retry
+artifacts are collapsed under that same fail-closed rule. Both venue merges now
+carry the already-verified current plan bytes directly into the final canonical
+artifact instead of performing a second name-based `download-artifact` lookup.
+
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
 run. It first resolves an equivalent canonical
