@@ -1338,7 +1338,11 @@ transition, quote-audit and WETH/USDG anchor run IDs, and verify each support
 run is successful, comes from its exact workflow path on the Phase 1 branch,
 and still exposes its required non-expired canonical artifact. The reusable
 representative chain repeats that immutable support preflight before its sample
-job, so direct/manual entry cannot bypass it and reach Transfer RPC. The
+job and now independently checks the eligibility run, V1/V3 and V2/V4 artifact
+presence, exact lifecycle-manifest venue provenance, and the absence of any
+active exact-title venue rescue. Direct/manual entry therefore cannot bypass
+the one-shot launcher and reach Transfer RPC with mixed venue lineage or while
+archive rescue work is active. The
 first real standalone representative run is now staged behind
 `.github/phase1-pons-representative-evidence.json` and remains unarmed at
 generation **0**. A future launch must be the exact one-line commit
