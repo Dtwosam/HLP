@@ -73,7 +73,33 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_registry
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before retry
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - id: retry_download_registry
+        name: Retry V1 registry artifact download
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before final retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - name: Final V1 registry artifact download retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-full-registry-recovered
           path: registry
@@ -448,19 +474,97 @@ jobs:
               "resolver": "canonical_manifest_exact_artifacts",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_quotes
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.quote_audit_artifact_name }}
           path: quotes
           run-id: ${{ inputs.quote_audit_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V1 quote audit download before retry
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - id: retry_download_quotes
+        name: Retry V1 quote audit artifact download
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 quote audit download before final retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - name: Final V1 quote audit artifact download retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-weth-usdg-anchor-full
           path: anchor
           run-id: ${{ inputs.anchor_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V1 anchor download before retry
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - id: retry_download_anchor
+        name: Retry V1 anchor artifact download
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 anchor download before final retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - name: Final V1 anchor artifact download retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 stock oracle download before retry
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - id: retry_download_oracle
+        name: Retry V1 stock oracle artifact download
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 stock oracle download before final retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - name: Final V1 stock oracle artifact download retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-stock-oracle-full
           path: oracle
@@ -750,8 +854,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_lifecycle
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v1-lifecycle-eligibility
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_lifecycle
+        name: Retry V1 lifecycle eligibility artifact upload
+        if: ${{ steps.upload_lifecycle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V1 lifecycle eligibility artifact upload retry
+        if: ${{ steps.retry_upload_lifecycle.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
