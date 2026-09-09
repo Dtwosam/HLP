@@ -1128,8 +1128,16 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert content.count("name: Final gap artifact upload retry") == 4
     assert content.count("steps.upload_gap.outcome == 'failure'") == 4
     assert content.count("steps.retry_upload_gap.outcome == 'failure'") == 4
-    assert content.count("overwrite: true") == 8
-    assert content.count("continue-on-error: true") >= 8
+    assert content.count("id: upload_plan") == 1
+    assert content.count("id: retry_upload_plan") == 1
+    assert "Retry V1/V3 gap-plan artifact upload" in content
+    assert "Final V1/V3 gap-plan artifact upload retry" in content
+    assert content.count("id: upload_full") == 1
+    assert content.count("id: retry_upload_full") == 1
+    assert "Retry canonical V1/V3 artifact upload" in content
+    assert "Final canonical V1/V3 artifact upload retry" in content
+    assert content.count("overwrite: true") == 12
+    assert content.count("continue-on-error: true") >= 10
     assert "frozen parent recovery is blocked while source is active" in content
     assert "Verify frozen V1 registry input" in content
     assert "V1 registry run ID changed: " in content
@@ -1160,6 +1168,8 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert '"planning_source_bytes_downloaded": 0' in content
     assert "Discover reusable prior V1/V3 gap coverage" in content
     assert "source-metadata/v1-v3-prior-gap-coverage.json" in content
+    assert "observed_groups = {}" in content
+    assert "collapsed_retry_artifacts = 0" in content
     assert '"planning_prior_gap_jsonl_bytes_downloaded": 0' in content
     prior_coverage_block = content.split(
         "Discover reusable prior V1/V3 gap coverage",
@@ -1197,7 +1207,16 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "duplicate V1/V3 shard file while downloading" in content
     assert "Download recursive paginated V1/V3 gap artifacts" in content
     assert "V1/V3 merge gap artifact pagination " in content
-    assert "V1/V3 merge contains duplicate gap artifact IDs" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "prior recovery plan retry artifacts are not " in content
+    assert "prior gap coverage plan retry artifacts are not " in content
+    assert "prior gap coverage duplicate retry artifacts " in content
+    assert "are not equivalent" in content
+    assert "V1/V3 merge duplicate retry artifacts " in content
+    assert "V1/V3 merge prior plan retry artifacts are not " in content
+    assert "V1/V3 merge current plan retry artifacts are not " in content
+    assert "V1/V3 merge contains duplicate gap artifact IDs" not in content
+    assert "prior gap coverage has duplicate gap artifacts" not in content
     assert "V1/V3 merge prior gap lineage contains a cycle" in content
     assert "V1/V3 merge prior gap lineage exceeds 20 generations" in content
     assert "V1/V3 merge prior gap artifact is not bound " in content
@@ -1229,7 +1248,7 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "pons-full-launch-registry.jsonl" in content
     assert "global_topic_then_registry" in content
     assert "observed_bounds != expected_bounds" in content
-    assert "V1/V3 merge current gap plan artifact identity " in content
+    assert "V1/V3 merge current gap plan artifact " in content
     assert "V1/V3 merge current gap plan file identity " in content
     assert "V1/V3 merge current gap partial source changed" in content
     assert "V1/V3 merge current gap snapshot head changed" in content
