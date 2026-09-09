@@ -46,7 +46,8 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - name: Verify acceptance caller and evidence provenance
+      - id: provenance
+        name: Verify acceptance caller and evidence provenance
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ELIGIBLE_RUN_ID: ${{ inputs.eligible_universe_run_id }}
@@ -95,8 +96,13 @@ jobs:
               with urllib.request.urlopen(request, timeout=30) as response:
                   return json.load(response)
 
-          def artifacts(run_id):
-              names = set()
+          artifact_rows_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
+              output = []
               page = 1
               while True:
                   payload = get(
@@ -104,10 +110,8 @@ jobs:
                       f"?per_page=100&page={page}"
                   )
                   rows = list(payload.get("artifacts") or [])
-                  names.update(
-                      str(row.get("name"))
-                      for row in rows
-                      if not row.get("expired")
+                  output.extend(
+                      row for row in rows if not row.get("expired")
                   )
                   if len(rows) < 100:
                       break
@@ -117,7 +121,14 @@ jobs:
                           "acceptance artifact pagination exceeded 1000: "
                           f"run={run_id}"
                       )
-              return names
+              artifact_rows_cache[run_id] = output
+              return output
+
+          def artifacts(run_id):
+              return {
+                  str(row.get("name") or "")
+                  for row in artifact_rows(run_id)
+              }
 
           current = get(
               f"/repos/{repo}/actions/runs/{current_run_id}"
@@ -193,19 +204,70 @@ jobs:
               raise SystemExit(
                   f"acceptance evidence artifacts missing: {missing}"
               )
-          if (
-              "phase1-pons-acquisition-viability-projection"
-              not in artifacts(current_run_id)
-          ):
+          projection_rows = [
+              row
+              for row in artifact_rows(current_run_id)
+              if str(row.get("name") or "")
+              == "phase1-pons-acquisition-viability-projection"
+          ]
+          if not projection_rows:
               raise SystemExit(
                   "acceptance current run is missing viability projection"
               )
+          if len(projection_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in projection_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in projection_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in projection_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "acceptance viability projection retry artifacts "
+                      "are not equivalent"
+                  )
+          viability_artifact_id = max(
+              int(row.get("id", 0))
+              for row in projection_rows
+          )
+          if viability_artifact_id <= 0:
+              raise SystemExit(
+                  "acceptance viability projection artifact ID is invalid"
+              )
 
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"viability_artifact_id={viability_artifact_id}\n"
+              )
           print(json.dumps({
               "caller_run_id": current_run_id,
               "caller_workflow_path": current_path,
               "evidence_run_id": eligible_run_id,
               "viability_projection_run_id": viability_run_id,
+              "viability_artifact_id": viability_artifact_id,
               "preflight": "pass",
           }, sort_keys=True))
           PY
@@ -223,7 +285,7 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-acquisition-viability-projection
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
           path: viability
           run-id: ${{ inputs.viability_projection_run_id }}
           github-token: ${{ github.token }}
