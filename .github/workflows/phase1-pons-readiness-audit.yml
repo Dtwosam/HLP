@@ -466,7 +466,26 @@ jobs:
                       return False
                   if int(summary.get(missing_field, -1)) != 0:
                       return False
-                  if int(summary.get("source_files", 0)) <= 0:
+                  shards = provenance.get("shards")
+                  if not isinstance(shards, list) or not shards:
+                      return False
+                  source_files = int(summary.get("source_files", 0))
+                  candidate_source_files = int(
+                      summary.get("candidate_source_files", -1)
+                  )
+                  dropped_source_files = int(
+                      summary.get(
+                          "dropped_overlapping_source_files",
+                          -1,
+                      )
+                  )
+                  if source_files != len(shards):
+                      return False
+                  if candidate_source_files < source_files:
+                      return False
+                  if dropped_source_files != (
+                      candidate_source_files - source_files
+                  ):
                       return False
               except (TypeError, ValueError):
                   return False
