@@ -78,37 +78,193 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_sample
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-sample
           path: sample
           run-id: ${{ inputs.sample_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative sample download before retry
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - id: retry_download_sample
+        name: Retry representative sample artifact download
+        if: ${{ steps.download_sample.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative sample download before final retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        run: rm -rf sample
+      - name: Final representative sample artifact download retry
+        if: ${{ steps.retry_download_sample.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-sample
+          path: sample
+          run-id: ${{ inputs.sample_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_market_paths
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-representative-market-paths
           path: market-paths
           run-id: ${{ inputs.market_path_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative market paths download before retry
+        if: ${{ steps.download_market_paths.outcome == 'failure' }}
+        run: rm -rf market-paths
+      - id: retry_download_market_paths
+        name: Retry representative market paths artifact download
+        if: ${{ steps.download_market_paths.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative market paths download before final retry
+        if: ${{ steps.retry_download_market_paths.outcome == 'failure' }}
+        run: rm -rf market-paths
+      - name: Final representative market paths artifact download retry
+        if: ${{ steps.retry_download_market_paths.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ inputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_quotes
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.quote_audit_artifact_name }}
           path: quotes
           run-id: ${{ inputs.quote_audit_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial quote audit download before retry
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - id: retry_download_quotes
+        name: Retry quote audit artifact download
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote audit download before final retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - name: Final quote audit artifact download retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-weth-usdg-anchor-full
           path: anchor
           run-id: ${{ inputs.anchor_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial WETH/USDG anchor download before retry
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - id: retry_download_anchor
+        name: Retry WETH/USDG anchor artifact download
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial WETH/USDG anchor download before final retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - name: Final WETH/USDG anchor artifact download retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-stock-oracle-full
           path: oracle
           run-id: ${{ inputs.oracle_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial stock oracle download before retry
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - id: retry_download_oracle
+        name: Retry stock oracle artifact download
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial stock oracle download before final retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - name: Final stock oracle artifact download retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote fallback download before retry
+        if: ${{ steps.download_fallback.outcome == 'failure' }}
+        run: rm -rf fallback
+      - id: retry_download_fallback
+        name: Retry quote fallback artifact download
+        if: ${{ steps.download_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote fallback download before final retry
+        if: ${{ steps.retry_download_fallback.outcome == 'failure' }}
+        run: rm -rf fallback
+      - name: Final quote fallback artifact download retry
+        if: ${{ steps.retry_download_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-quote-fallback-full
           path: fallback
