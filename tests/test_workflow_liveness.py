@@ -698,10 +698,10 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "viability measurement source eligibility run changed" in content
     assert "viability measurement evidence run ID cannot be negative" in content
     assert '"sequence_id": os.environ.get("SEQUENCE_ID", "")' in content
-    assert "import urllib.error" in content
-    assert "transient_http_codes = {" in content
-    assert "for attempt in range(3):" in content
-    assert "viability evidence metadata retry loop exhausted" in content
+    assert "fetch_github_actions_json(" in content
+    assert "PYTHONPATH: src" in content
+    assert "for attempt in range(3):" not in content
+    assert "urllib.request.urlopen" not in content
     lines = content.splitlines()
     for source in (
         "evidence",
@@ -2350,10 +2350,9 @@ def test_representative_evidence_chain_threads_one_parent_run_and_resumes_transf
     assert "transfers_retry:" not in content
     assert "needs.transfers.result == 'success'" in content
     assert content.count("format('{0}', github.run_id)") >= 10
-    assert "import urllib.error" in content
-    assert "transient_http_codes = {" in content
-    assert "for attempt in range(3):" in content
-    assert "representative preflight metadata retry loop exhausted" in content
+    assert "fetch_github_actions_json(" in content
+    assert "for attempt in range(3):" not in content
+    assert "urllib.request.urlopen" not in content
     for source in ("preflight_v1", "preflight_v2"):
         assert content.count(f"id: download_{source}") == 1, source
         assert content.count(f"id: retry_download_{source}") == 1, source
