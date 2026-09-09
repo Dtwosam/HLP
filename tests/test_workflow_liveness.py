@@ -1623,7 +1623,18 @@ def test_v1_v3_gap_recovery_is_manual_gap_aware_and_bounded():
     assert "Retry canonical V1/V3 artifact upload" in content
     assert "Final canonical V1/V3 artifact upload retry" in content
     assert content.count("overwrite: true") == 12
-    assert content.count("continue-on-error: true") >= 10
+    assert content.count("continue-on-error: true") >= 15
+    assert content.count("fetch_github_actions_json(") == 7
+    assert "urllib.request.urlopen" not in content
+    assert content.count("id: download_registry") == 5
+    assert content.count("id: retry_download_registry") == 5
+    assert content.count(
+        "steps.download_registry.outcome == 'failure'"
+    ) == 10
+    assert content.count(
+        "steps.retry_download_registry.outcome == 'failure'"
+    ) == 10
+    assert content.count("rm -rf registry") == 10
     assert "frozen parent recovery is blocked while source is active" in content
     assert "Verify frozen V1 registry input" in content
     assert "V1 registry run ID changed: " in content
