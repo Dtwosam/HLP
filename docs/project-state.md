@@ -484,12 +484,23 @@ research threshold or starting another archive crawl:
   market-path and priced-path inputs each receive three GitHub artifact
   download attempts with partial-directory cleanup, and its final explorer
   artifact receives three upload attempts without repeating the external
-  verification work. The Blockscout client itself now counts every HTTP attempt,
+  verification work. The Blockscout client itself counts every HTTP attempt,
   retries only transient 408/425/429/5xx plus transport/JSON failures, and fails
   permanent HTTP errors immediately, so request accounting remains truthful if
-  access is reverified. If explorer evidence is supplied later, representative
-  validation and Phase 1 PASS require complete
-  10-token coverage and exact agreement with the GeckoTerminal checkpoint set;
+  access is reverified. The representative evidence chain now exposes a
+  default-false `explorer_access_reverified` switch. When false, the explorer
+  job is skipped and today's GeckoTerminal-only acceptance path is unchanged;
+  when true, the chain runs the Blockscout cross-check after priced paths and
+  requires that job to succeed before representative validation. Validation
+  downloads the exact explorer artifact with the same three-attempt cleanup
+  contract, verifies sample/market/priced run provenance, passes all ten token
+  summaries into the already fail-closed explorer/DEX reconciliation helper,
+  and refuses completion unless `explorer_verified_tokens == 10`. The normal
+  and recovered evidence chains both pass this switch through, so explicitly
+  supplied explorer evidence is binding all the way into the Phase 1 PASS
+  evidence path. Complete 10-token coverage and exact agreement with the
+  GeckoTerminal checkpoint set are therefore mandatory whenever explorer
+  evidence is enabled;
 - V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
   events so an Initialize-only price cannot masquerade as independent trade
   evidence;
