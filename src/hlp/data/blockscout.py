@@ -25,6 +25,15 @@ from hlp.data.types import RawLog
 
 DEFAULT_BLOCKSCOUT_BASE = "https://robinhoodchain.blockscout.com"
 BLOCKSCOUT_LOG_RESULT_LIMIT = 1000
+_TRANSIENT_HTTP_CODES = {
+    408,
+    425,
+    429,
+    500,
+    502,
+    503,
+    504,
+}
 
 
 class BlockscoutError(RuntimeError):
@@ -63,15 +72,30 @@ class BlockscoutClient:
         )
         last_error: Exception | None = None
         for attempt in range(1, self.attempts + 1):
+            self.requests_made += 1
             try:
                 raw = self._read(request)
-                self.requests_made += 1
                 self.bytes_received += len(raw)
                 return json.loads(raw)
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if (
+                    exc.code not in _TRANSIENT_HTTP_CODES
+                    or attempt == self.attempts
+                ):
+                    raise BlockscoutError(
+                        "Blockscout request failed: "
+                        f"HTTP {exc.code}: {exc.reason}"
+                    ) from exc
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                json.JSONDecodeError,
+            ) as exc:
                 last_error = exc
                 if attempt == self.attempts:
                     break
+            if self.backoff_seconds > 0:
                 time.sleep(self.backoff_seconds * attempt)
         raise BlockscoutError(f"Blockscout request failed: {last_error}")
 
