@@ -2699,6 +2699,28 @@ def test_representative_market_paths_are_manual_artifact_only_and_bounded():
     assert 'default: "33911022718"' in content
     assert 'default: "33936232604"' in content
     assert 'default: "33912452330"' in content
+    for source in (
+        "sample",
+        "registry",
+        "v1v3",
+        "v1v3_current",
+        "v1v3_partial",
+        "v1v3_prior",
+        "v2curve",
+        "transition",
+        "v2v4",
+        "v2v4_current",
+        "v2v4_partial",
+        "v2v4_prior",
+    ):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
@@ -2730,6 +2752,22 @@ def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
     assert "identity mismatch: {field}" in content
     assert '"sample_sha256": sample_identity["sample_sha256"]' in content
     assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
+    for source in (
+        "sample",
+        "market_paths",
+        "quotes",
+        "anchor",
+        "oracle",
+        "fallback",
+    ):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "RpcClient" not in content
     assert "GeckoTerminalClient" not in content
@@ -2807,6 +2845,23 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "id: retry_upload_representative" in content
     assert "Retry representative validation artifact upload" in content
     assert "Final representative validation artifact upload retry" in content
+    for source in (
+        "sample",
+        "v1",
+        "v2",
+        "transfers",
+        "market_paths",
+        "priced_paths",
+        "dex",
+    ):
+        assert content.count(f"id: download_{source}") == 1, source
+        assert content.count(f"id: retry_download_{source}") == 1, source
+        assert content.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
 
