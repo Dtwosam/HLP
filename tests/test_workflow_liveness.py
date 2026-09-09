@@ -195,6 +195,18 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "viability measurement evidence workflow path is not" in content
     assert "viability measurement evidence branch changed" in content
     assert "viability measurement evidence artifacts missing" in content
+    assert "Validate evidence handoff contents before viability RPC" in content
+    assert "viability measurement evidence handoff is not ready" in content
+    assert "viability measurement evidence handoff run mismatch" in content
+    assert "viability measurement evidence handoff source mismatch" in content
+    assert "viability measurement evidence representative count changed" in content
+    assert "viability measurement evidence hash is invalid" in content
+    assert "representative_sample_sha256" in content
+    assert "representative_token_set_sha256" in content
+    assert "representative_source_coverage_sha256" in content
+    assert "viability measurement runner-smoke run changed" in content
+    assert "viability measurement runner-smoke universe SHA changed" in content
+    assert "viability measurement runner-smoke outcomes SHA changed" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-pons-eligible-universe" in content
     assert "phase1-pons-representative-validation" in content
