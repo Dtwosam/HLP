@@ -2878,7 +2878,32 @@ def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
     assert "push:" in trigger_block
     assert "workflow_dispatch:" not in trigger_block
     assert ".github/phase1-pons-recovered-completion.json" in content
-    assert "launch recovered Phase 1 completion" in content
+    assert "startsWith(github.event.head_commit.message" in content
+    assert "contains(github.event.head_commit.message" not in content
+    assert "launch recovered Phase 1 completion generation " in content
+    assert 'r"launch recovered Phase 1 completion generation (\\d+)"' in content
+    assert "raw_launch_message != launch_message" in content
+    assert "launch message must be exactly one line" in content
+    assert "launch requires an exact generation" in content
+    assert "requested_generation != generation" in content
+    assert "launch/config generation mismatch" in content
+    assert "generation != previous_generation + 1" in content
+    assert "generation must increment " in content
+    assert "by exactly one" in content
+    assert 're.fullmatch(r"[0-9a-f]{40}", before_sha)' in content
+    assert 're.fullmatch(r"[0-9a-f]{40}", current_sha)' in content
+    assert 'f"/repos/{repo}/commits/{current_sha}"' in content
+    assert "launch must be a direct " in content
+    assert "single-parent commit" in content
+    assert "launch must modify exactly " in content
+    assert "the guarded config file" in content
+    assert "expected_keys = {" in content
+    assert "set(config) != expected_keys" in content
+    assert "set(previous_config) != expected_keys" in content
+    assert "previous config schema changed" in content
+    assert "validation_generation != 7" in content
+    assert "previous_validation_generation != 7" in content
+    assert "validation generation changed" in content
     assert "recovered completion config is not armed" in content
     assert "source_id != 33_982_556_591" in content
     assert "v1_id <= 0" in content
