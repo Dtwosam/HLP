@@ -35,6 +35,7 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
           BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
         run: |
           python - <<'PY'
           import base64
@@ -42,8 +43,9 @@ jobs:
           import os
           import re
           import urllib.parse
-          import urllib.request
           from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
 
           config_path = ".github/phase1-pons-representative-evidence.json"
           config = json.loads(Path(config_path).read_text())
@@ -92,16 +94,11 @@ jobs:
           token = os.environ["GITHUB_TOKEN"]
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           launch_commit = get(f"/repos/{repo}/commits/{current_sha}")
           parents = list(launch_commit.get("parents") or [])
@@ -343,7 +340,33 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - name: Download frozen eligible universe
+      - id: download_eligible
+        name: Download frozen eligible universe
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+          run-id: ${{ steps.validate.outputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative eligible universe before retry
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_eligible
+        name: Retry frozen eligible universe artifact download
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+          run-id: ${{ steps.validate.outputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative eligible universe before final retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final frozen eligible universe artifact download retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
         uses: actions/download-artifact@v4
         with:
           name: phase1-pons-eligible-universe
