@@ -197,6 +197,13 @@ def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     assert "viability measurement evidence workflow path is not" in content
     assert "viability measurement evidence branch changed" in content
     assert "viability measurement evidence artifacts missing" in content
+    assert "viability measurement evidence-ready retry " in content
+    assert "artifacts are not equivalent" in content
+    assert "evidence_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}"
+        in content
+    )
     assert "Validate evidence handoff contents before viability RPC" in content
     assert "viability measurement evidence handoff is not ready" in content
     assert "viability measurement evidence handoff run mismatch" in content
@@ -1645,6 +1652,15 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance eligible and representative runs must" in content
     assert "final acceptance evidence workflow path is not allowed" in content
     assert "final acceptance evidence artifacts missing" in content
+    assert (
+        "final acceptance evidence-ready retry artifacts are not equivalent"
+        in content
+    )
+    assert "evidence_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}"
+        in content
+    )
     assert "Validate full evidence handoff identity before acceptance" in content
     assert "final acceptance evidence handoff is not ready" in content
     assert "final acceptance evidence handoff run mismatch" in content
@@ -2609,6 +2625,10 @@ def test_post_eligibility_evidence_handoff_is_guarded_and_reusable():
     assert "expected_v1_v3_run_id=source_run_id" in chain
     assert "expected_v2_v4_run_id=source_run_id" in chain
     assert "**validation" in chain
+    assert "id: upload_evidence_ready" in chain
+    assert "id: retry_upload_evidence_ready" in chain
+    assert "Retry evidence-ready artifact upload" in chain
+    assert "Final evidence-ready artifact upload retry" in chain
 
     launcher = _workflow(
         "phase1-pons-post-eligibility-evidence-one-shot.yml"
@@ -2637,6 +2657,12 @@ def test_viability_guarded_route_is_evidence_gated_before_rpc():
     assert "33_982_556_591" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
     assert "phase1-post-eligibility-evidence-ready.json" in content
+    assert "evidence-ready retry artifacts are not equivalent" in content
+    assert "evidence_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}"
+        in content
+    )
     assert "evidence handoff lifecycle run ID must be positive" in content
     assert "normal_evidence_path = (" in content
     assert "recovered_evidence_path = (" in content
@@ -2788,8 +2814,15 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "phase1-readiness-report.json" in content
     assert "phase1-pons-readiness-audit" in content
     assert "build_phase1_readiness_report" in content
-    assert "Resolve armed evidence run" in content
+    assert "Resolve armed evidence run and exact handoff artifact" in content
     assert "phase1-pons-post-eligibility-evidence-ready" in content
+    assert "readiness evidence-ready retry artifacts are not " in content
+    assert "equivalent" in content
+    assert "evidence_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}"
+        in content
+    )
     assert "phase1-post-eligibility-evidence-ready.json" in content
     assert "evidence_handoff=evidence_handoff" in content
     assert "evidence_handoff_errors" in content
@@ -3259,6 +3292,10 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
         assert "pons-representative-validation.jsonl.manifest.json" in content
         assert '"eligible_universe_sha256"' not in content or "**validation" in content
         assert "phase1-pons-post-eligibility-evidence-ready" in content
+        assert "id: upload_evidence_ready" in content
+        assert "id: retry_upload_evidence_ready" in content
+        assert "Retry evidence-ready artifact upload" in content
+        assert "Final evidence-ready artifact upload retry" in content
     assert "post-eligibility source run must match frozen parent" in normal
     assert "33_982_556_591" in normal
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in normal
