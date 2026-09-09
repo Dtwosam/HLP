@@ -253,6 +253,10 @@ jobs:
                   manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
                   expected_data_name = "pons-v1-v3-full.jsonl"
                   expected_source = "manifest_gap_aware_v1_v3_recovery"
+                  expected_filter_semantics = (
+                      "global V3 Initialize/Swap topic scan followed by "
+                      "frozen Pons V1 pool membership"
+                  )
                   upstream_field = "source_registry_run_id"
                   upstream_run_id = 33_911_022_718
               elif venue == "v2_v4":
@@ -260,6 +264,10 @@ jobs:
                   manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
                   expected_data_name = "pons-v2-v4-full.jsonl"
                   expected_source = "manifest_gap_aware_v4_recovery"
+                  expected_filter_semantics = (
+                      "PoolManager Initialize/Swap global topic scan followed "
+                      "by frozen Pons V2 registration membership"
+                  )
                   upstream_field = "transition_run_id"
                   upstream_run_id = 33_912_452_330
               else:
@@ -297,6 +305,8 @@ jobs:
               try:
                   envelope_valid = bool(
                       provenance.get("source") == expected_source
+                      and provenance.get("filter_semantics")
+                      == expected_filter_semantics
                       and int(provenance.get("chain_id", 0)) == 4663
                       and int(
                           provenance.get("snapshot_head_block", 0)
