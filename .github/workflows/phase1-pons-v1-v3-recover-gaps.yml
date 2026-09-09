@@ -591,7 +591,9 @@ jobs:
           from pathlib import Path
 
           from hlp.data.github_actions import (
+              build_rescue_terminal_binding,
               fetch_github_actions_artifact_zip,
+              rescue_terminal_binding_sha256,
               select_equivalent_artifact_retry,
           )
 
@@ -856,42 +858,32 @@ jobs:
                           str(row.get("name") or "")
                           for row in rows
                       }
-                      terminal_binding = {
-                          "run_id": cursor,
-                          "status": prior_run.get("status"),
-                          "conclusion": prior_run.get("conclusion"),
-                          "head_sha": prior_run.get("head_sha"),
-                          "display_title": prior_run.get(
-                              "display_title"
+                      terminal_binding = build_rescue_terminal_binding(
+                          run_id=cursor,
+                          status=prior_run.get("status"),
+                          conclusion=prior_run.get("conclusion"),
+                          head_sha=prior_run.get("head_sha"),
+                          display_title=prior_run.get("display_title"),
+                          run_attempt=prior_run.get("run_attempt"),
+                          reusable_gap_ids=reusable_gap_ids,
+                          missing_success_artifacts=(
+                              successful_gap_ids - set(observed)
                           ),
-                          "run_attempt": prior_run.get("run_attempt"),
-                          "reusable_gap_ids": sorted(
-                              reusable_gap_ids,
-                              key=int,
+                          non_success_gap_artifacts=(
+                              set(observed) - successful_gap_ids
                           ),
-                          "missing_success_artifacts": sorted(
-                              successful_gap_ids - set(observed),
-                              key=int,
-                          ),
-                          "non_success_gap_artifacts": sorted(
-                              set(observed) - successful_gap_ids,
-                              key=int,
-                          ),
-                          "plan_artifact_present": (
+                          plan_artifact_present=(
                               plan_artifact in artifact_names
                           ),
-                          "canonical_artifact_present": (
-                              "phase1-pons-v1-v3-full"
-                              in artifact_names
+                          canonical_artifact_present=(
+                              "phase1-pons-v1-v3-full" in artifact_names
                           ),
-                      }
-                      observed_snapshot_sha256 = hashlib.sha256(
-                          json.dumps(
-                              terminal_binding,
-                              sort_keys=True,
-                              separators=(",", ":"),
-                          ).encode()
-                      ).hexdigest()
+                      )
+                      observed_snapshot_sha256 = (
+                          rescue_terminal_binding_sha256(
+                              terminal_binding
+                          )
+                      )
                       if observed_snapshot_sha256 != (
                           expected_snapshot_sha256
                       ):
