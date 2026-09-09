@@ -121,7 +121,33 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"artifact_id={artifact_id}\n")
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_accounting
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
+          path: accounting
+          run-id: ${{ inputs.accounting_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability accounting download before retry
+        if: ${{ steps.download_accounting.outcome == 'failure' }}
+        run: rm -rf accounting
+      - id: retry_download_accounting
+        name: Retry viability accounting artifact download
+        if: ${{ steps.download_accounting.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
+          path: accounting
+          run-id: ${{ inputs.accounting_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability accounting download before final retry
+        if: ${{ steps.retry_download_accounting.outcome == 'failure' }}
+        run: rm -rf accounting
+      - name: Final viability accounting artifact download retry
+        if: ${{ steps.retry_download_accounting.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
           path: accounting
