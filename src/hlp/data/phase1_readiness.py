@@ -295,6 +295,25 @@ def _evidence_handoff_errors(
     if representative_tokens != 10:
         errors.append("evidence handoff representative token count changed")
 
+    explorer_required = handoff.get("explorer_evidence_required", False)
+    if not isinstance(explorer_required, bool):
+        errors.append("evidence handoff explorer requirement must be boolean")
+        explorer_required = False
+    explorer_run_id = _safe_int(
+        handoff.get("explorer_crosscheck_run_id"),
+        default=0,
+    )
+    if explorer_run_id < 0:
+        errors.append("evidence handoff explorer run ID is invalid")
+    elif explorer_required and explorer_run_id <= 0:
+        errors.append(
+            "evidence handoff explorer evidence is required without a run"
+        )
+    elif not explorer_required and explorer_run_id != 0:
+        errors.append(
+            "evidence handoff explorer run is present while optional"
+        )
+
     handoff_hashes: dict[str, str] = {}
     for field in (
         "eligible_universe_sha256",
