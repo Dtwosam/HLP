@@ -279,6 +279,54 @@ jobs:
               "artifacts/pons-representative-sample.jsonl"
           )
           identity = representative_sample_identity(sample_path)
+
+          v1_eligibility_run_id = int(
+              "${{ inputs.v1_eligibility_run_id }}"
+          )
+          v2_eligibility_run_id = int(
+              "${{ inputs.v2_eligibility_run_id }}"
+          )
+          v1_manifest = json.loads(
+              Path(
+                  "v1/pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+              ).read_text()
+          )
+          v2_manifest = json.loads(
+              Path(
+                  "v2/pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+              ).read_text()
+          )
+
+          def venue_run_id(manifest, field, lifecycle_run_id):
+              provenance = manifest.get("provenance") or {}
+              value = provenance.get(field)
+              if value is None:
+                  if lifecycle_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          "representative sample lifecycle venue "
+                          f"provenance missing: {field} "
+                          f"run={lifecycle_run_id}"
+                      )
+                  return lifecycle_run_id
+              run_id = int(value)
+              if run_id <= 0:
+                  raise SystemExit(
+                      "representative sample lifecycle venue run "
+                      f"is invalid: {field}={run_id}"
+                  )
+              return run_id
+
+          v1_v3_run_id = venue_run_id(
+              v1_manifest,
+              "v1_v3_run_id",
+              v1_eligibility_run_id,
+          )
+          v2_v4_run_id = venue_run_id(
+              v2_manifest,
+              "v4_run_id",
+              v2_eligibility_run_id,
+          )
+
           Path(
               "artifacts/pons-representative-sample-identity.json"
           ).write_text(
@@ -305,12 +353,10 @@ jobs:
               "latest_launch_block": max(
                   int(row["launch_block"]) for row in rows
               ),
-              "v1_eligibility_run_id": int(
-                  "${{ inputs.v1_eligibility_run_id }}"
-              ),
-              "v2_eligibility_run_id": int(
-                  "${{ inputs.v2_eligibility_run_id }}"
-              ),
+              "v1_eligibility_run_id": v1_eligibility_run_id,
+              "v2_eligibility_run_id": v2_eligibility_run_id,
+              "validated_v1_v3_run_id": v1_v3_run_id,
+              "validated_v2_v4_run_id": v2_v4_run_id,
               "runner_smoke_run_id": int(
                   "${{ inputs.runner_smoke_run_id }}"
               ),
