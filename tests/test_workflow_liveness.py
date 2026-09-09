@@ -2930,6 +2930,9 @@ def test_representative_chain_preflights_frozen_support_before_sample():
     assert "sample:" in content
     assert "needs: preflight" in content
     assert "needs.preflight.result == 'success'" in content
+    assert "fetch_github_actions_json(" in content
+    assert "for attempt in range" not in content
+    assert "urllib.request.urlopen" not in content
     for token in (
         "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml",
         "phase1-pons-stock-oracle-full",
