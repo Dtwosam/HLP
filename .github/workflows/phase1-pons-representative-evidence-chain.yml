@@ -142,6 +142,7 @@ jobs:
           import json
           import os
           import re
+          import urllib.error
           import urllib.request
 
           contracts = {
@@ -219,17 +220,49 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GITHUB_TOKEN"]
 
+          transient_http_codes = {
+              403,
+              408,
+              409,
+              425,
+              429,
+              500,
+              502,
+              503,
+              504,
+          }
+
           def get(path):
-              request = urllib.request.Request(
-                  api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+              url = api + path
+              for attempt in range(3):
+                  request = urllib.request.Request(
+                      url,
+                      headers={
+                          "Authorization": f"Bearer {token}",
+                          "Accept": "application/vnd.github+json",
+                          "X-GitHub-Api-Version": "2022-11-28",
+                      },
+                  )
+                  try:
+                      with urllib.request.urlopen(
+                          request,
+                          timeout=30,
+                      ) as response:
+                          return json.load(response)
+                  except urllib.error.HTTPError as exc:
+                      if (
+                          exc.code in transient_http_codes
+                          and attempt < 2
+                      ):
+                          continue
+                      raise
+                  except (urllib.error.URLError, TimeoutError):
+                      if attempt < 2:
+                          continue
+                      raise
+              raise RuntimeError(
+                  "representative preflight metadata retry loop exhausted"
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           def artifacts(run_id):
               names = set()
@@ -405,13 +438,65 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_preflight_v1
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v1-lifecycle-eligibility
           path: preflight-v1
           run-id: ${{ inputs.eligibility_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial representative V1 lifecycle preflight download before retry
+        if: ${{ steps.download_preflight_v1.outcome == 'failure' }}
+        run: rm -rf preflight-v1
+      - id: retry_download_preflight_v1
+        name: Retry representative V1 lifecycle preflight artifact download
+        if: ${{ steps.download_preflight_v1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V1 lifecycle preflight download before final retry
+        if: ${{ steps.retry_download_preflight_v1.outcome == 'failure' }}
+        run: rm -rf preflight-v1
+      - name: Final representative V1 lifecycle preflight artifact download retry
+        if: ${{ steps.retry_download_preflight_v1.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_preflight_v2
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V2 lifecycle preflight download before retry
+        if: ${{ steps.download_preflight_v2.outcome == 'failure' }}
+        run: rm -rf preflight-v2
+      - id: retry_download_preflight_v2
+        name: Retry representative V2 lifecycle preflight artifact download
+        if: ${{ steps.download_preflight_v2.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V2 lifecycle preflight download before final retry
+        if: ${{ steps.retry_download_preflight_v2.outcome == 'failure' }}
+        run: rm -rf preflight-v2
+      - name: Final representative V2 lifecycle preflight artifact download retry
+        if: ${{ steps.retry_download_preflight_v2.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-lifecycle-eligibility
           path: preflight-v2
