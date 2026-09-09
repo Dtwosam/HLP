@@ -1380,14 +1380,21 @@ fails closed on malformed numeric evidence, route-launch or finalizer
 provenance instead of crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
-evidence preflight in addition to the guarded route launcher. Manual/debug
-dispatch therefore cannot issue route RPC unless the evidence run ID is
-positive, completed successfully, comes from an approved post-eligibility or
-recovered-completion workflow on `phase1/data-acquisition-spike`, and still
+evidence preflight in addition to the guarded route launcher. The post-
+eligibility handoff itself carries the representative sample SHA, canonical
+token-set SHA, source-coverage SHA and frozen runner-smoke run/universe/outcome
+identity in addition to the eligible-universe, validation and lifecycle
+digests. The guarded route validates all of those fields before invoking the
+measurement workflow, and direct/manual measurement dispatch independently
+downloads and validates the same handoff before any RPC. Manual/debug dispatch
+therefore cannot issue route RPC unless the evidence run ID is positive,
+completed successfully, comes from an approved post-eligibility or
+recovered-completion workflow on `phase1/data-acquisition-spike`, still
 contains the ready handoff, eligible-universe and representative-validation
-artifacts. Both the primary route job and the V2 registry companion job depend
-on that preflight, while the existing global viability concurrency group keeps
-all route measurements serialized.
+artifacts, and preserves the full representative evidence identity. Both the
+primary route job and the V2 registry companion job depend on that preflight,
+while the existing global viability concurrency group keeps all route
+measurements serialized.
 
 The reusable final-acceptance chain now repeats the ledger finalizer's core
 provenance checks before any accounting or acceptance work: eligibility and
