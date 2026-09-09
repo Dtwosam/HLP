@@ -932,6 +932,16 @@ first must bind to exactly one consumed immediately preceding generation; a
 plan-only consumed generation with zero reusable repair artifacts remains the
 required parent so recursive lineage cannot silently skip it.
 
+V1/V3 now also uses the same launcher-to-child terminal snapshot binding as
+V2/V4. The launcher passes both the reusable-gap count and a SHA-256 over the
+canonical 11-field terminal binding (run/status/conclusion/head SHA/title/run
+attempt, reusable/missing/non-success gap IDs, and plan/canonical artifact
+presence). The V1 child independently re-fetches the immediate prior run,
+jobs and artifacts, rebuilds the same sorted-JSON binding, verifies the reusable
+count, and must reproduce the launcher digest before it can derive or emit any
+new repair matrix. Manual dispatch may omit both binding inputs together, but
+a one-sided binding is rejected.
+
 The first pinned V1/V3 rescue generation **34207459960**
 completed all 70 repair shards successfully but its final merge failed with
 `NameError: hashlib is not defined`: the launch commit imported `hashlib`
