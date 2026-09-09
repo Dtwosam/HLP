@@ -396,11 +396,13 @@ jobs:
           github-token: ${{ github.token }}
       - name: Validate full evidence handoff identity before acceptance
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           EVIDENCE_RUN_ID: ${{ inputs.eligibility_run_id }}
         run: |
           python - <<'PY'
           import json
           import os
+          import urllib.request
           from pathlib import Path
 
           report = json.loads(
@@ -410,6 +412,40 @@ jobs:
               ).read_text()
           )
           evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          request = urllib.request.Request(
+              api + f"/repos/{repo}/actions/runs/{evidence_run_id}",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              evidence = json.load(response)
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          normal_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          )
+          if evidence_path not in {
+              normal_evidence_path,
+              recovered_evidence_path,
+          }:
+              raise SystemExit(
+                  "final acceptance handoff evidence workflow path changed: "
+                  f"{evidence_path}"
+              )
+
           if report.get("status") != "ready":
               raise SystemExit(
                   "final acceptance evidence handoff is not ready"
@@ -450,10 +486,33 @@ jobs:
                       "final acceptance evidence routing is invalid: "
                       f"{field}"
                   )
-          if not isinstance(report.get("recovery_mode"), bool):
+          recovery_mode = report.get("recovery_mode")
+          if not isinstance(recovery_mode, bool):
               raise SystemExit(
                   "final acceptance evidence recovery mode changed"
               )
+          lifecycle_run_id = int(report["lifecycle_run_id"])
+          v1_v3_run_id = int(report["v1_v3_run_id"])
+          v2_v4_run_id = int(report["v2_v4_run_id"])
+          if evidence_path == normal_evidence_path:
+              if recovery_mode:
+                  raise SystemExit(
+                      "final acceptance normal evidence is marked recovered"
+                  )
+              if {
+                  lifecycle_run_id,
+                  v1_v3_run_id,
+                  v2_v4_run_id,
+              } != {33_982_556_591}:
+                  raise SystemExit(
+                      "final acceptance normal evidence routing changed"
+                  )
+          else:
+              if not recovery_mode:
+                  raise SystemExit(
+                      "final acceptance recovered evidence is not marked "
+                      "recovered"
+                  )
 
           hashes = {}
           for field in (
