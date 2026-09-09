@@ -3649,7 +3649,22 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "is unavailable or ambiguous" in content
     assert "recovery venue retry artifacts are not equivalent" in content
     assert content.count("fetch_github_actions_artifact_zip(") == 1
+    assert content.count("fetch_github_actions_json(") == 2
+    assert "urllib.request.urlopen" not in content
     assert "decode_json=False" not in content
+    assert content.count("id: download_reused_eligible") == 1
+    assert content.count("id: retry_download_reused_eligible") == 1
+    for source in ("eligible", "representative"):
+        assert content.count(f"id: download_evidence_{source}") == 1, source
+        assert content.count(
+            f"id: retry_download_evidence_{source}"
+        ) == 1, source
+        assert content.count(
+            f"steps.download_evidence_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert content.count(
+            f"steps.retry_download_evidence_{source}.outcome == 'failure'"
+        ) == 2, source
     assert "actions/checkout@v4" in content
     assert "python -m pip install -e ." in content
     assert "pons-v1-v3-full.jsonl.manifest.json" in content
