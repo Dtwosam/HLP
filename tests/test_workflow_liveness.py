@@ -277,6 +277,54 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
         ) not in content, name
 
 
+def test_lifecycle_artifact_handoffs_are_retry_safe():
+    contracts = {
+        "phase1-pons-v1-lifecycle-eligibility.yml": (
+            "registry",
+            "quotes",
+            "anchor",
+            "oracle",
+        ),
+        "phase1-pons-v2-lifecycle-eligibility.yml": (
+            "registry",
+            "curve",
+            "transition",
+            "anchor",
+            "oracle",
+            "fallback",
+        ),
+    }
+    for name, inputs in contracts.items():
+        content = _workflow(name)
+        for input_id in inputs:
+            assert content.count(f"id: download_{input_id}") == 1, (
+                name,
+                input_id,
+            )
+            assert content.count(
+                f"id: retry_download_{input_id}"
+            ) == 1, (name, input_id)
+            assert content.count(
+                f"steps.download_{input_id}.outcome == 'failure'"
+            ) == 2, (name, input_id)
+            assert content.count(
+                f"steps.retry_download_{input_id}.outcome == 'failure'"
+            ) == 2, (name, input_id)
+            assert content.count(f"rm -rf {input_id}") == 2, (
+                name,
+                input_id,
+            )
+        assert content.count("id: upload_lifecycle") == 1, name
+        assert content.count("id: retry_upload_lifecycle") == 1, name
+        assert content.count(
+            "steps.upload_lifecycle.outcome == 'failure'"
+        ) == 1, name
+        assert content.count(
+            "steps.retry_upload_lifecycle.outcome == 'failure'"
+        ) == 1, name
+        assert content.count("overwrite: true") == 2, name
+
+
 def test_viability_route_measurement_is_manual_bounded_guarded_and_canonical():
     content = _workflow("phase1-pons-viability-route-measurement.yml")
     trigger_block = content.split("\npermissions:", 1)[0]
