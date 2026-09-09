@@ -1185,12 +1185,36 @@ def test_single_wave_gap_recoveries_retry_transient_artifact_uploads():
         assert content.count("overwrite: true") == expected_overwrites, name
 
 
-def test_quote_gap_recovery_merge_reads_are_retry_safe():
+def test_quote_gap_recovery_artifact_reads_are_retry_safe():
     for name in (
         "phase1-pons-v3-quote-fallback-recover-gaps.yml",
         "phase1-pons-v4-quote-fallback-recover-gaps.yml",
     ):
         content = _workflow(name)
+
+        for source in ("partial", "routes", "prior_gaps"):
+            assert content.count(
+                f"id: download_plan_{source}"
+            ) == 1, (name, source)
+            assert content.count(
+                f"id: retry_download_plan_{source}"
+            ) == 1, (name, source)
+            assert content.count(
+                f"steps.download_plan_{source}.outcome == 'failure'"
+            ) == 2, (name, source)
+            assert content.count(
+                f"steps.retry_download_plan_{source}.outcome == 'failure'"
+            ) == 2, (name, source)
+
+        assert content.count("id: download_recover_routes") == 1, name
+        assert content.count("id: retry_download_recover_routes") == 1, name
+        assert content.count(
+            "steps.download_recover_routes.outcome == 'failure'"
+        ) == 2, name
+        assert content.count(
+            "steps.retry_download_recover_routes.outcome == 'failure'"
+        ) == 2, name
+
         for source in (
             "partial",
             "prior_gaps",
@@ -1211,17 +1235,19 @@ def test_quote_gap_recovery_merge_reads_are_retry_safe():
                 f"steps.retry_download_merge_{source}.outcome == 'failure'"
             ) == 2, (name, source)
 
-        for directory in (
-            "partial",
-            "prior-gaps",
-            "gaps",
-            "routes",
-            "plan",
-        ):
-            assert content.count(f"rm -rf {directory}") == 2, (
+        expected_cleanup_counts = {
+            "partial": 4,
+            "prior-gaps": 4,
+            "gaps": 2,
+            "routes": 6,
+            "plan": 2,
+        }
+        for directory, expected in expected_cleanup_counts.items():
+            assert content.count(f"rm -rf {directory}") == expected, (
                 name,
                 directory,
             )
+
 
 
 def test_v4_gap_recovery_is_manual_gap_aware_and_bounded():
