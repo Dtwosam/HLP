@@ -432,8 +432,28 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_evidence_ready
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-post-eligibility-evidence-ready
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_evidence_ready
+        name: Retry evidence-ready artifact upload
+        if: ${{ steps.upload_evidence_ready.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final evidence-ready artifact upload retry
+        if: ${{ steps.retry_upload_evidence_ready.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
