@@ -501,6 +501,25 @@ def test_representative_intermediate_outputs_are_retry_safe():
         assert content.count("overwrite: true") == 2, name
 
 
+    dex = _workflow("phase1-pons-representative-dex-crosscheck.yml")
+    for source in (
+        "sample",
+        "v1",
+        "v2",
+        "priced_paths",
+        "registry",
+        "transition",
+    ):
+        assert dex.count(f"id: download_{source}") == 1, source
+        assert dex.count(f"id: retry_download_{source}") == 1, source
+        assert dex.count(
+            f"steps.download_{source}.outcome == 'failure'"
+        ) == 2, source
+        assert dex.count(
+            f"steps.retry_download_{source}.outcome == 'failure'"
+        ) == 2, source
+
+
 def test_post_viability_artifact_reads_retry_transient_failures():
     projection = _workflow(
         "phase1-pons-acquisition-viability-projection.yml"
