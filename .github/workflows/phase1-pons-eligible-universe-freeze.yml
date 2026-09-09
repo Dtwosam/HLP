@@ -39,13 +39,65 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
+      - id: download_v1
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v1-lifecycle-eligibility
           path: v1
           run-id: ${{ inputs.v1_eligibility_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial V1 lifecycle download before retry
+        if: ${{ steps.download_v1.outcome == 'failure' }}
+        run: rm -rf v1
+      - id: retry_download_v1
+        name: Retry V1 lifecycle artifact download
+        if: ${{ steps.download_v1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 lifecycle download before final retry
+        if: ${{ steps.retry_download_v1.outcome == 'failure' }}
+        run: rm -rf v1
+      - name: Final V1 lifecycle artifact download retry
+        if: ${{ steps.retry_download_v1.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: v1
+          run-id: ${{ inputs.v1_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 lifecycle download before retry
+        if: ${{ steps.download_v2.outcome == 'failure' }}
+        run: rm -rf v2
+      - id: retry_download_v2
+        name: Retry V2 lifecycle artifact download
+        if: ${{ steps.download_v2.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: v2
+          run-id: ${{ inputs.v2_eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 lifecycle download before final retry
+        if: ${{ steps.retry_download_v2.outcome == 'failure' }}
+        run: rm -rf v2
+      - name: Final V2 lifecycle artifact download retry
+        if: ${{ steps.retry_download_v2.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-lifecycle-eligibility
           path: v2
