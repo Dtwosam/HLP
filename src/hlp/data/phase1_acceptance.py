@@ -367,6 +367,24 @@ def build_phase1_acceptance_report(
             "representative multi-checkpoint token count is invalid"
         )
 
+    explorer_required_raw = representative.get(
+        "explorer_evidence_required",
+        False,
+    )
+    if not isinstance(explorer_required_raw, bool):
+        raise ValueError(
+            "representative.explorer_evidence_required must be boolean"
+        )
+    explorer_required = explorer_required_raw
+    explorer_run_id = _int(
+        representative.get("explorer_crosscheck_run_id", 0),
+        field="representative.explorer_crosscheck_run_id",
+    )
+    if explorer_run_id < 0:
+        raise ValueError(
+            "representative.explorer_crosscheck_run_id must be non-negative"
+        )
+
     explorer_verified_tokens = _int(
         representative.get("explorer_verified_tokens", 0),
         field="representative.explorer_verified_tokens",
@@ -392,6 +410,20 @@ def build_phase1_acceptance_report(
             explorer_transactions,
         )
     )
+    if explorer_required:
+        if explorer_run_id <= 0:
+            raise ValueError(
+                "required supplementary explorer evidence has no run ID"
+            )
+        if not explorer_supplied:
+            raise ValueError(
+                "required supplementary explorer evidence is missing"
+            )
+    elif explorer_run_id > 0 and not explorer_supplied:
+        raise ValueError(
+            "supplementary explorer run ID is present without evidence"
+        )
+
     if explorer_supplied:
         if explorer_verified_tokens != 10 or explorer_launches != 10:
             raise ValueError(
@@ -729,8 +761,12 @@ def build_phase1_acceptance_report(
         "representative_dex_multi_checkpoint_tokens": (
             multi_checkpoint_tokens
         ),
+        "representative_explorer_evidence_required": explorer_required,
+        "representative_explorer_crosscheck_run_id": explorer_run_id,
         "representative_explorer_evidence_status": (
-            "verified" if explorer_supplied else "not_required"
+            "verified"
+            if explorer_supplied
+            else ("required_missing" if explorer_required else "not_required")
         ),
         "representative_explorer_verified_tokens": explorer_verified_tokens,
         "representative_explorer_verified_transactions": (
