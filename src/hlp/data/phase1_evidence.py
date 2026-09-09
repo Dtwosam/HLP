@@ -178,6 +178,50 @@ def validate_post_eligibility_evidence_bundle(
             "representative token-set SHA disagrees with manifest provenance"
         )
 
+    summary_explorer_required = representative_summary.get(
+        "explorer_evidence_required",
+        False,
+    )
+    provenance_explorer_required = representative_provenance.get(
+        "explorer_evidence_required",
+        False,
+    )
+    if not isinstance(summary_explorer_required, bool):
+        raise ValueError(
+            "representative summary explorer requirement must be boolean"
+        )
+    if not isinstance(provenance_explorer_required, bool):
+        raise ValueError(
+            "representative provenance explorer requirement must be boolean"
+        )
+    if summary_explorer_required != provenance_explorer_required:
+        raise ValueError(
+            "representative explorer requirement disagrees with manifest"
+        )
+    explorer_required = summary_explorer_required
+
+    summary_explorer_run = _int(
+        representative_summary.get("explorer_crosscheck_run_id", 0),
+        field="representative.summary.explorer_crosscheck_run_id",
+    )
+    provenance_explorer_run = _int(
+        representative_provenance.get("explorer_crosscheck_run_id", 0),
+        field="representative.explorer_crosscheck_run_id",
+    )
+    if summary_explorer_run != provenance_explorer_run:
+        raise ValueError(
+            "representative explorer run disagrees with manifest"
+        )
+    if explorer_required:
+        if summary_explorer_run <= 0:
+            raise ValueError(
+                "representative explorer evidence is required without a run"
+            )
+    elif summary_explorer_run != 0:
+        raise ValueError(
+            "representative explorer run is present while evidence is optional"
+        )
+
     source_coverage_sha = _sha256(
         representative_provenance.get("source_coverage_sha256"),
         field="representative.source_coverage_sha256",
@@ -311,6 +355,8 @@ def validate_post_eligibility_evidence_bundle(
         "representative_sample_sha256": sample_sha,
         "representative_token_set_sha256": token_set_sha,
         "representative_source_coverage_sha256": source_coverage_sha,
+        "explorer_evidence_required": explorer_required,
+        "explorer_crosscheck_run_id": summary_explorer_run,
         "runner_smoke_run_id": RUNNER_SMOKE_RUN_ID,
         "runner_smoke_universe_sha256": RUNNER_SMOKE_UNIVERSE_SHA256,
         "runner_smoke_outcomes_sha256": RUNNER_SMOKE_OUTCOMES_SHA256,
