@@ -304,6 +304,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
@@ -378,16 +379,25 @@ jobs:
                       raise SystemExit(
                           "prior recovery artifact pagination exceeded 2000"
                       )
-              if len(matches) != 1:
-                  raise SystemExit(
-                      "prior recovery plan artifact identity is ambiguous: "
-                      f"run={run_id}"
+              try:
+                  plan_artifact_row = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "prior recovery plan artifact "
+                          f"run={run_id}"
+                      ),
                   )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior recovery plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={run_id}: {exc}"
+                  ) from exc
 
               payload = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(matches[0]['id'])}/zip",
+                  + f"{int(plan_artifact_row['id'])}/zip",
                   token,
               )
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -561,6 +571,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -660,16 +671,25 @@ jobs:
                   for row in rows
                   if str(row.get("name") or "") == plan_artifact
               ]
-              if len(plan_rows) != 1:
-                  raise SystemExit(
-                      "prior gap coverage plan artifact identity "
-                      f"is ambiguous: run={cursor}"
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "prior gap coverage plan artifact "
+                          f"run={cursor}"
+                      ),
                   )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior gap coverage plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
 
               payload = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(plan_rows[0]['id'])}/zip",
+                  + f"{int(plan_row['id'])}/zip",
                   token,
               )
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -712,7 +732,7 @@ jobs:
                       f"{exc}"
                   ) from exc
 
-              observed = {}
+              observed_groups = {}
               for row in rows:
                   match = gap_pattern.fullmatch(
                       str(row.get("name") or "")
@@ -720,12 +740,26 @@ jobs:
                   if not match:
                       continue
                   gap_id = match.group(1)
-                  if gap_id in observed:
-                      raise SystemExit(
-                          "prior gap coverage has duplicate gap artifacts: "
-                          f"run={cursor} gap={gap_id}"
+                  observed_groups.setdefault(gap_id, []).append(row)
+
+              observed = {}
+              collapsed_retry_artifacts = 0
+              for gap_id, candidates in observed_groups.items():
+                  try:
+                      observed[gap_id] = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "prior V1/V3 gap artifact "
+                              f"run={cursor} gap={gap_id}"
+                          ),
                       )
-                  observed[gap_id] = row
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "prior gap coverage duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={cursor} gap={gap_id}: {exc}"
+                      ) from exc
+                  collapsed_retry_artifacts += len(candidates) - 1
 
               for gap_id, row in observed.items():
                   if gap_id not in planned:
@@ -925,11 +959,31 @@ jobs:
               handle.write(f"gap_count_4={len(wave_4)}\n")
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_plan
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v1-v3-gap-plan
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_plan
+        name: Retry V1/V3 gap-plan artifact upload
+        if: ${{ steps.upload_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V1/V3 gap-plan artifact upload retry
+        if: ${{ steps.retry_upload_plan.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
 
   recover_1:
     needs: plan
@@ -1325,6 +1379,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -1414,20 +1469,35 @@ jobs:
               )
 
           def gap_rows(rows, run_id):
-              selected = []
+              grouped = {}
               for row in rows:
                   match = gap_pattern.fullmatch(
                       str(row.get("name") or "")
                   )
                   if match:
-                      selected.append((match.group(1), row))
+                      grouped.setdefault(
+                          match.group(1),
+                          [],
+                      ).append(row)
+
+              selected = []
+              for gap_id, candidates in grouped.items():
+                  try:
+                      artifact = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "V1/V3 merge gap artifact "
+                              f"run={run_id} gap={gap_id}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "V1/V3 merge duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={run_id} gap={gap_id}: {exc}"
+                      ) from exc
+                  selected.append((gap_id, artifact))
               selected.sort(key=lambda item: int(item[0]))
-              gap_ids = [gap_id for gap_id, _ in selected]
-              if len(gap_ids) != len(set(gap_ids)):
-                  raise SystemExit(
-                      "V1/V3 merge contains duplicate gap artifact IDs: "
-                      f"run={run_id}"
-                  )
               return selected
 
           def extract_rows(selected, target, run_id, planned):
@@ -1545,12 +1615,21 @@ jobs:
                   for row in rows
                   if str(row.get("name") or "") == plan_artifact
               ]
-              if len(plan_rows) != 1:
-                  raise SystemExit(
-                      "V1/V3 merge prior gap plan artifact identity "
-                      f"is ambiguous: run={cursor}"
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "V1/V3 merge prior gap plan artifact "
+                          f"run={cursor}"
+                      ),
                   )
-              payload = artifact_zip(plan_rows[0])
+              except ValueError as exc:
+                  raise SystemExit(
+                      "V1/V3 merge prior plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
+              payload = artifact_zip(plan_row)
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
                   names = [
                       name
@@ -1640,12 +1719,21 @@ jobs:
               for row in current_rows
               if str(row.get("name") or "") == plan_artifact
           ]
-          if len(current_plan_rows) != 1:
-              raise SystemExit(
-                  "V1/V3 merge current gap plan artifact identity "
-                  f"is ambiguous: run={current_run_id}"
+          try:
+              current_plan_row = select_equivalent_artifact_retry(
+                  current_plan_rows,
+                  label=(
+                      "V1/V3 merge current gap plan artifact "
+                      f"run={current_run_id}"
+                  ),
               )
-          current_plan_payload = artifact_zip(current_plan_rows[0])
+          except ValueError as exc:
+              raise SystemExit(
+                  "V1/V3 merge current plan retry artifacts are not "
+                  "equivalent: "
+                  f"run={current_run_id}: {exc}"
+              ) from exc
+          current_plan_payload = artifact_zip(current_plan_row)
           with zipfile.ZipFile(
               io.BytesIO(current_plan_payload)
           ) as archive:
@@ -1949,8 +2037,28 @@ jobs:
           )
           print(json.dumps(summary, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_full
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-v1-v3-full
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_full
+        name: Retry canonical V1/V3 artifact upload
+        if: ${{ steps.upload_full.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final canonical V1/V3 artifact upload retry
+        if: ${{ steps.retry_upload_full.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-v3-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
