@@ -1376,7 +1376,7 @@ def test_v2_eligibility_is_reusable_with_frozen_known_inputs():
     assert "timeout-minutes: 60" in content
     assert 'provenance.get("storage_mode") != "sharded_artifacts"' in content
     assert "Resolve canonical V2 V4 selected shard artifacts" in content
-    assert "resolve_v2_v4_shard_artifact" in content
+    assert "resolve_v2_v4_canonical_shard_bindings" in content
     assert "select_equivalent_artifact_retry" in content
     assert "V2 lifecycle canonical V2/V4 artifact" in content
     assert "V2 lifecycle selected V2/V4 shard " in content
