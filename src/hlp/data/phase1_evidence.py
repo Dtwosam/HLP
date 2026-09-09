@@ -5,6 +5,13 @@ from typing import Any
 
 SNAPSHOT_HEAD_BLOCK = 54_486_035
 ALL_PONS_LAUNCHES = 494_639
+RUNNER_SMOKE_RUN_ID = 33_920_762_592
+RUNNER_SMOKE_UNIVERSE_SHA256 = (
+    "4861b2af1d549eb41c53341a07f6de71dce4d9486b769543c1376beab9c19ab9"
+)
+RUNNER_SMOKE_OUTCOMES_SHA256 = (
+    "6fb40693b77d7434d4e579a2225fed2c65061841a5ea9d0ba56f785071fc6ef2"
+)
 
 
 def _int(value: Any, *, field: str) -> int:
@@ -148,6 +155,74 @@ def validate_post_eligibility_evidence_bundle(
             "representative summary SHA disagrees with manifest"
         )
 
+    sample_sha = _sha256(
+        representative_provenance.get("sample_sha256"),
+        field="representative.sample_sha256",
+    )
+    token_set_sha = _sha256(
+        representative_provenance.get("token_set_sha256"),
+        field="representative.token_set_sha256",
+    )
+    if _sha256(
+        representative_summary.get("sample_sha256"),
+        field="representative.summary.sample_sha256",
+    ) != sample_sha:
+        raise ValueError(
+            "representative sample SHA disagrees with manifest provenance"
+        )
+    if _sha256(
+        representative_summary.get("token_set_sha256"),
+        field="representative.summary.token_set_sha256",
+    ) != token_set_sha:
+        raise ValueError(
+            "representative token-set SHA disagrees with manifest provenance"
+        )
+
+    source_coverage_sha = _sha256(
+        representative_provenance.get("source_coverage_sha256"),
+        field="representative.source_coverage_sha256",
+    )
+    if _sha256(
+        representative_summary.get("source_coverage_sha256"),
+        field="representative.summary.source_coverage_sha256",
+    ) != source_coverage_sha:
+        raise ValueError(
+            "representative source-coverage SHA disagrees"
+        )
+
+    runner_smoke_run = _int(
+        representative_provenance.get("runner_smoke_run_id"),
+        field="representative.runner_smoke_run_id",
+    )
+    if runner_smoke_run != RUNNER_SMOKE_RUN_ID or _int(
+        representative_summary.get("runner_smoke_run_id"),
+        field="representative.summary.runner_smoke_run_id",
+    ) != RUNNER_SMOKE_RUN_ID:
+        raise ValueError("representative runner-smoke run changed")
+
+    for field, expected in (
+        (
+            "runner_smoke_universe_sha256",
+            RUNNER_SMOKE_UNIVERSE_SHA256,
+        ),
+        (
+            "runner_smoke_outcomes_sha256",
+            RUNNER_SMOKE_OUTCOMES_SHA256,
+        ),
+    ):
+        provenance_sha = _sha256(
+            representative_provenance.get(field),
+            field=f"representative.{field}",
+        )
+        summary_sha = _sha256(
+            representative_summary.get(field),
+            field=f"representative.summary.{field}",
+        )
+        if provenance_sha != expected or summary_sha != expected:
+            raise ValueError(
+                f"representative frozen runner-smoke identity changed: {field}"
+            )
+
     run_fields = {
         "v1_eligibility_run_id": lifecycle_run_id,
         "v2_eligibility_run_id": lifecycle_run_id,
@@ -233,5 +308,11 @@ def validate_post_eligibility_evidence_bundle(
         "v2_v4_run_id": v2_v4_run_id,
         "eligible_universe_sha256": universe_sha,
         "representative_validation_sha256": representative_sha,
+        "representative_sample_sha256": sample_sha,
+        "representative_token_set_sha256": token_set_sha,
+        "representative_source_coverage_sha256": source_coverage_sha,
+        "runner_smoke_run_id": RUNNER_SMOKE_RUN_ID,
+        "runner_smoke_universe_sha256": RUNNER_SMOKE_UNIVERSE_SHA256,
+        "runner_smoke_outcomes_sha256": RUNNER_SMOKE_OUTCOMES_SHA256,
         **lifecycle_hashes,
     }
