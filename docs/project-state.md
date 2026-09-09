@@ -955,6 +955,16 @@ materialized Actions jobs separately. The audit summary reports
 later waves cannot disappear from progress accounting merely because GitHub has
 not materialized those matrix jobs yet.
 
+Recovered/normal evidence identity is now rechecked at every critical
+artifact-only transition. Final acceptance independently fetches the evidence
+run and requires the normal evidence workflow to carry `recovery_mode=false`
+with lifecycle/V1-V3/V2-V4 routing all fixed to source run **33982556591**;
+the recovered-completion workflow must carry `recovery_mode=true`. The
+guarded viability-route preflight applies the same workflow-path/mode contract
+before any bounded measurement RPC is allowed to start. These checks do not rely
+solely on the earlier readiness audit, so a malformed or replayed handoff fails
+closed both before viability RPC and again before final acceptance.
+
 The first pinned V1/V3 rescue generation **34207459960**
 completed all 70 repair shards successfully but its final merge failed with
 `NameError: hashlib is not defined`: the launch commit imported `hashlib`
