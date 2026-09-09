@@ -134,10 +134,14 @@ jobs:
           QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
           QUOTE_AUDIT_ARTIFACT_NAME: ${{ inputs.quote_audit_artifact_name }}
           ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
         run: |
           python - <<'PY'
           import json
           import os
+          import re
           import urllib.request
 
           contracts = {
@@ -278,11 +282,213 @@ jobs:
                       f"{field} artifact={contract['artifact']}"
                   )
 
+          eligibility_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          v1_text = os.environ["V1_V3_RUN_ID"].strip()
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          v1_v3_run_id = int(v1_text) if v1_text else eligibility_run_id
+          v2_v4_run_id = int(v2_text) if v2_text else eligibility_run_id
+          if min(
+              eligibility_run_id,
+              v1_v3_run_id,
+              v2_v4_run_id,
+          ) <= 0:
+              raise SystemExit(
+                  "representative evidence run IDs must be positive"
+              )
+
+          eligibility_run = get(
+              f"/repos/{repo}/actions/runs/{eligibility_run_id}"
+          )
+          if (
+              eligibility_run.get("status") != "completed"
+              or eligibility_run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "representative eligibility run is not successful"
+              )
+          if eligibility_run.get("head_branch") != (
+              "phase1/data-acquisition-spike"
+          ):
+              raise SystemExit(
+                  "representative eligibility branch changed"
+              )
+          eligibility_artifacts = artifacts(eligibility_run_id)
+          required_eligibility = {
+              "phase1-pons-v1-lifecycle-eligibility",
+              "phase1-pons-v2-lifecycle-eligibility",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing_eligibility = sorted(
+              required_eligibility - eligibility_artifacts
+          )
+          if missing_eligibility:
+              raise SystemExit(
+                  "representative eligibility artifacts missing: "
+                  f"{missing_eligibility}"
+              )
+
+          for label, run_id, artifact in (
+              ("V1/V3", v1_v3_run_id, "phase1-pons-v1-v3-full"),
+              ("V2/V4", v2_v4_run_id, "phase1-pons-v2-v4-full"),
+          ):
+              venue_run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  venue_run.get("status") != "completed"
+                  or venue_run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"representative {label} run is not successful"
+                  )
+              if venue_run.get("head_branch") != (
+                  "phase1/data-acquisition-spike"
+              ):
+                  raise SystemExit(
+                      f"representative {label} branch changed"
+                  )
+              if artifact not in artifacts(run_id):
+                  raise SystemExit(
+                      f"representative {label} artifact missing"
+                  )
+
+          active_statuses = {
+              "queued",
+              "in_progress",
+              "waiting",
+              "requested",
+              "pending",
+          }
+          rescue_pattern = re.compile(
+              r"launch (?:V1 V3|V2 V4) rescue generation \d+"
+          )
+          page = 1
+          active_rescues = []
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/"
+                  "phase1-pons-live-venue-rescue-one-shot.yml/runs"
+                  f"?branch=phase1%2Fdata-acquisition-spike"
+                  f"&per_page=100&page={page}"
+              )
+              runs = list(payload.get("workflow_runs") or [])
+              for run in runs:
+                  title = str(run.get("display_title") or "")
+                  if (
+                      rescue_pattern.fullmatch(title) is not None
+                      and str(run.get("status") or "") in active_statuses
+                  ):
+                      active_rescues.append({
+                          "id": int(run["id"]),
+                          "status": run.get("status"),
+                          "title": title,
+                      })
+              if len(runs) < 100:
+                  break
+              page += 1
+              if page > 5:
+                  raise SystemExit(
+                      "representative rescue scan exceeded 500 runs"
+                  )
+          if active_rescues:
+              raise SystemExit(
+                  "representative chain cannot overlap active venue rescue: "
+                  f"{active_rescues}"
+              )
+
           print(json.dumps({
               "support_run_ids": observed,
               "quote_audit_artifact_name": os.environ[
                   "QUOTE_AUDIT_ARTIFACT_NAME"
               ],
+              "eligibility_run_id": eligibility_run_id,
+              "v1_v3_run_id": v1_v3_run_id,
+              "v2_v4_run_id": v2_v4_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify lifecycle venue provenance before representative RPC
+        env:
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          eligibility_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          v1_text = os.environ["V1_V3_RUN_ID"].strip()
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          expected_v1_v3 = (
+              int(v1_text) if v1_text else eligibility_run_id
+          )
+          expected_v2_v4 = (
+              int(v2_text) if v2_text else eligibility_run_id
+          )
+
+          def validate(path, records, field, expected):
+              manifest = json.loads(Path(path).read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(manifest.get("records", -1)) != records:
+                  raise SystemExit(
+                      f"representative lifecycle record count changed: {path}"
+                  )
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative lifecycle chain changed: {path}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != 54_486_035:
+                  raise SystemExit(
+                      f"representative lifecycle snapshot changed: {path}"
+                  )
+              value = provenance.get(field)
+              if value is None:
+                  if eligibility_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          "representative lifecycle venue provenance missing: "
+                          f"{field}"
+                      )
+                  observed = eligibility_run_id
+              else:
+                  observed = int(value)
+              if observed != expected:
+                  raise SystemExit(
+                      "representative lifecycle venue provenance mismatch: "
+                      f"{field} expected={expected} observed={observed}"
+                  )
+
+          validate(
+              "preflight-v1/"
+              "pons-v1-lifecycle-eligibility.jsonl.manifest.json",
+              268_688,
+              "v1_v3_run_id",
+              expected_v1_v3,
+          )
+          validate(
+              "preflight-v2/"
+              "pons-v2-lifecycle-eligibility.jsonl.manifest.json",
+              225_951,
+              "v4_run_id",
+              expected_v2_v4,
+          )
+          print(json.dumps({
+              "eligibility_run_id": eligibility_run_id,
+              "v1_v3_run_id": expected_v1_v3,
+              "v2_v4_run_id": expected_v2_v4,
               "preflight": "pass",
           }, sort_keys=True))
           PY
