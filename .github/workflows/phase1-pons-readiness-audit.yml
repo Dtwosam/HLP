@@ -42,10 +42,10 @@ jobs:
           python - <<'PY'
           import json
           import os
-          import urllib.request
           from pathlib import Path
 
           from hlp.data.github_actions import (
+              fetch_github_actions_json,
               select_equivalent_artifact_retry,
           )
 
@@ -63,19 +63,11 @@ jobs:
               token = os.environ["GITHUB_TOKEN"]
 
               def get(path):
-                  request = urllib.request.Request(
+                  return fetch_github_actions_json(
                       api + path,
-                      headers={
-                          "Authorization": f"Bearer {token}",
-                          "Accept": "application/vnd.github+json",
-                          "X-GitHub-Api-Version": "2022-11-28",
-                      },
-                  )
-                  with urllib.request.urlopen(
-                      request,
+                      token,
                       timeout=30,
-                  ) as response:
-                      return json.load(response)
+                  )
 
               matches = []
               page = 1
@@ -120,8 +112,34 @@ jobs:
               output.write(f"evidence_run_id={run_id}\n")
               output.write(f"evidence_artifact_id={artifact_id}\n")
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_handoff
         if: ${{ steps.evidence.outputs.evidence_run_id != '0' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial readiness evidence handoff before retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - id: retry_download_handoff
+        name: Retry readiness evidence handoff artifact download
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.download_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial readiness evidence handoff before final retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.retry_download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - name: Final readiness evidence handoff artifact download retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.retry_download_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
           path: handoff
@@ -140,12 +158,12 @@ jobs:
           import os
           import re
           import urllib.parse
-          import urllib.request
           import zipfile
           from pathlib import Path
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
               select_equivalent_artifact_retry,
           )
           from hlp.data.pons_v1_v3_artifacts import (
@@ -174,16 +192,11 @@ jobs:
               )
 
           def get(path):
-              request = urllib.request.Request(
+              return fetch_github_actions_json(
                   api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
+                  token,
+                  timeout=30,
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           def json_file_at_ref(path, ref):
               encoded_path = urllib.parse.quote(path, safe="/")
