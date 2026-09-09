@@ -1497,6 +1497,10 @@ def test_eligible_universe_freeze_is_reusable_and_fails_closed():
     assert "268_688" in content
     assert "225_951" in content
     assert "eligibility artifact has invalid status values" in content
+    assert "id: upload_universe" in content
+    assert "id: retry_upload_universe" in content
+    assert "Retry eligible universe artifact upload" in content
+    assert "Final eligible universe artifact upload retry" in content
 
 
 def test_skhy_known_pool_continuation_is_manual_bounded_and_frozen():
@@ -1966,6 +1970,19 @@ def test_phase1_acceptance_gate_is_manual_artifact_only_and_fail_closed():
     assert "phase1-pons-final-acceptance-chain.yml" in content
     assert "acceptance evidence workflow path is not allowed" in content
     assert "acceptance evidence artifacts missing" in content
+    assert "select_equivalent_artifact_retry" in content
+    assert "acceptance evidence retry artifacts are not " in content
+    assert "eligible_artifact_id" in content
+    assert "representative_artifact_id" in content
+    assert (
+        "artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}"
+        in content
+    )
+    assert (
+        "artifact-ids: ${{ steps.provenance.outputs."
+        "representative_artifact_id }}"
+        in content
+    )
     assert "acceptance current run is missing viability projection" in content
     assert "artifact_rows_cache = {}" in content
     assert "acceptance viability projection retry artifacts " in content
@@ -2295,6 +2312,10 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "pons-v2-lifecycle-eligibility.jsonl.manifest.json" in content
     assert "representative validation must contain exactly 10" in content
+    assert "id: upload_representative" in content
+    assert "id: retry_upload_representative" in content
+    assert "Retry representative validation artifact upload" in content
+    assert "Final representative validation artifact upload retry" in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
     assert "time.sleep(" not in content
 
@@ -3338,6 +3359,22 @@ def test_post_eligibility_handoffs_validate_bundle_before_viability():
         assert "id: retry_upload_evidence_ready" in content
         assert "Retry evidence-ready artifact upload" in content
         assert "Final evidence-ready artifact upload retry" in content
+        assert "Resolve exact eligible and representative artifacts" in content
+        assert "select_equivalent_artifact_retry" in content
+        assert "post-eligibility evidence input retry artifacts " in content
+        assert "are not equivalent" in content
+        assert "eligible_artifact_id" in content
+        assert "representative_artifact_id" in content
+        assert (
+            "artifact-ids: ${{ steps.evidence_inputs.outputs."
+            "eligible_artifact_id }}"
+            in content
+        )
+        assert (
+            "artifact-ids: ${{ steps.evidence_inputs.outputs."
+            "representative_artifact_id }}"
+            in content
+        )
     assert "post-eligibility source run must match frozen parent" in normal
     assert "33_982_556_591" in normal
     assert "phase1-pons-full-eligibility-acquisition-one-shot.yml" in normal
