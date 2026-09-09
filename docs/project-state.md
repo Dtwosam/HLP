@@ -480,8 +480,12 @@ research threshold or starting another archive crawl:
   first/max/last DEX price checkpoint, but it is **supplementary only** while
   GitHub-hosted runners remain known to receive HTTP 403 from Blockscout APIs.
   Its workflow is gated behind an explicit access-reverified input, is capped
-  at 40 targets, and reports request/egress counters. If explorer evidence is
-  supplied later, representative validation and Phase 1 PASS require complete
+  at 40 targets, and reports request/egress counters. Its frozen sample,
+  market-path and priced-path inputs now each receive three GitHub artifact
+  download attempts with partial-directory cleanup, and its final explorer
+  artifact receives three upload attempts without repeating the external
+  verification work. If explorer evidence is supplied later, representative
+  validation and Phase 1 PASS require complete
   10-token coverage and exact agreement with the GeckoTerminal checkpoint set;
 - V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
   events so an Initialize-only price cannot masquerade as independent trade
