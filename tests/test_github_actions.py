@@ -5,8 +5,10 @@ import pytest
 
 from hlp.data.github_actions import (
     GitHubActionsJobLogUnavailable,
+    build_rescue_terminal_binding,
     fetch_github_actions_artifact_zip,
     fetch_github_actions_job_log,
+    rescue_terminal_binding_sha256,
     select_equivalent_artifact_retry,
 )
 
@@ -349,3 +351,62 @@ def test_select_equivalent_artifact_retry_allows_single_legacy_row():
         [row],
         label="gap 060",
     ) == row
+
+
+
+def test_rescue_terminal_binding_matches_launcher_schema_and_digest():
+    binding = build_rescue_terminal_binding(
+        run_id=34207459960,
+        status="completed",
+        conclusion="failure",
+        head_sha="a" * 40,
+        display_title="launch V1 V3 rescue generation 2",
+        run_attempt=1,
+        reusable_gap_ids=["010", "002"],
+        missing_success_artifacts=["011"],
+        non_success_gap_artifacts=["009"],
+        plan_artifact_present=True,
+        canonical_artifact_present=False,
+    )
+
+    assert list(binding) == [
+        "run_id",
+        "status",
+        "conclusion",
+        "head_sha",
+        "display_title",
+        "run_attempt",
+        "reusable_gap_ids",
+        "missing_success_artifacts",
+        "non_success_gap_artifacts",
+        "plan_artifact_present",
+        "canonical_artifact_present",
+    ]
+    assert binding["reusable_gap_ids"] == ["002", "010"]
+
+    expected = (
+        "da8eb2a309e676ef54d03042c04f10a17404d99466bb777131856034c11c5195"
+    )
+    assert rescue_terminal_binding_sha256(binding) == expected
+
+
+def test_rescue_terminal_binding_rejects_duplicate_gap_ids():
+    with pytest.raises(ValueError, match="duplicate gap ID"):
+        build_rescue_terminal_binding(
+            run_id=1,
+            status="completed",
+            conclusion="failure",
+            head_sha="a" * 40,
+            display_title="launch V1 V3 rescue generation 2",
+            run_attempt=1,
+            reusable_gap_ids=["001", "001"],
+            missing_success_artifacts=[],
+            non_success_gap_artifacts=[],
+            plan_artifact_present=True,
+            canonical_artifact_present=False,
+        )
+
+
+def test_rescue_terminal_binding_hash_rejects_schema_drift():
+    with pytest.raises(ValueError, match="keys changed"):
+        rescue_terminal_binding_sha256({"run_id": 1})
