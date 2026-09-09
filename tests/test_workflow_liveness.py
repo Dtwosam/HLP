@@ -2326,6 +2326,12 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "representative_sample_sha256" in content
     assert "representative_token_set_sha256" in content
     assert "representative_source_coverage_sha256" in content
+    assert "explorer_evidence_required" in content
+    assert "explorer_crosscheck_run_id" in content
+    assert "final acceptance explorer requirement changed type" in content
+    assert "final acceptance explorer run ID is invalid" in content
+    assert "final acceptance explorer evidence is required without a run" in content
+    assert "final acceptance explorer run is present while optional" in content
     assert "final acceptance runner-smoke run changed" in content
     assert "final acceptance runner-smoke universe SHA changed" in content
     assert "final acceptance runner-smoke outcomes SHA changed" in content
