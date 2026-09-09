@@ -1548,7 +1548,10 @@ malformed numeric evidence, route-launch or finalizer provenance instead of
 crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
-evidence preflight in addition to the guarded route launcher. The post-
+evidence preflight in addition to the guarded route launcher. Each bounded route
+measurement now retries its primary artifact upload up to three total attempts
+without repeating the completed RPC scan; the Pons-registry route applies the
+same protection to its separate V2 secondary artifact. The post-
 eligibility handoff itself carries the representative sample SHA, canonical
 token-set SHA, source-coverage SHA and frozen runner-smoke run/universe/outcome
 identity in addition to the eligible-universe, validation and lifecycle
