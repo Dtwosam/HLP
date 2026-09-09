@@ -122,7 +122,7 @@ jobs:
               select_equivalent_artifact_retry,
           )
           from hlp.data.pons_v2_v4_artifacts import (
-              resolve_v2_v4_shard_artifact,
+              resolve_v2_v4_canonical_shard_bindings,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -293,83 +293,22 @@ jobs:
                   "canonical V2 V4 tape is not stored as sharded artifacts"
               )
 
+          try:
+              bindings = resolve_v2_v4_canonical_shard_bindings(
+                  aggregate,
+                  current_run_id=current_run_id,
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "V2 lifecycle canonical shard binding changed: "
+                  f"{exc}"
+              ) from exc
           partial_value = provenance.get("partial_run_id")
           partial_run_id = (
               int(partial_value)
               if partial_value not in {None, "", 0}
               else None
           )
-          shards = list(provenance.get("shards") or [])
-          if not shards:
-              raise SystemExit(
-                  "V2 lifecycle canonical V2/V4 manifest has no shards"
-              )
-
-          bindings = []
-          previous_hi = None
-          seen_bindings = set()
-          for shard in shards:
-              try:
-                  binding = resolve_v2_v4_shard_artifact(
-                      shard,
-                      current_run_id=current_run_id,
-                      partial_run_id=partial_run_id,
-                  )
-              except (TypeError, ValueError) as exc:
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard binding changed: "
-                      f"{exc}"
-                  ) from exc
-
-              digest = binding["sha256"]
-              if (
-                  len(digest) != 64
-                  or any(
-                      char not in "0123456789abcdef"
-                      for char in digest.lower()
-                  )
-              ):
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard SHA-256 is invalid"
-                  )
-              if binding["records"] < 0:
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard record count is invalid"
-                  )
-              lo = binding["from_block"]
-              hi = binding["to_block"]
-              if lo <= 0 or hi < lo:
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard range is invalid"
-                  )
-              if previous_hi is None:
-                  if lo != 26_841_846:
-                      raise SystemExit(
-                          "V2 lifecycle canonical shard start changed"
-                      )
-              elif lo != previous_hi + 1:
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard coverage is discontinuous"
-                  )
-              previous_hi = hi
-
-              key = (
-                  binding["run_id"],
-                  binding["artifact_name"],
-                  binding["file"],
-              )
-              if key in seen_bindings:
-                  raise SystemExit(
-                      "V2 lifecycle canonical shard binding is duplicated: "
-                      f"{key}"
-                  )
-              seen_bindings.add(key)
-              bindings.append(binding)
-
-          if previous_hi != 54_486_035:
-              raise SystemExit(
-                  "V2 lifecycle canonical shard coverage ends early"
-              )
 
           selected_rows = []
           for binding in bindings:
