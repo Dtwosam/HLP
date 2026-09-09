@@ -199,6 +199,45 @@ jobs:
           if int(report.get("source_eligibility_run_id", 0)) != source_run_id:
               raise SystemExit("evidence handoff source run mismatch")
 
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          normal_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          )
+          if evidence_path not in {
+              normal_evidence_path,
+              recovered_evidence_path,
+          }:
+              raise SystemExit(
+                  "viability handoff evidence workflow path changed: "
+                  f"{evidence_path}"
+              )
+
           lifecycle_run_id = int(report.get("lifecycle_run_id", 0))
           if lifecycle_run_id <= 0:
               raise SystemExit(
@@ -268,30 +307,23 @@ jobs:
                   "evidence handoff runner-smoke outcomes SHA changed"
               )
 
-          if not recovery_mode and (
-              lifecycle_run_id != source_run_id
-              or int(report["v1_v3_run_id"]) != source_run_id
-              or int(report["v2_v4_run_id"]) != source_run_id
-          ):
+          if evidence_path == normal_evidence_path:
+              if recovery_mode:
+                  raise SystemExit(
+                      "viability normal evidence is marked recovered"
+                  )
+              if (
+                  lifecycle_run_id != source_run_id
+                  or int(report["v1_v3_run_id"]) != source_run_id
+                  or int(report["v2_v4_run_id"]) != source_run_id
+              ):
+                  raise SystemExit(
+                      "normal evidence handoff routing changed"
+                  )
+          elif not recovery_mode:
               raise SystemExit(
-                  "normal evidence handoff routing changed"
+                  "viability recovered evidence is not marked recovered"
               )
-
-          api = os.environ["GITHUB_API_URL"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GITHUB_TOKEN"]
-
-          def get(path):
-              request = urllib.request.Request(
-                  api + path,
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
-              )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
 
           lifecycle = get(
               f"/repos/{repo}/actions/runs/{lifecycle_run_id}"
