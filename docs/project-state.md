@@ -921,7 +921,18 @@ closed rather than being trusted from sidecar metadata alone. Cross-run artifact
 in both venue recovery workflows and recovered completion now use the shared
 safe GitHub Actions downloader: the GitHub API request carries auth, but the
 redirected blob-storage request deliberately does not. Recursive prior-gap
-manifest/plan verification uses the same token-stripping path. The first pinned V1/V3 rescue generation **34207459960**
+manifest/plan verification uses the same token-stripping path. The first pinned V1/V3 rescue generation **34207459960** is exact-title
+generation **2** and its child `v1_v3_rescue / plan` job succeeded, so
+generation 2 is a **consumed** V1/V3 recovery generation. Exact-title generation
+**3** run **34228101146** is terminal but unconsumed because its child plan
+failed. The next legitimate V1/V3 launch therefore remains generation 3 and is
+now required to select consumed generation-2 run **34207459960** as its
+immediate prior plan. More generally, every venue rescue generation after the
+first must bind to exactly one consumed immediately preceding generation; a
+plan-only consumed generation with zero reusable repair artifacts remains the
+required parent so recursive lineage cannot silently skip it.
+
+The first pinned V1/V3 rescue generation **34207459960**
 completed all 70 repair shards successfully but its final merge failed with
 `NameError: hashlib is not defined`: the launch commit imported `hashlib`
 in the planner heredoc but not in the merge heredoc. Current V1/V3 and V2/V4
