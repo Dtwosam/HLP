@@ -459,7 +459,33 @@ jobs:
               "status": "ready_for_acceptance_work",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_evidence_handoff
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial final acceptance evidence handoff download before retry
+        if: ${{ steps.download_evidence_handoff.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - id: retry_download_evidence_handoff
+        name: Retry final acceptance evidence handoff artifact download
+        if: ${{ steps.download_evidence_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial final acceptance evidence handoff download before final retry
+        if: ${{ steps.retry_download_evidence_handoff.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - name: Final final acceptance evidence handoff artifact download retry
+        if: ${{ steps.retry_download_evidence_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
           path: evidence-handoff
@@ -645,61 +671,321 @@ jobs:
               "preflight": "pass",
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
+      - id: download_route_pons_registry_primary
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_registry-primary
           path: route-artifacts/pons_registry/primary
           run-id: ${{ inputs.pons_registry_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons registry primary route download before retry
+        if: ${{ steps.download_route_pons_registry_primary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/primary"
+      - id: retry_download_route_pons_registry_primary
+        name: Retry pons registry primary route artifact download
+        if: ${{ steps.download_route_pons_registry_primary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry primary route download before final retry
+        if: ${{ steps.retry_download_route_pons_registry_primary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/primary"
+      - name: Final pons registry primary route artifact download retry
+        if: ${{ steps.retry_download_route_pons_registry_primary.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_registry_secondary
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_registry-secondary
           path: route-artifacts/pons_registry/secondary
           run-id: ${{ inputs.pons_registry_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons registry secondary route download before retry
+        if: ${{ steps.download_route_pons_registry_secondary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/secondary"
+      - id: retry_download_route_pons_registry_secondary
+        name: Retry pons registry secondary route artifact download
+        if: ${{ steps.download_route_pons_registry_secondary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry secondary route download before final retry
+        if: ${{ steps.retry_download_route_pons_registry_secondary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/secondary"
+      - name: Final pons registry secondary route artifact download retry
+        if: ${{ steps.retry_download_route_pons_registry_secondary.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v1_v3
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_v1_v3-primary
           path: route-artifacts/pons_v1_v3/primary
           run-id: ${{ inputs.pons_v1_v3_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons v1 v3 route download before retry
+        if: ${{ steps.download_route_pons_v1_v3.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v1_v3/primary"
+      - id: retry_download_route_pons_v1_v3
+        name: Retry pons v1 v3 route artifact download
+        if: ${{ steps.download_route_pons_v1_v3.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v1 v3 route download before final retry
+        if: ${{ steps.retry_download_route_pons_v1_v3.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v1_v3/primary"
+      - name: Final pons v1 v3 route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v1_v3.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_curve
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_v2_curve-primary
           path: route-artifacts/pons_v2_curve/primary
           run-id: ${{ inputs.pons_v2_curve_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons v2 curve route download before retry
+        if: ${{ steps.download_route_pons_v2_curve.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_curve/primary"
+      - id: retry_download_route_pons_v2_curve
+        name: Retry pons v2 curve route artifact download
+        if: ${{ steps.download_route_pons_v2_curve.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 curve route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_curve.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_curve/primary"
+      - name: Final pons v2 curve route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_curve.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_v2_transition-primary
           path: route-artifacts/pons_v2_transition/primary
           run-id: ${{ inputs.pons_v2_transition_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons v2 transition route download before retry
+        if: ${{ steps.download_route_pons_v2_transition.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_transition/primary"
+      - id: retry_download_route_pons_v2_transition
+        name: Retry pons v2 transition route artifact download
+        if: ${{ steps.download_route_pons_v2_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 transition route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_transition.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_transition/primary"
+      - name: Final pons v2 transition route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_v4
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-pons_v2_v4-primary
           path: route-artifacts/pons_v2_v4/primary
           run-id: ${{ inputs.pons_v2_v4_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial pons v2 v4 route download before retry
+        if: ${{ steps.download_route_pons_v2_v4.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_v4/primary"
+      - id: retry_download_route_pons_v2_v4
+        name: Retry pons v2 v4 route artifact download
+        if: ${{ steps.download_route_pons_v2_v4.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 v4 route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_v4.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_v4/primary"
+      - name: Final pons v2 v4 route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_v4.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_weth_usdg_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
           path: route-artifacts/weth_usdg_anchor/primary
           run-id: ${{ inputs.weth_usdg_anchor_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial weth usdg anchor route download before retry
+        if: ${{ steps.download_route_weth_usdg_anchor.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/weth_usdg_anchor/primary"
+      - id: retry_download_route_weth_usdg_anchor
+        name: Retry weth usdg anchor route artifact download
+        if: ${{ steps.download_route_weth_usdg_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial weth usdg anchor route download before final retry
+        if: ${{ steps.retry_download_route_weth_usdg_anchor.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/weth_usdg_anchor/primary"
+      - name: Final weth usdg anchor route artifact download retry
+        if: ${{ steps.retry_download_route_weth_usdg_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_stock_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-stock_oracle-primary
           path: route-artifacts/stock_oracle/primary
           run-id: ${{ inputs.stock_oracle_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial stock oracle route download before retry
+        if: ${{ steps.download_route_stock_oracle.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/stock_oracle/primary"
+      - id: retry_download_route_stock_oracle
+        name: Retry stock oracle route artifact download
+        if: ${{ steps.download_route_stock_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial stock oracle route download before final retry
+        if: ${{ steps.retry_download_route_stock_oracle.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/stock_oracle/primary"
+      - name: Final stock oracle route artifact download retry
+        if: ${{ steps.retry_download_route_stock_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_quote_v3_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-quote_v3_fallback-primary
           path: route-artifacts/quote_v3_fallback/primary
           run-id: ${{ inputs.quote_v3_fallback_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - name: Clean partial quote v3 fallback route download before retry
+        if: ${{ steps.download_route_quote_v3_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v3_fallback/primary"
+      - id: retry_download_route_quote_v3_fallback
+        name: Retry quote v3 fallback route artifact download
+        if: ${{ steps.download_route_quote_v3_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v3 fallback route download before final retry
+        if: ${{ steps.retry_download_route_quote_v3_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v3_fallback/primary"
+      - name: Final quote v3 fallback route artifact download retry
+        if: ${{ steps.retry_download_route_quote_v3_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_quote_v4_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v4 fallback route download before retry
+        if: ${{ steps.download_route_quote_v4_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v4_fallback/primary"
+      - id: retry_download_route_quote_v4_fallback
+        name: Retry quote v4 fallback route artifact download
+        if: ${{ steps.download_route_quote_v4_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v4 fallback route download before final retry
+        if: ${{ steps.retry_download_route_quote_v4_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v4_fallback/primary"
+      - name: Final quote v4 fallback route artifact download retry
+        if: ${{ steps.retry_download_route_quote_v4_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           name: phase1-pons-viability-measurement-quote_v4_fallback-primary
           path: route-artifacts/quote_v4_fallback/primary
