@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LAUNCH_VALIDATION_GENERATION: '9'
+  LAUNCH_VALIDATION_GENERATION: '10'
 
 jobs:
   preflight:
