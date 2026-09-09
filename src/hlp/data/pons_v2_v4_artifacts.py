@@ -74,3 +74,118 @@ def resolve_v2_v4_shard_artifact(
         "from_block": int(shard.get("from_block", -1)),
         "to_block": int(shard.get("to_block", -1)),
     }
+
+
+
+def resolve_v2_v4_canonical_shard_bindings(
+    manifest: Mapping[str, Any],
+    *,
+    current_run_id: int,
+    expected_start: int = 26_841_846,
+    expected_end: int = 54_486_035,
+) -> list[dict[str, Any]]:
+    """Validate aggregate shard geometry and return exact artifact bindings."""
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("canonical V2/V4 provenance is missing")
+    if provenance.get("storage_mode") != "sharded_artifacts":
+        raise ValueError(
+            "canonical V2/V4 manifest is not sharded-artifact storage"
+        )
+
+    partial_value = provenance.get("partial_run_id")
+    try:
+        partial_run_id = (
+            int(partial_value)
+            if partial_value not in {None, "", 0}
+            else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "canonical V2/V4 partial run ID is invalid"
+        ) from exc
+
+    shards = provenance.get("shards")
+    if not isinstance(shards, list) or not shards:
+        raise ValueError("canonical V2/V4 manifest has no shards")
+
+    try:
+        aggregate_records = int(manifest.get("records", -1))
+        start = int(expected_start)
+        end = int(expected_end)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("canonical V2/V4 aggregate counts are invalid") from exc
+    if aggregate_records < 0:
+        raise ValueError("canonical V2/V4 aggregate records are invalid")
+    if start <= 0 or end < start:
+        raise ValueError("canonical V2/V4 expected range is invalid")
+
+    bindings: list[dict[str, Any]] = []
+    seen = set()
+    previous_hi = None
+    selected_records = 0
+    for shard in shards:
+        if not isinstance(shard, Mapping):
+            raise ValueError("canonical V2/V4 shard row is invalid")
+        binding = resolve_v2_v4_shard_artifact(
+            shard,
+            current_run_id=current_run_id,
+            partial_run_id=partial_run_id,
+        )
+        digest = str(binding["sha256"]).lower()
+        records = int(binding["records"])
+        lo = int(binding["from_block"])
+        hi = int(binding["to_block"])
+        if (
+            len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise ValueError(
+                f"canonical V2/V4 shard SHA-256 is invalid: {binding['file']}"
+            )
+        if records < 0:
+            raise ValueError(
+                f"canonical V2/V4 shard records are invalid: {binding['file']}"
+            )
+        if lo <= 0 or hi < lo:
+            raise ValueError(
+                f"canonical V2/V4 shard range is invalid: {binding['file']}"
+            )
+        if previous_hi is None:
+            if lo != start:
+                raise ValueError(
+                    "canonical V2/V4 shard coverage start changed: "
+                    f"{lo} != {start}"
+                )
+        elif lo != previous_hi + 1:
+            raise ValueError(
+                "canonical V2/V4 shard coverage is discontinuous: "
+                f"{previous_hi} -> {lo}"
+            )
+        previous_hi = hi
+        selected_records += records
+
+        key = (
+            int(binding["run_id"]),
+            str(binding["artifact_name"]),
+            str(binding["file"]),
+        )
+        if key in seen:
+            raise ValueError(
+                f"canonical V2/V4 shard binding is duplicated: {key}"
+            )
+        seen.add(key)
+        binding["sha256"] = digest
+        bindings.append(binding)
+
+    if previous_hi != end:
+        raise ValueError(
+            "canonical V2/V4 shard coverage end changed: "
+            f"{previous_hi} != {end}"
+        )
+    if selected_records != aggregate_records:
+        raise ValueError(
+            "canonical V2/V4 shard records do not match aggregate: "
+            f"{selected_records} != {aggregate_records}"
+        )
+    return bindings
