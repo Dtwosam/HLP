@@ -1985,7 +1985,8 @@ def test_representative_priced_paths_are_manual_artifact_only_and_bounded():
     assert "summarize_snapshot_manifest_coverage" in content
     assert "pons-representative-pricing-source-coverage.json" in content
     assert "require_representative_sample_identity" in content
-    assert "market-path sample identity mismatch" in content
+    assert "market-path sample " in content
+    assert "identity mismatch: {field}" in content
     assert '"sample_sha256": sample_identity["sample_sha256"]' in content
     assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
@@ -2050,7 +2051,8 @@ def test_representative_validation_is_manual_artifact_only_and_fail_closed():
     assert "representative validation runner smoke universe SHA mismatch" in content
     assert "representative validation runner smoke outcomes SHA mismatch" in content
     assert "require_representative_sample_identity" in content
-    assert "sample identity mismatch" in content
+    assert "sample identity " in content
+    assert "mismatch: {field}" in content
     assert '"sample_sha256": sample_identity["sample_sha256"]' in content
     assert '"token_set_sha256": sample_identity["token_set_sha256"]' in content
     assert "pons-v1-lifecycle-eligibility.jsonl.manifest.json" in content
