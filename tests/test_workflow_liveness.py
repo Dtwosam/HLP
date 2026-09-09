@@ -68,6 +68,7 @@ SHARED_METADATA_WORKFLOWS = (
     "phase1-pons-recovered-completion-one-shot.yml",
     "phase1-pons-post-eligibility-evidence-chain.yml",
     "phase1-pons-representative-evidence-chain.yml",
+    "phase1-pons-representative-transfers-full.yml",
     "phase1-pons-acquisition-accounting.yml",
     "phase1-pons-acquisition-viability-projection.yml",
     "phase1-pons-viability-route-measurement.yml",
@@ -518,12 +519,10 @@ def test_representative_transfer_recovery_preserves_successful_work():
         "steps.retry_upload_full.outcome == 'failure'"
     ) == 1
     assert content.count("overwrite: true") == 12
-    assert content.count("TRANSIENT_METADATA_HTTP_CODES = {") == 2
-    assert content.count("for retry_index in range(3):") == 2
-    assert content.count(
-        "representative transfer metadata retry loop exhausted"
-    ) == 2
-    assert content.count("import urllib.error") == 2
+    assert content.count("fetch_github_actions_json(") == 2
+    assert "urllib.request.Request(" not in content
+    assert "urllib.request.urlopen" not in content
+    assert "import urllib.error" not in content
     assert content.count("select_equivalent_artifact_retry(") == 2
     assert content.count(
         "representative transfer retry artifacts"
