@@ -330,6 +330,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
@@ -406,16 +407,25 @@ jobs:
                       raise SystemExit(
                           "prior recovery artifact pagination exceeded 2000"
                       )
-              if len(matches) != 1:
-                  raise SystemExit(
-                      "prior recovery plan artifact identity is ambiguous: "
-                      f"run={run_id}"
+              try:
+                  plan_artifact_row = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "prior recovery plan artifact "
+                          f"run={run_id}"
+                      ),
                   )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior recovery plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={run_id}: {exc}"
+                  ) from exc
 
               payload = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(matches[0]['id'])}/zip",
+                  + f"{int(plan_artifact_row['id'])}/zip",
                   token,
               )
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -764,16 +774,25 @@ jobs:
                   for row in rows
                   if str(row.get("name") or "") == plan_artifact
               ]
-              if len(plan_rows) != 1:
-                  raise SystemExit(
-                      "prior gap coverage plan artifact identity "
-                      f"is ambiguous: run={cursor}"
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "prior gap coverage plan artifact "
+                          f"run={cursor}"
+                      ),
                   )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior gap coverage plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
 
               payload = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(plan_rows[0]['id'])}/zip",
+                  + f"{int(plan_row['id'])}/zip",
                   token,
               )
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -2103,12 +2122,21 @@ jobs:
                   for row in rows
                   if str(row.get("name") or "") == plan_artifact
               ]
-              if len(plan_rows) != 1:
-                  raise SystemExit(
-                      "V2/V4 merge prior gap plan artifact identity "
-                      f"is ambiguous: run={cursor}"
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "V2/V4 merge prior gap plan artifact "
+                          f"run={cursor}"
+                      ),
                   )
-              payload = artifact_zip(plan_rows[0])
+              except ValueError as exc:
+                  raise SystemExit(
+                      "V2/V4 merge prior plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
+              payload = artifact_zip(plan_row)
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
                   names = [
                       name
@@ -2198,12 +2226,21 @@ jobs:
               for row in current_rows
               if str(row.get("name") or "") == plan_artifact
           ]
-          if len(current_plan_rows) != 1:
-              raise SystemExit(
-                  "V2/V4 merge current gap plan artifact identity "
-                  f"is ambiguous: run={current_run_id}"
+          try:
+              current_plan_row = select_equivalent_artifact_retry(
+                  current_plan_rows,
+                  label=(
+                      "V2/V4 merge current gap plan artifact "
+                      f"run={current_run_id}"
+                  ),
               )
-          current_plan_payload = artifact_zip(current_plan_rows[0])
+          except ValueError as exc:
+              raise SystemExit(
+                  "V2/V4 merge current plan retry artifacts are not "
+                  "equivalent: "
+                  f"run={current_run_id}: {exc}"
+              ) from exc
+          current_plan_payload = artifact_zip(current_plan_row)
           with zipfile.ZipFile(
               io.BytesIO(current_plan_payload)
           ) as archive:
