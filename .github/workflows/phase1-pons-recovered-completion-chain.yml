@@ -779,9 +779,37 @@ jobs:
                           "recovery venue summary missing initialize changed: "
                           f"run={run_id}"
                       )
-                  if int(summary.get("source_files", 0)) <= 0:
+                  shards = provenance.get("shards")
+                  if not isinstance(shards, list) or not shards:
                       raise SystemExit(
-                          "recovery venue summary source file count is invalid: "
+                          "recovery venue summary shard provenance changed: "
+                          f"run={run_id}"
+                      )
+                  source_files = int(summary.get("source_files", 0))
+                  candidate_source_files = int(
+                      summary.get("candidate_source_files", -1)
+                  )
+                  dropped_source_files = int(
+                      summary.get(
+                          "dropped_overlapping_source_files",
+                          -1,
+                      )
+                  )
+                  if source_files != len(shards):
+                      raise SystemExit(
+                          "recovery venue summary source file count changed: "
+                          f"run={run_id}"
+                      )
+                  if candidate_source_files < source_files:
+                      raise SystemExit(
+                          "recovery venue summary candidate file count "
+                          f"changed: run={run_id}"
+                      )
+                  if dropped_source_files != (
+                      candidate_source_files - source_files
+                  ):
+                      raise SystemExit(
+                          "recovery venue summary overlap accounting changed: "
                           f"run={run_id}"
                       )
               except (TypeError, ValueError):
