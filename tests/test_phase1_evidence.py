@@ -10,6 +10,9 @@ def _fixtures():
     v2_sha = "2" * 64
     universe_sha = "3" * 64
     representative_sha = "4" * 64
+    sample_sha = "5" * 64
+    token_set_sha = "6" * 64
+    source_coverage_sha = "7" * 64
 
     eligible_manifest = {
         "sha256": universe_sha,
@@ -50,6 +53,18 @@ def _fixtures():
             "fallback_run_id": 700,
             "v1_eligibility_sha256": v1_sha,
             "v2_eligibility_sha256": v2_sha,
+            "sample_sha256": sample_sha,
+            "token_set_sha256": token_set_sha,
+            "source_coverage_sha256": source_coverage_sha,
+            "runner_smoke_run_id": 33_920_762_592,
+            "runner_smoke_universe_sha256": (
+                "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+                "b769543c1376beab9c19ab9"
+            ),
+            "runner_smoke_outcomes_sha256": (
+                "6fb40693b77d7434d4e579a2225fed2c65061841"
+                "a5ea9d0ba56f785071fc6ef2"
+            ),
         },
     }
     representative_summary = {
@@ -58,6 +73,18 @@ def _fixtures():
         "complete_tokens": 10,
         "sample_groups": {"failure": 5, "runner": 5},
         "validation_sha256": representative_sha,
+        "sample_sha256": sample_sha,
+        "token_set_sha256": token_set_sha,
+        "source_coverage_sha256": source_coverage_sha,
+        "runner_smoke_run_id": 33_920_762_592,
+        "runner_smoke_universe_sha256": (
+            "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+            "b769543c1376beab9c19ab9"
+        ),
+        "runner_smoke_outcomes_sha256": (
+            "6fb40693b77d7434d4e579a2225fed2c65061841"
+            "a5ea9d0ba56f785071fc6ef2"
+        ),
     }
     return {
         "eligible_summary": eligible_summary,
@@ -84,6 +111,18 @@ def test_post_eligibility_evidence_bundle_accepts_consistent_provenance():
         "v2_v4_run_id": 702,
         "eligible_universe_sha256": "3" * 64,
         "representative_validation_sha256": "4" * 64,
+        "representative_sample_sha256": "5" * 64,
+        "representative_token_set_sha256": "6" * 64,
+        "representative_source_coverage_sha256": "7" * 64,
+        "runner_smoke_run_id": 33_920_762_592,
+        "runner_smoke_universe_sha256": (
+            "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+            "b769543c1376beab9c19ab9"
+        ),
+        "runner_smoke_outcomes_sha256": (
+            "6fb40693b77d7434d4e579a2225fed2c65061841"
+            "a5ea9d0ba56f785071fc6ef2"
+        ),
         "v1_eligibility_sha256": "1" * 64,
         "v2_eligibility_sha256": "2" * 64,
     }
@@ -153,5 +192,40 @@ def test_post_eligibility_evidence_bundle_rejects_launch_count_drift():
     with pytest.raises(
         ValueError,
         match="eligible universe Pons launch count changed",
+    ):
+        validate_post_eligibility_evidence_bundle(**fixtures)
+
+
+def test_post_eligibility_evidence_bundle_rejects_sample_identity_drift():
+    fixtures = _fixtures()
+    fixtures["representative_summary"]["sample_sha256"] = "a" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="representative sample SHA disagrees",
+    ):
+        validate_post_eligibility_evidence_bundle(**fixtures)
+
+
+def test_post_eligibility_evidence_bundle_rejects_source_coverage_drift():
+    fixtures = _fixtures()
+    fixtures["representative_summary"]["source_coverage_sha256"] = "a" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="representative source-coverage SHA disagrees",
+    ):
+        validate_post_eligibility_evidence_bundle(**fixtures)
+
+
+def test_post_eligibility_evidence_bundle_rejects_runner_smoke_drift():
+    fixtures = _fixtures()
+    fixtures["representative_manifest"]["provenance"][
+        "runner_smoke_outcomes_sha256"
+    ] = "a" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="frozen runner-smoke identity changed",
     ):
         validate_post_eligibility_evidence_bundle(**fixtures)
