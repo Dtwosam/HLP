@@ -41,6 +41,26 @@ MATRIX_WORKFLOWS = {
 }
 
 
+ARTIFACT_WORKFLOWS = tuple(
+    dict.fromkeys(
+        (
+            *WORKFLOWS,
+            "phase1-pons-recovered-completion-chain.yml",
+            "phase1-pons-post-eligibility-evidence-chain.yml",
+            "phase1-pons-representative-market-paths.yml",
+            "phase1-pons-representative-priced-paths.yml",
+            "phase1-pons-representative-dex-crosscheck.yml",
+            "phase1-pons-representative-validation.yml",
+            "phase1-pons-acquisition-viability-projection.yml",
+            "phase1-pons-final-acceptance-chain.yml",
+            "phase1-pons-acceptance-gate.yml",
+            "phase1-pons-pass-closeout-one-shot.yml",
+            "phase1-pons-readiness-audit.yml",
+        )
+    )
+)
+
+
 def _workflow(name: str) -> str:
     return (
         Path(__file__).parents[1] / ".github" / "workflows" / name
@@ -120,7 +140,7 @@ def test_critical_phase1_workflow_python_heredocs_compile():
 
 
 def test_critical_upload_artifact_steps_have_local_configuration():
-    for name in WORKFLOWS:
+    for name in ARTIFACT_WORKFLOWS:
         lines = _workflow(name).splitlines()
         for index, line in enumerate(lines):
             if "uses: actions/upload-artifact@v4" not in line:
