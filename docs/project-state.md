@@ -1519,7 +1519,11 @@ before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
 artifact from an older evidence or route ledger therefore cannot close Phase 1.
 
 Evidence handoffs are now guarded before any representative RPC at three
-layers. The normal post-eligibility chain requires source run **33982556591**,
+layers. The reusable representative-evidence preflight now retries transient
+GitHub metadata reads up to three times without sleeps and retries both
+lifecycle provenance artifacts with partial-directory cleanup before it can
+launch sample/market/Transfer work. The normal post-eligibility chain requires
+source run **33982556591**,
 the exact full-eligibility workflow path, branch
 `phase1/data-acquisition-spike` and launch commit
 `c53b3a63156976a5873752c332fa7578011249b0`. Both the normal and recovered
