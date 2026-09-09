@@ -114,6 +114,121 @@ def test_actions_log_missing_redirect_blob_is_classified(monkeypatch):
 
 
 
+def test_actions_log_retries_transient_blob_failure_with_fresh_redirect(
+    monkeypatch,
+):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/jobs/457/logs"
+    blob_urls = [
+        "https://results.blob.core.windows.net/actions/first-log.txt",
+        "https://results.blob.core.windows.net/actions/second-log.txt",
+    ]
+    seen = {"api_calls": 0, "blob_calls": 0, "blob_headers": []}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            index = seen["api_calls"]
+            seen["api_calls"] += 1
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_urls[index]},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+
+    def flaky_blob(request, timeout):
+        seen["blob_calls"] += 1
+        seen["blob_headers"].append(dict(request.header_items()))
+        if seen["blob_calls"] == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b"retry"),
+            )
+        return _Response(b'{"requests_made": 8}\n')
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        flaky_blob,
+    )
+
+    log = fetch_github_actions_job_log(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert log == '{"requests_made": 8}\n'
+    assert seen["api_calls"] == 2
+    assert seen["blob_calls"] == 2
+    assert all(
+        "Authorization" not in headers
+        for headers in seen["blob_headers"]
+    )
+
+
+def test_actions_log_retries_transient_api_failure(monkeypatch):
+    api_url = "https://api.github.com/repos/Dtwosam/HLP/actions/jobs/458/logs"
+    blob_url = "https://results.blob.core.windows.net/actions/retry-log.txt"
+    seen = {"api_calls": 0}
+
+    class NoRedirectOpener:
+        def open(self, request, timeout):
+            seen["api_calls"] += 1
+            if seen["api_calls"] == 1:
+                raise urllib.error.HTTPError(
+                    api_url,
+                    503,
+                    "Service Unavailable",
+                    {},
+                    io.BytesIO(b"retry"),
+                )
+            raise urllib.error.HTTPError(
+                api_url,
+                302,
+                "Found",
+                {"Location": blob_url},
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.build_opener",
+        lambda *handlers: NoRedirectOpener(),
+    )
+    monkeypatch.setattr(
+        "hlp.data.github_actions.urllib.request.urlopen",
+        lambda request, timeout: _Response(b'{"requests_made": 9}\n'),
+    )
+
+    log = fetch_github_actions_job_log(
+        api_url,
+        "secret-token",
+        attempts=3,
+    )
+
+    assert log == '{"requests_made": 9}\n'
+    assert seen["api_calls"] == 2
+
+
+def test_actions_log_attempts_must_be_positive():
+    with pytest.raises(
+        ValueError,
+        match="job log attempts must be positive",
+    ):
+        fetch_github_actions_job_log(
+            "https://api.github.com/repos/Dtwosam/HLP/actions/jobs/459/logs",
+            "secret-token",
+            attempts=0,
+        )
+
+
 def test_actions_artifact_redirect_does_not_forward_github_token(monkeypatch):
     api_url = (
         "https://api.github.com/repos/Dtwosam/HLP/"
