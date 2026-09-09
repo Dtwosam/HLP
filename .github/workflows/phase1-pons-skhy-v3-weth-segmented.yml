@@ -383,7 +383,29 @@ jobs:
       SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
       SKHY_WETH_POOL: '0x13f78b235d19141f572986afcaab66ce7744b4ef'
     steps:
-      - uses: actions/download-artifact@v4
+      - id: download_segments
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v3-weth-segment-*
+          path: segments
+      - name: Clean partial artifact download before retry
+        if: ${{ steps.download_segments.outcome == 'failure' }}
+        run: rm -rf segments
+      - id: retry_download_segments
+        name: Retry SKHY/WETH segment bundle download
+        if: ${{ steps.download_segments.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v3-weth-segment-*
+          path: segments
+      - name: Clean partial artifact download before final retry
+        if: ${{ steps.retry_download_segments.outcome == 'failure' }}
+        run: rm -rf segments
+      - name: Final SKHY/WETH segment bundle download retry
+        if: ${{ steps.retry_download_segments.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-skhy-v3-weth-segment-*
           path: segments
