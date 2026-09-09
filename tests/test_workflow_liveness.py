@@ -251,6 +251,26 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
                 f"steps.retry_upload_{upload_id}.outcome == 'failure'"
             ) == 1, (name, upload_id)
         assert content.count("overwrite: true") == 6, name
+        for download_id in (
+            "routes",
+            "shards",
+            "merge_routes",
+        ):
+            assert content.count(f"id: download_{download_id}") == 1, (
+                name,
+                download_id,
+            )
+            assert content.count(
+                f"id: retry_download_{download_id}"
+            ) == 1, (name, download_id)
+            assert content.count(
+                f"steps.download_{download_id}.outcome == 'failure'"
+            ) == 2, (name, download_id)
+            assert content.count(
+                f"steps.retry_download_{download_id}.outcome == 'failure'"
+            ) == 2, (name, download_id)
+        assert content.count("rm -rf routes") == 4, name
+        assert content.count("rm -rf downloads") == 2, name
         assert (
             "      - uses: actions/upload-artifact@v4\n"
             "      - uses: actions/upload-artifact@v4"
