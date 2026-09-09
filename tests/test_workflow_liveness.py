@@ -2981,12 +2981,16 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "source_v2_shards" in content
     assert "recovery_manifest" in content
     assert "select_equivalent_artifact_retry" in content
+    assert "resolve_v1_v3_canonical_shard_bindings" in content
     assert "resolve_v2_v4_canonical_shard_bindings" in content
     assert "artifact_rows_cache = {}" in content
     assert "if run_id in artifact_rows_cache:" in content
-    assert "recovery V2/V4 canonical shard geometry " in content
-    assert "recovered completion selected V2/V4 " in content
-    assert "recovery V2/V4 selected shard artifact " in content
+    assert 'venue_label = (' in content
+    assert 'if venue_label == "V1/V3"' in content
+    assert "shard_resolver = (" in content
+    assert 'f"recovery {venue_label} canonical shard geometry "' in content
+    assert '"recovered completion selected "' in content
+    assert 'f"recovery {venue_label} selected shard artifact "' in content
     assert "is unavailable or ambiguous" in content
     assert "recovery venue retry artifacts are not equivalent" in content
     assert content.count("fetch_github_actions_artifact_zip(") == 1
