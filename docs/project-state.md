@@ -1562,7 +1562,10 @@ present, and observe zero active exact-title venue-rescue generations before
 the representative chain can start. The launcher also opens the eligible
 universe before any representative RPC and proves its exact **494,639** launch
 geometry, zero unknown tokens, universe SHA, lifecycle run identity, and
-embedded V1/V3 plus V2/V4 provenance against the configured venue runs. This
+embedded V1/V3 plus V2/V4 provenance against the configured venue runs. Its
+launch-contract GitHub metadata reads now use the shared bounded-retry Actions
+JSON helper, and the exact eligible-universe artifact gets three download
+attempts with partial-directory cleanup before that provenance check. This
 prevents the Transfer backfill from competing with a live venue rescue or
 starting from a mixed/stale eligibility bundle while allowing a clean
 post-recovery end-to-end retry path. Resumed representative Transfer shards are
