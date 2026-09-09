@@ -278,6 +278,29 @@ def test_downstream_pricing_artifact_uploads_are_retry_safe():
         ) not in content, name
 
 
+def test_generic_quote_fallback_artifact_handoff_is_retry_safe():
+    content = _workflow("phase1-pons-quote-fallback-full.yml")
+    for venue in ("v3", "v4"):
+        assert content.count(f"id: download_{venue}") == 1, venue
+        assert content.count(f"id: retry_download_{venue}") == 1, venue
+        assert content.count(
+            f"steps.download_{venue}.outcome == 'failure'"
+        ) == 2, venue
+        assert content.count(
+            f"steps.retry_download_{venue}.outcome == 'failure'"
+        ) == 2, venue
+        assert content.count(f"rm -rf {venue}") == 2, venue
+    assert content.count("id: upload_merged") == 1
+    assert content.count("id: retry_upload_merged") == 1
+    assert content.count(
+        "steps.upload_merged.outcome == 'failure'"
+    ) == 1
+    assert content.count(
+        "steps.retry_upload_merged.outcome == 'failure'"
+    ) == 1
+    assert content.count("overwrite: true") == 2
+
+
 def test_lifecycle_artifact_handoffs_are_retry_safe():
     contracts = {
         "phase1-pons-v1-lifecycle-eligibility.yml": (
