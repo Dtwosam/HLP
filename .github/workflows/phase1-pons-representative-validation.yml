@@ -224,6 +224,18 @@ jobs:
               raise SystemExit(
                   "representative validation sample V2 run mismatch"
               )
+          if int(
+              sample_summary.get("validated_v1_v3_run_id", -1)
+          ) != v1_v3_run:
+              raise SystemExit(
+                  "representative validation sample V1/V3 lineage mismatch"
+              )
+          if int(
+              sample_summary.get("validated_v2_v4_run_id", -1)
+          ) != v2_v4_run:
+              raise SystemExit(
+                  "representative validation sample V2/V4 lineage mismatch"
+              )
           if int(sample_summary.get("runner_smoke_run_id", -1)) != 33_920_762_592:
               raise SystemExit(
                   "representative validation runner smoke run mismatch"
