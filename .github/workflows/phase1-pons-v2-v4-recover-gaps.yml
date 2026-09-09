@@ -2254,9 +2254,10 @@ jobs:
                       "V2/V4 merge current gap plan file identity "
                       f"is ambiguous: run={current_run_id}"
                   )
-              current_plan = json.loads(
-                  archive.read(current_plan_names[0])
+              current_plan_bytes = archive.read(
+                  current_plan_names[0]
               )
+              current_plan = json.loads(current_plan_bytes)
           if int(
               current_plan.get("partial_run_id", 0)
           ) != partial_run_id:
@@ -2325,6 +2326,8 @@ jobs:
               current_run_id,
               current_planned,
           )
+          Path("plan").mkdir(parents=True, exist_ok=True)
+          (Path("plan") / plan_name).write_bytes(current_plan_bytes)
           print(json.dumps({
               "prior_gap_generations": prior_generations,
               "prior_gap_artifacts": prior_total,
@@ -2338,10 +2341,6 @@ jobs:
               "current_gap_count": current_gap_count,
           }, sort_keys=True))
           PY
-      - uses: actions/download-artifact@v4
-        with:
-          name: phase1-pons-v2-v4-gap-plan
-          path: plan
       - uses: actions/download-artifact@v4
         with:
           name: phase1-pons-v2-transition-full
