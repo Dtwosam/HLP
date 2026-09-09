@@ -1389,8 +1389,13 @@ both venue inputs and its merged output, preventing a late artifact-service
 failure from discarding two already-completed 128-shard fallback scans. Both
 V3 and V4 manifest-gap recovery workflows now retry their gap-plan and final
 canonical uploads too; their per-gap RPC artifacts were already retry-safe.
+Their final merge stages also retry all five critical artifact reads—the
+partial tape, optional prior gaps, current gaps, frozen routes and gap plan—with
+partial-directory cleanup between attempts. CI compiles both recovery heredoc
+sets, checks their upload-step structure and pins the merge-read retry contract.
 A recovered fallback generation therefore does not need another generation
-solely because GitHub artifact finalization failed after planning or merge.
+solely because GitHub artifact finalization or a transient final-merge read
+failed after completed gap RPC work.
 
 The V2 lifecycle replay no longer wildcard-downloads
 `phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
