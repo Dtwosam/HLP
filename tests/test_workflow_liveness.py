@@ -2883,6 +2883,10 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
     assert "return selected_recovery_shards_resolvable(" in content
     assert '"pons-v1-v3-full.jsonl"' in content
     assert '"pons-v2-v4-full.jsonl"' in content
+    assert "expected_filter_semantics = (" in content
+    assert "global V3 Initialize/Swap topic scan followed by " in content
+    assert "PoolManager Initialize/Swap global topic scan followed " in content
+    assert 'provenance.get("filter_semantics")' in content
     assert 'records = int(manifest.get("records", -1))' in content
     assert 'digest = str(manifest.get("sha256") or "")' in content
     assert 'manifest.get("path") != expected_data_name' in content
@@ -3079,6 +3083,10 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "pons-v2-v4-full.jsonl.manifest.json" in content
     assert "manifest_gap_aware_v1_v3_recovery" in content
     assert "manifest_gap_aware_v4_recovery" in content
+    assert "expected_filter_semantics" in content
+    assert "global V3 Initialize/Swap topic scan followed by " in content
+    assert "PoolManager Initialize/Swap global topic scan followed " in content
+    assert "recovery venue manifest filter semantics changed" in content
     assert "recovery venue manifest path changed" in content
     assert "recovery venue manifest record count is invalid" in content
     assert "recovery venue manifest SHA-256 is invalid" in content
