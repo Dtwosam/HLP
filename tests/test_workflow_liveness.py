@@ -1649,6 +1649,14 @@ def test_final_acceptance_chain_requires_nine_distinct_route_runs():
     assert "final acceptance evidence handoff is not ready" in content
     assert "final acceptance evidence handoff run mismatch" in content
     assert "final acceptance evidence handoff source changed" in content
+    assert "final acceptance handoff evidence workflow path changed" in content
+    assert "normal_evidence_path = (" in content
+    assert "recovered_evidence_path = (" in content
+    assert "final acceptance normal evidence is marked recovered" in content
+    assert "final acceptance normal evidence routing changed" in content
+    assert "final acceptance recovered evidence is not marked " in content
+    assert "urllib.request.Request(" in content
+    assert 'GITHUB_TOKEN: ${{ github.token }}' in content
     assert "final acceptance evidence hash is invalid" in content
     assert "representative_sample_sha256" in content
     assert "representative_token_set_sha256" in content
