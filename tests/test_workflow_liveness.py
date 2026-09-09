@@ -2394,14 +2394,15 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "unconsumed terminal generations:" in content
     assert "live venue rescue generation is not monotonic: " in content
     assert "expected_prior_consumed_run_id = \"\"" in content
-    assert "rescue_v2 and requested_generation >= 4" in content
+    assert "requested_generation >= 2" in content
     assert "prior_generation = requested_generation - 1" in content
     assert "consumed_generation_runs.get(prior_generation, [])" in content
-    assert "next cleanup generation requires exactly " in content
-    assert "one consumed immediate prior generation" in content
+    assert 'venue_label = "V1/V3" if rescue_v1 else "V2/V4"' in content
+    assert "next rescue generation requires " in content
+    assert "exactly one consumed immediate prior generation" in content
     assert "is_expected_consumed_prior" in content
     assert "can_select_plan_only" in content
-    assert "next cleanup generation did not select " in content
+    assert "next rescue generation did not select " in content
     assert "the immediate consumed prior run" in content
     assert '"requested_generation": requested_generation' in content
     assert '"expected_generation": expected_generation' in content
