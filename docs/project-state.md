@@ -1538,8 +1538,13 @@ partial directories and retry before failing. A failed earlier acquisition wave
 no longer prevents later planned waves from materializing, so unrelated
 successful ranges remain reusable by the next recovery generation; final merge
 still requires every wave to be success or skipped and therefore remains
-fail-closed on incomplete coverage. Readiness metadata parsing also fails closed
-on malformed numeric evidence, route-launch or finalizer provenance instead of
+fail-closed on incomplete coverage. The representative sample freeze,
+artifact-only market-path extraction, causal priced-path replay and bounded DEX
+cross-check now also retry their final artifact uploads up to three total
+attempts using already-computed local evidence. This closes the remaining
+single-attempt finalization points before the already retry-hardened
+representative validation join. Readiness metadata parsing also fails closed on
+malformed numeric evidence, route-launch or finalizer provenance instead of
 crashing the audit.
 
 The shared bounded viability measurement workflow now also carries its own
