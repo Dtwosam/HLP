@@ -3478,6 +3478,11 @@ def test_phase1_readiness_audit_is_artifact_only_and_guarded():
         "artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}"
         in content
     )
+    assert content.count("fetch_github_actions_json(") == 2
+    assert "urllib.request.urlopen" not in content
+    assert content.count("id: download_handoff") == 1
+    assert content.count("id: retry_download_handoff") == 1
+    assert content.count("rm -rf handoff") == 2
     assert "phase1-post-eligibility-evidence-ready.json" in content
     assert "evidence_handoff=evidence_handoff" in content
     assert "evidence_handoff_errors" in content
