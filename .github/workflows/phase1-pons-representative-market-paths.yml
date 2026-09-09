@@ -204,6 +204,9 @@ jobs:
           from hlp.data.phase1_coverage import (
               summarize_sharded_manifest_coverage,
           )
+          from hlp.data.pons_representative_identity import (
+              require_representative_sample_identity,
+          )
           from hlp.data.pons_representative_paths import (
               build_representative_market_path_rows,
               summarize_representative_market_paths,
@@ -222,8 +225,18 @@ jobs:
           def load_jsonl(path):
               return list(read_jsonl(path))
 
-          sample = load_jsonl(
+          sample_path = Path(
               "sample/pons-representative-sample.jsonl"
+          )
+          sample = load_jsonl(sample_path)
+          sample_summary = json.loads(
+              Path(
+                  "sample/pons-representative-sample-summary.json"
+              ).read_text()
+          )
+          sample_identity = require_representative_sample_identity(
+              sample_path,
+              sample_summary,
           )
           if len(sample) != 10:
               raise SystemExit(
@@ -437,6 +450,10 @@ jobs:
                   f"10 tokens, got {len(summary_rows)}"
               )
 
+          sample_binding = {
+              "sample_sha256": sample_identity["sample_sha256"],
+              "token_set_sha256": sample_identity["token_set_sha256"],
+          }
           source_runs = {
               "sample_run_id": int("${{ inputs.sample_run_id }}"),
               "registry_run_id": int("${{ inputs.registry_run_id }}"),
@@ -458,6 +475,7 @@ jobs:
                       "artifact-only representative launch/trade path "
                       "extraction; no provider requests"
                   ),
+                  **sample_binding,
                   **source_runs,
               },
           )
@@ -471,6 +489,7 @@ jobs:
                   "chain_id": 4663,
                   "snapshot_head_block": SNAPSHOT_HEAD,
                   "market_paths_sha256": path_snapshot["sha256"],
+                  **sample_binding,
                   **source_runs,
               },
           )
@@ -496,6 +515,7 @@ jobs:
               "market_paths_sha256": path_snapshot["sha256"],
               "summary_sha256": summary_snapshot["sha256"],
               "continuous_market_sources": len(market_source_coverage),
+              **sample_binding,
               **source_runs,
           }
           Path(
