@@ -299,7 +299,29 @@ jobs:
       SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
       SKHY_POOL_ID: '0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601'
     steps:
-      - uses: actions/download-artifact@v4
+      - id: download_segments
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v4-segment-*
+          path: segments
+      - name: Clean partial artifact download before retry
+        if: ${{ steps.download_segments.outcome == 'failure' }}
+        run: rm -rf segments
+      - id: retry_download_segments
+        name: Retry SKHY V4 segment bundle download
+        if: ${{ steps.download_segments.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-skhy-v4-segment-*
+          path: segments
+      - name: Clean partial artifact download before final retry
+        if: ${{ steps.retry_download_segments.outcome == 'failure' }}
+        run: rm -rf segments
+      - name: Final SKHY V4 segment bundle download retry
+        if: ${{ steps.retry_download_segments.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
         with:
           pattern: phase1-pons-skhy-v4-segment-*
           path: segments
