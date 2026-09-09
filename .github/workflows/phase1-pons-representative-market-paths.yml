@@ -238,6 +238,20 @@ jobs:
               sample_path,
               sample_summary,
           )
+          expected_v1_v3_run_id = int("${{ inputs.v1_v3_run_id }}")
+          expected_v2_v4_run_id = int("${{ inputs.v2_v4_run_id }}")
+          if int(
+              sample_summary.get("validated_v1_v3_run_id", -1)
+          ) != expected_v1_v3_run_id:
+              raise SystemExit(
+                  "representative market-path sample V1/V3 lineage mismatch"
+              )
+          if int(
+              sample_summary.get("validated_v2_v4_run_id", -1)
+          ) != expected_v2_v4_run_id:
+              raise SystemExit(
+                  "representative market-path sample V2/V4 lineage mismatch"
+              )
           if len(sample) != 10:
               raise SystemExit(
                   "representative market-path freeze requires exactly 10 "
@@ -457,10 +471,10 @@ jobs:
           source_runs = {
               "sample_run_id": int("${{ inputs.sample_run_id }}"),
               "registry_run_id": int("${{ inputs.registry_run_id }}"),
-              "v1_v3_run_id": int("${{ inputs.v1_v3_run_id }}"),
+              "v1_v3_run_id": expected_v1_v3_run_id,
               "v2_curve_run_id": int("${{ inputs.v2_curve_run_id }}"),
               "transition_run_id": int("${{ inputs.transition_run_id }}"),
-              "v2_v4_run_id": int("${{ inputs.v2_v4_run_id }}"),
+              "v2_v4_run_id": expected_v2_v4_run_id,
           }
           path_snapshot = write_jsonl_snapshot(
               rows,
