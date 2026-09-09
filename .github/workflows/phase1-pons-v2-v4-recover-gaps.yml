@@ -643,6 +643,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -815,7 +816,7 @@ jobs:
                       f"{exc}"
                   ) from exc
 
-              observed = {}
+              observed_groups = {}
               for row in rows:
                   match = gap_pattern.fullmatch(
                       str(row.get("name") or "")
@@ -823,12 +824,26 @@ jobs:
                   if not match:
                       continue
                   gap_id = match.group(1)
-                  if gap_id in observed:
-                      raise SystemExit(
-                          "prior gap coverage has duplicate gap artifacts: "
-                          f"run={cursor} gap={gap_id}"
+                  observed_groups.setdefault(gap_id, []).append(row)
+
+              observed = {}
+              collapsed_retry_artifacts = 0
+              for gap_id, candidates in observed_groups.items():
+                  try:
+                      observed[gap_id] = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "prior V2/V4 gap artifact "
+                              f"run={cursor} gap={gap_id}"
+                          ),
                       )
-                  observed[gap_id] = row
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "prior gap coverage duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={cursor} gap={gap_id}: {exc}"
+                      ) from exc
+                  collapsed_retry_artifacts += len(candidates) - 1
 
               reusable_gap_ids = []
               for gap_id, row in observed.items():
@@ -953,6 +968,9 @@ jobs:
                   ),
                   "terminal_snapshot_sha256": (
                       observed_snapshot_sha256
+                  ),
+                  "collapsed_equivalent_retry_artifacts": (
+                      collapsed_retry_artifacts
                   ),
               })
               cursor = (
@@ -1849,6 +1867,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -1938,20 +1957,35 @@ jobs:
               )
 
           def gap_rows(rows, run_id):
-              selected = []
+              grouped = {}
               for row in rows:
                   match = gap_pattern.fullmatch(
                       str(row.get("name") or "")
                   )
                   if match:
-                      selected.append((match.group(1), row))
+                      grouped.setdefault(
+                          match.group(1),
+                          [],
+                      ).append(row)
+
+              selected = []
+              for gap_id, candidates in grouped.items():
+                  try:
+                      artifact = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "V2/V4 merge gap artifact "
+                              f"run={run_id} gap={gap_id}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "V2/V4 merge duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={run_id} gap={gap_id}: {exc}"
+                      ) from exc
+                  selected.append((gap_id, artifact))
               selected.sort(key=lambda item: int(item[0]))
-              gap_ids = [gap_id for gap_id, _ in selected]
-              if len(gap_ids) != len(set(gap_ids)):
-                  raise SystemExit(
-                      "V2/V4 merge contains duplicate gap artifact IDs: "
-                      f"run={run_id}"
-                  )
               return selected
 
           def extract_rows(selected, target, run_id, planned):
