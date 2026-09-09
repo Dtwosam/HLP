@@ -1375,9 +1375,12 @@ also structurally checks every critical `upload-artifact` step for its own
 future malformed empty step.
 
 The two 60-minute lifecycle replay workflows are now protected by the same
-artifact-service discipline. V1 retries registry, quote-audit, anchor and stock
-oracle downloads before replay; V2 retries registry, curve, transition, anchor,
-stock oracle and merged quote-fallback downloads. Partial target directories are
+artifact-service discipline. Their canonical V1/V3 and V2/V4 shard resolvers
+use the shared bounded-retry Actions JSON reader for run/artifact pagination in
+addition to the safe token-stripping ZIP downloader. V1 retries registry,
+quote-audit, anchor and stock oracle downloads before replay; V2 retries
+registry, curve, transition, anchor, stock oracle and merged quote-fallback
+downloads. Partial target directories are
 removed between attempts. Both final lifecycle eligibility artifacts also get
 three upload attempts using the already-computed local output, so a transient
 GitHub artifact failure does not force a multi-GB replay to start over. The
