@@ -1338,9 +1338,18 @@ transition, quote-audit and WETH/USDG anchor run IDs, and verify each support
 run is successful, comes from its exact workflow path on the Phase 1 branch,
 and still exposes its required non-expired canonical artifact. The reusable
 representative chain repeats that immutable support preflight before its sample
-job, so direct/manual entry cannot bypass it and reach Transfer RPC. Resumed
-representative Transfer shards are now bound to the exact frozen sample as
-well: the sample freeze publishes the SHA256 of the exact ten-token JSONL plus
+job, so direct/manual entry cannot bypass it and reach Transfer RPC. The
+first real standalone representative run is now staged behind
+`.github/phase1-pons-representative-evidence.json` and remains unarmed at
+generation **0**. A future launch must be the exact one-line commit
+`launch representative evidence generation N`, modify only that guarded
+config, advance its generation by exactly one, name successful canonical
+eligibility plus V1/V3 and V2/V4 runs with all required artifacts still
+present, and observe zero active exact-title venue-rescue generations before
+the representative chain can start. This prevents the Transfer backfill from
+competing with a live venue rescue while allowing a clean post-recovery
+end-to-end retry path. Resumed representative Transfer shards are now bound to
+the exact frozen sample as well: the sample freeze publishes the SHA256 of the exact ten-token JSONL plus
 a canonical SHA256 of the sorted token-address set, and every downstream
 representative stage revalidates those identities. Transfer planning/reuse,
 artifact-only market-path extraction, causal priced-path replay, the independent
