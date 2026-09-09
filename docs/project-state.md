@@ -1641,6 +1641,14 @@ same shared metadata reader for evidence/route runs, frozen config-at-ref reads
 and ancestry comparisons, so transient GitHub API failures cannot invalidate an
 otherwise complete nine-route ledger.
 
+The post-eligibility evidence chain now uses the shared bounded-retry Actions
+metadata reader for both source/support preflight and exact current-run evidence
+artifact resolution, and retries both eligible-universe and representative
+artifacts three times with partial-directory cleanup. Final acceptance,
+acceptance-gate and PASS-closeout metadata reads use the same shared helper; all
+three therefore retain their exact artifact-ID retry semantics without a raw
+single-attempt GitHub metadata dependency.
+
 The reusable final-acceptance chain now repeats the ledger finalizer's core
 provenance checks before any accounting or acceptance work: eligibility and
 representative artifacts must come from the same approved evidence handoff,
