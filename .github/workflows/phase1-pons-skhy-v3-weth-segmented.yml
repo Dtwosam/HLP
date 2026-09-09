@@ -479,8 +479,28 @@ jobs:
               handle.write(f"search_to_block={search_to}\n")
           print(json.dumps(final, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_segmented
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-skhy-v3-weth-segmented
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_segmented
+        name: Retry segmented SKHY/WETH artifact upload
+        if: ${{ steps.upload_segmented.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-skhy-v3-weth-segmented
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final segmented SKHY/WETH artifact upload retry
+        if: ${{ steps.retry_upload_segmented.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-skhy-v3-weth-segmented
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
