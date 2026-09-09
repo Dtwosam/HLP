@@ -113,6 +113,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -167,7 +168,7 @@ jobs:
                   "representative transfer metadata retry loop exhausted"
               )
 
-          selected = []
+          by_index = {}
           page = 1
           while True:
               payload = get(
@@ -178,7 +179,10 @@ jobs:
               for row in rows:
                   match = pattern.fullmatch(str(row.get("name") or ""))
                   if match and not row.get("expired"):
-                      selected.append((int(match.group(1)), row))
+                      by_index.setdefault(
+                          int(match.group(1)),
+                          [],
+                      ).append(row)
               if len(rows) < 100:
                   break
               page += 1
@@ -188,17 +192,27 @@ jobs:
                       "exceeded 2000"
                   )
 
-          selected.sort(key=lambda item: item[0])
-          indexes = [index for index, _ in selected]
-          if not selected:
+          if not by_index:
               raise SystemExit(
                   "prior representative transfer run has no shard artifacts"
               )
-          if len(indexes) != len(set(indexes)):
-              raise SystemExit(
-                  "prior representative transfer run has duplicate shard "
-                  "artifact indexes"
-              )
+          selected = []
+          for index, candidates in sorted(by_index.items()):
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      candidates,
+                      label=(
+                          "prior representative transfer shard "
+                          f"{index} run={run_id}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior representative transfer retry artifacts are "
+                      f"not equivalent: shard={index} run={run_id}: {exc}"
+                  ) from exc
+              selected.append((index, artifact))
+          indexes = [index for index, _ in selected]
 
           target = Path("prior")
           target.mkdir(parents=True, exist_ok=True)
@@ -850,6 +864,7 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
           )
 
           api = os.environ["GITHUB_API_URL"]
@@ -904,7 +919,7 @@ jobs:
               )
 
           def download(run_id, target_name, label):
-              selected = []
+              by_index = {}
               page = 1
               while True:
                   payload = get(
@@ -917,9 +932,10 @@ jobs:
                           str(row.get("name") or "")
                       )
                       if match and not row.get("expired"):
-                          selected.append(
-                              (int(match.group(1)), row)
-                          )
+                          by_index.setdefault(
+                              int(match.group(1)),
+                              [],
+                          ).append(row)
                   if len(rows) < 100:
                       break
                   page += 1
@@ -929,18 +945,29 @@ jobs:
                           f"exceeded 2000: {label}"
                       )
 
-              selected.sort(key=lambda item: item[0])
-              indexes = [index for index, _ in selected]
-              if not selected:
+              if not by_index:
                   raise SystemExit(
                       f"{label} representative transfer run has no "
                       "shard artifacts"
                   )
-              if len(indexes) != len(set(indexes)):
-                  raise SystemExit(
-                      f"{label} representative transfer run has duplicate "
-                      "shard artifact indexes"
-                  )
+              selected = []
+              for index, candidates in sorted(by_index.items()):
+                  try:
+                      artifact = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              f"{label} representative transfer shard "
+                              f"{index} run={run_id}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          f"{label} representative transfer retry artifacts "
+                          "are not equivalent: "
+                          f"shard={index} run={run_id}: {exc}"
+                      ) from exc
+                  selected.append((index, artifact))
+              indexes = [index for index, _ in selected]
 
               target = Path(target_name)
               target.mkdir(parents=True, exist_ok=True)
