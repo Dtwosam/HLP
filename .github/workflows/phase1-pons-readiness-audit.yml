@@ -77,6 +77,10 @@ jobs:
 
           from hlp.data.github_actions import (
               fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.pons_v2_v4_artifacts import (
+              resolve_v2_v4_shard_artifact,
           )
           from hlp.data.ranges import validate_gap_plan_jobs
           from hlp.data.phase1_readiness import (
@@ -123,7 +127,12 @@ jobs:
                   base64.b64decode(payload.get("content") or "")
               )
 
+          artifact_rows_cache = {}
+
           def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
               rows_out = []
               page = 1
               while True:
@@ -144,6 +153,7 @@ jobs:
                       raise SystemExit(
                           f"artifact pagination exceeded 2000 for run {run_id}"
                       )
+              artifact_rows_cache[run_id] = rows_out
               return rows_out
 
           def artifact_names(run_id):
@@ -160,12 +170,20 @@ jobs:
                   for row in artifact_rows(run_id)
                   if str(row.get("name")) == artifact_name
               ]
-              if len(matches) != 1:
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "readiness artifact "
+                          f"{artifact_name} run={run_id}"
+                      ),
+                  )
+              except ValueError:
                   return None
               blob = fetch_github_actions_artifact_zip(
                   api
                   + f"/repos/{repo}/actions/artifacts/"
-                  + f"{int(matches[0]['id'])}/zip",
+                  + f"{int(artifact['id'])}/zip",
                   token,
               )
               try:
@@ -184,6 +202,103 @@ jobs:
                   UnicodeDecodeError,
               ):
                   return None
+
+          def v2_v4_selected_shards_resolvable(run_id, manifest):
+              provenance = manifest.get("provenance") or {}
+              if not isinstance(provenance, dict):
+                  return False
+              if provenance.get("storage_mode") != "sharded_artifacts":
+                  return False
+
+              partial_value = provenance.get("partial_run_id")
+              try:
+                  partial_run_id = (
+                      int(partial_value)
+                      if partial_value not in {None, "", 0}
+                      else None
+                  )
+              except (TypeError, ValueError):
+                  return False
+
+              shards = provenance.get("shards")
+              if not isinstance(shards, list) or not shards:
+                  return False
+
+              previous_hi = None
+              selected_records = 0
+              seen_bindings = set()
+              for shard in shards:
+                  if not isinstance(shard, dict):
+                      return False
+                  try:
+                      binding = resolve_v2_v4_shard_artifact(
+                          shard,
+                          current_run_id=run_id,
+                          partial_run_id=partial_run_id,
+                      )
+                  except (TypeError, ValueError):
+                      return False
+
+                  digest = str(binding.get("sha256") or "")
+                  records = int(binding.get("records", -1))
+                  lo = int(binding.get("from_block", -1))
+                  hi = int(binding.get("to_block", -1))
+                  if (
+                      len(digest) != 64
+                      or any(
+                          char not in "0123456789abcdef"
+                          for char in digest
+                      )
+                      or records < 0
+                      or lo <= 0
+                      or hi < lo
+                  ):
+                      return False
+                  if previous_hi is None:
+                      if lo != 26_841_846:
+                          return False
+                  elif lo != previous_hi + 1:
+                      return False
+                  previous_hi = hi
+                  selected_records += records
+
+                  key = (
+                      int(binding["run_id"]),
+                      str(binding["artifact_name"]),
+                      str(binding["file"]),
+                  )
+                  if key in seen_bindings:
+                      return False
+                  seen_bindings.add(key)
+
+                  matches = [
+                      row
+                      for row in artifact_rows(binding["run_id"])
+                      if str(row.get("name") or "")
+                      == binding["artifact_name"]
+                  ]
+                  try:
+                      select_equivalent_artifact_retry(
+                          matches,
+                          label=(
+                              "readiness selected V2/V4 shard "
+                              f"run={binding['run_id']} "
+                              f"artifact={binding['artifact_name']}"
+                          ),
+                      )
+                  except ValueError:
+                      return False
+
+              try:
+                  aggregate_records = int(
+                      manifest.get("records", -1)
+                  )
+              except (TypeError, ValueError):
+                  return False
+              return bool(
+                  previous_hi == 54_486_035
+                  and selected_records == aggregate_records
+              )
 
           def recovery_manifest_valid(venue, run_id):
               if venue == "v1_v3":
@@ -233,7 +348,7 @@ jobs:
               ):
                   return False
               try:
-                  return bool(
+                  envelope_valid = bool(
                       provenance.get("source") == expected_source
                       and int(provenance.get("chain_id", 0)) == 4663
                       and int(
@@ -248,6 +363,14 @@ jobs:
                   )
               except (TypeError, ValueError):
                   return False
+              if not envelope_valid:
+                  return False
+              if venue == "v2_v4":
+                  return v2_v4_selected_shards_resolvable(
+                      run_id,
+                      manifest,
+                  )
+              return True
 
           def recovery_lineage_valid(venue, run_id):
               if venue == "v1_v3":
