@@ -535,15 +535,16 @@ jobs:
               )
 
           expected_prior_consumed_run_id = ""
-          if rescue_v2 and requested_generation >= 4:
+          if requested_generation >= 2:
               prior_generation = requested_generation - 1
               prior_consumed_runs = sorted(set(
                   consumed_generation_runs.get(prior_generation, [])
               ))
               if len(prior_consumed_runs) != 1:
+                  venue_label = "V1/V3" if rescue_v1 else "V2/V4"
                   raise SystemExit(
-                      "V2/V4 next cleanup generation requires exactly "
-                      "one consumed immediate prior generation: "
+                      f"{venue_label} next rescue generation requires "
+                      "exactly one consumed immediate prior generation: "
                       f"generation={prior_generation} "
                       f"runs={prior_consumed_runs}"
                   )
@@ -636,8 +637,9 @@ jobs:
           if expected_prior_consumed_run_id and (
               prior_gap_run_id != expected_prior_consumed_run_id
           ):
+              venue_label = "V1/V3" if rescue_v1 else "V2/V4"
               raise SystemExit(
-                  "V2/V4 next cleanup generation did not select "
+                  f"{venue_label} next rescue generation did not select "
                   "the immediate consumed prior run: "
                   f"selected={prior_gap_run_id or None} "
                   f"expected={expected_prior_consumed_run_id}"
