@@ -60,6 +60,10 @@ jobs:
           import os
           import urllib.request
 
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+
           eligible_run_id = int(os.environ["ELIGIBLE_RUN_ID"])
           representative_run_id = int(os.environ["REPRESENTATIVE_RUN_ID"])
           viability_run_id = int(os.environ["VIABILITY_RUN_ID"])
@@ -194,16 +198,54 @@ jobs:
                   "acceptance evidence is not an ancestor of caller HEAD"
               )
 
+          evidence_artifact_rows = artifact_rows(
+              eligible_run_id
+          )
           required = {
               "phase1-pons-post-eligibility-evidence-ready",
               "phase1-pons-eligible-universe",
               "phase1-pons-representative-validation",
           }
-          missing = sorted(required - artifacts(eligible_run_id))
+          missing = sorted(
+              required
+              - {
+                  str(row.get("name") or "")
+                  for row in evidence_artifact_rows
+              }
+          )
           if missing:
               raise SystemExit(
                   f"acceptance evidence artifacts missing: {missing}"
               )
+
+          exact_evidence_ids = {}
+          for output_name, artifact_name in (
+              ("eligible_artifact_id", "phase1-pons-eligible-universe"),
+              (
+                  "representative_artifact_id",
+                  "phase1-pons-representative-validation",
+              ),
+          ):
+              matches = [
+                  row
+                  for row in evidence_artifact_rows
+                  if str(row.get("name") or "") == artifact_name
+              ]
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "acceptance evidence artifact "
+                          f"{artifact_name} run={eligible_run_id}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "acceptance evidence retry artifacts are not "
+                      f"equivalent: {artifact_name}: {exc}"
+                  ) from exc
+              exact_evidence_ids[output_name] = int(artifact["id"])
+
           projection_rows = [
               row
               for row in artifact_rows(current_run_id)
@@ -259,6 +301,8 @@ jobs:
               )
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key, value in exact_evidence_ids.items():
+                  output.write(f"{key}={value}\n")
               output.write(
                   f"viability_artifact_id={viability_artifact_id}\n"
               )
@@ -267,19 +311,20 @@ jobs:
               "caller_workflow_path": current_path,
               "evidence_run_id": eligible_run_id,
               "viability_projection_run_id": viability_run_id,
+              **exact_evidence_ids,
               "viability_artifact_id": viability_artifact_id,
               "preflight": "pass",
           }, sort_keys=True))
           PY
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-eligible-universe
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
           path: eligible
           run-id: ${{ inputs.eligible_universe_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: phase1-pons-representative-validation
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
           path: representative
           run-id: ${{ inputs.representative_validation_run_id }}
           github-token: ${{ github.token }}
