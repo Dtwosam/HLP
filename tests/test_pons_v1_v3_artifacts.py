@@ -50,12 +50,34 @@ def test_recursive_prior_v1_v3_gap_binds_to_numeric_source_run():
     assert binding["artifact_name"] == "phase1-pons-v1-v3-gap-060"
 
 
+def test_legacy_prior_gaps_v1_v3_gap_binds_to_manifest_prior_run():
+    binding = resolve_v1_v3_shard_artifact(
+        _row("v1-v3-events-gap-054.jsonl", source="prior-gaps"),
+        current_run_id=123,
+        partial_run_id=456,
+        prior_gap_run_id=34_207_459_960,
+    )
+    assert binding["run_id"] == 34_207_459_960
+    assert binding["artifact_name"] == "phase1-pons-v1-v3-gap-054"
+
+
+def test_legacy_prior_gaps_v1_v3_gap_requires_bound_prior_run():
+    with pytest.raises(ValueError, match="positive prior gap run ID"):
+        resolve_v1_v3_shard_artifact(
+            _row("v1-v3-events-gap-054.jsonl", source="prior-gaps"),
+            current_run_id=123,
+            partial_run_id=456,
+            prior_gap_run_id=None,
+        )
+
+
 def test_canonical_v1_v3_bindings_validate_recursive_geometry():
     manifest = {
         "records": 15,
         "provenance": {
             "storage_mode": "sharded_artifacts",
             "partial_run_id": 456,
+            "prior_gap_run_id": 34_207_459_960,
             "shards": [
                 {
                     **_row(
@@ -68,7 +90,7 @@ def test_canonical_v1_v3_bindings_validate_recursive_geometry():
                 {
                     **_row(
                         "v1-v3-events-gap-000.jsonl",
-                        source="34200000000",
+                        source="prior-gaps",
                     ),
                     "from_block": 200,
                     "to_block": 299,
@@ -92,7 +114,7 @@ def test_canonical_v1_v3_bindings_validate_recursive_geometry():
     )
     assert [row["run_id"] for row in bindings] == [
         456,
-        34_200_000_000,
+        34_207_459_960,
         123,
     ]
 
