@@ -15,6 +15,7 @@ def resolve_v1_v3_shard_artifact(
     *,
     current_run_id: int,
     partial_run_id: int | None,
+    prior_gap_run_id: int | None = None,
 ) -> dict[str, Any]:
     """Bind one aggregate-manifest V1/V3 shard to its exact artifact."""
     current = int(current_run_id)
@@ -47,6 +48,14 @@ def resolve_v1_v3_shard_artifact(
     elif gap_match is not None:
         if source in {"", "gaps"}:
             run_id = current
+        elif source == "prior-gaps":
+            prior = int(prior_gap_run_id or 0)
+            if prior <= 0:
+                raise ValueError(
+                    "legacy prior-gaps V1/V3 gap lacks a positive "
+                    "prior gap run ID"
+                )
+            run_id = prior
         elif source.isdigit() and int(source) > 0:
             run_id = int(source)
         else:
@@ -102,6 +111,20 @@ def resolve_v1_v3_canonical_shard_bindings(
             "canonical V1/V3 partial run ID is invalid"
         ) from exc
 
+    prior_value = provenance.get("prior_gap_run_id")
+    try:
+        prior_gap_run_id = (
+            int(prior_value)
+            if prior_value not in {None, "", 0}
+            else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "canonical V1/V3 prior gap run ID is invalid"
+        ) from exc
+    if prior_gap_run_id is not None and prior_gap_run_id <= 0:
+        raise ValueError("canonical V1/V3 prior gap run ID is invalid")
+
     shards = provenance.get("shards")
     if not isinstance(shards, list) or not shards:
         raise ValueError("canonical V1/V3 manifest has no shards")
@@ -128,6 +151,7 @@ def resolve_v1_v3_canonical_shard_bindings(
             shard,
             current_run_id=current_run_id,
             partial_run_id=partial_run_id,
+            prior_gap_run_id=prior_gap_run_id,
         )
         digest = str(binding["sha256"]).lower()
         records = int(binding["records"])
