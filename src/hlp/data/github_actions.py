@@ -277,7 +277,11 @@ def fetch_github_actions_artifact_zip(
                     f"GitHub Actions artifact request failed: HTTP {exc.code}: "
                     f"{body[:500]}"
                 ) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            http.client.IncompleteRead,
+        ) as exc:
             if attempt + 1 < attempt_count:
                 continue
             raise RuntimeError(
@@ -315,7 +319,11 @@ def fetch_github_actions_artifact_zip(
                 "GitHub Actions redirected artifact download failed: "
                 f"HTTP {exc.code}: {exc.reason}"
             ) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            http.client.IncompleteRead,
+        ) as exc:
             if attempt + 1 < attempt_count:
                 continue
             raise RuntimeError(
