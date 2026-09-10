@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -204,7 +205,12 @@ def fetch_github_actions_json(
                 f"GitHub Actions metadata request failed: HTTP {exc.code}: "
                 f"{body[:500]}"
             ) from exc
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            http.client.IncompleteRead,
+            json.JSONDecodeError,
+        ) as exc:
             if attempt + 1 < attempt_count:
                 continue
             raise RuntimeError(
