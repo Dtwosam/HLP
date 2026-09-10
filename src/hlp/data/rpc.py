@@ -19,7 +19,18 @@ from hlp.data.types import RawLog
 
 
 class RpcError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        data: Any = None,
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.data = data
+        self.http_status = http_status
 
 
 def _hex_quantity(value: int | str) -> str:
@@ -101,7 +112,12 @@ class RpcClient:
                 self.response_bytes_received += len(response_bytes)
                 payload = json.loads(response_bytes)
                 if "error" in payload:
-                    raise RpcError(f"{method}: {payload['error']}")
+                    error = payload["error"]
+                    raise RpcError(
+                        f"{method}: {error}",
+                        code=error.get("code") if isinstance(error, dict) else None,
+                        data=error.get("data") if isinstance(error, dict) else None,
+                    )
                 if "result" not in payload:
                     raise RpcError(f"{method}: malformed JSON-RPC response")
                 return payload["result"]
@@ -131,7 +147,15 @@ class RpcClient:
                 if attempt == self.attempts:
                     break
                 time.sleep(self.backoff_seconds * attempt)
-        raise RpcError(f"{method} failed after {self.attempts} attempts: {last_error}")
+        http_status = (
+            last_error.code
+            if isinstance(last_error, urllib.error.HTTPError)
+            else None
+        )
+        raise RpcError(
+            f"{method} failed after {self.attempts} attempts: {last_error}",
+            http_status=http_status,
+        )
 
     def batch_call(
         self,
@@ -419,7 +443,24 @@ class RpcClient:
                     address=address,
                     topics=topics,
                 )
-            except RpcError:
+            except RpcError as exc:
+                if exc.http_status is not None:
+                    raise
+                provider_limit = None
+                if isinstance(exc.data, dict):
+                    raw_limit = exc.data.get("maxBlockRange")
+                    if (
+                        exc.data.get("reason") == "filtered_range_limit"
+                        and isinstance(raw_limit, int)
+                        and raw_limit > 0
+                    ):
+                        provider_limit = raw_limit
+                if provider_limit is not None:
+                    if provider_limit < min_chunk_size:
+                        raise
+                    active_size = min(active_size, provider_limit)
+                    successful_windows = 0
+                    continue
                 if active_size <= min_chunk_size:
                     raise
                 active_size = max(min_chunk_size, active_size // 2)
