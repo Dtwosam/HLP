@@ -22,6 +22,7 @@ jobs:
       v2_v4_run_id: ${{ steps.read.outputs.v2_v4_run_id }}
       prior_transfer_run_id: ${{ steps.read.outputs.prior_transfer_run_id }}
       pricing_run_id: ${{ steps.read.outputs.pricing_run_id }}
+      v3_fallback_run_id: ${{ steps.read.outputs.v3_fallback_run_id }}
     steps:
       - uses: actions/checkout@v4
       - id: read
@@ -54,6 +55,7 @@ jobs:
               "prior_transfer_run_id",
               "validation_generation",
               "pricing_run_id",
+              "v3_fallback_run_id",
           }
           if set(config) != expected_keys:
               raise SystemExit(
@@ -143,6 +145,7 @@ jobs:
           v2_id = int(config.get("v2_v4_run_id", 0))
           prior_id = int(config.get("prior_transfer_run_id", 0))
           pricing_id = int(config.get("pricing_run_id", 0))
+          v3_fallback_id = int(config.get("v3_fallback_run_id", 0))
           previous_generation = int(previous_config.get("generation", -1))
           validation_generation = int(
               config.get("validation_generation", -1)
@@ -172,7 +175,12 @@ jobs:
               raise SystemExit("recovered completion source run changed")
           if v1_id <= 0:
               raise SystemExit("recovered completion V1/V3 run must be positive")
-          if v2_id < 0 or prior_id < 0 or pricing_id < 0:
+          if (
+              v2_id < 0
+              or prior_id < 0
+              or pricing_id < 0
+              or v3_fallback_id < 0
+          ):
               raise SystemExit("recovered completion optional run IDs are invalid")
           if pricing_id > 0 and v2_id <= 0:
               raise SystemExit(
@@ -208,6 +216,7 @@ jobs:
               "v2_v4_run_id": v2_id,
               "prior_transfer_run_id": prior_id,
               "pricing_run_id": pricing_id,
+              "v3_fallback_run_id": v3_fallback_id,
           }, sort_keys=True))
           PY
 
@@ -221,6 +230,7 @@ jobs:
       v2_v4_run_id: ${{ needs.config.outputs.v2_v4_run_id }}
       prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
       pricing_run_id: ${{ needs.config.outputs.pricing_run_id }}
+      v3_fallback_run_id: ${{ needs.config.outputs.v3_fallback_run_id }}
       oracle_run_id: "33974681334"
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
