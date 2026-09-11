@@ -1625,6 +1625,11 @@ def test_v4_quote_fallback_uses_cumulative_forward_probe():
     assert 'default: "pons-residual-v4-forward-probe.jsonl"' in content
     assert "select_v4_quote_routes" in content
     assert "phase1-pons-v3-quote-fallback-full" in content
+    assert "phase1-pons-v3-quote-routes-selected" in content
+    assert "Restore canonical V3 route manifest" in content
+    assert "canonical-v3-routes/pons-v3-quote-routes.jsonl" in content
+    assert "selected_manifest = selected.with_suffix(" in content
+    assert "V3 route-selection artifact disagrees with merged V3 routes" in content
     assert "v3_run_id" in content
     assert "skhy_v4_run_id" in content
     assert "phase1-pons-skhy-v4-known-pool-segmented" in content
@@ -1661,6 +1666,7 @@ def test_v3_quote_fallback_is_reusable_with_frozen_route_runs():
     assert "canonical V3 fallback must select 25 or 26 unique routes" in content
     assert "SKHY must be owned by exactly one of V3 or the residual set" in content
     assert "causal_v3_routes_with_optional_delayed_skhy_weth" in content
+    assert "cp routes/pons-v3-quote-routes.jsonl.manifest.json artifacts/" in content
     assert "--anchor-initial anchor/pons-weth-usdg-anchor-initial.json" in content
     assert "--anchor-events anchor/pons-weth-usdg-anchor-full.jsonl" in content
     assert "SHARD_COUNT: '128'" in content
@@ -3212,7 +3218,7 @@ def test_live_venue_rescue_launcher_is_pinned_guarded_and_two_wave():
     assert "Venue rescue terminal preflight" in content
     assert "requested_artifact" in content
     assert "LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}" in content
-    assert "LAUNCH_VALIDATION_GENERATION: '10'" in content
+    assert "LAUNCH_VALIDATION_GENERATION: '11'" in content
     assert "VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}" in content
     assert 'os.environ["VALIDATION_GENERATION"]' in content
     assert "requested_generation + 7" in content

@@ -89,6 +89,43 @@ jobs:
           run-id: ${{ inputs.v3_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-routes-selected
+          path: canonical-v3-routes
+          run-id: ${{ inputs.v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Restore canonical V3 route manifest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          merged = Path("canonical-v3/pons-v3-quote-routes.jsonl")
+          target_manifest = merged.with_suffix(merged.suffix + ".manifest.json")
+          selected = Path("canonical-v3-routes/pons-v3-quote-routes.jsonl")
+          selected_manifest = selected.with_suffix(
+              selected.suffix + ".manifest.json"
+          )
+          if not target_manifest.exists():
+              if not selected.exists() or not selected_manifest.exists():
+                  raise SystemExit(
+                      "V3 route-selection artifact is missing recovery inputs"
+                  )
+              merged_digest = hashlib.sha256(merged.read_bytes()).hexdigest()
+              selected_digest = hashlib.sha256(selected.read_bytes()).hexdigest()
+              manifest = json.loads(selected_manifest.read_text())
+              if (
+                  merged_digest != selected_digest
+                  or manifest.get("sha256") != merged_digest
+                  or manifest.get("path") != merged.name
+              ):
+                  raise SystemExit(
+                      "V3 route-selection artifact disagrees with merged V3 routes"
+                  )
+              target_manifest.write_bytes(selected_manifest.read_bytes())
+          PY
+      - uses: actions/download-artifact@v4
         if: ${{ inputs.skhy_v4_run_id != '' }}
         with:
           name: phase1-pons-skhy-v4-known-pool-segmented
