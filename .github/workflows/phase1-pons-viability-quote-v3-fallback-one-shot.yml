@@ -1,0 +1,26 @@
+name: phase1-pons-viability-quote-v3-fallback-one-shot
+run-name: phase1 viability quote_v3_fallback ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-viability-quote-v3-fallback-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-quote-v3-fallback-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch viability quote_v3_fallback') }}
+    uses: ./.github/workflows/phase1-pons-viability-guarded-route.yml
+    with:
+      route: "quote_v3_fallback"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit

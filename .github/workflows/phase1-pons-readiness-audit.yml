@@ -1,0 +1,1711 @@
+name: phase1-pons-readiness-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_eligibility_run_id:
+        description: "Frozen full eligibility acquisition parent"
+        required: false
+        default: "33982556591"
+        type: string
+  workflow_call:
+    inputs:
+      source_eligibility_run_id:
+        required: false
+        default: "33982556591"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-readiness-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e .
+      - id: evidence
+        name: Resolve armed evidence run and exact handoff artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+
+          config = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          run_id = int(config.get("evidence_run_id", 0))
+          if run_id < 0:
+              raise SystemExit("readiness evidence run ID cannot be negative")
+
+          artifact_id = 0
+          if run_id > 0:
+              api = os.environ["GITHUB_API_URL"]
+              repo = os.environ["GITHUB_REPOSITORY"]
+              token = os.environ["GITHUB_TOKEN"]
+
+              def get(path):
+                  return fetch_github_actions_json(
+                      api + path,
+                      token,
+                      timeout=30,
+                  )
+
+              matches = []
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  matches.extend(
+                      row
+                      for row in rows
+                      if not row.get("expired")
+                      and str(row.get("name") or "")
+                      == "phase1-pons-post-eligibility-evidence-ready"
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "readiness evidence artifact pagination "
+                          "exceeded 1000"
+                      )
+
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "readiness evidence-ready artifact "
+                          f"run={run_id}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "readiness evidence-ready retry artifacts are not "
+                      f"equivalent: {exc}"
+                  ) from exc
+              artifact_id = int(artifact["id"])
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"evidence_run_id={run_id}\n")
+              output.write(f"evidence_artifact_id={artifact_id}\n")
+          PY
+      - id: download_handoff
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial readiness evidence handoff before retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - id: retry_download_handoff
+        name: Retry readiness evidence handoff artifact download
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.download_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial readiness evidence handoff before final retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.retry_download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - name: Final readiness evidence handoff artifact download retry
+        if: ${{ steps.evidence.outputs.evidence_run_id != '0' && steps.retry_download_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.evidence.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build Phase 1 readiness report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import base64
+          import io
+          import json
+          import os
+          import re
+          import urllib.parse
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.pons_v1_v3_artifacts import (
+              resolve_v1_v3_canonical_shard_bindings,
+          )
+          from hlp.data.pons_v2_v4_artifacts import (
+              resolve_v2_v4_canonical_shard_bindings,
+          )
+          from hlp.data.ranges import validate_gap_plan_jobs
+          from hlp.data.phase1_readiness import (
+              RECOVERY_VENUE_ARTIFACTS,
+              RECOVERY_VENUE_WORKFLOW_PATHS,
+              VIABILITY_ROUTE_WORKFLOW_PATHS,
+              build_phase1_readiness_report,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          source_run_id = int(os.environ["SOURCE_RUN_ID"])
+          branch = os.environ["GITHUB_REF_NAME"]
+
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "readiness audit source must remain 33982556591"
+              )
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          def json_file_at_ref(path, ref):
+              encoded_path = urllib.parse.quote(path, safe="/")
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              payload = get(
+                  f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+              )
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"unexpected contents encoding for {path}@{ref}"
+                  )
+              return json.loads(
+                  base64.b64decode(payload.get("content") or "")
+              )
+
+          artifact_rows_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
+              rows_out = []
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  artifacts = list(payload.get("artifacts") or [])
+                  rows_out.extend(
+                      artifact
+                      for artifact in artifacts
+                      if not artifact.get("expired")
+                  )
+                  if len(artifacts) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 2000 for run {run_id}"
+                      )
+              artifact_rows_cache[run_id] = rows_out
+              return rows_out
+
+          def artifact_names(run_id):
+              return sorted(
+                  {
+                      str(artifact.get("name"))
+                      for artifact in artifact_rows(run_id)
+                  }
+              )
+
+          def artifact_json(run_id, artifact_name, filename):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if str(row.get("name")) == artifact_name
+              ]
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "readiness artifact "
+                          f"{artifact_name} run={run_id}"
+                      ),
+                  )
+              except ValueError:
+                  return None
+              blob = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
+              )
+              try:
+                  with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                      names = [
+                          name
+                          for name in archive.namelist()
+                          if name.rsplit("/", 1)[-1] == filename
+                      ]
+                      if len(names) != 1:
+                          return None
+                      return json.loads(archive.read(names[0]))
+              except (
+                  zipfile.BadZipFile,
+                  json.JSONDecodeError,
+                  UnicodeDecodeError,
+              ):
+                  return None
+
+          def selected_recovery_shards_resolvable(
+              venue,
+              run_id,
+              manifest,
+          ):
+              resolver = (
+                  resolve_v1_v3_canonical_shard_bindings
+                  if venue == "v1_v3"
+                  else resolve_v2_v4_canonical_shard_bindings
+              )
+              try:
+                  bindings = resolver(
+                      manifest,
+                      current_run_id=run_id,
+                  )
+              except (TypeError, ValueError):
+                  return False
+
+              venue_label = (
+                  "V1/V3" if venue == "v1_v3" else "V2/V4"
+              )
+              for binding in bindings:
+                  matches = [
+                      row
+                      for row in artifact_rows(binding["run_id"])
+                      if str(row.get("name") or "")
+                      == binding["artifact_name"]
+                  ]
+                  try:
+                      select_equivalent_artifact_retry(
+                          matches,
+                          label=(
+                              f"readiness selected {venue_label} shard "
+                              f"run={binding['run_id']} "
+                              f"artifact={binding['artifact_name']}"
+                          ),
+                      )
+                  except ValueError:
+                      return False
+              return True
+
+          def recovery_manifest_valid(venue, run_id):
+              if venue == "v1_v3":
+                  artifact_name = "phase1-pons-v1-v3-full"
+                  manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
+                  expected_data_name = "pons-v1-v3-full.jsonl"
+                  expected_source = "manifest_gap_aware_v1_v3_recovery"
+                  expected_filter_semantics = (
+                      "global V3 Initialize/Swap topic scan followed by "
+                      "frozen Pons V1 pool membership"
+                  )
+                  upstream_field = "source_registry_run_id"
+                  upstream_run_id = 33_911_022_718
+              elif venue == "v2_v4":
+                  artifact_name = "phase1-pons-v2-v4-full"
+                  manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
+                  expected_data_name = "pons-v2-v4-full.jsonl"
+                  expected_source = "manifest_gap_aware_v4_recovery"
+                  expected_filter_semantics = (
+                      "PoolManager Initialize/Swap global topic scan followed "
+                      "by frozen Pons V2 registration membership"
+                  )
+                  upstream_field = "transition_run_id"
+                  upstream_run_id = 33_912_452_330
+              else:
+                  raise SystemExit(
+                      f"readiness recovery venue changed: {venue}"
+                  )
+
+              manifest = artifact_json(
+                  run_id,
+                  artifact_name,
+                  manifest_name,
+              )
+              if not isinstance(manifest, dict):
+                  return False
+              if not isinstance(manifest.get("provenance"), dict):
+                  return False
+              provenance = dict(manifest["provenance"])
+              try:
+                  records = int(manifest.get("records", -1))
+              except (TypeError, ValueError):
+                  return False
+              digest = str(manifest.get("sha256") or "")
+              if manifest.get("path") != expected_data_name:
+                  return False
+              if records < 0:
+                  return False
+              if (
+                  len(digest) != 64
+                  or any(
+                      char not in "0123456789abcdef"
+                      for char in digest
+                  )
+              ):
+                  return False
+              try:
+                  envelope_valid = bool(
+                      provenance.get("source") == expected_source
+                      and provenance.get("filter_semantics")
+                      == expected_filter_semantics
+                      and int(provenance.get("chain_id", 0)) == 4663
+                      and int(
+                          provenance.get("snapshot_head_block", 0)
+                      ) == 54_486_035
+                      and int(
+                          provenance.get("partial_run_id", 0)
+                      ) == 33_982_556_591
+                      and int(
+                          provenance.get(upstream_field, 0)
+                      ) == upstream_run_id
+                  )
+              except (TypeError, ValueError):
+                  return False
+              if not envelope_valid:
+                  return False
+              return selected_recovery_shards_resolvable(
+                  venue,
+                  run_id,
+                  manifest,
+              )
+
+          def recovery_lineage_valid(venue, run_id):
+              if venue == "v1_v3":
+                  artifact_name = "phase1-pons-v1-v3-full"
+                  manifest_name = "pons-v1-v3-full.jsonl.manifest.json"
+                  plan_artifact = "phase1-pons-v1-v3-gap-plan"
+                  plan_name = "v1-v3-gap-plan.json"
+                  summary_name = "pons-v1-v3-summary.json"
+                  membership_field = "registered_pools"
+                  matched_field = "matched_pools"
+                  missing_field = "missing_initialize_pools"
+                  expected_membership = 268_688
+                  start_field = "first_v1_launch"
+                  expected_start = 8_621_658
+                  allowed_paths = {
+                      ".github/workflows/"
+                      "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-live-venue-rescue-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-v1-v3-recover-gaps.yml",
+                  }
+              elif venue == "v2_v4":
+                  artifact_name = "phase1-pons-v2-v4-full"
+                  manifest_name = "pons-v2-v4-full.jsonl.manifest.json"
+                  plan_artifact = "phase1-pons-v2-v4-gap-plan"
+                  plan_name = "v4-gap-plan.json"
+                  summary_name = "pons-v2-v4-summary.json"
+                  membership_field = "registered_pool_ids"
+                  matched_field = "matched_pool_ids"
+                  missing_field = "missing_initialize_pool_ids"
+                  expected_membership = 3_638
+                  start_field = "generation_start"
+                  expected_start = 26_841_846
+                  allowed_paths = {
+                      ".github/workflows/"
+                      "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-live-venue-rescue-one-shot.yml",
+                      ".github/workflows/"
+                      "phase1-pons-v2-v4-recover-gaps.yml",
+                      ".github/workflows/"
+                      "phase1-pons-recovered-completion-one-shot.yml",
+                  }
+              else:
+                  raise SystemExit(
+                      f"readiness recovery venue changed: {venue}"
+                  )
+
+              manifest = artifact_json(
+                  run_id,
+                  artifact_name,
+                  manifest_name,
+              )
+              if not isinstance(manifest, dict):
+                  return False
+              if not isinstance(manifest.get("provenance"), dict):
+                  return False
+              provenance = dict(manifest["provenance"])
+              prior_gap = provenance.get("prior_gap_run_id")
+              try:
+                  prior_gap_id = (
+                      int(prior_gap)
+                      if prior_gap not in {None, "", 0}
+                      else 0
+                  )
+              except (TypeError, ValueError):
+                  return False
+              if prior_gap_id < 0:
+                  return False
+
+              current_plan = artifact_json(
+                  run_id,
+                  plan_artifact,
+                  plan_name,
+              )
+              if not isinstance(current_plan, dict):
+                  return False
+              if (
+                  "partial_run_id" not in current_plan
+                  or "prior_gap_run_id" not in current_plan
+              ):
+                  return False
+              try:
+                  if int(
+                      current_plan["partial_run_id"]
+                  ) != source_run_id:
+                      return False
+                  if int(
+                      current_plan.get("prior_gap_run_id") or 0
+                  ) != prior_gap_id:
+                      return False
+                  if int(
+                      current_plan.get("snapshot_head", -1)
+                  ) != 54_486_035:
+                      return False
+                  if int(
+                      current_plan.get(start_field, -1)
+                  ) != expected_start:
+                      return False
+                  validate_gap_plan_jobs(
+                      current_plan,
+                      expected_start=expected_start,
+                      expected_end=54_486_035,
+                  )
+              except (TypeError, ValueError):
+                  return False
+              embedded_plan = artifact_json(
+                  run_id,
+                  artifact_name,
+                  plan_name,
+              )
+              if embedded_plan != current_plan:
+                  return False
+
+              summary = artifact_json(
+                  run_id,
+                  artifact_name,
+                  summary_name,
+              )
+              if not isinstance(summary, dict):
+                  return False
+              try:
+                  if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+                      return False
+                  if int(summary.get("records", -1)) != int(
+                      manifest.get("records", -1)
+                  ):
+                      return False
+                  if str(summary.get("tape_sha256") or "") != str(
+                      manifest.get("sha256") or ""
+                  ):
+                      return False
+                  if int(summary.get(membership_field, -1)) != expected_membership:
+                      return False
+                  if int(summary.get(matched_field, -1)) != expected_membership:
+                      return False
+                  if int(summary.get(missing_field, -1)) != 0:
+                      return False
+                  shards = provenance.get("shards")
+                  if not isinstance(shards, list) or not shards:
+                      return False
+                  source_files = int(summary.get("source_files", 0))
+                  candidate_source_files = int(
+                      summary.get("candidate_source_files", -1)
+                  )
+                  dropped_source_files = int(
+                      summary.get(
+                          "dropped_overlapping_source_files",
+                          -1,
+                      )
+                  )
+                  if source_files != len(shards):
+                      return False
+                  if candidate_source_files < source_files:
+                      return False
+                  if dropped_source_files != (
+                      candidate_source_files - source_files
+                  ):
+                      return False
+              except (TypeError, ValueError):
+                  return False
+
+              if prior_gap_id == 0:
+                  return True
+
+              seen = set()
+              depth = 0
+              cursor = prior_gap_id
+              while cursor:
+                  if cursor in seen:
+                      return False
+                  seen.add(cursor)
+                  depth += 1
+                  if depth > 20:
+                      return False
+
+                  prior_run = get(
+                      f"/repos/{repo}/actions/runs/{cursor}"
+                  )
+                  if prior_run.get("status") != "completed":
+                      return False
+                  prior_path = str(
+                      prior_run.get("path") or ""
+                  ).split("@", 1)[0]
+                  if prior_path not in allowed_paths:
+                      return False
+                  if prior_run.get("head_branch") != branch:
+                      return False
+
+                  prior_plan = artifact_json(
+                      cursor,
+                      plan_artifact,
+                      plan_name,
+                  )
+                  if not isinstance(prior_plan, dict):
+                      return False
+                  if (
+                      "partial_run_id" not in prior_plan
+                      or "prior_gap_run_id" not in prior_plan
+                  ):
+                      return False
+                  try:
+                      if int(
+                          prior_plan["partial_run_id"]
+                      ) != source_run_id:
+                          return False
+                      if int(
+                          prior_plan.get("snapshot_head", -1)
+                      ) != 54_486_035:
+                          return False
+                      if int(
+                          prior_plan.get(start_field, -1)
+                      ) != expected_start:
+                          return False
+                      validate_gap_plan_jobs(
+                          prior_plan,
+                          expected_start=expected_start,
+                          expected_end=54_486_035,
+                      )
+                  except (TypeError, ValueError):
+                      return False
+
+                  parent = prior_plan.get("prior_gap_run_id")
+                  try:
+                      cursor = (
+                          int(parent)
+                          if parent not in {None, "", 0}
+                          else 0
+                      )
+                  except (TypeError, ValueError):
+                      return False
+
+              return True
+
+          def job_diagnostics(run_id):
+              counts = {}
+              repair_wave_counts = {}
+              repair_jobs = {}
+              problem_jobs = []
+              failed_states = {
+                  "failure",
+                  "cancelled",
+                  "timed_out",
+                  "startup_failure",
+                  "action_required",
+                  "stale",
+              }
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  jobs = list(payload.get("jobs") or [])
+                  for job in jobs:
+                      key = str(
+                          job.get("conclusion")
+                          or job.get("status")
+                          or "unknown"
+                      )
+                      counts[key] = counts.get(key, 0) + 1
+                      job_name = str(job.get("name") or "")
+                      wave_marker = "/ recover_"
+                      if wave_marker in job_name:
+                          wave_text = job_name.split(
+                              wave_marker,
+                              1,
+                          )[1].split(" ", 1)[0]
+                          matrix_marker = (
+                              f"/ recover_{wave_text} ("
+                          )
+                          if (
+                              wave_text in {"1", "2", "3", "4"}
+                              and matrix_marker in job_name
+                          ):
+                              wave_counts = repair_wave_counts.setdefault(
+                                  wave_text,
+                                  {},
+                              )
+                              wave_counts[key] = (
+                                  int(wave_counts.get(key, 0)) + 1
+                              )
+                              gap_id = job_name.split(
+                                  matrix_marker,
+                                  1,
+                              )[1].split(",", 1)[0].strip()
+                              repair_jobs.setdefault(
+                                  gap_id,
+                                  [],
+                              ).append(
+                                  {
+                                      "job_id": int(job["id"]),
+                                      "wave": wave_text,
+                                      "state": key,
+                                      "name": job_name,
+                                  }
+                              )
+                      if key in failed_states and len(problem_jobs) < 20:
+                          problem_jobs.append(
+                              {
+                                  "job_id": int(job["id"]),
+                                  "name": job.get("name"),
+                                  "status": job.get("status"),
+                                  "conclusion": job.get("conclusion"),
+                              }
+                          )
+                  if len(jobs) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          f"job pagination exceeded 1000 for run {run_id}"
+                      )
+              return {
+                  "job_counts": counts,
+                  "repair_wave_counts": repair_wave_counts,
+                  "repair_jobs": repair_jobs,
+                  "problem_jobs": problem_jobs,
+              }
+
+          def recovery_progress(venue, run_id, diagnostics):
+              if venue == "v1_v3":
+                  plan_artifact = "phase1-pons-v1-v3-gap-plan"
+                  plan_name = "v1-v3-gap-plan.json"
+                  gap_artifact_prefix = "phase1-pons-v1-v3-gap-"
+                  gap_artifact_pattern = re.compile(
+                      r"^phase1-pons-v1-v3-gap-(\d{3})$"
+                  )
+                  expected_start = 8_621_658
+              elif venue == "v2_v4":
+                  plan_artifact = "phase1-pons-v2-v4-gap-plan"
+                  plan_name = "v4-gap-plan.json"
+                  gap_artifact_prefix = "phase1-pons-v2-v4-gap-"
+                  gap_artifact_pattern = re.compile(
+                      r"^phase1-pons-v2-v4-gap-(\d{3})$"
+                  )
+                  expected_start = 26_841_846
+              else:
+                  raise SystemExit(
+                      f"readiness recovery progress venue changed: {venue}"
+                  )
+
+              plan = artifact_json(
+                  run_id,
+                  plan_artifact,
+                  plan_name,
+              )
+              if not isinstance(plan, dict):
+                  return {
+                      "status": "plan_unavailable",
+                      "planned_repairs": 0,
+                      "successful_repairs": 0,
+                      "failed_repairs": 0,
+                      "remaining_repairs": 0,
+                      "current_wave": None,
+                      "waves": {},
+                      "drift": [],
+                  }
+
+              try:
+                  validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=54_486_035,
+                  )
+                  expected_wave_counts = [
+                      int(value)
+                      for value in plan["gap_wave_job_counts"]
+                  ]
+                  planned_repairs = int(plan["gap_job_count"])
+                  expected_gap_ids = {
+                      str(job["id"])
+                      for job in plan["gap_jobs"]
+                  }
+              except (KeyError, TypeError, ValueError) as exc:
+                  return {
+                      "status": "plan_invalid",
+                      "error": str(exc),
+                      "planned_repairs": 0,
+                      "successful_repairs": 0,
+                      "failed_repairs": 0,
+                      "remaining_repairs": 0,
+                      "current_wave": None,
+                      "waves": {},
+                      "drift": [],
+                  }
+
+              failed_states = {
+                  "failure",
+                  "cancelled",
+                  "timed_out",
+                  "startup_failure",
+                  "action_required",
+                  "stale",
+              }
+              observed_waves = diagnostics.get(
+                  "repair_wave_counts"
+              ) or {}
+              waves = {}
+              drift = []
+              successful_repairs = 0
+              failed_repairs = 0
+              current_wave = None
+              first_unresolved_wave = None
+              materialized_repairs = 0
+
+              for index, expected in enumerate(
+                  expected_wave_counts,
+                  start=1,
+              ):
+                  wave = str(index)
+                  counts = {
+                      str(key): int(value)
+                      for key, value in (
+                          observed_waves.get(wave) or {}
+                      ).items()
+                  }
+                  observed = sum(counts.values())
+                  success = int(counts.get("success", 0))
+                  failed = sum(
+                      int(counts.get(state, 0))
+                      for state in failed_states
+                  )
+                  active = sum(
+                      int(counts.get(state, 0))
+                      for state in {
+                          "queued",
+                          "in_progress",
+                          "waiting",
+                          "pending",
+                      }
+                  )
+                  materialized_repairs += observed
+                  successful_repairs += success
+                  failed_repairs += failed
+
+                  if observed > expected:
+                      drift.append(
+                          {
+                              "wave": wave,
+                              "reason": "over_materialized",
+                              "expected": expected,
+                              "observed": observed,
+                          }
+                      )
+                  if expected == 0 and observed:
+                      drift.append(
+                          {
+                              "wave": wave,
+                              "reason": "unexpected_jobs",
+                              "expected": expected,
+                              "observed": observed,
+                          }
+                      )
+
+                  if expected == 0:
+                      state = "empty"
+                  elif success == expected and observed == expected:
+                      state = "complete"
+                  elif active:
+                      state = "active"
+                  elif observed == expected and failed:
+                      state = "failed"
+                  elif observed:
+                      state = "incomplete"
+                  else:
+                      state = "pending"
+
+                  if (
+                      first_unresolved_wave is None
+                      and expected > 0
+                      and state != "complete"
+                  ):
+                      first_unresolved_wave = wave
+                  if current_wave is None and state == "active":
+                      current_wave = wave
+
+                  waves[wave] = {
+                      "expected": expected,
+                      "observed": observed,
+                      "state": state,
+                      "counts": counts,
+                  }
+
+              if current_wave is None:
+                  current_wave = first_unresolved_wave
+
+              repair_jobs = diagnostics.get("repair_jobs") or {}
+              duplicate_job_ids = sorted(
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if len(rows) != 1
+              )
+              successful_job_ids = {
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if any(
+                      str(row.get("state") or "") == "success"
+                      for row in rows
+                  )
+              }
+              active_job_states = {
+                  "queued",
+                  "in_progress",
+                  "waiting",
+                  "pending",
+              }
+              active_job_ids = {
+                  gap_id
+                  for gap_id, rows in repair_jobs.items()
+                  if any(
+                      str(row.get("state") or "") in active_job_states
+                      for row in rows
+                  )
+              }
+              malformed_job_ids = sorted(
+                  gap_id
+                  for gap_id in repair_jobs
+                  if gap_id not in expected_gap_ids
+              )
+
+              observed_artifact_ids = set()
+              malformed_gap_artifacts = []
+              for name in artifact_names(run_id):
+                  if "-gap-" not in name:
+                      continue
+                  match = gap_artifact_pattern.fullmatch(name)
+                  if match:
+                      observed_artifact_ids.add(match.group(1))
+                  elif name.startswith(gap_artifact_prefix):
+                      malformed_gap_artifacts.append(name)
+
+              missing_success_artifacts = sorted(
+                  successful_job_ids - observed_artifact_ids
+              )
+              artifact_candidate_ids = (
+                  (observed_artifact_ids & expected_gap_ids)
+                  - successful_job_ids
+              )
+              artifacts_with_active_jobs = sorted(
+                  artifact_candidate_ids & active_job_ids
+              )
+              artifacts_without_successful_jobs = sorted(
+                  artifact_candidate_ids - active_job_ids
+              )
+              unexpected_artifact_ids = sorted(
+                  observed_artifact_ids - expected_gap_ids
+              )
+              artifact_drift = []
+              if duplicate_job_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "duplicate_repair_job_ids",
+                          "gap_ids": duplicate_job_ids[:20],
+                      }
+                  )
+              if malformed_job_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "unexpected_repair_job_ids",
+                          "gap_ids": malformed_job_ids[:20],
+                      }
+                  )
+              if missing_success_artifacts:
+                  artifact_drift.append(
+                      {
+                          "reason": "successful_job_artifact_missing",
+                          "gap_ids": missing_success_artifacts[:20],
+                      }
+                  )
+              if artifacts_without_successful_jobs:
+                  artifact_drift.append(
+                      {
+                          "reason": "artifact_without_successful_job",
+                          "gap_ids": (
+                              artifacts_without_successful_jobs[:20]
+                          ),
+                      }
+                  )
+              if unexpected_artifact_ids:
+                  artifact_drift.append(
+                      {
+                          "reason": "unexpected_gap_artifacts",
+                          "gap_ids": unexpected_artifact_ids[:20],
+                      }
+                  )
+              if malformed_gap_artifacts:
+                  artifact_drift.append(
+                      {
+                          "reason": "malformed_gap_artifact_names",
+                          "artifacts": malformed_gap_artifacts[:20],
+                      }
+                  )
+
+              remaining_repairs = max(
+                  0,
+                  planned_repairs - successful_repairs,
+              )
+              progress_percent = (
+                  round(
+                      100.0
+                      * successful_repairs
+                      / planned_repairs,
+                      2,
+                  )
+                  if planned_repairs
+                  else 100.0
+              )
+              return {
+                  "status": (
+                      "job_plan_drift"
+                      if drift
+                      else (
+                          "artifact_drift"
+                          if artifact_drift
+                          else "ok"
+                      )
+                  ),
+                  "planned_repairs": planned_repairs,
+                  "materialized_repairs": materialized_repairs,
+                  "successful_repairs": successful_repairs,
+                  "failed_repairs": failed_repairs,
+                  "remaining_repairs": remaining_repairs,
+                  "progress_percent": progress_percent,
+                  "current_wave": current_wave,
+                  "waves": waves,
+                  "artifact_progress": {
+                      "observed_gap_artifacts": len(
+                          observed_artifact_ids
+                      ),
+                      "successful_job_ids": len(
+                          successful_job_ids
+                      ),
+                      "missing_success_artifacts": (
+                          missing_success_artifacts[:20]
+                      ),
+                      "artifacts_with_active_jobs": (
+                          artifacts_with_active_jobs[:20]
+                      ),
+                      "artifacts_without_successful_jobs": (
+                          artifacts_without_successful_jobs[:20]
+                      ),
+                      "unexpected_artifact_ids": (
+                          unexpected_artifact_ids[:20]
+                      ),
+                      "malformed_gap_artifacts": (
+                          malformed_gap_artifacts[:20]
+                      ),
+                      "duplicate_repair_job_ids": (
+                          duplicate_job_ids[:20]
+                      ),
+                  },
+                  "drift": drift,
+                  "artifact_drift": artifact_drift,
+              }
+
+          def job_counts(run_id):
+              return job_diagnostics(run_id)["job_counts"]
+
+          def run_payload(run_id, *, include_jobs=False):
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              payload = {
+                  "id": int(run["id"]),
+                  "name": run.get("name"),
+                  "status": run.get("status"),
+                  "conclusion": run.get("conclusion"),
+                  "head_branch": run.get("head_branch"),
+                  "head_sha": run.get("head_sha"),
+                  "path": run.get("path"),
+                  "artifacts": artifact_names(run_id),
+              }
+              if include_jobs:
+                  payload["job_counts"] = job_counts(run_id)
+              return payload
+
+          recovery_discovery = {
+              venue: {
+                  "selected_run_id": 0,
+                  "active_run": None,
+                  "latest_terminal_run": None,
+                  "completed_success_candidates": 0,
+                  "rejection_counts": {},
+                  "rejected_candidates": [],
+              }
+              for venue in RECOVERY_VENUE_ARTIFACTS
+          }
+
+          def reject_recovery_candidate(venue, candidate, reason):
+              diagnostics = recovery_discovery[venue]
+              counts = diagnostics["rejection_counts"]
+              counts[reason] = int(counts.get(reason, 0)) + 1
+              rejected = diagnostics["rejected_candidates"]
+              if len(rejected) < 20:
+                  rejected.append(
+                      {
+                          "run_id": int(candidate["id"]),
+                          "head_sha": candidate.get("head_sha"),
+                          "reason": reason,
+                      }
+                  )
+
+          def latest_recovery_run(venue):
+              artifact = RECOVERY_VENUE_ARTIFACTS[venue]
+              launch_marker = (
+                  "launch V1 V3 rescue"
+                  if venue == "v1_v3"
+                  else "launch V2 V4 rescue"
+              )
+              launch_pattern = re.compile(
+                  "^"
+                  + re.escape(launch_marker)
+                  + r" generation (\d+)$"
+              )
+              candidates = []
+              diagnostics = recovery_discovery[venue]
+              for workflow_path in RECOVERY_VENUE_WORKFLOW_PATHS[venue]:
+                  workflow_file = workflow_path.rsplit("/", 1)[-1]
+                  encoded_workflow = urllib.parse.quote(
+                      workflow_file,
+                      safe="",
+                  )
+                  encoded_branch = urllib.parse.quote(branch, safe="")
+                  page = 1
+                  found = False
+                  while not found:
+                      payload = get(
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{encoded_workflow}/runs"
+                          f"?branch={encoded_branch}&per_page=100&page={page}"
+                      )
+                      rows = list(payload.get("workflow_runs") or [])
+                      for row in rows:
+                          display_title = str(
+                              row.get("display_title") or ""
+                          )
+                          if (
+                              launch_pattern.fullmatch(display_title)
+                              is None
+                          ):
+                              continue
+                          if (
+                              diagnostics["active_run"] is None
+                              and row.get("status") != "completed"
+                              and row.get("head_branch") == branch
+                          ):
+                              active_run_id = int(row["id"])
+                              active_jobs = job_diagnostics(active_run_id)
+                              active_progress = recovery_progress(
+                                  venue,
+                                  active_run_id,
+                                  active_jobs,
+                              )
+                              diagnostics["active_run"] = {
+                                  "run_id": active_run_id,
+                                  "status": row.get("status"),
+                                  "head_sha": row.get("head_sha"),
+                                  "display_title": display_title,
+                                  "repair_progress": active_progress,
+                                  **active_jobs,
+                              }
+                          if (
+                              diagnostics["latest_terminal_run"] is None
+                              and row.get("status") == "completed"
+                              and row.get("head_branch") == branch
+                          ):
+                              terminal_run_id = int(row["id"])
+                              terminal_jobs = job_diagnostics(
+                                  terminal_run_id
+                              )
+                              terminal_progress = recovery_progress(
+                                  venue,
+                                  terminal_run_id,
+                                  terminal_jobs,
+                              )
+                              diagnostics["latest_terminal_run"] = {
+                                  "run_id": terminal_run_id,
+                                  "status": row.get("status"),
+                                  "conclusion": row.get("conclusion"),
+                                  "head_sha": row.get("head_sha"),
+                                  "display_title": display_title,
+                                  "repair_progress": terminal_progress,
+                                  **terminal_jobs,
+                              }
+                          if (
+                              row.get("status") != "completed"
+                              or row.get("conclusion") != "success"
+                              or row.get("head_branch") != branch
+                          ):
+                              continue
+                          run_id = int(row["id"])
+                          candidate = run_payload(run_id)
+                          diagnostics[
+                              "completed_success_candidates"
+                          ] += 1
+                          observed_path = str(
+                              candidate.get("path") or ""
+                          ).split("@", 1)[0]
+                          if observed_path != workflow_path:
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "workflow_path_mismatch",
+                              )
+                              continue
+                          if artifact not in set(
+                              candidate.get("artifacts") or []
+                          ):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "canonical_artifact_missing",
+                              )
+                              continue
+                          if not recovery_manifest_valid(venue, run_id):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "manifest_invalid",
+                              )
+                              continue
+                          if not recovery_lineage_valid(venue, run_id):
+                              reject_recovery_candidate(
+                                  venue,
+                                  candidate,
+                                  "lineage_invalid",
+                              )
+                              continue
+                          candidate["recovery_manifest_valid"] = True
+                          candidate["recovery_lineage_valid"] = True
+                          candidates.append(candidate)
+                          diagnostics["selected_run_id"] = run_id
+                          found = True
+                          break
+                      if found or len(rows) < 100:
+                          break
+                      page += 1
+                      if page > 10:
+                          raise SystemExit(
+                              "recovery run pagination exceeded 1000: "
+                              f"{venue}"
+                          )
+              if not candidates:
+                  return None
+              return max(candidates, key=lambda row: int(row["id"]))
+
+          def route_run_payload(route, run_id):
+              payload = run_payload(run_id)
+              head_sha = str(payload.get("head_sha") or "")
+              if len(head_sha) != 40:
+                  raise SystemExit(
+                      f"readiness viability route head SHA is invalid: {route}"
+                  )
+              launch_readiness = json_file_at_ref(
+                  ".github/phase1-pons-viability-ready.json",
+                  head_sha,
+              )
+              launch_ledger = json_file_at_ref(
+                  ".github/phase1-pons-viability-runs.json",
+                  head_sha,
+              )
+              payload.update(
+                  {
+                      "launch_readiness_generation": int(
+                          launch_readiness.get("generation", 0)
+                      ),
+                      "launch_readiness_source_run_id": int(
+                          launch_readiness.get(
+                              "source_eligibility_run_id",
+                              0,
+                          )
+                      ),
+                      "launch_readiness_evidence_run_id": int(
+                          launch_readiness.get("evidence_run_id", 0)
+                      ),
+                      "launch_ledger_generation": int(
+                          launch_ledger.get("generation", 0)
+                      ),
+                      "launch_ledger_evidence_run_id": int(
+                          launch_ledger.get("evidence_run_id", 0)
+                      ),
+                      "launch_route_slot": int(
+                          (launch_ledger.get("routes") or {}).get(
+                              route,
+                              -1,
+                          )
+                      ),
+                      "launch_ledger_routes": sorted(
+                          (launch_ledger.get("routes") or {}).keys()
+                      ),
+                  }
+              )
+              return payload
+
+          ready_config = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          ledger = json.loads(
+              Path(".github/phase1-pons-viability-runs.json").read_text()
+          )
+
+          configured_source = int(
+              ready_config.get("source_eligibility_run_id", 0)
+          )
+          evidence_run_id = int(
+              ready_config.get("evidence_run_id", 0)
+          )
+          ledger_generation = int(ledger.get("generation", 0))
+          ledger_evidence_run_id = int(
+              ledger.get("evidence_run_id", 0)
+          )
+          route_run_ids = {
+              route: int((ledger.get("routes") or {}).get(route, 0))
+              for route in VIABILITY_ROUTE_WORKFLOW_PATHS
+          }
+
+          source_run = run_payload(source_run_id, include_jobs=True)
+          recovery_runs = {
+              "v1_v3": None,
+              "v2_v4": None,
+          }
+          if source_run.get("status") == "completed":
+              source_artifacts = set(source_run.get("artifacts") or [])
+              if "phase1-pons-v1-v3-full" not in source_artifacts:
+                  recovery_runs["v1_v3"] = latest_recovery_run("v1_v3")
+              if "phase1-pons-v2-v4-full" not in source_artifacts:
+                  recovery_runs["v2_v4"] = latest_recovery_run("v2_v4")
+
+          active_recovery_run_ids = {
+              venue: int(
+                  (
+                      diagnostics.get("active_run") or {}
+                  ).get("run_id", 0)
+              )
+              for venue, diagnostics in recovery_discovery.items()
+          }
+
+          evidence_run = (
+              run_payload(evidence_run_id)
+              if evidence_run_id > 0
+              else None
+          )
+          viability_runs = {
+              route: (
+                  route_run_payload(route, route_run_ids[route])
+                  if route_run_ids[route] > 0
+                  else None
+              )
+              for route in VIABILITY_ROUTE_WORKFLOW_PATHS
+          }
+
+          handoff_path = Path(
+              "handoff/phase1-post-eligibility-evidence-ready.json"
+          )
+          evidence_handoff = (
+              json.loads(handoff_path.read_text())
+              if handoff_path.exists()
+              else None
+          )
+
+          finalizer_runs = []
+          if (
+              evidence_run_id > 0
+              and ledger_generation > 0
+              and all(value > 0 for value in route_run_ids.values())
+          ):
+              payload = get(
+                  f"/repos/{repo}/actions/runs"
+                  f"?branch={urllib.parse.quote(branch)}"
+                  "&per_page=100&page=1"
+              )
+              for run in list(payload.get("workflow_runs") or []):
+                  if (
+                      run.get("name")
+                      != "phase1-pons-viability-ledger-finalize-one-shot"
+                  ):
+                      continue
+                  run_id = int(run["id"])
+                  finalizer_head_sha = str(run.get("head_sha") or "")
+                  finalizer_payload = {
+                      "id": run_id,
+                      "name": run.get("name"),
+                      "path": run.get("path"),
+                      "status": run.get("status"),
+                      "conclusion": run.get("conclusion"),
+                      "head_branch": run.get("head_branch"),
+                      "head_sha": finalizer_head_sha,
+                      "artifacts": (
+                          artifact_names(run_id)
+                          if run.get("status") == "completed"
+                          else []
+                      ),
+                  }
+                  if len(finalizer_head_sha) == 40:
+                      launch_readiness = json_file_at_ref(
+                          ".github/phase1-pons-viability-ready.json",
+                          finalizer_head_sha,
+                      )
+                      launch_ledger = json_file_at_ref(
+                          ".github/phase1-pons-viability-runs.json",
+                          finalizer_head_sha,
+                      )
+                      finalizer_payload.update(
+                          {
+                              "launch_readiness_source_run_id": int(
+                                  launch_readiness.get(
+                                      "source_eligibility_run_id",
+                                      0,
+                                  )
+                              ),
+                              "launch_readiness_evidence_run_id": int(
+                                  launch_readiness.get("evidence_run_id", 0)
+                              ),
+                              "launch_ledger_generation": int(
+                                  launch_ledger.get("generation", 0)
+                              ),
+                              "launch_ledger_evidence_run_id": int(
+                                  launch_ledger.get("evidence_run_id", 0)
+                              ),
+                              "launch_ledger_routes": {
+                                  route: int(value)
+                                  for route, value in dict(
+                                      launch_ledger.get("routes") or {}
+                                  ).items()
+                              },
+                          }
+                      )
+                  finalizer_runs.append(finalizer_payload)
+
+          report = build_phase1_readiness_report(
+              source_run=source_run,
+              evidence_run=evidence_run,
+              viability_runs=viability_runs,
+              finalizer_runs=finalizer_runs,
+              configured_source_run_id=configured_source,
+              configured_evidence_run_id=evidence_run_id,
+              ledger_generation=ledger_generation,
+              ledger_evidence_run_id=ledger_evidence_run_id,
+              ledger_route_run_ids=route_run_ids,
+              evidence_handoff=evidence_handoff,
+              recovery_runs=recovery_runs,
+              active_recovery_run_ids=active_recovery_run_ids,
+          )
+          report.update(
+              {
+                  "audit_run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "audit_head_sha": os.environ["GITHUB_SHA"],
+                  "audit_branch": branch,
+                  "recovery_discovery": recovery_discovery,
+              }
+          )
+
+          Path(
+              "artifacts/phase1-readiness-report.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          completed = report.get("completed_viability_routes", [])
+          pending = report.get("pending_viability_routes", [])
+          with summary_path.open("a") as summary:
+              summary.write("# Phase 1 readiness\n\n")
+              summary.write(f"- Stage: **{report['stage']}**\n")
+              summary.write(
+                  f"- Next action: **{report['next_action']}**\n"
+              )
+              summary.write(
+                  f"- Phase 1 ready: **{str(report['phase1_ready']).lower()}**\n"
+              )
+              summary.write(
+                  f"- Completed viability routes: **{len(completed)}/9**\n"
+              )
+              if pending:
+                  summary.write(
+                      "- Pending routes: "
+                      + ", ".join(pending)
+                      + "\n"
+                  )
+              if report.get("source_job_counts"):
+                  counts = report["source_job_counts"]
+                  summary.write(
+                      "- Source jobs: "
+                      + ", ".join(
+                          f"{key}={value}"
+                          for key, value in sorted(counts.items())
+                      )
+                      + "\n"
+                  )
+              if report.get("source_missing_artifacts"):
+                  summary.write(
+                      "- Missing source artifacts: "
+                      + ", ".join(report["source_missing_artifacts"])
+                      + "\n"
+                  )
+              recovery_plan = report.get("source_recovery_plan") or {}
+              if recovery_plan:
+                  summary.write(
+                      "- Recovery run IDs: "
+                      f"V1/V3={recovery_plan.get('recommended_v1_v3_run_id', 0)}, "
+                      f"V2/V4={recovery_plan.get('recommended_v2_v4_run_id', 0)}, "
+                      f"pricing={recovery_plan.get('recommended_pricing_run_id', 0)}"
+                      + "\n"
+                  )
+              for venue, diagnostics in sorted(
+                  (report.get("recovery_discovery") or {}).items()
+              ):
+                  rejection_counts = diagnostics.get(
+                      "rejection_counts"
+                  ) or {}
+                  rejection_summary = (
+                      ", ".join(
+                          f"{reason}={count}"
+                          for reason, count in sorted(
+                              rejection_counts.items()
+                          )
+                      )
+                      if rejection_counts
+                      else "none"
+                  )
+                  summary.write(
+                      f"- Recovery discovery {venue}: "
+                      f"selected={diagnostics.get('selected_run_id', 0)}, "
+                      "completed-success-candidates="
+                      f"{diagnostics.get('completed_success_candidates', 0)}, "
+                      f"rejections={rejection_summary}\n"
+                  )
+                  active_run = diagnostics.get("active_run") or {}
+                  if active_run:
+                      active_counts = active_run.get("job_counts") or {}
+                      summary.write(
+                          f"  - Active rescue {active_run.get('run_id', 0)}: "
+                          f"status={active_run.get('status')}, jobs="
+                          + (
+                              ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      active_counts.items()
+                                  )
+                              )
+                              if active_counts
+                              else "none"
+                          )
+                          + "\n"
+                      )
+                  repair_progress = active_run.get(
+                      "repair_progress"
+                  ) or {}
+                  if repair_progress:
+                      summary.write(
+                          "    - Repair progress: "
+                          f"status={repair_progress.get('status')}, "
+                          f"materialized={repair_progress.get('materialized_repairs', 0)}/"
+                          f"{repair_progress.get('planned_repairs', 0)}, "
+                          f"success={repair_progress.get('successful_repairs', 0)}/"
+                          f"{repair_progress.get('planned_repairs', 0)}, "
+                          f"failed={repair_progress.get('failed_repairs', 0)}, "
+                          f"remaining={repair_progress.get('remaining_repairs', 0)}, "
+                          f"current-wave={repair_progress.get('current_wave')}, "
+                          f"progress={repair_progress.get('progress_percent', 0.0)}%"
+                          + "\n"
+                      )
+                      artifact_progress = repair_progress.get(
+                          "artifact_progress"
+                      ) or {}
+                      if artifact_progress:
+                          summary.write(
+                              "    - Repair artifacts: "
+                              f"observed={artifact_progress.get('observed_gap_artifacts', 0)}, "
+                              f"successful-jobs={artifact_progress.get('successful_job_ids', 0)}, "
+                              f"missing-success={len(artifact_progress.get('missing_success_artifacts') or [])}, "
+                              f"in-flight={len(artifact_progress.get('artifacts_with_active_jobs') or [])}, "
+                              f"artifact-without-success={len(artifact_progress.get('artifacts_without_successful_jobs') or [])}, "
+                              f"unexpected={len(artifact_progress.get('unexpected_artifact_ids') or [])}, "
+                              f"malformed={len(artifact_progress.get('malformed_gap_artifacts') or [])}, "
+                              f"duplicate-jobs={len(artifact_progress.get('duplicate_repair_job_ids') or [])}"
+                              + "\n"
+                          )
+                  wave_counts = active_run.get(
+                      "repair_wave_counts"
+                  ) or {}
+                  if wave_counts:
+                      wave_parts = []
+                      for wave in sorted(
+                          wave_counts,
+                          key=int,
+                      ):
+                          values = wave_counts[wave]
+                          wave_parts.append(
+                              f"{wave}[" + ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      values.items()
+                                  )
+                              ) + "]"
+                          )
+                      summary.write(
+                          "    - Repair waves: "
+                          + "; ".join(wave_parts)
+                          + "\n"
+                      )
+                  terminal_run = diagnostics.get(
+                      "latest_terminal_run"
+                  ) or {}
+                  if terminal_run:
+                      terminal_counts = terminal_run.get(
+                          "job_counts"
+                      ) or {}
+                      summary.write(
+                          "  - Latest terminal rescue "
+                          f"{terminal_run.get('run_id', 0)}: "
+                          f"conclusion={terminal_run.get('conclusion')}, jobs="
+                          + (
+                              ", ".join(
+                                  f"{key}={value}"
+                                  for key, value in sorted(
+                                      terminal_counts.items()
+                                  )
+                              )
+                              if terminal_counts
+                              else "none"
+                          )
+                          + "\n"
+                      )
+                      terminal_progress = terminal_run.get(
+                          "repair_progress"
+                      ) or {}
+                      if terminal_progress:
+                          summary.write(
+                              "    - Terminal repair progress: "
+                              f"status={terminal_progress.get('status')}, "
+                              f"materialized={terminal_progress.get('materialized_repairs', 0)}/"
+                              f"{terminal_progress.get('planned_repairs', 0)}, "
+                              f"success={terminal_progress.get('successful_repairs', 0)}/"
+                              f"{terminal_progress.get('planned_repairs', 0)}, "
+                              f"failed={terminal_progress.get('failed_repairs', 0)}, "
+                              f"remaining={terminal_progress.get('remaining_repairs', 0)}"
+                              + "\n"
+                          )
+                          terminal_artifact_progress = terminal_progress.get(
+                              "artifact_progress"
+                          ) or {}
+                          if terminal_artifact_progress:
+                              summary.write(
+                                  "    - Terminal repair artifacts: "
+                                  f"observed={terminal_artifact_progress.get('observed_gap_artifacts', 0)}, "
+                                  f"successful-jobs={terminal_artifact_progress.get('successful_job_ids', 0)}, "
+                                  f"missing-success={len(terminal_artifact_progress.get('missing_success_artifacts') or [])}, "
+                                  f"in-flight={len(terminal_artifact_progress.get('artifacts_with_active_jobs') or [])}, "
+                                  f"artifact-without-success={len(terminal_artifact_progress.get('artifacts_without_successful_jobs') or [])}, "
+                                  f"unexpected={len(terminal_artifact_progress.get('unexpected_artifact_ids') or [])}"
+                                  + "\n"
+                              )
+                      problem_jobs = terminal_run.get(
+                          "problem_jobs"
+                      ) or []
+                      if problem_jobs:
+                          summary.write(
+                              "    - Problem jobs: "
+                              + "; ".join(
+                                  f"{job.get('job_id')}:{job.get('name')}"
+                                  f"={job.get('conclusion')}"
+                                  for job in problem_jobs
+                              )
+                              + "\n"
+                          )
+              if report.get("evidence_handoff_errors"):
+                  summary.write(
+                      "- Evidence handoff errors: "
+                      + "; ".join(report["evidence_handoff_errors"])
+                      + "\n"
+                  )
+              if report.get("invalid_finalizers"):
+                  summary.write(
+                      "- Invalid finalizers: "
+                      + ", ".join(
+                          f"{row['run_id']}:{row['reason']}"
+                          for row in report["invalid_finalizers"]
+                      )
+                      + "\n"
+                  )
+              if report.get("invalid_viability_routes"):
+                  summary.write(
+                      "- Invalid viability routes: "
+                      + ", ".join(
+                          row["route"]
+                          for row in report[
+                              "invalid_viability_routes"
+                          ]
+                      )
+                      + "\n"
+                  )
+
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-readiness-audit
+          path: artifacts/
+          if-no-files-found: error

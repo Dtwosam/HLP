@@ -1,0 +1,930 @@
+name: phase1-pons-viability-route-measurement
+run-name: phase1 route ${{ inputs.route }} sequence=${{ inputs.sequence_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      route:
+        description: "Frozen Phase 1 acquisition route to measure"
+        required: true
+        type: choice
+        options:
+          - pons_registry
+          - pons_v1_v3
+          - pons_v2_curve
+          - pons_v2_transition
+          - pons_v2_v4
+          - weth_usdg_anchor
+          - stock_oracle
+          - quote_v3_fallback
+          - quote_v4_fallback
+      from_block:
+        description: "Inclusive measurement start; keep the span <=50k blocks"
+        required: true
+        default: "54436036"
+        type: string
+      to_block:
+        description: "Inclusive measurement end; keep the span <=50k blocks"
+        required: true
+        default: "54486035"
+        type: string
+      eligibility_run_id:
+        description: "Run containing canonical quote fallback route files; required only for quote fallback measurements"
+        required: false
+        default: ""
+        type: string
+      evidence_run_id:
+        description: "Validated post-eligibility evidence run; required for acceptance measurements"
+        required: false
+        default: ""
+        type: string
+      source_eligibility_run_id:
+        description: "Frozen original full eligibility parent"
+        required: false
+        default: "33982556591"
+        type: string
+      sequence_id:
+        description: "Optional parent completion-sequence identity for exact run discovery"
+        required: false
+        default: ""
+        type: string
+      registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        description: "Frozen Pons V2 registry run"
+        required: true
+        default: "33912235341"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+  workflow_call:
+    inputs:
+      route:
+        required: true
+        type: string
+      from_block:
+        required: false
+        default: "54436036"
+        type: string
+      to_block:
+        required: false
+        default: "54486035"
+        type: string
+      eligibility_run_id:
+        required: false
+        default: ""
+        type: string
+      evidence_run_id:
+        required: false
+        default: ""
+        type: string
+      source_eligibility_run_id:
+        required: false
+        default: "33982556591"
+        type: string
+      sequence_id:
+        required: false
+        default: ""
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_registry_run_id:
+        required: false
+        default: "33912235341"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-route-measurement-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+  ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - id: evidence
+        name: Verify approved evidence before any viability RPC
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          if evidence_run_id <= 0:
+              raise SystemExit(
+                  "viability measurement evidence run ID must be positive"
+              )
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "viability measurement source eligibility run changed"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          run = get(f"/repos/{repo}/actions/runs/{evidence_run_id}")
+          if (
+              run.get("status") != "completed"
+              or run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "viability measurement evidence run is not successful"
+              )
+          allowed_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          observed_path = str(run.get("path") or "").split("@", 1)[0]
+          if observed_path not in allowed_paths:
+              raise SystemExit(
+                  "viability measurement evidence workflow path is not "
+                  f"allowed: {observed_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "viability measurement evidence branch changed"
+              )
+
+          live_artifacts = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              live_artifacts.extend(
+                  row for row in rows if not row.get("expired")
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "viability measurement evidence artifact pagination "
+                      "exceeded 1000"
+                  )
+          names = {
+              str(row.get("name") or "")
+              for row in live_artifacts
+          }
+          required = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  "viability measurement evidence artifacts missing: "
+                  f"{missing}"
+              )
+
+          handoff_rows = [
+              row
+              for row in live_artifacts
+              if str(row.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "viability measurement evidence-ready retry "
+                      "artifacts are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "viability measurement evidence-ready artifact ID "
+                  "is invalid"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
+
+          print(json.dumps({
+              "source_eligibility_run_id": source_run_id,
+              "evidence_run_id": evidence_run_id,
+              "evidence_workflow_path": observed_path,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - id: download_evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff download before retry
+        if: ${{ steps.download_evidence.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - id: retry_download_evidence
+        name: Retry viability evidence handoff artifact download
+        if: ${{ steps.download_evidence.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff download before final retry
+        if: ${{ steps.retry_download_evidence.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - name: Final viability evidence handoff artifact download retry
+        if: ${{ steps.retry_download_evidence.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate evidence handoff contents before viability RPC
+        env:
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(
+              Path(
+                  "evidence-handoff/"
+                  "phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          source_run_id = int(os.environ["SOURCE_ELIGIBILITY_RUN_ID"])
+
+          if report.get("status") != "ready":
+              raise SystemExit(
+                  "viability measurement evidence handoff is not ready"
+              )
+          if int(report.get("evidence_run_id", -1)) != evidence_run_id:
+              raise SystemExit(
+                  "viability measurement evidence handoff run mismatch"
+              )
+          if int(
+              report.get("source_eligibility_run_id", -1)
+          ) != source_run_id:
+              raise SystemExit(
+                  "viability measurement evidence handoff source mismatch"
+              )
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit(
+                  "viability measurement evidence snapshot changed"
+              )
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit(
+                  "viability measurement evidence launch count changed"
+              )
+          if int(report.get("eligible_tokens", 0)) <= 0:
+              raise SystemExit(
+                  "viability measurement evidence eligible universe is empty"
+              )
+          if int(report.get("representative_tokens", -1)) != 10:
+              raise SystemExit(
+                  "viability measurement evidence representative count changed"
+              )
+          for field in (
+              "lifecycle_run_id",
+              "v1_v3_run_id",
+              "v2_v4_run_id",
+          ):
+              if int(report.get(field, 0)) <= 0:
+                  raise SystemExit(
+                      "viability measurement evidence routing is invalid: "
+                      f"{field}"
+                  )
+
+          hashes = {}
+          for field in (
+              "eligible_universe_sha256",
+              "representative_validation_sha256",
+              "representative_sample_sha256",
+              "representative_token_set_sha256",
+              "representative_source_coverage_sha256",
+              "v1_eligibility_sha256",
+              "v2_eligibility_sha256",
+              "runner_smoke_universe_sha256",
+              "runner_smoke_outcomes_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value) != 64:
+                  raise SystemExit(
+                      "viability measurement evidence hash is invalid: "
+                      f"{field}"
+                  )
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "viability measurement evidence hash is invalid: "
+                      f"{field}"
+                  ) from exc
+              hashes[field] = value
+
+          if int(report.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "viability measurement runner-smoke run changed"
+              )
+          if hashes["runner_smoke_universe_sha256"] != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "viability measurement runner-smoke universe SHA changed"
+              )
+          if hashes["runner_smoke_outcomes_sha256"] != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "viability measurement runner-smoke outcomes SHA changed"
+              )
+
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "source_eligibility_run_id": source_run_id,
+              "representative_sample_sha256": hashes[
+                  "representative_sample_sha256"
+              ],
+              "representative_token_set_sha256": hashes[
+                  "representative_token_set_sha256"
+              ],
+              "representative_source_coverage_sha256": hashes[
+                  "representative_source_coverage_sha256"
+              ],
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  measure:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate bounded measurement contract
+        env:
+          ROUTE: ${{ inputs.route }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          SEQUENCE_ID: ${{ inputs.sequence_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          routes = {
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          }
+          route = os.environ["ROUTE"]
+          if route not in routes:
+              raise SystemExit(f"unsupported Phase 1 viability route: {route}")
+          lo = int(os.environ["FROM_BLOCK"])
+          hi = int(os.environ["TO_BLOCK"])
+          if lo < 0 or hi < lo:
+              raise SystemExit("invalid viability measurement block range")
+          span = hi - lo + 1
+          if span > 50_000:
+              raise SystemExit(
+                  f"viability measurement exceeds 50000-block ceiling: {span}"
+              )
+          fallback_text = os.environ.get(
+              "ELIGIBILITY_RUN_ID",
+              "",
+          ).strip()
+          fallback_run_id = int(fallback_text) if fallback_text else 0
+          if route in {"quote_v3_fallback", "quote_v4_fallback"}:
+              if fallback_run_id <= 0:
+                  raise SystemExit(
+                      "quote fallback measurement requires fallback artifact run ID"
+                  )
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "viability measurement source eligibility run changed"
+              )
+          if evidence_run_id < 0:
+              raise SystemExit(
+                  "viability measurement evidence run ID cannot be negative"
+              )
+          Path("artifacts").mkdir()
+          Path("artifacts/phase1-route-measurement.json").write_text(
+              json.dumps(
+                  {
+                      "route": route,
+                      "from_block": lo,
+                      "to_block": hi,
+                      "processed_block_span": span,
+                      "snapshot_head_block": 54_486_035,
+                      "measurement_run_id": int(
+                          os.environ["GITHUB_RUN_ID"]
+                      ),
+                      "measurement_head_sha": os.environ["GITHUB_SHA"],
+                      "evidence_run_id": evidence_run_id,
+                      "source_eligibility_run_id": source_run_id,
+                      "fallback_artifact_run_id": fallback_run_id,
+                      "registry_generation": (
+                          "v1" if route == "pons_registry" else None
+                      ),
+                      "sequence_id": os.environ.get("SEQUENCE_ID", ""),
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+      - id: download_registry
+        if: ${{ inputs.route == 'pons_v1_v3' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before retry
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - id: retry_download_registry
+        name: Retry V1 registry artifact download
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before final retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - name: Final V1 registry artifact download retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v2_registry
+        if: ${{ inputs.route == 'pons_v2_curve' || inputs.route == 'pons_v2_transition' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: v2-registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 registry download before retry
+        if: ${{ steps.download_v2_registry.outcome == 'failure' }}
+        run: rm -rf v2-registry
+      - id: retry_download_v2_registry
+        name: Retry V2 registry artifact download
+        if: ${{ steps.download_v2_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: v2-registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 registry download before final retry
+        if: ${{ steps.retry_download_v2_registry.outcome == 'failure' }}
+        run: rm -rf v2-registry
+      - name: Final V2 registry artifact download retry
+        if: ${{ steps.retry_download_v2_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: v2-registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_transition
+        if: ${{ inputs.route == 'pons_v2_v4' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_quotes
+        if: ${{ inputs.route == 'stock_oracle' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote audit download before retry
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - id: retry_download_quotes
+        name: Retry quote audit artifact download
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote audit download before final retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - name: Final quote audit artifact download retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v3_fallback
+        if: ${{ inputs.route == 'quote_v3_fallback' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V3 quote fallback download before retry
+        if: ${{ steps.download_v3_fallback.outcome == 'failure' }}
+        run: rm -rf canonical-v3
+      - id: retry_download_v3_fallback
+        name: Retry V3 quote fallback artifact download
+        if: ${{ steps.download_v3_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V3 quote fallback download before final retry
+        if: ${{ steps.retry_download_v3_fallback.outcome == 'failure' }}
+        run: rm -rf canonical-v3
+      - name: Final V3 quote fallback artifact download retry
+        if: ${{ steps.retry_download_v3_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v3-quote-fallback-full
+          path: canonical-v3
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_v4_fallback
+        if: ${{ inputs.route == 'quote_v4_fallback' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: canonical-v4
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V4 quote fallback download before retry
+        if: ${{ steps.download_v4_fallback.outcome == 'failure' }}
+        run: rm -rf canonical-v4
+      - id: retry_download_v4_fallback
+        name: Retry V4 quote fallback artifact download
+        if: ${{ steps.download_v4_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: canonical-v4
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V4 quote fallback download before final retry
+        if: ${{ steps.retry_download_v4_fallback.outcome == 'failure' }}
+        run: rm -rf canonical-v4
+      - name: Final V4 quote fallback artifact download retry
+        if: ${{ steps.retry_download_v4_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v4-quote-fallback-full
+          path: canonical-v4
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Run exact canonical bounded route scan
+        env:
+          ROUTE: ${{ inputs.route }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+        run: |
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          case "$ROUTE" in
+            pons_registry)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v1-registry-window                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/pons-registry-v1-measurement.jsonl
+              ;;
+            pons_v1_v3)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v3-pons-tape                 --registry registry/pons-full-launch-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-topic-scan                 --out artifacts/pons-v1-v3-measurement.jsonl
+              ;;
+            pons_v2_curve)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-curve-tape                 --registry v2-registry/pons-v2-full-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-topic-scan                 --out artifacts/pons-v2-curve-measurement.jsonl
+              ;;
+            pons_v2_transition)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-transition-tape                 --registry v2-registry/pons-v2-full-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --graduations-out artifacts/pons-v2-graduations-measurement.jsonl                 --registrations-out artifacts/pons-v2-registrations-measurement.jsonl
+              ;;
+            pons_v2_v4)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v2-v4-tape                 --registrations transition/pons-v2-registrations-full.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --global-pool-scan                 --out artifacts/pons-v2-v4-measurement.jsonl
+              ;;
+            weth_usdg_anchor)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v1-price-path                 --token "$WETH"                 --quote-token "$USDG"                 --pool "$ANCHOR_POOL"                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/weth-usdg-anchor-measurement.jsonl
+              ;;
+            stock_oracle)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-pons-stock-oracle-lifecycle                 --quote-registry quotes/pons-quote-registry.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --state-out artifacts/stock-oracle-state-measurement.jsonl                 --out artifacts/stock-oracle-updates-measurement.jsonl
+              ;;
+            quote_v3_fallback)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v3-quote-route-tape                 --routes canonical-v3/pons-v3-quote-routes.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/quote-v3-fallback-measurement.jsonl
+              ;;
+            quote_v4_fallback)
+              hlp --timeout 30 --attempts 5 --min-interval 0.1                 rpc-v4-quote-route-tape                 --routes canonical-v4/pons-v4-quote-routes.jsonl                 --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"                 --chunk-size "$CHUNK" --min-chunk-size 25                 --out artifacts/quote-v4-fallback-measurement.jsonl
+              ;;
+          esac
+      - id: upload_primary
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_primary
+        name: Retry primary viability measurement artifact upload
+        if: ${{ steps.upload_primary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final primary viability measurement artifact upload retry
+        if: ${{ steps.retry_upload_primary.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-${{ inputs.route }}-primary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  registry_v2:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && inputs.route == 'pons_registry' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate bounded registry measurement range
+        env:
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          SEQUENCE_ID: ${{ inputs.sequence_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          lo = int(os.environ["FROM_BLOCK"])
+          hi = int(os.environ["TO_BLOCK"])
+          if lo < 26_841_846:
+              raise SystemExit(
+                  "pons_registry shared measurement range must postdate V2 deployment"
+              )
+          if hi < lo or hi - lo + 1 > 50_000:
+              raise SystemExit("invalid pons_registry V2 measurement range")
+          source_run_id = int(
+              os.environ.get("SOURCE_ELIGIBILITY_RUN_ID", "0")
+          )
+          if source_run_id != 33_982_556_591:
+              raise SystemExit(
+                  "pons_registry V2 measurement source run changed"
+              )
+          evidence_text = os.environ.get("EVIDENCE_RUN_ID", "").strip()
+          evidence_run_id = int(evidence_text) if evidence_text else 0
+          if evidence_run_id < 0:
+              raise SystemExit(
+                  "pons_registry V2 evidence run ID cannot be negative"
+              )
+          fallback_text = os.environ.get(
+              "ELIGIBILITY_RUN_ID",
+              "",
+          ).strip()
+          fallback_run_id = int(fallback_text) if fallback_text else 0
+          Path("artifacts/phase1-route-measurement.json").write_text(
+              json.dumps(
+                  {
+                      "route": "pons_registry",
+                      "registry_generation": "v2",
+                      "from_block": lo,
+                      "to_block": hi,
+                      "processed_block_span": hi - lo + 1,
+                      "snapshot_head_block": 54_486_035,
+                      "measurement_run_id": int(
+                          os.environ["GITHUB_RUN_ID"]
+                      ),
+                      "measurement_head_sha": os.environ["GITHUB_SHA"],
+                      "evidence_run_id": evidence_run_id,
+                      "source_eligibility_run_id": source_run_id,
+                      "fallback_artifact_run_id": fallback_run_id,
+                      "sequence_id": os.environ.get("SEQUENCE_ID", ""),
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+      - name: Measure V2 launch-registry scan separately
+        env:
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-v2-registry-window             --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK"             --chunk-size "$CHUNK" --min-chunk-size 25             --out artifacts/pons-registry-v2-measurement.jsonl
+      - id: upload_secondary
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_secondary
+        name: Retry secondary registry viability artifact upload
+        if: ${{ steps.upload_secondary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final secondary registry viability artifact upload retry
+        if: ${{ steps.retry_upload_secondary.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

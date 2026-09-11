@@ -1,0 +1,178 @@
+name: phase1-pons-usd-anchor-history
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-usd-anchor-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  anchor-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit all canonical WETH/USDG V3 pools
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import defaultdict
+          from pathlib import Path
+
+          from hlp.config import (
+              ROBINHOOD_USDG,
+              ROBINHOOD_WETH,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V3_FACTORY,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.evm import topic_address as _unused
+          from hlp.protocols.uniswap import (
+              V3_INITIALIZE_TOPIC,
+              V3_POOL_CREATED_TOPIC,
+              V3_SWAP_TOPIC,
+              decode_v3_pool_created,
+              decode_v3_pool_initialized,
+              decode_v3_swap,
+          )
+
+          def address_topic(address):
+              return "0x" + address.lower().removeprefix("0x").rjust(64, "0")
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          factory_first = rpc.find_first_code_block(
+              UNISWAP_V3_FACTORY, low=0, high=head
+          )
+
+          weth = ROBINHOOD_WETH.lower()
+          usdg = ROBINHOOD_USDG.lower()
+          token0, token1 = sorted([weth, usdg], key=lambda x: int(x, 16))
+
+          creation_logs = list(
+              rpc.iter_logs_chunked(
+                  factory_first,
+                  head,
+                  address=UNISWAP_V3_FACTORY,
+                  topics=[
+                      V3_POOL_CREATED_TOPIC,
+                      address_topic(token0),
+                      address_topic(token1),
+                  ],
+                  chunk_size=100_000,
+                  min_chunk_size=100,
+              )
+          )
+          pools = [decode_v3_pool_created(row) for row in creation_logs]
+          pool_addresses = [row.pool for row in pools]
+          assert pool_addresses, "no canonical WETH/USDG V3 pools"
+
+          event_logs = list(
+              rpc.iter_logs_chunked(
+                  min(row.block_number for row in pools),
+                  head,
+                  address=pool_addresses,
+                  topics=[[V3_INITIALIZE_TOPIC, V3_SWAP_TOPIC]],
+                  chunk_size=100_000,
+                  min_chunk_size=100,
+              )
+          )
+
+          stats = {
+              pool: {
+                  "pool": pool,
+                  "fee": next(x.fee for x in pools if x.pool == pool),
+                  "tick_spacing": next(
+                      x.tick_spacing for x in pools if x.pool == pool
+                  ),
+                  "created_block": next(
+                      x.block_number for x in pools if x.pool == pool
+                  ),
+                  "initialize_block": None,
+                  "first_swap_block": None,
+                  "last_swap_block": None,
+                  "swap_count": 0,
+                  "max_observed_active_liquidity": 0,
+              }
+              for pool in pool_addresses
+          }
+          for raw in event_logs:
+              if raw.topics[0] == V3_INITIALIZE_TOPIC:
+                  row = decode_v3_pool_initialized(raw)
+                  state = stats[row.pool]
+                  if state["initialize_block"] is None:
+                      state["initialize_block"] = row.block_number
+              else:
+                  row = decode_v3_swap(raw)
+                  state = stats[row.pool]
+                  state["swap_count"] += 1
+                  state["first_swap_block"] = (
+                      state["first_swap_block"] or row.block_number
+                  )
+                  state["last_swap_block"] = row.block_number
+                  state["max_observed_active_liquidity"] = max(
+                      state["max_observed_active_liquidity"],
+                      row.liquidity,
+                  )
+
+          rows = sorted(
+              stats.values(),
+              key=lambda x: (
+                  x["first_swap_block"]
+                  if x["first_swap_block"] is not None else 10**18,
+                  x["created_block"],
+              ),
+          )
+          first_pons_v1_launch = 8_621_658
+          active_before_pons = [
+              row for row in rows
+              if row["first_swap_block"] is not None
+              and row["first_swap_block"] <= first_pons_v1_launch
+          ]
+          result = {
+              "factory_first_code_block": factory_first,
+              "head_block": head,
+              "weth": weth,
+              "usdg": usdg,
+              "pools": rows,
+              "pool_count": len(rows),
+              "first_pons_v1_launch_block": first_pons_v1_launch,
+              "active_anchor_pools_before_first_pons_v1": len(active_before_pons),
+              "earliest_active_pool": (
+                  active_before_pons[0] if active_before_pons else None
+              ),
+              "requests_made": rpc.requests_made,
+          }
+          Path("artifacts/pons-usd-anchor-history.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True)
+          )
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-usd-anchor-history
+          path: artifacts/
+          if-no-files-found: error

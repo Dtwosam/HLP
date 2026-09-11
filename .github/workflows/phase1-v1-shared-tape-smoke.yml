@@ -1,0 +1,101 @@
+name: phase1-v1-shared-tape-smoke
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  shared-tape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build enriched Pons V1 registry shard
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-v1-registry-window             --from-block 30000000             --to-block 30099999             --chunk-size 2000             --min-chunk-size 50             --out artifacts/v1-registry.jsonl
+      - name: Acquire one shared V3 swap tape
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-v3-pons-tape             --registry artifacts/v1-registry.jsonl             --from-block 30000000             --to-block 30099999             --chunk-size 2000             --min-chunk-size 25             --out artifacts/v1-pons-v3-swaps.jsonl
+      - name: Derive USD market caps and $100k eligibility
+        run: |
+          hlp \
+            --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-v1-market-cap-window \
+            --registry artifacts/v1-registry.jsonl \
+            --swaps artifacts/v1-pons-v3-swaps.jsonl \
+            --from-block 30000000 \
+            --to-block 30099999 \
+            --chunk-size 2000 \
+            --min-chunk-size 25 \
+            --out artifacts/v1-market-cap-points.jsonl \
+            --summary-out artifacts/v1-token-summary.jsonl
+      - name: Validate join
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          registry = [
+              json.loads(line)
+              for line in Path("artifacts/v1-registry.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          swaps = [
+              json.loads(line)
+              for line in Path("artifacts/v1-pons-v3-swaps.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          swap_manifest = json.loads(
+              Path("artifacts/v1-pons-v3-swaps.jsonl.manifest.json").read_text()
+          )
+          assert len(registry) == 166, len(registry)
+          assert swaps, "shared V3 tape matched zero Pons price events"
+          assert swap_manifest["provenance"]["server_side_pool_address_filter"] is True
+          initializes = [
+              row for row in swaps if row.get("event_type") == "v3_initialize"
+          ]
+          trade_swaps = [
+              row for row in swaps if row.get("event_type") == "v3_swap"
+          ]
+          assert len(initializes) == len(registry), (
+              len(initializes),
+              len(registry),
+          )
+          assert trade_swaps, "shared V3 tape matched zero Pons swaps"
+          pools = {row["pool"] for row in registry}
+          assert all(row["pool"] in pools for row in swaps)
+          assert all(row["transaction_index"] is not None for row in swaps)
+          orders = [
+              (row["block_number"], row["transaction_index"], row["log_index"])
+              for row in swaps
+          ]
+          assert orders == sorted(orders)
+          summary = [
+              json.loads(line)
+              for line in Path("artifacts/v1-token-summary.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert summary, "no per-token market-cap summaries"
+          print(json.dumps({
+              "launches": len(registry),
+              "initializes": len(initializes),
+              "matched_swaps": len(trade_swaps),
+              "price_events": len(swaps),
+              "pools_with_swaps": len({row["pool"] for row in swaps}),
+              "tokens_summarized": len(summary),
+              "tokens_crossed_100k": sum(bool(row["crossed_100k"]) for row in summary),
+              "first_swap": orders[0],
+              "last_swap": orders[-1],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-v1-shared-tape
+          path: artifacts/
+          if-no-files-found: error

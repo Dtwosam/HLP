@@ -1,0 +1,176 @@
+name: phase1-pons-lifecycle-plan
+
+on:
+  workflow_run:
+    workflows: ["phase1-pons-full-registry"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: "Successful phase1-pons-full-registry run id"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: run
+        name: Resolve registry run
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          AUTO_RUN_ID: ${{ github.event.workflow_run.id }}
+          MANUAL_RUN_ID: ${{ inputs.registry_run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          run_id = (
+              os.environ.get("MANUAL_RUN_ID")
+              if os.environ["EVENT_NAME"] == "workflow_dispatch"
+              else os.environ.get("AUTO_RUN_ID")
+          )
+          if not run_id:
+              raise SystemExit("registry run id is required")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"run_id={run_id}\n")
+          print({"registry_run_id": run_id})
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry
+          path: registry
+          run-id: ${{ steps.run.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Build exact lifecycle acquisition plan
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import math
+          from collections import Counter
+          from pathlib import Path
+
+          registry_path = Path("registry/pons-full-launch-registry.jsonl")
+          summary_path = Path("registry/pons-full-registry-summary.json")
+          rows = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          summary = json.loads(summary_path.read_text())
+          head = int(summary["snapshot_head_block"])
+          assert len(rows) == int(summary["registry_records"])
+
+          v1 = [row for row in rows if row["version"] == "v1"]
+          v2 = [row for row in rows if row["version"] == "v2"]
+          assert len({row["pool"].lower() for row in v1}) == len(v1)
+          assert len({row["curve"].lower() for row in v2}) == len(v2)
+
+          def block_shards(start, end, count):
+              span = end - start + 1
+              result = []
+              for i in range(count):
+                  lo = start + (span * i) // count
+                  hi = start + (span * (i + 1)) // count - 1
+                  result.append((lo, hi))
+              assert result[0][0] == start
+              assert result[-1][1] == end
+              for left, right in zip(result, result[1:]):
+                  assert right[0] == left[1] + 1
+              return result
+
+          def address_loads(generation_rows, start, count, key):
+              out = []
+              for i, (lo, hi) in enumerate(block_shards(start, head, count)):
+                  eligible = [
+                      row for row in generation_rows
+                      if int(row["block_number"]) <= hi
+                  ]
+                  addresses = {row[key].lower() for row in eligible}
+                  block_requests = math.ceil((hi - lo + 1) / 2000)
+                  out.append({
+                      "shard": i,
+                      "from_block": lo,
+                      "to_block": hi,
+                      "blocks": hi - lo + 1,
+                      "addresses_visible_by_shard_end": len(addresses),
+                      "approx_address_filter_chars": len(addresses) * 43,
+                      "keyless_requests_per_single_block_scan": block_requests,
+                  })
+              return out
+
+          v1_shards = address_loads(v1, 8_600_612, 12, "pool")
+          v2_shards = address_loads(v2, 26_841_846, 8, "curve")
+          pair_v1 = Counter(row["pair_token"].lower() for row in v1)
+          pair_v2 = Counter(row["pair_token"].lower() for row in v2)
+
+          plan = {
+              "snapshot_head_block": head,
+              "registry_sha256": summary["registry_sha256"],
+              "all_pons_launches": len(rows),
+              "v1": {
+                  "launches": len(v1),
+                  "unique_pools": len({row["pool"].lower() for row in v1}),
+                  "pair_token_counts": dict(sorted(pair_v1.items())),
+                  "first_launch_block": min(
+                      (int(row["block_number"]) for row in v1),
+                      default=None,
+                  ),
+                  "last_launch_block": max(
+                      (int(row["block_number"]) for row in v1),
+                      default=None,
+                  ),
+                  "candidate_block_shards": v1_shards,
+                  "keyless_requests_one_full_block_scan": math.ceil(
+                      (head - 8_600_612 + 1) / 2000
+                  ),
+              },
+              "v2": {
+                  "launches": len(v2),
+                  "unique_curves": len({row["curve"].lower() for row in v2}),
+                  "pair_token_counts": dict(sorted(pair_v2.items())),
+                  "first_launch_block": min(
+                      (int(row["block_number"]) for row in v2),
+                      default=None,
+                  ),
+                  "last_launch_block": max(
+                      (int(row["block_number"]) for row in v2),
+                      default=None,
+                  ),
+                  "candidate_block_shards": v2_shards,
+                  "keyless_requests_one_full_block_scan": math.ceil(
+                      (head - 26_841_846 + 1) / 2000
+                  ),
+              },
+              "notes": [
+                  "Pons V1/V2 only; Uniswap V3/V4 are downstream venues.",
+                  "No dump or recovery threshold is chosen here.",
+                  "Request estimates use the verified 2,000-block keyless public eth_getLogs cap.",
+                  "Address counts are measured from the frozen launch registry, not guessed.",
+              ],
+          }
+          Path("artifacts/pons-lifecycle-plan.json").write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(plan, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-lifecycle-plan
+          path: artifacts/
+          if-no-files-found: error

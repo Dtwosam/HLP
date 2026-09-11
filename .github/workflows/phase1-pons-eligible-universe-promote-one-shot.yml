@@ -1,0 +1,21 @@
+name: phase1-pons-eligible-universe-promote-one-shot
+# validation-generation: 1
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-eligible-universe-promote-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promote:
+    if: ${{ contains(github.event.head_commit.message, 'launch eligible universe promotion') }}
+    uses: ./.github/workflows/phase1-pons-eligible-universe-promote.yml
+    with:
+      source_eligibility_run_id: "33982556591"
+    secrets: inherit

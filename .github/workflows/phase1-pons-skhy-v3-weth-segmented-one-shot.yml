@@ -1,0 +1,22 @@
+name: phase1-pons-skhy-v3-weth-segmented-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-skhy-v3-weth-segmented-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  scan:
+    if: ${{ contains(github.event.head_commit.message, 'launch SKHY V3 WETH continuation') }}
+    uses: ./.github/workflows/phase1-pons-skhy-v3-weth-segmented.yml
+    with:
+      route_audit_run_id: "33921477647"
+      route_audit_artifact_name: "phase1-pons-unpriced-v3-route-audit"
+      route_audit_filename: "pons-unpriced-v3-route-audit.jsonl"
+    secrets: inherit

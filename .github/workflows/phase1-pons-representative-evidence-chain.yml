@@ -1,0 +1,656 @@
+name: phase1-pons-representative-evidence-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_run_id:
+        description: "Run containing V1/V2 lifecycle and fallback artifacts"
+        required: true
+        type: string
+      v1_v3_run_id:
+        description: "Optional separate V1/V3 full/recovery run; defaults to eligibility run"
+        required: false
+        default: ""
+        type: string
+      v2_v4_run_id:
+        description: "Optional separate V2/V4 full/recovery run; defaults to eligibility run"
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        description: "Successful canonical phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+      prior_transfer_run_id:
+        description: "Optional earlier representative chain/transfer run whose successful Transfer shards should be reused"
+        required: false
+        default: ""
+        type: string
+      explorer_access_reverified:
+        description: "Run supplementary Blockscout cross-check only after GitHub-runner access is explicitly reverified"
+        required: false
+        default: false
+        type: boolean
+      runner_smoke_run_id:
+        description: "Frozen five-runner research-smoke evidence"
+        required: true
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        description: "Canonical recovered Pons V2 curve run"
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        description: "Canonical recovered WETH/USDG anchor run"
+        required: true
+        default: "33972109927"
+        type: string
+  workflow_call:
+    inputs:
+      eligibility_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: false
+        default: ""
+        type: string
+      v2_v4_run_id:
+        required: false
+        default: ""
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      prior_transfer_run_id:
+        required: false
+        default: ""
+        type: string
+      explorer_access_reverified:
+        required: false
+        default: false
+        type: boolean
+      runner_smoke_run_id:
+        required: false
+        default: "33920762592"
+        type: string
+      registry_run_id:
+        required: false
+        default: "33911022718"
+        type: string
+      v2_curve_run_id:
+        required: false
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        required: false
+        default: "33912452330"
+        type: string
+      quote_audit_run_id:
+        required: false
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        required: false
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        required: false
+        default: "33972109927"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-evidence-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Verify frozen representative support inputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+          RUNNER_SMOKE_RUN_ID: ${{ inputs.runner_smoke_run_id }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          V2_CURVE_RUN_ID: ${{ inputs.v2_curve_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          QUOTE_AUDIT_ARTIFACT_NAME: ${{ inputs.quote_audit_artifact_name }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          contracts = {
+              "ORACLE_RUN_ID": {
+                  "run_id": 33_974_681_334,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-stock-oracle-full",
+              },
+              "RUNNER_SMOKE_RUN_ID": {
+                  "run_id": 33_920_762_592,
+                  "path": ".github/workflows/phase1-pons-research-smoke.yml",
+                  "artifact": "phase1-pons-research-smoke",
+              },
+              "REGISTRY_RUN_ID": {
+                  "run_id": 33_911_022_718,
+                  "path": ".github/workflows/phase1-pons-v1-registry-recovery.yml",
+                  "artifact": "phase1-pons-full-registry-recovered",
+              },
+              "V2_CURVE_RUN_ID": {
+                  "run_id": 33_936_232_604,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-v2-curve-gap-recovery-optimized-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-v2-curve-full",
+              },
+              "TRANSITION_RUN_ID": {
+                  "run_id": 33_912_452_330,
+                  "path": ".github/workflows/phase1-pons-v2-transition-full.yml",
+                  "artifact": "phase1-pons-v2-transition-full",
+              },
+              "QUOTE_AUDIT_RUN_ID": {
+                  "run_id": 33_923_299_711,
+                  "path": ".github/workflows/phase1-pons-quote-audit-one-shot.yml",
+                  "artifact": "phase1-pons-full-quote-audit-current",
+              },
+              "ANCHOR_RUN_ID": {
+                  "run_id": 33_972_109_927,
+                  "path": (
+                      ".github/workflows/"
+                      "phase1-pons-anchor-promote-recovered-one-shot.yml"
+                  ),
+                  "artifact": "phase1-pons-weth-usdg-anchor-full",
+              },
+          }
+
+          observed = {
+              field: int(os.environ[field])
+              for field in contracts
+          }
+          mismatched = {
+              field: {
+                  "expected": contracts[field]["run_id"],
+                  "observed": observed[field],
+              }
+              for field in contracts
+              if observed[field] != contracts[field]["run_id"]
+          }
+          if mismatched:
+              raise SystemExit(
+                  "representative support run IDs changed: "
+                  f"{mismatched}"
+              )
+          if os.environ["QUOTE_AUDIT_ARTIFACT_NAME"] != (
+              "phase1-pons-full-quote-audit-current"
+          ):
+              raise SystemExit(
+                  "representative quote audit artifact changed"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          def artifacts(run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "representative support artifact pagination "
+                          f"exceeded 2000: run={run_id}"
+                      )
+              return names
+
+          for field, contract in contracts.items():
+              run_id = int(contract["run_id"])
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      "representative support run is not successful: "
+                      f"{field} run={run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path != contract["path"]:
+                  raise SystemExit(
+                      "representative support workflow path changed: "
+                      f"{field} actual={path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"representative support branch changed: {field}"
+                  )
+              if contract["artifact"] not in artifacts(run_id):
+                  raise SystemExit(
+                      "representative support artifact missing or expired: "
+                      f"{field} artifact={contract['artifact']}"
+                  )
+
+          eligibility_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          v1_text = os.environ["V1_V3_RUN_ID"].strip()
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          v1_v3_run_id = int(v1_text) if v1_text else eligibility_run_id
+          v2_v4_run_id = int(v2_text) if v2_text else eligibility_run_id
+          if min(
+              eligibility_run_id,
+              v1_v3_run_id,
+              v2_v4_run_id,
+          ) <= 0:
+              raise SystemExit(
+                  "representative evidence run IDs must be positive"
+              )
+
+          eligibility_run = get(
+              f"/repos/{repo}/actions/runs/{eligibility_run_id}"
+          )
+          if (
+              eligibility_run.get("status") != "completed"
+              or eligibility_run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "representative eligibility run is not successful"
+              )
+          if eligibility_run.get("head_branch") != (
+              "phase1/data-acquisition-spike"
+          ):
+              raise SystemExit(
+                  "representative eligibility branch changed"
+              )
+          eligibility_artifacts = artifacts(eligibility_run_id)
+          required_eligibility = {
+              "phase1-pons-v1-lifecycle-eligibility",
+              "phase1-pons-v2-lifecycle-eligibility",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing_eligibility = sorted(
+              required_eligibility - eligibility_artifacts
+          )
+          if missing_eligibility:
+              raise SystemExit(
+                  "representative eligibility artifacts missing: "
+                  f"{missing_eligibility}"
+              )
+
+          for label, run_id, artifact in (
+              ("V1/V3", v1_v3_run_id, "phase1-pons-v1-v3-full"),
+              ("V2/V4", v2_v4_run_id, "phase1-pons-v2-v4-full"),
+          ):
+              venue_run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  venue_run.get("status") != "completed"
+                  or venue_run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      f"representative {label} run is not successful"
+                  )
+              if venue_run.get("head_branch") != (
+                  "phase1/data-acquisition-spike"
+              ):
+                  raise SystemExit(
+                      f"representative {label} branch changed"
+                  )
+              if artifact not in artifacts(run_id):
+                  raise SystemExit(
+                      f"representative {label} artifact missing"
+                  )
+
+          active_statuses = {
+              "queued",
+              "in_progress",
+              "waiting",
+              "requested",
+              "pending",
+          }
+          rescue_pattern = re.compile(
+              r"launch (?:V1 V3|V2 V4) rescue generation \d+"
+          )
+          page = 1
+          active_rescues = []
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/"
+                  "phase1-pons-live-venue-rescue-one-shot.yml/runs"
+                  f"?branch=phase1%2Fdata-acquisition-spike"
+                  f"&per_page=100&page={page}"
+              )
+              runs = list(payload.get("workflow_runs") or [])
+              for run in runs:
+                  title = str(run.get("display_title") or "")
+                  if (
+                      rescue_pattern.fullmatch(title) is not None
+                      and str(run.get("status") or "") in active_statuses
+                  ):
+                      active_rescues.append({
+                          "id": int(run["id"]),
+                          "status": run.get("status"),
+                          "title": title,
+                      })
+              if len(runs) < 100:
+                  break
+              page += 1
+              if page > 5:
+                  raise SystemExit(
+                      "representative rescue scan exceeded 500 runs"
+                  )
+          if active_rescues:
+              raise SystemExit(
+                  "representative chain cannot overlap active venue rescue: "
+                  f"{active_rescues}"
+              )
+
+          print(json.dumps({
+              "support_run_ids": observed,
+              "quote_audit_artifact_name": os.environ[
+                  "QUOTE_AUDIT_ARTIFACT_NAME"
+              ],
+              "eligibility_run_id": eligibility_run_id,
+              "v1_v3_run_id": v1_v3_run_id,
+              "v2_v4_run_id": v2_v4_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - id: download_preflight_v1
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V1 lifecycle preflight download before retry
+        if: ${{ steps.download_preflight_v1.outcome == 'failure' }}
+        run: rm -rf preflight-v1
+      - id: retry_download_preflight_v1
+        name: Retry representative V1 lifecycle preflight artifact download
+        if: ${{ steps.download_preflight_v1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V1 lifecycle preflight download before final retry
+        if: ${{ steps.retry_download_preflight_v1.outcome == 'failure' }}
+        run: rm -rf preflight-v1
+      - name: Final representative V1 lifecycle preflight artifact download retry
+        if: ${{ steps.retry_download_preflight_v1.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: preflight-v1
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_preflight_v2
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V2 lifecycle preflight download before retry
+        if: ${{ steps.download_preflight_v2.outcome == 'failure' }}
+        run: rm -rf preflight-v2
+      - id: retry_download_preflight_v2
+        name: Retry representative V2 lifecycle preflight artifact download
+        if: ${{ steps.download_preflight_v2.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative V2 lifecycle preflight download before final retry
+        if: ${{ steps.retry_download_preflight_v2.outcome == 'failure' }}
+        run: rm -rf preflight-v2
+      - name: Final representative V2 lifecycle preflight artifact download retry
+        if: ${{ steps.retry_download_preflight_v2.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: preflight-v2
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify lifecycle venue provenance before representative RPC
+        env:
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          eligibility_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          v1_text = os.environ["V1_V3_RUN_ID"].strip()
+          v2_text = os.environ["V2_V4_RUN_ID"].strip()
+          expected_v1_v3 = (
+              int(v1_text) if v1_text else eligibility_run_id
+          )
+          expected_v2_v4 = (
+              int(v2_text) if v2_text else eligibility_run_id
+          )
+
+          def validate(path, records, field, expected):
+              manifest = json.loads(Path(path).read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(manifest.get("records", -1)) != records:
+                  raise SystemExit(
+                      f"representative lifecycle record count changed: {path}"
+                  )
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"representative lifecycle chain changed: {path}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != 54_486_035:
+                  raise SystemExit(
+                      f"representative lifecycle snapshot changed: {path}"
+                  )
+              value = provenance.get(field)
+              if value is None:
+                  if eligibility_run_id != 33_982_556_591:
+                      raise SystemExit(
+                          "representative lifecycle venue provenance missing: "
+                          f"{field}"
+                      )
+                  observed = eligibility_run_id
+              else:
+                  observed = int(value)
+              if observed != expected:
+                  raise SystemExit(
+                      "representative lifecycle venue provenance mismatch: "
+                      f"{field} expected={expected} observed={observed}"
+                  )
+
+          validate(
+              "preflight-v1/"
+              "pons-v1-lifecycle-eligibility.jsonl.manifest.json",
+              268_688,
+              "v1_v3_run_id",
+              expected_v1_v3,
+          )
+          validate(
+              "preflight-v2/"
+              "pons-v2-lifecycle-eligibility.jsonl.manifest.json",
+              225_951,
+              "v4_run_id",
+              expected_v2_v4,
+          )
+          print(json.dumps({
+              "eligibility_run_id": eligibility_run_id,
+              "v1_v3_run_id": expected_v1_v3,
+              "v2_v4_run_id": expected_v2_v4,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+
+  sample:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-sample-freeze.yml
+    with:
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      runner_smoke_run_id: ${{ inputs.runner_smoke_run_id }}
+    secrets: inherit
+
+  market_paths:
+    needs: sample
+    if: ${{ needs.sample.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-market-paths.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || inputs.eligibility_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || inputs.eligibility_run_id }}
+    secrets: inherit
+
+  transfers:
+    needs: sample
+    if: ${{ needs.sample.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-transfers-full.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      prior_run_id: ${{ inputs.prior_transfer_run_id }}
+    secrets: inherit
+
+  priced_paths:
+    needs: market_paths
+    if: ${{ needs.market_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-priced-paths.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      quote_audit_artifact_name: ${{ inputs.quote_audit_artifact_name }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      fallback_run_id: ${{ inputs.eligibility_run_id }}
+    secrets: inherit
+
+  dex_crosscheck:
+    needs: priced_paths
+    if: ${{ needs.priced_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-dex-crosscheck.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  explorer_crosscheck:
+    needs: priced_paths
+    if: ${{ inputs.explorer_access_reverified == true && needs.priced_paths.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-representative-explorer-crosscheck.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      access_reverified: true
+    secrets: inherit
+
+  validate:
+    needs:
+      - market_paths
+      - priced_paths
+      - dex_crosscheck
+      - explorer_crosscheck
+      - transfers
+    if: ${{ always() && needs.market_paths.result == 'success' && needs.priced_paths.result == 'success' && needs.dex_crosscheck.result == 'success' && needs.transfers.result == 'success' && ((inputs.explorer_access_reverified == true && needs.explorer_crosscheck.result == 'success') || (inputs.explorer_access_reverified != true && needs.explorer_crosscheck.result == 'skipped')) }}
+    uses: ./.github/workflows/phase1-pons-representative-validation.yml
+    with:
+      sample_run_id: ${{ format('{0}', github.run_id) }}
+      v1_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v2_eligibility_run_id: ${{ inputs.eligibility_run_id }}
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id != '' && inputs.v1_v3_run_id || inputs.eligibility_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id != '' && inputs.v2_v4_run_id || inputs.eligibility_run_id }}
+      transfer_run_id: ${{ format('{0}', github.run_id) }}
+      market_path_run_id: ${{ format('{0}', github.run_id) }}
+      priced_path_run_id: ${{ format('{0}', github.run_id) }}
+      dex_crosscheck_run_id: ${{ format('{0}', github.run_id) }}
+      explorer_crosscheck_run_id: ${{ inputs.explorer_access_reverified == true && format('{0}', github.run_id) || '' }}
+      registry_run_id: ${{ inputs.registry_run_id }}
+      v2_curve_run_id: ${{ inputs.v2_curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      fallback_run_id: ${{ inputs.eligibility_run_id }}
+    secrets: inherit

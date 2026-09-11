@@ -1,0 +1,243 @@
+name: phase1-pons-full-eligibility-acquisition-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      oracle_run_id:
+        description: "Successful canonical phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+      source_registry_run_id:
+        description: "Recovered full Pons registry run"
+        required: true
+        default: "33911022718"
+        type: string
+      transition_run_id:
+        description: "Canonical Pons V2 transition run"
+        required: true
+        default: "33912452330"
+        type: string
+      anchor_run_id:
+        description: "Canonical recovered WETH/USDG anchor run"
+        required: true
+        default: "33972109927"
+        type: string
+      route_audit_run_id:
+        description: "Frozen unpriced V3 route-audit run"
+        required: true
+        default: "33921477647"
+        type: string
+      delayed_probe_run_id:
+        description: "Frozen delayed direct-USDG V3 probe run"
+        required: true
+        default: "33923160281"
+        type: string
+      residual_v4_probe_run_id:
+        description: "Frozen cumulative residual V4 probe run"
+        required: true
+        default: "33926428274"
+        type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      v2_registry_run_id:
+        description: "Frozen Pons V2 registry run"
+        required: true
+        default: "33912235341"
+        type: string
+      curve_run_id:
+        description: "Canonical recovered Pons V2 curve run"
+        required: true
+        default: "33936232604"
+        type: string
+  workflow_call:
+    inputs:
+      oracle_run_id:
+        required: true
+        type: string
+      source_registry_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      route_audit_run_id:
+        required: true
+        type: string
+      delayed_probe_run_id:
+        required: true
+        type: string
+      residual_v4_probe_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      v2_registry_run_id:
+        required: true
+        type: string
+      curve_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-full-eligibility-acquisition-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate canonical stock-oracle artifact
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          head = 54_486_035
+          summary = json.loads(
+              Path("oracle/pons-stock-oracle-summary.json").read_text()
+          )
+          initial_manifest = json.loads(
+              Path(
+                  "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+              ).read_text()
+          )
+          updates_manifest = json.loads(
+              Path(
+                  "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+              ).read_text()
+          )
+
+          if int(summary.get("snapshot_head_block", -1)) != head:
+              raise SystemExit("stock-oracle summary snapshot head changed")
+          if int(summary.get("stock_quote_assets", -1)) != 23:
+              raise SystemExit("canonical stock oracle must contain 23 feeds")
+          if int(summary.get("promoted_v2_stock_quote_assets", -1)) != 22:
+              raise SystemExit("canonical stock oracle must promote 22 V2 feeds")
+          if int(summary.get("delta_stock_quote_assets", -1)) != 1:
+              raise SystemExit("canonical stock oracle must contain one delta feed")
+          if summary.get("delta_symbols") != ["DELL"]:
+              raise SystemExit("canonical stock-oracle delta must be exactly DELL")
+
+          for label, manifest in (
+              ("initial", initial_manifest),
+              ("updates", updates_manifest),
+          ):
+              prov = manifest.get("provenance") or {}
+              if int(prov.get("chain_id", -1)) != 4663:
+                  raise SystemExit(
+                      f"stock-oracle {label} manifest chain changed"
+                  )
+              if int(prov.get("snapshot_head_block", -1)) != head:
+                  raise SystemExit(
+                      f"stock-oracle {label} manifest snapshot changed"
+                  )
+              if prov.get("source") != (
+                  "promoted_v2_oracle_plus_full_pons_delta"
+              ):
+                  raise SystemExit(
+                      f"stock-oracle {label} manifest source changed"
+                  )
+
+          if int(initial_manifest.get("records", -1)) != 23:
+              raise SystemExit(
+                  "stock-oracle initial manifest must contain 23 records"
+              )
+          if int(updates_manifest.get("records", -1)) != int(
+              summary.get("oracle_updates", -1)
+          ):
+              raise SystemExit(
+                  "stock-oracle update count disagrees with summary"
+              )
+          if initial_manifest.get("sha256") != summary.get("initial_sha256"):
+              raise SystemExit(
+                  "stock-oracle initial checksum disagrees with summary"
+              )
+          if updates_manifest.get("sha256") != summary.get("updates_sha256"):
+              raise SystemExit(
+                  "stock-oracle updates checksum disagrees with summary"
+              )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+
+  v1_v3:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-v1-v3-full.yml
+    with:
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+    secrets: inherit
+
+  v1_v3_recovery:
+    needs: v1_v3
+    if: ${{ always() && (needs.v1_v3.result == 'failure' || needs.v1_v3.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
+    with:
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "50000"
+    secrets: inherit
+
+  v2_v4:
+    needs:
+      - v1_v3
+      - v1_v3_recovery
+    if: ${{ always() && (needs.v1_v3.result == 'success' || needs.v1_v3_recovery.result == 'success') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit
+
+  v2_v4_recovery:
+    needs: v2_v4
+    if: ${{ always() && (needs.v2_v4.result == 'failure' || needs.v2_v4.result == 'cancelled') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
+    with:
+      transition_run_id: ${{ inputs.transition_run_id }}
+      partial_run_id: ${{ format('{0}', github.run_id) }}
+      prior_gap_run_id: ""
+      max_gap_blocks: "50000"
+    secrets: inherit
+
+  pricing_eligibility:
+    needs:
+      - v2_v4
+      - v2_v4_recovery
+    if: ${{ always() && (needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
+    uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
+    with:
+      oracle_run_id: ${{ inputs.oracle_run_id }}
+      v1_v3_run_id: ${{ format('{0}', github.run_id) }}
+      v2_v4_run_id: ${{ format('{0}', github.run_id) }}
+      anchor_run_id: ${{ inputs.anchor_run_id }}
+      route_audit_run_id: ${{ inputs.route_audit_run_id }}
+      delayed_probe_run_id: ${{ inputs.delayed_probe_run_id }}
+      residual_v4_probe_run_id: ${{ inputs.residual_v4_probe_run_id }}
+      source_registry_run_id: ${{ inputs.source_registry_run_id }}
+      quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
+      v2_registry_run_id: ${{ inputs.v2_registry_run_id }}
+      curve_run_id: ${{ inputs.curve_run_id }}
+      transition_run_id: ${{ inputs.transition_run_id }}
+    secrets: inherit

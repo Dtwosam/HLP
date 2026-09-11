@@ -76,6 +76,103 @@ Can cached/reusable protocol Substreams, protocol deployment start blocks, targe
 
 Do not declare this solved until measured.
 
+## 3A. hoodexplorer — PROMISING KEYLESS ARCHIVE/INDEX CANDIDATE, HOST NETWORK CAVEAT
+
+Docs:
+https://www.hoodexplorer.org/apidocs
+
+Verified documentation:
+- Etherscan-compatible read API;
+- keyless access at 60 requests/minute per IP;
+- paginated list endpoints with up to 1,000 rows/page;
+- event-log filtering by address and/or topic0 across indexed history;
+- contract-creation lookup;
+- ERC-20 transfer endpoints;
+- token holder list/count endpoints for current state;
+- Proxy module backed by hoodexplorer's own archive node for read-only eth_* methods.
+
+Why this matters:
+HLP can potentially request only Pons/Uniswap event families instead of processing every Robinhood block, making the historical study dramatically cheaper in free-quota terms.
+
+Current caveat:
+GitHub-hosted Actions runners tested on 2026-09-04 could not route to hoodexplorer over IPv4 or normal Python HTTPS, while the public website/API documentation remained accessible from other networks. Therefore hoodexplorer is not a required CI dependency. Phase 1 must validate the historical sampler from a reachable runtime before promoting it to canonical bulk acquisition.
+
+Use:
+- historical Pons launch/trade event candidate;
+- archive state reads;
+- contract creation metadata;
+- bounded cross-checks and potential bulk extraction.
+
+Do not use near-live holder-count/list endpoints as historical point-in-time holder truth. Historical holder states must be reconstructed from Transfer events.
+
+## 3B. BlockReq public endpoint — REJECTED AS ARCHIVE SOURCE
+
+Docs advertised the public Robinhood endpoint as archive-enabled, but the live Phase-1 test returned:
+"public endpoint only serves recent blocks (last 1024). Register at blockreq.com for historical / archive access."
+
+Conclusion:
+Do not use BlockReq public as HLP's zero-key historical source.
+
+## 3C. NodeFlare — HIGH-PRIORITY FREE CANDIDATE, LIVE SPIKE ACTIVE
+
+Docs:
+https://nodeflare.app/chains/robinhood
+https://nodeflare.app/chains/robinhood/eth_getlogs
+
+Published:
+- no-key public Robinhood RPC;
+- historical state methods such as eth_getCode/eth_getStorageAt exposed on the public endpoint;
+- free keyed tier: 2,000,000 CU/month, no credit card;
+- eth_getLogs requires a free key and costs 25 CU/call (~80,000 calls/month before other usage).
+
+Architecture candidate:
+- public endpoint for archive state verification and block reads;
+- free keyed endpoint for heavy historical event queries;
+- hoodexplorer as an independent indexed-log path where reachable.
+
+Phase-1 live result:
+GitHub-hosted shared runners received HTTP 429 on the first NodeFlare public request. This does not disprove historical support; it does prove that shared GitHub runner IPs are unsuitable as HLP's acquisition worker.
+
+Next test:
+use a dedicated/reachable runtime and a free keyed endpoint for heavy historical event queries, then measure actual eth_getLogs range/response limits.
+
+## 3D. SolidRPC — VERIFIED FREE ARCHIVE PATH / CURRENT PREFERRED PROVIDER
+
+Docs:
+https://solidrpc.io/docs/chains/robinhood-chain
+https://solidrpc.io/docs/pricing
+https://solidrpc.io/docs/public-rpc
+https://solidrpc.io/blog/eth-getlogs-backfill-without-gaps
+
+Published Free plan:
+- $0, no credit card required;
+- 10,000 response units per UTC day;
+- 10 RPC method calls/s, burst 50;
+- one billable JSON-RPC method call = one response unit;
+- Robinhood Chain is archive-backed on Free;
+- keyless public Robinhood route is available;
+- keyless public eth_getLogs range is capped at 2,000 blocks;
+- authenticated endpoints remove that public-policy range cap.
+
+HLP live evidence on 2026-09-04:
+- keyless endpoint was reachable from GitHub Actions;
+- chain ID/current reads passed;
+- historical eth_getCode returned full Pons V1 bytecode at block 30,000,000;
+- a 2,000-block historical Pons TokenLaunched query returned real logs;
+- Pons V1 deployment boundary reconstructed as block 8,991,118 (2026-07-13 21:29:03 UTC);
+- Pons V2 deployment boundary reconstructed as block 26,841,846 (2026-08-03 14:41:19 UTC).
+
+Architecture:
+- keep official Robinhood RPC for current/live control reads;
+- use SolidRPC for archive/backfill;
+- use the keyless route for bounded verification;
+- use a Free authenticated endpoint for sustained backfills so HLP can discover practical wide ranges adaptively;
+- API key is passed by X-API-Key from an environment secret, never committed.
+
+Status:
+**PASS as an archive capability.** Full-history quota/egress/request projection is still a Phase-1 gate.
+
+
 ## 4. Pons contracts — PASS, open source and directly decodable
 
 Official source:
@@ -134,17 +231,20 @@ Use:
 
 Do not classify by token symbol.
 
-## 7. Blockscout — PASS as explorer/verification/fallback
+## 7. Blockscout — EXPLORER PASS, GITHUB ACQUISITION ROUTE REJECTED
 
 Robinhood’s official explorer is Blockscout.
 
-Use:
-- deployment/contract verification;
-- transaction/log spot checks;
-- source-code verification;
-- bounded fallback discovery.
+Verified:
+- useful browser/source/transaction verification surface;
+- documented indexed log APIs exist;
+- both legacy Etherscan-compatible and modern /api/v2 log APIs returned HTTP 403 from GitHub-hosted HLP runs.
 
-Do not make Blockscout the only canonical high-frequency/live ingestion path.
+Use:
+- browser/explorer verification;
+- source and transaction spot checks from permitted runtimes.
+
+Do not require Blockscout APIs for the GitHub-hosted acquisition pipeline unless access changes and is reverified.
 
 ## 8. DEX Screener / GeckoTerminal — PASS for cross-check/current discovery, not canonical history
 

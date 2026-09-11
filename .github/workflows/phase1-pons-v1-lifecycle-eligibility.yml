@@ -1,0 +1,841 @@
+name: phase1-pons-v1-lifecycle-eligibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_registry_run_id:
+        description: "Successful run containing phase1-pons-full-registry-recovered"
+        required: true
+        default: "33911022718"
+        type: string
+      v1_v3_run_id:
+        description: "Successful phase1-pons-v1-v3-full run"
+        required: true
+        type: string
+      quote_audit_run_id:
+        description: "Successful full-Pons quote-audit run"
+        required: true
+        default: "33923299711"
+        type: string
+      quote_audit_artifact_name:
+        description: "Artifact containing pons-quote-registry.jsonl"
+        required: true
+        default: "phase1-pons-full-quote-audit-current"
+        type: string
+      anchor_run_id:
+        description: "Successful phase1-pons-weth-usdg-anchor-full run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Successful phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      source_registry_run_id:
+        required: true
+        type: string
+      v1_v3_run_id:
+        required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        type: string
+      quote_audit_artifact_name:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v1-lifecycle-eligibility-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_registry
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before retry
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - id: retry_download_registry
+        name: Retry V1 registry artifact download
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 registry download before final retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - name: Final V1 registry artifact download retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-registry-recovered
+          path: registry
+          run-id: ${{ inputs.source_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Resolve canonical V1 V3 selected shard artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
+        run: |
+          mkdir -p v3 v3-shards
+          python - <<'PY'
+          import concurrent.futures
+          import hashlib
+          import io
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.pons_v1_v3_artifacts import (
+              resolve_v1_v3_canonical_shard_bindings,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          current_run_id = int(os.environ["V1_V3_RUN_ID"])
+          registry_run_id = int(os.environ["SOURCE_REGISTRY_RUN_ID"])
+          if current_run_id <= 0:
+              raise SystemExit("V1 lifecycle V1/V3 run ID must be positive")
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          artifact_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_cache:
+                  return artifact_cache[run_id]
+              output = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "V1 lifecycle artifact pagination exceeded 2000: "
+                          f"run={run_id}"
+                      )
+              artifact_cache[run_id] = output
+              return output
+
+          def selected_artifact(run_id, artifact_name, label):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if str(row.get("name") or "") == artifact_name
+              ]
+              try:
+                  return select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} retry artifacts are not equivalent: {exc}"
+                  ) from exc
+
+          def artifact_zip(row):
+              return fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(row['id'])}/zip",
+                  token,
+              )
+
+          canonical_row = selected_artifact(
+              current_run_id,
+              "phase1-pons-v1-v3-full",
+              "V1 lifecycle canonical V1/V3 artifact",
+          )
+          canonical_blob = artifact_zip(canonical_row)
+          required_canonical = {
+              "pons-v1-v3-full.jsonl.manifest.json",
+              "pons-v1-v3-summary.json",
+          }
+          canonical_payloads = {}
+          with zipfile.ZipFile(io.BytesIO(canonical_blob)) as archive:
+              for filename in required_canonical:
+                  matches = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == filename
+                  ]
+                  if len(matches) != 1:
+                      raise SystemExit(
+                          "V1 lifecycle canonical artifact file identity "
+                          f"is ambiguous: {filename}"
+                      )
+                  canonical_payloads[filename] = archive.read(matches[0])
+
+          for filename, payload in canonical_payloads.items():
+              (Path("v3") / filename).write_bytes(payload)
+
+          aggregate = json.loads(
+              canonical_payloads[
+                  "pons-v1-v3-full.jsonl.manifest.json"
+              ]
+          )
+          provenance = aggregate.get("provenance") or {}
+          if aggregate.get("path") != "pons-v1-v3-full.jsonl":
+              raise SystemExit(
+                  "V1 lifecycle canonical V1/V3 manifest path changed"
+              )
+          if int(provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit(
+                  "V1 lifecycle canonical V1/V3 chain changed"
+              )
+          if int(
+              provenance.get("snapshot_head_block", -1)
+          ) != 54_486_035:
+              raise SystemExit(
+                  "V1 lifecycle canonical V1/V3 snapshot changed"
+              )
+          if int(
+              provenance.get("source_registry_run_id", -1)
+          ) != registry_run_id:
+              raise SystemExit(
+                  "V1 lifecycle canonical V1/V3 registry run changed"
+              )
+
+          try:
+              bindings = resolve_v1_v3_canonical_shard_bindings(
+                  aggregate,
+                  current_run_id=current_run_id,
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "V1 lifecycle canonical shard binding changed: "
+                  f"{exc}"
+              ) from exc
+
+          partial_value = provenance.get("partial_run_id")
+          partial_run_id = (
+              int(partial_value)
+              if partial_value not in {None, "", 0}
+              else None
+          )
+
+          selected_rows = []
+          for binding in bindings:
+              row = selected_artifact(
+                  binding["run_id"],
+                  binding["artifact_name"],
+                  (
+                      "V1 lifecycle selected V1/V3 shard "
+                      f"run={binding['run_id']} "
+                      f"artifact={binding['artifact_name']}"
+                  ),
+              )
+              selected_rows.append((binding, row))
+
+          def materialize(item):
+              binding, artifact = item
+              blob = artifact_zip(artifact)
+              filename = binding["file"]
+              sidecar_name = filename + ".manifest.json"
+              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                  data_members = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == filename
+                  ]
+                  manifest_members = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == sidecar_name
+                  ]
+                  if len(data_members) != 1:
+                      raise ValueError(
+                          "selected V1/V3 shard data identity is ambiguous: "
+                          f"{filename}"
+                      )
+                  if len(manifest_members) != 1:
+                      raise ValueError(
+                          "selected V1/V3 shard manifest identity is "
+                          f"ambiguous: {sidecar_name}"
+                      )
+                  data = archive.read(data_members[0])
+                  manifest_bytes = archive.read(manifest_members[0])
+
+              manifest = json.loads(manifest_bytes)
+              shard_provenance = manifest.get("provenance") or {}
+              expected_range = (
+                  binding["from_block"],
+                  binding["to_block"],
+              )
+              observed_range = (
+                  int(shard_provenance.get("from_block", -1)),
+                  int(shard_provenance.get("to_block", -1)),
+              )
+              if manifest.get("path") != filename:
+                  raise ValueError(
+                      f"selected V1/V3 shard path changed: {filename}"
+                  )
+              if manifest.get("sha256") != binding["sha256"]:
+                  raise ValueError(
+                      f"selected V1/V3 shard manifest SHA changed: {filename}"
+                  )
+              if int(manifest.get("records", -1)) != binding["records"]:
+                  raise ValueError(
+                      "selected V1/V3 shard manifest record count changed: "
+                      f"{filename}"
+                  )
+              if observed_range != expected_range:
+                  raise ValueError(
+                      f"selected V1/V3 shard range changed: {filename}"
+                  )
+              if str(shard_provenance.get("source") or "") != "evm_json_rpc":
+                  raise ValueError(
+                      f"selected V1/V3 shard source changed: {filename}"
+                  )
+              if int(shard_provenance.get("chain_id", -1)) != 4663:
+                  raise ValueError(
+                      f"selected V1/V3 shard chain changed: {filename}"
+                  )
+              if str(shard_provenance.get("protocol") or "") != (
+                  "uniswap_v3_shared_price_tape"
+              ):
+                  raise ValueError(
+                      f"selected V1/V3 shard protocol changed: {filename}"
+                  )
+              if str(
+                  shard_provenance.get("registry") or ""
+              ) != "pons-full-launch-registry.jsonl":
+                  raise ValueError(
+                      "selected V1/V3 shard frozen input changed: "
+                      f"{filename}"
+                  )
+              if str(
+                  shard_provenance.get("pool_filter_mode") or ""
+              ) != "global_topic_then_registry":
+                  raise ValueError(
+                      "selected V1/V3 shard filter mode changed: "
+                      f"{filename}"
+                  )
+
+              actual_sha = hashlib.sha256(data).hexdigest()
+              actual_records = sum(
+                  1
+                  for line in data.splitlines()
+                  if line.strip()
+              )
+              if actual_sha != binding["sha256"]:
+                  raise ValueError(
+                      f"selected V1/V3 shard data SHA changed: {filename}"
+                  )
+              if actual_records != binding["records"]:
+                  raise ValueError(
+                      "selected V1/V3 shard data record count changed: "
+                      f"{filename}"
+                  )
+
+              target = (
+                  Path("v3-shards")
+                  / str(binding["run_id"])
+              )
+              target.mkdir(parents=True, exist_ok=True)
+              (target / filename).write_bytes(data)
+              (target / sidecar_name).write_bytes(manifest_bytes)
+              return {
+                  "run_id": binding["run_id"],
+                  "artifact_name": binding["artifact_name"],
+                  "file": filename,
+                  "records": binding["records"],
+              }
+
+          materialized = []
+          with concurrent.futures.ThreadPoolExecutor(
+              max_workers=4
+          ) as executor:
+              futures = [
+                  executor.submit(materialize, item)
+                  for item in selected_rows
+              ]
+              for future in futures:
+                  try:
+                      materialized.append(future.result())
+                  except Exception as exc:
+                      raise SystemExit(
+                          "V1 lifecycle selected V1/V3 shard download "
+                          f"failed: {exc}"
+                      ) from exc
+
+          by_run = {}
+          for row in materialized:
+              run_key = str(row["run_id"])
+              by_run[run_key] = by_run.get(run_key, 0) + 1
+
+          print(json.dumps({
+              "v1_v3_run_id": current_run_id,
+              "partial_run_id": partial_run_id,
+              "selected_shards": len(bindings),
+              "selected_shards_by_run": dict(sorted(by_run.items())),
+              "materialized_shards": len(materialized),
+              "resolver": "canonical_manifest_exact_artifacts",
+          }, sort_keys=True))
+          PY
+      - id: download_quotes
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 quote audit download before retry
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - id: retry_download_quotes
+        name: Retry V1 quote audit artifact download
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 quote audit download before final retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - name: Final V1 quote audit artifact download retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.quote_audit_artifact_name }}
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 anchor download before retry
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - id: retry_download_anchor
+        name: Retry V1 anchor artifact download
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 anchor download before final retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - name: Final V1 anchor artifact download retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 stock oracle download before retry
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - id: retry_download_oracle
+        name: Retry V1 stock oracle artifact download
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V1 stock oracle download before final retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - name: Final V1 stock oracle artifact download retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate frozen V1 lifecycle input manifests
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          CHAIN_ID = 4663
+
+          specs = [
+              (
+                  Path(
+                      "registry/pons-full-launch-registry.jsonl.manifest.json"
+                  ),
+                  494_639,
+                  "c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed",
+                  True,
+              ),
+              (
+                  Path(
+                      "quotes/pons-quote-registry.jsonl.manifest.json"
+                  ),
+                  57,
+                  "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc",
+                  False,
+              ),
+              (
+                  Path("v3/pons-v1-v3-full.jsonl.manifest.json"),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+                  True,
+              ),
+          ]
+
+          validated = []
+          for (
+              path,
+              expected_records,
+              expected_sha,
+              require_snapshot,
+          ) in specs:
+              if not path.exists():
+                  raise SystemExit(
+                      f"required V1 lifecycle manifest is missing: {path}"
+                  )
+              manifest = json.loads(path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if require_snapshot and int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"V1 lifecycle manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if (
+                  expected_records is not None
+                  and int(manifest["records"]) != expected_records
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle record count changed: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              if (
+                  expected_sha is not None
+                  and manifest["sha256"] != expected_sha
+              ):
+                  raise SystemExit(
+                      f"frozen V1 lifecycle SHA changed: {path} "
+                      f"expected={expected_sha} "
+                      f"actual={manifest['sha256']}"
+                  )
+              validated.append({
+                  "manifest": str(path),
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+                  "snapshot_required": require_snapshot,
+              })
+
+          report = {
+              "chain_id": CHAIN_ID,
+              "snapshot_head_block": HEAD,
+              "validated_manifests": validated,
+              "validated_manifest_count": len(validated),
+          }
+          Path(
+              "artifacts/pons-v1-input-manifest-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Validate complete direct-USD coverage for V1 quotes
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-full-launch-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          v1 = [row for row in registry if row.get("version") == "v1"]
+          quote_tokens = {
+              row["pair_token"].lower()
+              for row in v1
+          }
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          by_token = {
+              row["quote_token"].lower(): row
+              for row in quotes
+          }
+          missing = sorted(quote_tokens - set(by_token))
+          blockers = [
+              by_token[token]
+              for token in sorted(quote_tokens & set(by_token))
+              if by_token[token]["pricing_status"] in {
+                  "missing_chainlink_feed",
+                  "unsupported_quote",
+              }
+          ]
+          if missing or blockers:
+              raise SystemExit(
+                  "V1 quote coverage is not complete: "
+                  f"missing={missing[:10]} "
+                  f"blockers={[r['quote_token'] for r in blockers[:10]]}"
+              )
+
+          statuses = Counter(
+              by_token[token]["pricing_status"]
+              for token in quote_tokens
+          )
+          print(json.dumps({
+              "v1_launches": len(v1),
+              "v1_quote_assets": len(quote_tokens),
+              "pricing_status_counts": dict(sorted(statuses.items())),
+              "blocking_quote_assets": 0,
+          }, sort_keys=True))
+          PY
+      - name: Replay complete V1 lifecycle as token summaries
+        run: |
+          mkdir -p artifacts
+          hlp pons-v1-lifecycle-eligibility \
+            --registry registry/pons-full-launch-registry.jsonl \
+            --v3-events-dir v3-shards \
+            --v3-events-manifest v3/pons-v1-v3-full.jsonl.manifest.json \
+            --quote-registry quotes/pons-quote-registry.jsonl \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --oracle-state oracle/pons-stock-oracle-initial.jsonl \
+            --oracle-events oracle/pons-stock-oracle-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --out artifacts/pons-v1-lifecycle-eligibility.jsonl
+      - name: Bind V1 lifecycle source run provenance
+        env:
+          SOURCE_REGISTRY_RUN_ID: ${{ inputs.source_registry_run_id }}
+          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/"
+              "pons-v1-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          manifest = json.loads(path.read_text())
+          provenance = dict(manifest.get("provenance") or {})
+          provenance.update({
+              "source_registry_run_id": int(
+                  os.environ["SOURCE_REGISTRY_RUN_ID"]
+              ),
+              "v1_v3_run_id": int(os.environ["V1_V3_RUN_ID"]),
+              "quote_audit_run_id": int(
+                  os.environ["QUOTE_AUDIT_RUN_ID"]
+              ),
+              "anchor_run_id": int(os.environ["ANCHOR_RUN_ID"]),
+              "oracle_run_id": int(os.environ["ORACLE_RUN_ID"]),
+          })
+          manifest["provenance"] = provenance
+          path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(provenance, sort_keys=True))
+          PY
+      - name: Freeze V1 tokens that ever reached the $100k universe gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source = Path("artifacts/pons-v1-lifecycle-eligibility.jsonl")
+          rows = [
+              json.loads(line)
+              for line in source.read_text().splitlines()
+              if line.strip()
+          ]
+          eligible = [
+              row for row in rows
+              if row.get("eligibility_status") == "eligible"
+          ]
+          unknown = [
+              row for row in rows
+              if row.get("eligibility_status") == "unknown"
+          ]
+          eligible.sort(key=lambda row: (row["launch_block"], row["token"]))
+          snapshot = write_jsonl_snapshot(
+              eligible,
+              output=Path("artifacts/pons-v1-eligible-100k.jsonl"),
+              provenance={
+                  "source": source.name,
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+          report = {
+              "snapshot_head_block": 54_486_035,
+              "registry_tokens": len(rows),
+              "eligible_tokens": len(eligible),
+              "eligible_share": 0 if not rows else len(eligible) / len(rows),
+              "tokens_without_priced_points": sum(
+                  int(row["priced_points"]) == 0 for row in rows
+              ),
+              "tokens_with_partial_pricing": sum(
+                  int(row.get("unpriced_points", 0)) > 0 for row in rows
+              ),
+              "eligibility_unknown_tokens": len(unknown),
+              "unknown_sample": [row["token"] for row in unknown[:20]],
+              "eligible_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v1-eligibility-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - id: upload_lifecycle
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_lifecycle
+        name: Retry V1 lifecycle eligibility artifact upload
+        if: ${{ steps.upload_lifecycle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V1 lifecycle eligibility artifact upload retry
+        if: ${{ steps.retry_upload_lifecycle.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v1-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

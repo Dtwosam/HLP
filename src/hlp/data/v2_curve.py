@@ -1,0 +1,401 @@
+"""Pons V2 bonding-curve event tape and exact reserve replay."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Iterable, Iterator
+
+from hlp.data.quote_usd import QuoteUsdTimeline
+from hlp.data.reconstruct import event_order
+from hlp.price import constant_product_spot_quote_per_token, human_amount
+
+
+def _launch_order(row: dict) -> tuple[int, int, int]:
+    return event_order(row)
+
+
+def build_v2_curve_market_cap_points(
+    registry_rows: Iterable[dict],
+    curve_event_rows: Iterable[dict],
+    weth_usd_anchor_points: Iterable[dict],
+    *,
+    initial_weth_usd: Decimal,
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
+) -> Iterator[dict]:
+    """Replay every V2 curve from launch using only observable event deltas.
+
+    Reserve transitions mirror PonsV2BondingCurve:
+    - buy: quote += quoteIn - fee - tax; token -= tokensOut
+    - sell: quote -= quoteOut + fee + tax; token += tokensIn
+    - BuybackLocked: quote += quoteSpent; token -= tokensLocked
+
+    Fee sweeps without a buyback do not move getReserves(), so they require no
+    price event. Graduation is handled separately by the V4 phase.
+    """
+    if initial_weth_usd <= 0:
+        raise ValueError("initial_weth_usd must be positive")
+
+    registry_list = sorted(list(registry_rows), key=_launch_order)
+    launches = iter(registry_list)
+    events = iter(curve_event_rows)
+    next_launch = next(launches, None)
+    next_event = next(events, None)
+    usd = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
+    states: dict[str, dict[str, int]] = {}
+
+    def price_row(base: dict, launch: dict, *, event_type: str):
+        curve_address = launch["curve"].lower()
+        state = states[curve_address]
+        quote_per_token = constant_product_spot_quote_per_token(
+            quote_reserve_raw=state["quote_reserve_raw"],
+            token_reserve_raw=state["token_reserve_raw"],
+            quote_decimals=int(launch["quote_decimals"]),
+            token_decimals=int(launch["token_decimals"]),
+        )
+        quote_usd = usd.price(launch["pair_token"])
+        pricing_status = usd.pricing_status(launch["pair_token"])
+        out = dict(base)
+        out.update(
+            {
+                "phase": "curve",
+                "event_type": event_type,
+                "token": launch["token"].lower(),
+                "curve": curve_address,
+                "quote_token": launch["pair_token"].lower(),
+                "launch_block": int(launch["block_number"]),
+                "quote_reserve_raw": state["quote_reserve_raw"],
+                "token_reserve_raw": state["token_reserve_raw"],
+                "quote_per_token": str(quote_per_token),
+                "pricing_status": pricing_status,
+                "quote_usd": None if quote_usd is None else str(quote_usd),
+                "token_price_usd": None,
+                "market_cap_proxy_usd": None,
+            }
+        )
+        if quote_usd is not None:
+            token_price_usd = quote_per_token * quote_usd
+            supply = human_amount(
+                int(launch["supply_raw"]),
+                int(launch["token_decimals"]),
+            )
+            out["token_price_usd"] = str(token_price_usd)
+            out["market_cap_proxy_usd"] = str(token_price_usd * supply)
+        return out
+
+    registry_by_curve = {
+        row["curve"].lower(): row
+        for row in registry_list
+    }
+
+    # Merge launch initialization and reserve-changing events in exact order.
+    # Anchor events are advanced immediately before each emitted point.
+    while next_launch is not None or next_event is not None:
+        launch_order = _launch_order(next_launch) if next_launch is not None else None
+        event_ord = event_order(next_event) if next_event is not None else None
+
+        if next_launch is not None and (
+            next_event is None or launch_order <= event_ord
+        ):
+            launch = next_launch
+            order = launch_order
+            usd.advance_to(order)
+            curve_address = launch["curve"].lower()
+            if curve_address in states:
+                raise ValueError(f"duplicate V2 curve launch: {curve_address}")
+            states[curve_address] = {
+                "quote_reserve_raw": int(launch["phantom_quote"]),
+                "token_reserve_raw": int(launch["supply_raw"]),
+            }
+            base = {
+                "block_number": int(launch["block_number"]),
+                "transaction_hash": launch["transaction_hash"],
+                "transaction_index": launch.get("transaction_index"),
+                "log_index": int(launch["log_index"]),
+            }
+            yield price_row(base, launch, event_type="curve_initialized")
+            next_launch = next(launches, None)
+            continue
+
+        event = next_event
+        order = event_ord
+        usd.advance_to(order)
+        curve_address = event["curve"].lower()
+        launch = registry_by_curve.get(curve_address)
+        state = states.get(curve_address)
+        if launch is None:
+            raise KeyError(f"curve event is absent from V2 registry: {curve_address}")
+        if state is None:
+            raise ValueError(
+                f"curve event precedes initialization in supplied history: {curve_address}"
+            )
+
+        kind = event["event_type"]
+        if kind == "curve_buy":
+            net_quote = (
+                int(event["quote_amount"])
+                - int(event["fee"])
+                - int(event["tax"])
+            )
+            if net_quote < 0:
+                raise ValueError("curve buy fees exceed quote input")
+            state["quote_reserve_raw"] += net_quote
+            state["token_reserve_raw"] -= int(event["token_amount"])
+        elif kind == "curve_sell":
+            gross_quote = (
+                int(event["quote_amount"])
+                + int(event["fee"])
+                + int(event["tax"])
+            )
+            state["quote_reserve_raw"] -= gross_quote
+            state["token_reserve_raw"] += int(event["token_amount"])
+        elif kind == "curve_buyback":
+            state["quote_reserve_raw"] += int(event["quote_spent"])
+            state["token_reserve_raw"] -= int(event["tokens_locked"])
+        else:
+            raise ValueError(f"unknown V2 curve event type: {kind}")
+
+        if state["quote_reserve_raw"] <= 0 or state["token_reserve_raw"] <= 0:
+            raise ValueError(
+                f"invalid replayed V2 reserves for {curve_address}: {state}"
+            )
+        yield price_row(event, launch, event_type=kind)
+        next_event = next(events, None)
+
+
+
+def summarize_v2_curve_market_caps(rows: Iterable[dict]) -> list[dict]:
+    summary: dict[str, dict] = {}
+    for row in rows:
+        token = row["token"]
+        current = summary.get(token)
+        value = row.get("market_cap_proxy_usd")
+        mcap = Decimal(value) if value is not None else None
+        if current is None:
+            current = {
+                "token": token,
+                "curve": row["curve"],
+                "quote_token": row["quote_token"],
+                "launch_block": row["launch_block"],
+                "pricing_statuses": set(),
+                "price_points": 0,
+                "priced_points": 0,
+                "unpriced_points": 0,
+                "first_priced_block": None,
+                "last_priced_block": None,
+                "first_unpriced_block": None,
+                "last_unpriced_block": None,
+                "max_market_cap_proxy_usd": None,
+                "max_market_cap_block": None,
+                "v4_swap_max_market_cap_proxy_usd": None,
+                "v4_swap_max_market_cap_block": None,
+                "crossed_100k": False,
+            }
+            summary[token] = current
+        current["pricing_statuses"].add(row["pricing_status"])
+        current["price_points"] += 1
+        block = int(row["block_number"])
+        if mcap is None:
+            current["unpriced_points"] += 1
+            if current["first_unpriced_block"] is None:
+                current["first_unpriced_block"] = block
+            current["last_unpriced_block"] = block
+            continue
+        current["priced_points"] += 1
+        if current["first_priced_block"] is None:
+            current["first_priced_block"] = block
+        current["last_priced_block"] = block
+        previous = current["max_market_cap_proxy_usd"]
+        if previous is None or mcap > previous:
+            current["max_market_cap_proxy_usd"] = mcap
+            current["max_market_cap_block"] = row["block_number"]
+        if row.get("event_type") == "v4_swap":
+            previous_swap = current["v4_swap_max_market_cap_proxy_usd"]
+            if previous_swap is None or mcap > previous_swap:
+                current["v4_swap_max_market_cap_proxy_usd"] = mcap
+                current["v4_swap_max_market_cap_block"] = row["block_number"]
+        if mcap >= Decimal("100000"):
+            current["crossed_100k"] = True
+
+    output = []
+    for current in summary.values():
+        row = dict(current)
+        row["pricing_statuses"] = sorted(row["pricing_statuses"])
+        if row["max_market_cap_proxy_usd"] is not None:
+            row["max_market_cap_proxy_usd"] = str(row["max_market_cap_proxy_usd"])
+        if row["v4_swap_max_market_cap_proxy_usd"] is not None:
+            row["v4_swap_max_market_cap_proxy_usd"] = str(
+                row["v4_swap_max_market_cap_proxy_usd"]
+            )
+        row["pricing_complete"] = row["unpriced_points"] == 0
+        row["eligibility_status"] = (
+            "eligible"
+            if row["crossed_100k"]
+            else "unknown"
+            if row["unpriced_points"] > 0
+            else "ineligible"
+        )
+        output.append(row)
+    output.sort(key=lambda row: (row["launch_block"], row["token"]))
+    return output
+
+
+
+def merge_v2_lifecycle_market_cap_summaries(
+    registry_rows: Iterable[dict],
+    *,
+    curve_summary: Iterable[dict],
+    seed_summary: Iterable[dict] = (),
+    v4_summary: Iterable[dict] = (),
+) -> list[dict]:
+    """Merge summary-only V2 phases without materializing full priced paths.
+
+    The registry is authoritative for the token population. Curve replay must
+    cover every launch; seed/V4 summaries are optional because most tokens may
+    never graduate.
+    """
+    registry = {
+        row["token"].lower(): row
+        for row in registry_rows
+    }
+    curve = {row["token"].lower(): dict(row) for row in curve_summary}
+    seeds = {row["token"].lower(): dict(row) for row in seed_summary}
+    v4 = {row["token"].lower(): dict(row) for row in v4_summary}
+
+    if set(curve) != set(registry):
+        missing = sorted(set(registry) - set(curve))
+        extra = sorted(set(curve) - set(registry))
+        raise ValueError(
+            "V2 curve summary must cover the frozen registry exactly: "
+            f"missing={missing[:20]} extra={extra[:20]}"
+        )
+    if not set(seeds).issubset(registry):
+        raise ValueError("V2 seed summary contains token outside registry")
+    if not set(v4).issubset(registry):
+        raise ValueError("V2 V4 summary contains token outside registry")
+
+    output = []
+    for token, launch in sorted(
+        registry.items(),
+        key=lambda item: (
+            int(item[1]["block_number"]),
+            item[0],
+        ),
+    ):
+        phase_rows = [
+            ("curve", curve[token]),
+        ]
+        if token in seeds:
+            phase_rows.append(("v4_seed", seeds[token]))
+        if token in v4:
+            phase_rows.append(("v4", v4[token]))
+
+        statuses = set()
+        price_points = 0
+        priced_points = 0
+        unpriced_points = 0
+        first_priced_block = None
+        last_priced_block = None
+        first_unpriced_block = None
+        last_unpriced_block = None
+        crossed = False
+        max_value = None
+        max_block = None
+        max_phase = None
+
+        for phase, row in phase_rows:
+            statuses.update(row.get("pricing_statuses", []))
+            price_points += int(row.get("price_points", 0))
+            priced_points += int(row.get("priced_points", 0))
+            unpriced_points += int(
+                row.get(
+                    "unpriced_points",
+                    int(row.get("price_points", 0))
+                    - int(row.get("priced_points", 0)),
+                )
+            )
+            fp = row.get("first_priced_block")
+            lp = row.get("last_priced_block")
+            fu = row.get("first_unpriced_block")
+            lu = row.get("last_unpriced_block")
+            if fp is not None:
+                first_priced_block = (
+                    int(fp)
+                    if first_priced_block is None
+                    else min(first_priced_block, int(fp))
+                )
+            if lp is not None:
+                last_priced_block = (
+                    int(lp)
+                    if last_priced_block is None
+                    else max(last_priced_block, int(lp))
+                )
+            if fu is not None:
+                first_unpriced_block = (
+                    int(fu)
+                    if first_unpriced_block is None
+                    else min(first_unpriced_block, int(fu))
+                )
+            if lu is not None:
+                last_unpriced_block = (
+                    int(lu)
+                    if last_unpriced_block is None
+                    else max(last_unpriced_block, int(lu))
+                )
+            crossed = crossed or bool(row.get("crossed_100k"))
+            raw = row.get("max_market_cap_proxy_usd")
+            if raw is None:
+                continue
+            value = Decimal(raw)
+            if max_value is None or value > max_value:
+                max_value = value
+                max_block = row.get("max_market_cap_block")
+                max_phase = phase
+
+        output.append({
+            "token": token,
+            "curve": launch["curve"].lower(),
+            "quote_token": launch["pair_token"].lower(),
+            "launch_block": int(launch["block_number"]),
+            "pricing_statuses": sorted(statuses),
+            "price_points": price_points,
+            "priced_points": priced_points,
+            "unpriced_points": unpriced_points,
+            "first_priced_block": first_priced_block,
+            "last_priced_block": last_priced_block,
+            "first_unpriced_block": first_unpriced_block,
+            "last_unpriced_block": last_unpriced_block,
+            "pricing_complete": unpriced_points == 0,
+            "eligibility_status": (
+                "eligible"
+                if crossed
+                else "unknown"
+                if unpriced_points > 0
+                else "ineligible"
+            ),
+            "max_market_cap_proxy_usd": (
+                None if max_value is None else str(max_value)
+            ),
+            "max_market_cap_block": max_block,
+            "max_market_cap_phase": max_phase,
+            "v4_swap_max_market_cap_proxy_usd": (
+                None
+                if token not in v4
+                else v4[token].get("v4_swap_max_market_cap_proxy_usd")
+            ),
+            "v4_swap_max_market_cap_block": (
+                None
+                if token not in v4
+                else v4[token].get("v4_swap_max_market_cap_block")
+            ),
+            "crossed_100k": crossed,
+            "graduated": token in seeds,
+            "has_v4_price_points": token in v4,
+        })
+
+    return output

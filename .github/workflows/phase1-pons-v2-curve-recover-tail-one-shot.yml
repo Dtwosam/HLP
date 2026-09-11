@@ -1,0 +1,225 @@
+name: phase1-pons-v2-curve-recover-tail-one-shot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-curve-recover-tail-one-shot
+  cancel-in-progress: false
+
+env:
+  V2_REGISTRY_RUN_ID: '33912235341'
+  PRESERVED_RUN_ID: '33912593934'
+  GENERATION_START: '26841846'
+  RECOVERY_START: '47574988'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '8'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ env.V2_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - id: bounds
+        name: Compute recovery shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["RECOVERY_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire missing V2 curve tail
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-curve-tape \
+            --registry registry/pons-v2-full-registry.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-topic-scan \
+            --out "artifacts/v2-curve-recovery-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-recovery-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: recover
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-curve-*
+          path: preserved
+          merge-multiple: true
+          run-id: ${{ env.PRESERVED_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-curve-recovery-*
+          path: recovered
+          merge-multiple: true
+      - name: Stream-merge preserved prefix and recovered tail
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["GENERATION_START"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          files = (
+              list(Path("preserved").glob("v2-curve-shard-*.jsonl"))
+              + list(Path("recovered").glob("v2-curve-recovery-*.jsonl"))
+          )
+          assert len(files) == 14, [p.name for p in files]
+
+          entries = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              prov = manifest["provenance"]
+              entries.append((
+                  int(prov["from_block"]),
+                  int(prov["to_block"]),
+                  path,
+                  manifest,
+              ))
+          entries.sort(key=lambda item: item[0])
+
+          previous_hi = None
+          manifests = []
+          expected_records = 0
+          for lo, hi, path, manifest in entries:
+              if previous_hi is None:
+                  assert lo == START, lo
+              else:
+                  assert lo == previous_hi + 1, (previous_hi, lo, path.name)
+              previous_hi = hi
+              expected_records += int(manifest["records"])
+              manifests.append({
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == HEAD, (previous_hi, HEAD)
+
+          stats = {
+              "records": 0,
+              "curve_buy": 0,
+              "curve_sell": 0,
+              "curve_buyback": 0,
+          }
+          curves = set()
+
+          def rows():
+              prior = None
+              for _, _, path, manifest in entries:
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if prior is not None:
+                              assert prior < order, (prior, order, path.name)
+                          prior = order
+                          kind = row["event_type"]
+                          assert kind in stats, kind
+                          stats[kind] += 1
+                          stats["records"] += 1
+                          curves.add(row["curve"].lower())
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+
+          snapshot = write_jsonl_snapshot(
+              rows(),
+              output=Path("artifacts/pons-v2-curve-full.jsonl"),
+              provenance={
+                  "source": "preserved_prefix_plus_recovered_curve_tail",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "preserved_run_id": int(os.environ["PRESERVED_RUN_ID"]),
+                  "recovery_start_block": int(os.environ["RECOVERY_START"]),
+                  "shards": manifests,
+              },
+          )
+          assert stats["records"] == expected_records
+          summary = {
+              "snapshot_head_block": HEAD,
+              "records": stats["records"],
+              "curve_buys": stats["curve_buy"],
+              "curve_sells": stats["curve_sell"],
+              "curve_buybacks": stats["curve_buyback"],
+              "curves_with_activity": len(curves),
+              "registry_curves": 225_951,
+              "tape_sha256": snapshot["sha256"],
+              "preserved_files": 6,
+              "recovery_files": 8,
+          }
+          Path("artifacts/pons-v2-curve-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: artifacts/
+          if-no-files-found: error

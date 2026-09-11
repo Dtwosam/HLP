@@ -1,0 +1,106 @@
+name: phase1-trench-curve-mcap-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-trench-curve-mcap-smoke.yml'
+      - 'src/hlp/data/trench_curve.py'
+      - 'src/hlp/data/trench_registry.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trench-mcap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Acquire trench.today tape
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-trench-tape \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/trench-events.jsonl
+      - name: Build in-shard launch registry
+        run: |
+          hlp trench-registry \
+            --events artifacts/trench-events.jsonl \
+            --out artifacts/trench-registry.jsonl
+      - name: Restrict validation to tokens launched inside shard
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          registry = [
+              json.loads(x)
+              for x in Path("artifacts/trench-registry.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          tokens = {row["token"] for row in registry}
+          source = [
+              json.loads(x)
+              for x in Path("artifacts/trench-events.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          filtered = [row for row in source if row["token"] in tokens]
+          Path("artifacts/trench-events-in-shard-launches.jsonl").write_text(
+              "".join(json.dumps(row, sort_keys=True) + "\n" for row in filtered)
+          )
+          print(json.dumps({
+              "registry_tokens": len(tokens),
+              "filtered_events": len(filtered),
+              "quote_counts": {
+                  quote: sum(1 for row in registry if row["quote_token"] == quote)
+                  for quote in sorted({row["quote_token"] for row in registry})
+              },
+              "sync_tokens": len({
+                  row["token"] for row in filtered if row["event_type"] == "sync"
+              }),
+          }, sort_keys=True))
+          PY
+      - name: Price trench.today curve
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-trench-curve-market-cap-window \
+            --events artifacts/trench-events-in-shard-launches.jsonl \
+            --registry artifacts/trench-registry.jsonl \
+            --from-block 30000000 --to-block 30099999 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/trench-curve-market-caps.jsonl \
+            --summary-out artifacts/trench-curve-summary.jsonl
+      - name: Validate eligibility summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(x)
+              for x in Path("artifacts/trench-curve-summary.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          winners = [row for row in rows if row["crossed_100k"]]
+          print(json.dumps({
+              "tokens_with_syncs": len(rows),
+              "tokens_priced": sum(row["priced_points"] > 0 for row in rows),
+              "tokens_crossed_100k": len(winners),
+              "winner_examples": winners[:20],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-trench-curve-mcap
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,132 @@
+name: phase1-pons-v2-quote-audit
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v2-quote-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  V2_REGISTRY_RUN_ID: '33912235341'
+  SNAPSHOT_HEAD: '54486035'
+  # Missing official feeds are reported as data, never treated as a parser abort.
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ env.V2_REGISTRY_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Classify every V2 pair token
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5             pons-quote-audit             --registry registry/pons-v2-full-registry.jsonl             --out artifacts/pons-v2-quote-registry.jsonl
+      - name: Audit historical feed causality
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-pons-quote-causality             --quote-registry artifacts/pons-v2-quote-registry.jsonl             --out artifacts/pons-v2-quote-causality.jsonl
+      - name: Summarize V2 USD coverage
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          quotes = [
+              json.loads(line)
+              for line in Path("artifacts/pons-v2-quote-registry.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          causality = [
+              json.loads(line)
+              for line in Path("artifacts/pons-v2-quote-causality.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          statuses = Counter(row["pricing_status"] for row in quotes)
+          launches = Counter()
+          for row in quotes:
+              launches[row["pricing_status"]] += int(row["launches"])
+
+          blocking_quotes = [
+              row for row in quotes
+              if row["pricing_status"] in {
+                  "unsupported_quote",
+                  "missing_chainlink_feed",
+              }
+          ]
+          blocking_feeds = [
+              row for row in causality if not bool(row["causal_ready"])
+          ]
+          report = {
+              "snapshot_head_block": 54_486_035,
+              "v2_launches": 225_951,
+              "quote_assets": len(quotes),
+              "status_counts": dict(sorted(statuses.items())),
+              "launches_by_status": dict(sorted(launches.items())),
+              "stock_quote_assets": len(causality),
+              "stock_feeds_causal_ready": sum(
+                  bool(row["causal_ready"]) for row in causality
+              ),
+              "blocking_quote_assets": [
+                  {
+                      "quote_token": row["quote_token"],
+                      "status": row["pricing_status"],
+                      "launches": row["launches"],
+                      "first_launch_block": row["first_launch_block"],
+                  }
+                  for row in blocking_quotes
+              ],
+              "blocking_stock_feeds": [
+                  {
+                      "quote_token": row["quote_token"],
+                      "symbol": row["symbol"],
+                      "first_launch_block": row["first_launch_block"],
+                      "error": row["error"],
+                  }
+                  for row in blocking_feeds
+              ],
+              "complete_for_v2_100k_eligibility": (
+                  not blocking_quotes and not blocking_feeds
+              ),
+          }
+          assert len(quotes) == 56, len(quotes)
+          Path("artifacts/pons-v2-quote-completeness.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-pons-v2-quote-audit
+          path: artifacts/
+          if-no-files-found: warn
+      - name: Fail closed if V2 USD coverage is incomplete
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(
+              Path("artifacts/pons-v2-quote-completeness.json").read_text()
+          )
+          if not report["complete_for_v2_100k_eligibility"]:
+              raise SystemExit("V2 quote coverage incomplete; inspect artifact")
+          PY

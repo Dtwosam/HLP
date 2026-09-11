@@ -1,0 +1,129 @@
+name: phase1-hoodfun-source-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-hoodfun-source-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit hood.fun contract generations
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+
+          contracts = {
+              "current": "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c",
+              "previous": "0x6a63d96ef77ae569fcb85934cf1bd1ec7fe9b33d",
+          }
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          output = {}
+
+          for label, address in contracts.items():
+              code = rpc.get_code(address, head)
+              assert code not in {"0x", "0x0", ""}, (label, address)
+              first_code = rpc.find_first_code_block(address, low=0, high=head)
+              start = first_code
+              end = min(head, first_code + 99_999)
+              logs = list(
+                  rpc.iter_logs_chunked(
+                      start,
+                      end,
+                      address=address,
+                      chunk_size=2000,
+                      min_chunk_size=25,
+                  )
+              )
+              topic_counts = Counter(
+                  row.topics[0] if row.topics else "<none>"
+                  for row in logs
+              )
+              first_by_topic = {}
+              for row in logs:
+                  topic0 = row.topics[0] if row.topics else "<none>"
+                  if topic0 not in first_by_topic:
+                      first_by_topic[topic0] = {
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                          "topics": list(row.topics),
+                          "data": row.data,
+                          "data_words": (
+                              len(row.data.removeprefix("0x")) // 64
+                              if len(row.data.removeprefix("0x")) % 64 == 0
+                              else None
+                          ),
+                      }
+              output[label] = {
+                  "address": address.lower(),
+                  "first_code_block": first_code,
+                  "scan_from": start,
+                  "scan_to": end,
+                  "code_bytes": len(code.removeprefix("0x")) // 2,
+                  "code_sha256": hashlib.sha256(
+                      bytes.fromhex(code.removeprefix("0x"))
+                  ).hexdigest(),
+                  "logs": len(logs),
+                  "topic_counts": dict(topic_counts),
+                  "first_by_topic": first_by_topic,
+              }
+
+          Path("artifacts/hoodfun-source-audit.json").write_text(
+              json.dumps(output, indent=2, sort_keys=True)
+          )
+          print(json.dumps({
+              label: {
+                  "address": row["address"],
+                  "first_code_block": row["first_code_block"],
+                  "scan_from": row["scan_from"],
+                  "scan_to": row["scan_to"],
+                  "code_bytes": row["code_bytes"],
+                  "logs": row["logs"],
+                  "topic_counts": row["topic_counts"],
+                  "first_by_topic": row["first_by_topic"],
+              }
+              for label, row in output.items()
+          }, sort_keys=True))
+          print(json.dumps({"requests_made": rpc.requests_made}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-hoodfun-source-audit
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,1246 @@
+name: phase1-pons-final-acceptance-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_run_id:
+        description: "Run containing canonical phase1-pons-eligible-universe artifact; promotion run is allowed"
+        required: true
+        type: string
+      representative_run_id:
+        description: "Successful representative evidence-chain run"
+        required: true
+        type: string
+      pons_registry_run_id:
+        description: "Instrumented pons_registry viability measurement run"
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        description: "Instrumented pons_v1_v3 viability measurement run"
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        description: "Instrumented pons_v2_curve viability measurement run"
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        description: "Instrumented pons_v2_transition viability measurement run"
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        description: "Instrumented pons_v2_v4 viability measurement run"
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        description: "Instrumented weth_usdg_anchor viability measurement run"
+        required: true
+        type: string
+      stock_oracle_run_id:
+        description: "Instrumented stock_oracle viability measurement run"
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        description: "Instrumented quote_v3_fallback viability measurement run"
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        description: "Instrumented quote_v4_fallback viability measurement run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      eligibility_run_id:
+        required: true
+        type: string
+      representative_run_id:
+        required: true
+        type: string
+      pons_registry_run_id:
+        required: true
+        type: string
+      pons_v1_v3_run_id:
+        required: true
+        type: string
+      pons_v2_curve_run_id:
+        required: true
+        type: string
+      pons_v2_transition_run_id:
+        required: true
+        type: string
+      pons_v2_v4_run_id:
+        required: true
+        type: string
+      weth_usdg_anchor_run_id:
+        required: true
+        type: string
+      stock_oracle_run_id:
+        required: true
+        type: string
+      quote_v3_fallback_run_id:
+        required: true
+        type: string
+      quote_v4_fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-final-acceptance-chain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - id: provenance
+        name: Verify evidence and nine route provenance before acceptance work
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          REPRESENTATIVE_RUN_ID: ${{ inputs.representative_run_id }}
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.parse
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          evidence_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          representative_run_id = int(os.environ["REPRESENTATIVE_RUN_ID"])
+          if evidence_run_id <= 0:
+              raise SystemExit(
+                  "final acceptance evidence run ID must be positive"
+              )
+          if representative_run_id != evidence_run_id:
+              raise SystemExit(
+                  "final acceptance eligible and representative runs must "
+                  "be the same evidence handoff"
+              )
+
+          route_env = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          expected_paths = {
+              route: (
+                  ".github/workflows/"
+                  f"phase1-pons-viability-{route.replace('_', '-')}-one-shot.yml"
+              )
+              for route in route_env
+          }
+          expected_paths["pons_registry"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-registry-one-shot.yml"
+          )
+          expected_paths["pons_v1_v3"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v1-v3-one-shot.yml"
+          )
+          expected_paths["pons_v2_curve"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-curve-one-shot.yml"
+          )
+          expected_paths["pons_v2_transition"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-transition-one-shot.yml"
+          )
+          expected_paths["pons_v2_v4"] = (
+              ".github/workflows/"
+              "phase1-pons-viability-pons-v2-v4-one-shot.yml"
+          )
+          route_run_ids = {
+              route: int(os.environ[field])
+              for route, field in route_env.items()
+          }
+          if min(route_run_ids.values()) <= 0:
+              raise SystemExit(
+                  "final acceptance route run IDs must be positive"
+              )
+          if len(set(route_run_ids.values())) != 9:
+              raise SystemExit(
+                  "final acceptance requires nine distinct evidence run IDs"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          def json_file_at_ref(path, ref):
+              encoded_path = urllib.parse.quote(path, safe="/")
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              payload = get(
+                  f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+              )
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"unexpected contents encoding for {path}@{ref}"
+                  )
+              return json.loads(
+                  base64.b64decode(payload.get("content") or "")
+              )
+
+          artifact_rows_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
+              output = []
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row for row in rows if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "final acceptance artifact pagination exceeded "
+                          f"1000: run={run_id}"
+                      )
+              artifact_rows_cache[run_id] = output
+              return output
+
+          def artifact_names(run_id):
+              return {
+                  str(row.get("name") or "")
+                  for row in artifact_rows(run_id)
+              }
+
+          def require_ancestor(label, sha):
+              if len(sha) != 40:
+                  raise SystemExit(f"{label} head SHA is invalid")
+              comparison = get(
+                  f"/repos/{repo}/compare/{sha}..."
+                  f"{os.environ['GITHUB_SHA']}"
+              )
+              if comparison.get("status") not in {"ahead", "identical"}:
+                  raise SystemExit(
+                      f"{label} head is not an ancestor of acceptance HEAD: "
+                      f"status={comparison.get('status')} sha={sha}"
+                  )
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          if (
+              evidence.get("status") != "completed"
+              or evidence.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "final acceptance evidence run is not successful"
+              )
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  "final acceptance evidence workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if evidence.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "final acceptance evidence branch changed"
+              )
+          evidence_head_sha = str(evidence.get("head_sha") or "")
+          require_ancestor("final acceptance evidence", evidence_head_sha)
+
+          required_evidence = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          evidence_artifacts = artifact_rows(evidence_run_id)
+          missing_evidence = sorted(
+              required_evidence
+              - {
+                  str(row.get("name") or "")
+                  for row in evidence_artifacts
+              }
+          )
+          if missing_evidence:
+              raise SystemExit(
+                  "final acceptance evidence artifacts missing: "
+                  f"{missing_evidence}"
+              )
+
+          handoff_rows = [
+              row
+              for row in evidence_artifacts
+              if str(row.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "final acceptance evidence-ready retry artifacts "
+                      "are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "final acceptance evidence-ready artifact ID is invalid"
+              )
+
+          for route, run_id in route_run_ids.items():
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              if (
+                  run.get("status") != "completed"
+                  or run.get("conclusion") != "success"
+              ):
+                  raise SystemExit(
+                      "final acceptance route run is not successful: "
+                      f"{route} run={run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path != expected_paths[route]:
+                  raise SystemExit(
+                      "final acceptance route workflow path mismatch: "
+                      f"{route} expected={expected_paths[route]} actual={path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      f"final acceptance route branch changed: {route}"
+                  )
+              route_head_sha = str(run.get("head_sha") or "")
+              require_ancestor(
+                  f"final acceptance route {route}",
+                  route_head_sha,
+              )
+              required_artifacts = {
+                  f"phase1-pons-viability-measurement-{route}-primary"
+              }
+              if route == "pons_registry":
+                  required_artifacts.add(
+                      "phase1-pons-viability-measurement-"
+                      "pons_registry-secondary"
+                  )
+              missing_route = sorted(
+                  required_artifacts - artifact_names(run_id)
+              )
+              if missing_route:
+                  raise SystemExit(
+                      "final acceptance route measurement artifacts missing: "
+                      f"{route} {missing_route}"
+                  )
+
+              launch_readiness = json_file_at_ref(
+                  ".github/phase1-pons-viability-ready.json",
+                  route_head_sha,
+              )
+              launch_ledger = json_file_at_ref(
+                  ".github/phase1-pons-viability-runs.json",
+                  route_head_sha,
+              )
+              if int(
+                  launch_readiness.get("source_eligibility_run_id", 0)
+              ) != 33_982_556_591:
+                  raise SystemExit(
+                      f"final acceptance route source changed: {route}"
+                  )
+              if int(
+                  launch_readiness.get("evidence_run_id", 0)
+              ) != evidence_run_id:
+                  raise SystemExit(
+                      f"final acceptance route evidence changed: {route}"
+                  )
+              if int(launch_readiness.get("generation", 0)) <= 0:
+                  raise SystemExit(
+                      f"final acceptance route readiness unarmed: {route}"
+                  )
+              if int(launch_ledger.get("generation", 0)) <= 0:
+                  raise SystemExit(
+                      f"final acceptance route ledger unarmed: {route}"
+                  )
+              if int(
+                  launch_ledger.get("evidence_run_id", 0)
+              ) != evidence_run_id:
+                  raise SystemExit(
+                      "final acceptance route ledger evidence changed: "
+                      f"{route}"
+                  )
+              launch_routes = dict(launch_ledger.get("routes") or {})
+              if set(launch_routes) != set(route_env):
+                  raise SystemExit(
+                      f"final acceptance route launch ledger changed: {route}"
+                  )
+              if int(launch_routes.get(route, -1)) != 0:
+                  raise SystemExit(
+                      f"final acceptance route launch slot was not empty: "
+                      f"{route}"
+                  )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "evidence_artifact_id": evidence_artifact_id,
+              "route_run_ids": route_run_ids,
+              "source_eligibility_run_id": 33_982_556_591,
+              "status": "ready_for_acceptance_work",
+          }, sort_keys=True))
+          PY
+      - id: download_evidence_handoff
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial final acceptance evidence handoff download before retry
+        if: ${{ steps.download_evidence_handoff.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - id: retry_download_evidence_handoff
+        name: Retry final acceptance evidence handoff artifact download
+        if: ${{ steps.download_evidence_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial final acceptance evidence handoff download before final retry
+        if: ${{ steps.retry_download_evidence_handoff.outcome == 'failure' }}
+        run: rm -rf evidence-handoff
+      - name: Final final acceptance evidence handoff artifact download retry
+        if: ${{ steps.retry_download_evidence_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.evidence_artifact_id }}
+          path: evidence-handoff
+          run-id: ${{ inputs.eligibility_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate full evidence handoff identity before acceptance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ inputs.eligibility_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          report = json.loads(
+              Path(
+                  "evidence-handoff/"
+                  "phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          evidence = fetch_github_actions_json(
+              api + f"/repos/{repo}/actions/runs/{evidence_run_id}",
+              token,
+              timeout=30,
+          )
+
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          normal_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          )
+          if evidence_path not in {
+              normal_evidence_path,
+              recovered_evidence_path,
+          }:
+              raise SystemExit(
+                  "final acceptance handoff evidence workflow path changed: "
+                  f"{evidence_path}"
+              )
+
+          if report.get("status") != "ready":
+              raise SystemExit(
+                  "final acceptance evidence handoff is not ready"
+              )
+          if int(report.get("evidence_run_id", -1)) != evidence_run_id:
+              raise SystemExit(
+                  "final acceptance evidence handoff run mismatch"
+              )
+          if int(
+              report.get("source_eligibility_run_id", -1)
+          ) != 33_982_556_591:
+              raise SystemExit(
+                  "final acceptance evidence handoff source changed"
+              )
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit(
+                  "final acceptance evidence handoff snapshot changed"
+              )
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit(
+                  "final acceptance evidence handoff launch count changed"
+              )
+          if int(report.get("eligible_tokens", 0)) <= 0:
+              raise SystemExit(
+                  "final acceptance evidence eligible universe is empty"
+              )
+          if int(report.get("representative_tokens", -1)) != 10:
+              raise SystemExit(
+                  "final acceptance representative count changed"
+              )
+          explorer_required = report.get("explorer_evidence_required", False)
+          if not isinstance(explorer_required, bool):
+              raise SystemExit(
+                  "final acceptance explorer requirement changed type"
+              )
+          explorer_run_id = int(
+              report.get("explorer_crosscheck_run_id", 0)
+          )
+          if explorer_run_id < 0:
+              raise SystemExit(
+                  "final acceptance explorer run ID is invalid"
+              )
+          if explorer_required and explorer_run_id <= 0:
+              raise SystemExit(
+                  "final acceptance explorer evidence is required without a run"
+              )
+          if not explorer_required and explorer_run_id != 0:
+              raise SystemExit(
+                  "final acceptance explorer run is present while optional"
+              )
+          for field in (
+              "lifecycle_run_id",
+              "v1_v3_run_id",
+              "v2_v4_run_id",
+          ):
+              if int(report.get(field, 0)) <= 0:
+                  raise SystemExit(
+                      "final acceptance evidence routing is invalid: "
+                      f"{field}"
+                  )
+          recovery_mode = report.get("recovery_mode")
+          if not isinstance(recovery_mode, bool):
+              raise SystemExit(
+                  "final acceptance evidence recovery mode changed"
+              )
+          lifecycle_run_id = int(report["lifecycle_run_id"])
+          v1_v3_run_id = int(report["v1_v3_run_id"])
+          v2_v4_run_id = int(report["v2_v4_run_id"])
+          if evidence_path == normal_evidence_path:
+              if recovery_mode:
+                  raise SystemExit(
+                      "final acceptance normal evidence is marked recovered"
+                  )
+              if {
+                  lifecycle_run_id,
+                  v1_v3_run_id,
+                  v2_v4_run_id,
+              } != {33_982_556_591}:
+                  raise SystemExit(
+                      "final acceptance normal evidence routing changed"
+                  )
+          else:
+              if not recovery_mode:
+                  raise SystemExit(
+                      "final acceptance recovered evidence is not marked "
+                      "recovered"
+                  )
+
+          hashes = {}
+          for field in (
+              "eligible_universe_sha256",
+              "representative_validation_sha256",
+              "representative_sample_sha256",
+              "representative_token_set_sha256",
+              "representative_source_coverage_sha256",
+              "v1_eligibility_sha256",
+              "v2_eligibility_sha256",
+              "runner_smoke_universe_sha256",
+              "runner_smoke_outcomes_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value) != 64:
+                  raise SystemExit(
+                      "final acceptance evidence hash is invalid: "
+                      f"{field}"
+                  )
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "final acceptance evidence hash is invalid: "
+                      f"{field}"
+                  ) from exc
+              hashes[field] = value
+
+          if int(report.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "final acceptance runner-smoke run changed"
+              )
+          if hashes["runner_smoke_universe_sha256"] != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "final acceptance runner-smoke universe SHA changed"
+              )
+          if hashes["runner_smoke_outcomes_sha256"] != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "final acceptance runner-smoke outcomes SHA changed"
+              )
+
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "representative_sample_sha256": hashes[
+                  "representative_sample_sha256"
+              ],
+              "representative_token_set_sha256": hashes[
+                  "representative_token_set_sha256"
+              ],
+              "representative_source_coverage_sha256": hashes[
+                  "representative_source_coverage_sha256"
+              ],
+              "explorer_evidence_required": explorer_required,
+              "explorer_crosscheck_run_id": explorer_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - id: download_route_pons_registry_primary
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry primary route download before retry
+        if: ${{ steps.download_route_pons_registry_primary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/primary"
+      - id: retry_download_route_pons_registry_primary
+        name: Retry pons registry primary route artifact download
+        if: ${{ steps.download_route_pons_registry_primary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry primary route download before final retry
+        if: ${{ steps.retry_download_route_pons_registry_primary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/primary"
+      - name: Final pons registry primary route artifact download retry
+        if: ${{ steps.retry_download_route_pons_registry_primary.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-primary
+          path: route-artifacts/pons_registry/primary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_registry_secondary
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry secondary route download before retry
+        if: ${{ steps.download_route_pons_registry_secondary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/secondary"
+      - id: retry_download_route_pons_registry_secondary
+        name: Retry pons registry secondary route artifact download
+        if: ${{ steps.download_route_pons_registry_secondary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons registry secondary route download before final retry
+        if: ${{ steps.retry_download_route_pons_registry_secondary.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_registry/secondary"
+      - name: Final pons registry secondary route artifact download retry
+        if: ${{ steps.retry_download_route_pons_registry_secondary.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_registry-secondary
+          path: route-artifacts/pons_registry/secondary
+          run-id: ${{ inputs.pons_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v1_v3
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v1 v3 route download before retry
+        if: ${{ steps.download_route_pons_v1_v3.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v1_v3/primary"
+      - id: retry_download_route_pons_v1_v3
+        name: Retry pons v1 v3 route artifact download
+        if: ${{ steps.download_route_pons_v1_v3.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v1 v3 route download before final retry
+        if: ${{ steps.retry_download_route_pons_v1_v3.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v1_v3/primary"
+      - name: Final pons v1 v3 route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v1_v3.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v1_v3-primary
+          path: route-artifacts/pons_v1_v3/primary
+          run-id: ${{ inputs.pons_v1_v3_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_curve
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 curve route download before retry
+        if: ${{ steps.download_route_pons_v2_curve.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_curve/primary"
+      - id: retry_download_route_pons_v2_curve
+        name: Retry pons v2 curve route artifact download
+        if: ${{ steps.download_route_pons_v2_curve.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 curve route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_curve.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_curve/primary"
+      - name: Final pons v2 curve route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_curve.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_curve-primary
+          path: route-artifacts/pons_v2_curve/primary
+          run-id: ${{ inputs.pons_v2_curve_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 transition route download before retry
+        if: ${{ steps.download_route_pons_v2_transition.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_transition/primary"
+      - id: retry_download_route_pons_v2_transition
+        name: Retry pons v2 transition route artifact download
+        if: ${{ steps.download_route_pons_v2_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 transition route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_transition.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_transition/primary"
+      - name: Final pons v2 transition route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_transition-primary
+          path: route-artifacts/pons_v2_transition/primary
+          run-id: ${{ inputs.pons_v2_transition_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_pons_v2_v4
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 v4 route download before retry
+        if: ${{ steps.download_route_pons_v2_v4.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_v4/primary"
+      - id: retry_download_route_pons_v2_v4
+        name: Retry pons v2 v4 route artifact download
+        if: ${{ steps.download_route_pons_v2_v4.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial pons v2 v4 route download before final retry
+        if: ${{ steps.retry_download_route_pons_v2_v4.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/pons_v2_v4/primary"
+      - name: Final pons v2 v4 route artifact download retry
+        if: ${{ steps.retry_download_route_pons_v2_v4.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-pons_v2_v4-primary
+          path: route-artifacts/pons_v2_v4/primary
+          run-id: ${{ inputs.pons_v2_v4_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_weth_usdg_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial weth usdg anchor route download before retry
+        if: ${{ steps.download_route_weth_usdg_anchor.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/weth_usdg_anchor/primary"
+      - id: retry_download_route_weth_usdg_anchor
+        name: Retry weth usdg anchor route artifact download
+        if: ${{ steps.download_route_weth_usdg_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial weth usdg anchor route download before final retry
+        if: ${{ steps.retry_download_route_weth_usdg_anchor.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/weth_usdg_anchor/primary"
+      - name: Final weth usdg anchor route artifact download retry
+        if: ${{ steps.retry_download_route_weth_usdg_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-weth_usdg_anchor-primary
+          path: route-artifacts/weth_usdg_anchor/primary
+          run-id: ${{ inputs.weth_usdg_anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_stock_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial stock oracle route download before retry
+        if: ${{ steps.download_route_stock_oracle.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/stock_oracle/primary"
+      - id: retry_download_route_stock_oracle
+        name: Retry stock oracle route artifact download
+        if: ${{ steps.download_route_stock_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial stock oracle route download before final retry
+        if: ${{ steps.retry_download_route_stock_oracle.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/stock_oracle/primary"
+      - name: Final stock oracle route artifact download retry
+        if: ${{ steps.retry_download_route_stock_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-stock_oracle-primary
+          path: route-artifacts/stock_oracle/primary
+          run-id: ${{ inputs.stock_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_quote_v3_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v3 fallback route download before retry
+        if: ${{ steps.download_route_quote_v3_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v3_fallback/primary"
+      - id: retry_download_route_quote_v3_fallback
+        name: Retry quote v3 fallback route artifact download
+        if: ${{ steps.download_route_quote_v3_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v3 fallback route download before final retry
+        if: ${{ steps.retry_download_route_quote_v3_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v3_fallback/primary"
+      - name: Final quote v3 fallback route artifact download retry
+        if: ${{ steps.retry_download_route_quote_v3_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v3_fallback-primary
+          path: route-artifacts/quote_v3_fallback/primary
+          run-id: ${{ inputs.quote_v3_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_route_quote_v4_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v4 fallback route download before retry
+        if: ${{ steps.download_route_quote_v4_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v4_fallback/primary"
+      - id: retry_download_route_quote_v4_fallback
+        name: Retry quote v4 fallback route artifact download
+        if: ${{ steps.download_route_quote_v4_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote v4 fallback route download before final retry
+        if: ${{ steps.retry_download_route_quote_v4_fallback.outcome == 'failure' }}
+        run: rm -rf "route-artifacts/quote_v4_fallback/primary"
+      - name: Final quote v4 fallback route artifact download retry
+        if: ${{ steps.retry_download_route_quote_v4_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-viability-measurement-quote_v4_fallback-primary
+          path: route-artifacts/quote_v4_fallback/primary
+          run-id: ${{ inputs.quote_v4_fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify route measurement artifact contents
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          evidence_run_id = int(os.environ["ELIGIBILITY_RUN_ID"])
+          route_env = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          route_run_ids = {
+              route: int(os.environ[field])
+              for route, field in route_env.items()
+          }
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          def validate_measurement(
+              route,
+              run_id,
+              path,
+              *,
+              registry_generation,
+          ):
+              report = json.loads(Path(path).read_text())
+              run = get(f"/repos/{repo}/actions/runs/{run_id}")
+              head_sha = str(run.get("head_sha") or "")
+              expected = {
+                  "route": route,
+                  "from_block": 54_436_036,
+                  "to_block": 54_486_035,
+                  "processed_block_span": 50_000,
+                  "snapshot_head_block": 54_486_035,
+                  "measurement_run_id": run_id,
+                  "measurement_head_sha": head_sha,
+                  "evidence_run_id": evidence_run_id,
+                  "source_eligibility_run_id": 33_982_556_591,
+                  "sequence_id": head_sha,
+                  "registry_generation": registry_generation,
+              }
+              mismatched = {
+                  key: {
+                      "expected": value,
+                      "observed": report.get(key),
+                  }
+                  for key, value in expected.items()
+                  if report.get(key) != value
+              }
+              if mismatched:
+                  raise SystemExit(
+                      "final acceptance route measurement content mismatch: "
+                      f"{route} run={run_id} {mismatched}"
+                  )
+
+          for route, run_id in route_run_ids.items():
+              validate_measurement(
+                  route,
+                  run_id,
+                  (
+                      "route-artifacts/"
+                      f"{route}/primary/"
+                      "phase1-route-measurement.json"
+                  ),
+                  registry_generation=(
+                      "v1" if route == "pons_registry" else None
+                  ),
+              )
+
+          validate_measurement(
+              "pons_registry",
+              route_run_ids["pons_registry"],
+              (
+                  "route-artifacts/pons_registry/secondary/"
+                  "phase1-route-measurement.json"
+              ),
+              registry_generation="v2",
+          )
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "route_run_ids": route_run_ids,
+              "measurement_window": [54_436_036, 54_486_035],
+              "route_measurement_content": "pass",
+          }, sort_keys=True))
+          PY
+
+  plan:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_ids_json: ${{ steps.plan.outputs.run_ids_json }}
+      route_plan_json: ${{ steps.plan.outputs.route_plan_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Freeze distinct nine-route evidence plan
+        env:
+          PONS_REGISTRY_RUN_ID: ${{ inputs.pons_registry_run_id }}
+          PONS_V1_V3_RUN_ID: ${{ inputs.pons_v1_v3_run_id }}
+          PONS_V2_CURVE_RUN_ID: ${{ inputs.pons_v2_curve_run_id }}
+          PONS_V2_TRANSITION_RUN_ID: ${{ inputs.pons_v2_transition_run_id }}
+          PONS_V2_V4_RUN_ID: ${{ inputs.pons_v2_v4_run_id }}
+          WETH_USDG_ANCHOR_RUN_ID: ${{ inputs.weth_usdg_anchor_run_id }}
+          STOCK_ORACLE_RUN_ID: ${{ inputs.stock_oracle_run_id }}
+          QUOTE_V3_FALLBACK_RUN_ID: ${{ inputs.quote_v3_fallback_run_id }}
+          QUOTE_V4_FALLBACK_RUN_ID: ${{ inputs.quote_v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.data.phase1_viability import (
+              REQUIRED_PHASE1_ROUTE_BLOCKS,
+              build_phase1_route_plan,
+          )
+
+          env_keys = {
+              "pons_registry": "PONS_REGISTRY_RUN_ID",
+              "pons_v1_v3": "PONS_V1_V3_RUN_ID",
+              "pons_v2_curve": "PONS_V2_CURVE_RUN_ID",
+              "pons_v2_transition": "PONS_V2_TRANSITION_RUN_ID",
+              "pons_v2_v4": "PONS_V2_V4_RUN_ID",
+              "weth_usdg_anchor": "WETH_USDG_ANCHOR_RUN_ID",
+              "stock_oracle": "STOCK_ORACLE_RUN_ID",
+              "quote_v3_fallback": "QUOTE_V3_FALLBACK_RUN_ID",
+              "quote_v4_fallback": "QUOTE_V4_FALLBACK_RUN_ID",
+          }
+          if list(env_keys) != list(REQUIRED_PHASE1_ROUTE_BLOCKS):
+              raise SystemExit("final acceptance route order changed")
+
+          route_run_ids = {}
+          for route, key in env_keys.items():
+              value = int(os.environ[key])
+              if value <= 0:
+                  raise SystemExit(f"{route} evidence run ID must be positive")
+              route_run_ids[route] = [value]
+
+          plan = build_phase1_route_plan(route_run_ids)
+          run_ids = [row["run_ids"][0] for row in plan]
+          if len(run_ids) != 9 or len(set(run_ids)) != 9:
+              raise SystemExit(
+                  "final acceptance requires nine distinct evidence run IDs"
+              )
+
+          compact_runs = json.dumps(run_ids, separators=(",", ":"))
+          compact_plan = json.dumps(
+              route_run_ids,
+              sort_keys=True,
+              separators=(",", ":"),
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"run_ids_json={compact_runs}\n")
+              handle.write(f"route_plan_json={compact_plan}\n")
+          print(
+              json.dumps(
+                  {
+                      "routes": len(plan),
+                      "required_work_blocks": sum(
+                          REQUIRED_PHASE1_ROUTE_BLOCKS.values()
+                      ),
+                      "distinct_evidence_runs": len(set(run_ids)),
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+  accounting:
+    needs: plan
+    if: ${{ needs.plan.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-accounting.yml
+    with:
+      run_ids_json: ${{ needs.plan.outputs.run_ids_json }}
+      free_daily_method_calls: "10000"
+      require_successful_runs: true
+    secrets: inherit
+
+  viability:
+    needs:
+      - plan
+      - accounting
+    if: ${{ needs.accounting.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acquisition-viability-projection.yml
+    with:
+      accounting_run_id: ${{ format('{0}', github.run_id) }}
+      route_plan_json: ${{ needs.plan.outputs.route_plan_json }}
+      free_daily_method_calls: "10000"
+    secrets: inherit
+
+  acceptance:
+    needs: viability
+    if: ${{ needs.viability.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-acceptance-gate.yml
+    with:
+      eligible_universe_run_id: ${{ inputs.eligibility_run_id }}
+      representative_validation_run_id: ${{ inputs.representative_run_id }}
+      viability_projection_run_id: ${{ format('{0}', github.run_id) }}
+    secrets: inherit

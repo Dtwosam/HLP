@@ -1,0 +1,421 @@
+name: phase1-pons-weth-usdg-anchor-promote-recovered
+
+on:
+  workflow_dispatch:
+    inputs:
+      preserved_run_id:
+        description: "Original successful anchor prefix run"
+        required: true
+        default: "33912536839"
+        type: string
+      partial_recovery_run_id:
+        description: "Successful preserved anchor tail shard run"
+        required: true
+        default: "33925648293"
+        type: string
+      gap_recovery_run_id:
+        description: "Completed manifest-gap recovery run"
+        required: true
+        default: "33957294304"
+        type: string
+      range_repair_run_id:
+        description: "Completed exact-range repair run for cancelled gaps"
+        required: true
+        default: "33970898635"
+        type: string
+  workflow_call:
+    inputs:
+      preserved_run_id:
+        required: true
+        type: string
+      partial_recovery_run_id:
+        required: true
+        type: string
+      gap_recovery_run_id:
+        required: true
+        type: string
+      range_repair_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-weth-usdg-anchor-promote-recovered-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  FIRST_PONS_LAUNCH: '8621658'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+  ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-anchor-*
+          path: preserved
+          merge-multiple: true
+          run-id: ${{ inputs.preserved_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-anchor-recovery-*
+          path: partial
+          merge-multiple: true
+          run-id: ${{ inputs.partial_recovery_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-anchor-gap-*
+          path: gaps
+          merge-multiple: true
+          run-id: ${{ inputs.gap_recovery_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-anchor-recovered-range-*
+          path: repairs
+          run-id: ${{ inputs.range_repair_run_id }}
+          github-token: ${{ github.token }}
+      - name: Promote exact recovered anchor tape
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.anchor_promotion import (
+              select_anchor_source_ranges,
+          )
+          from hlp.data.reconstruct import (
+              event_order,
+              v3_quote_price_at_block,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          START = int(os.environ["FIRST_PONS_LAUNCH"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          WETH = os.environ["WETH"].lower()
+          USDG = os.environ["USDG"].lower()
+          POOL = os.environ["ANCHOR_POOL"].lower()
+
+          source_specs = [
+              (
+                  "preserved",
+                  int("${{ inputs.preserved_run_id }}"),
+                  sorted(Path("preserved").glob("anchor-shard-*.jsonl")),
+              ),
+              (
+                  "partial_recovery",
+                  int("${{ inputs.partial_recovery_run_id }}"),
+                  sorted(Path("partial").glob("anchor-recovery-*.jsonl")),
+              ),
+              (
+                  "gap_recovery",
+                  int("${{ inputs.gap_recovery_run_id }}"),
+                  sorted(Path("gaps").glob("anchor-gap-*.jsonl")),
+              ),
+              (
+                  "range_repair",
+                  int("${{ inputs.range_repair_run_id }}"),
+                  sorted(
+                      Path("repairs").glob(
+                          "phase1-pons-anchor-recovered-range-*/"
+                          "pons-anchor-recovered-range.jsonl"
+                      )
+                  ),
+              ),
+          ]
+
+          normalized = []
+          path_by_ref = {}
+          source_counts = {}
+          for source_kind, run_id, paths in source_specs:
+              source_counts[source_kind] = len(paths)
+              for path in paths:
+                  manifest_path = path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  )
+                  if not manifest_path.exists():
+                      raise SystemExit(
+                          f"anchor source manifest missing: {manifest_path}"
+                      )
+                  manifest = json.loads(manifest_path.read_text())
+                  prov = manifest.get("provenance") or {}
+                  source = str(prov.get("source") or "")
+                  if source_kind == "range_repair":
+                      if source != "four_way_exact_anchor_range_recovery":
+                          raise SystemExit(
+                              "range repair provenance changed: "
+                              f"{path} source={source}"
+                          )
+                  elif source != "evm_json_rpc":
+                      raise SystemExit(
+                          f"raw anchor source changed: {path} source={source}"
+                      )
+                  if (
+                      source_kind != "range_repair"
+                      and prov.get("protocol") != "uniswap_v3"
+                  ):
+                      raise SystemExit(
+                          f"raw anchor protocol changed: {path}"
+                      )
+
+                  ref = (
+                      f"{source_kind}:{run_id}:"
+                      f"{path.parent.name}/{path.name}"
+                  )
+                  row = {
+                      "from_block": int(prov["from_block"]),
+                      "to_block": int(prov["to_block"]),
+                      "chain_id": int(prov.get("chain_id", -1)),
+                      "weth": str(
+                          prov.get("token")
+                          or prov.get("weth")
+                          or ""
+                      ).lower(),
+                      "usdg": str(
+                          prov.get("quote_token")
+                          or prov.get("usdg")
+                          or ""
+                      ).lower(),
+                      "pool": str(prov.get("pool") or "").lower(),
+                      "sha256": str(manifest["sha256"]),
+                      "records": int(manifest["records"]),
+                      "source_kind": source_kind,
+                      "source_run_id": run_id,
+                      "source_artifact": path.parent.name,
+                      "path": str(path),
+                      "source_ref": ref,
+                  }
+                  normalized.append(row)
+                  path_by_ref[ref] = (path, manifest)
+
+          if source_counts != {
+              "preserved": 14,
+              "partial_recovery": 1,
+              "gap_recovery": 32,
+              "range_repair": 2,
+          }:
+              raise SystemExit(
+                  "anchor promotion source artifact counts changed: "
+                  f"{source_counts}"
+              )
+
+          selected = select_anchor_source_ranges(
+              normalized,
+              start_block=START,
+              snapshot_head_block=HEAD,
+              chain_id=4663,
+              weth=WETH,
+              usdg=USDG,
+              pool=POOL,
+          )
+          selected_ranges = [
+              (
+                  int(row["from_block"]),
+                  int(row["to_block"]),
+                  row["source_ref"],
+              )
+              for row in selected
+          ]
+          repair_ranges = [
+              (lo, hi)
+              for lo, hi, ref in selected_ranges
+              if ref.startswith("range_repair:")
+          ]
+          if repair_ranges != [
+              (52_169_619, 52_319_618),
+              (53_219_619, 53_369_618),
+          ]:
+              raise SystemExit(
+                  "anchor promotion repaired-range ownership changed: "
+                  f"{repair_ranges}"
+              )
+
+          stats = {
+              "records": 0,
+              "first": None,
+              "last": None,
+          }
+
+          def rows():
+              prior = None
+              for selected_row in selected:
+                  path, manifest = path_by_ref[
+                      selected_row["source_ref"]
+                  ]
+                  local = 0
+                  with path.open() as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = event_order(row)
+                          if prior is not None and order <= prior:
+                              raise ValueError(
+                                  "anchor promoted tape is not strictly "
+                                  f"chronological: {prior} -> {order} "
+                                  f"from {path}"
+                              )
+                          prior = order
+                          if stats["first"] is None:
+                              stats["first"] = row
+                          stats["last"] = row
+                          stats["records"] += 1
+                          local += 1
+                          yield row
+                  if local != int(manifest["records"]):
+                      raise ValueError(
+                          f"anchor source record mismatch: {path} "
+                          f"{local} != {manifest['records']}"
+                      )
+
+          provenance_ranges = [
+              {
+                  "source_kind": row["source_kind"],
+                  "source_run_id": int(row["source_run_id"]),
+                  "source_artifact": row["source_artifact"],
+                  "file": Path(str(row["path"])).name,
+                  "sha256": row["sha256"],
+                  "records": int(row["records"]),
+                  "from_block": int(row["from_block"]),
+                  "to_block": int(row["to_block"]),
+              }
+              for row in selected
+          ]
+          tape = write_jsonl_snapshot(
+              rows(),
+              output=Path(
+                  "artifacts/pons-weth-usdg-anchor-full.jsonl"
+              ),
+              provenance={
+                  "source": "promoted_recovered_weth_usdg_anchor",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "first_pons_launch_block": START,
+                  "state_block": START - 1,
+                  "weth": WETH,
+                  "usdg": USDG,
+                  "pool": POOL,
+                  "preserved_run_id": int(
+                      "${{ inputs.preserved_run_id }}"
+                  ),
+                  "partial_recovery_run_id": int(
+                      "${{ inputs.partial_recovery_run_id }}"
+                  ),
+                  "gap_recovery_run_id": int(
+                      "${{ inputs.gap_recovery_run_id }}"
+                  ),
+                  "range_repair_run_id": int(
+                      "${{ inputs.range_repair_run_id }}"
+                  ),
+                  "shards": provenance_ranges,
+              },
+          )
+          expected_records = sum(
+              int(row["records"]) for row in selected
+          )
+          if stats["records"] != expected_records:
+              raise SystemExit(
+                  "anchor promotion total record count changed: "
+                  f"{stats['records']} != {expected_records}"
+              )
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          route = (
+              "solidrpc_authenticated_free"
+              if key
+              else "solidrpc_keyless_public"
+          )
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+              route_label=route,
+          )
+          rpc.assert_robinhood()
+          initial = v3_quote_price_at_block(
+              rpc,
+              token=WETH,
+              quote_token=USDG,
+              pool=POOL,
+              block=START - 1,
+          )
+          if initial <= 0:
+              raise SystemExit(
+                  "promoted anchor initial WETH/USD must be positive"
+              )
+
+          initial_state = {
+              "block_number": START - 1,
+              "weth_usd": str(initial),
+              "pricing_semantics": (
+                  "WETH per USDG pool spot; USDG nominal USD 1"
+              ),
+              "pool": POOL,
+          }
+          Path(
+              "artifacts/pons-weth-usdg-anchor-initial.json"
+          ).write_text(
+              json.dumps(initial_state, indent=2, sort_keys=True) + "\n"
+          )
+
+          report = {
+              "snapshot_head_block": HEAD,
+              "state_block": START - 1,
+              "initial_weth_usd": str(initial),
+              "anchor_price_events": stats["records"],
+              "first_event": stats["first"],
+              "last_event": stats["last"],
+              "tape_sha256": tape["sha256"],
+              "state_rpc_requests": rpc.requests_made,
+              "state_rpc_response_bytes": rpc.response_bytes_received,
+              "state_rpc_route": rpc.route_label,
+              "source_ranges": len(selected),
+              "source_artifact_counts": source_counts,
+              "repaired_ranges": [
+                  [lo, hi] for lo, hi in repair_ranges
+              ],
+              "covered_blocks": HEAD - START + 1,
+              "no_unexplained_block_gaps": True,
+          }
+          Path(
+              "artifacts/pons-weth-usdg-anchor-summary.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,26 @@
+name: phase1-pons-viability-pons-v1-v3-one-shot
+run-name: phase1 viability pons_v1_v3 ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-viability-pons-v1-v3-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-pons-v1-v3-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch viability pons_v1_v3') }}
+    uses: ./.github/workflows/phase1-pons-viability-guarded-route.yml
+    with:
+      route: "pons_v1_v3"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit

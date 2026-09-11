@@ -1,0 +1,1045 @@
+name: phase1-pons-v2-lifecycle-eligibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      v2_registry_run_id:
+        description: "Successful phase1-pons-v2-registry-freeze run"
+        required: true
+        default: "33912235341"
+        type: string
+      curve_run_id:
+        description: "Successful phase1-pons-v2-curve-full run"
+        required: true
+        default: "33936232604"
+        type: string
+      transition_run_id:
+        description: "Successful phase1-pons-v2-transition-full run"
+        required: true
+        default: "33912452330"
+        type: string
+      v4_run_id:
+        description: "Successful phase1-pons-v2-v4-full run"
+        required: true
+        type: string
+      anchor_run_id:
+        description: "Successful phase1-pons-weth-usdg-anchor-full run"
+        required: true
+        type: string
+      oracle_run_id:
+        description: "Successful phase1-pons-stock-oracle-full run"
+        required: true
+        type: string
+      fallback_run_id:
+        description: "Successful phase1-pons-quote-fallback-full run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      v2_registry_run_id:
+        required: true
+        type: string
+      curve_run_id:
+        required: true
+        type: string
+      transition_run_id:
+        required: true
+        type: string
+      v4_run_id:
+        required: true
+        type: string
+      anchor_run_id:
+        required: true
+        type: string
+      oracle_run_id:
+        required: true
+        type: string
+      fallback_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-lifecycle-eligibility-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_registry
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 registry download before retry
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - id: retry_download_registry
+        name: Retry V2 registry artifact download
+        if: ${{ steps.download_registry.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 registry download before final retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        run: rm -rf registry
+      - name: Final V2 registry artifact download retry
+        if: ${{ steps.retry_download_registry.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_curve
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: curve
+          run-id: ${{ inputs.curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 curve download before retry
+        if: ${{ steps.download_curve.outcome == 'failure' }}
+        run: rm -rf curve
+      - id: retry_download_curve
+        name: Retry V2 curve artifact download
+        if: ${{ steps.download_curve.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: curve
+          run-id: ${{ inputs.curve_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 curve download before final retry
+        if: ${{ steps.retry_download_curve.outcome == 'failure' }}
+        run: rm -rf curve
+      - name: Final V2 curve artifact download retry
+        if: ${{ steps.retry_download_curve.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-curve-full
+          path: curve
+          run-id: ${{ inputs.curve_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Resolve canonical V2 V4 selected shard artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          V4_RUN_ID: ${{ inputs.v4_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+        run: |
+          mkdir -p v4 v4-shards
+          python - <<'PY'
+          import concurrent.futures
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.pons_v2_v4_artifacts import (
+              resolve_v2_v4_canonical_shard_bindings,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          current_run_id = int(os.environ["V4_RUN_ID"])
+          transition_run_id = int(os.environ["TRANSITION_RUN_ID"])
+          if current_run_id <= 0:
+              raise SystemExit("V2 lifecycle V4 run ID must be positive")
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          artifact_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_cache:
+                  return artifact_cache[run_id]
+              output = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "V2 lifecycle artifact pagination exceeded 2000: "
+                          f"run={run_id}"
+                      )
+              artifact_cache[run_id] = output
+              return output
+
+          def selected_artifact(run_id, artifact_name, label):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if str(row.get("name") or "") == artifact_name
+              ]
+              try:
+                  return select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} retry artifacts are not equivalent: {exc}"
+                  ) from exc
+
+          def artifact_zip(row):
+              return fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(row['id'])}/zip",
+                  token,
+              )
+
+          canonical_row = selected_artifact(
+              current_run_id,
+              "phase1-pons-v2-v4-full",
+              "V2 lifecycle canonical V2/V4 artifact",
+          )
+          canonical_blob = artifact_zip(canonical_row)
+          required_canonical = {
+              "pons-v2-v4-full.jsonl.manifest.json",
+              "pons-v2-v4-summary.json",
+          }
+          canonical_payloads = {}
+          with zipfile.ZipFile(io.BytesIO(canonical_blob)) as archive:
+              for filename in required_canonical:
+                  matches = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == filename
+                  ]
+                  if len(matches) != 1:
+                      raise SystemExit(
+                          "V2 lifecycle canonical artifact file identity "
+                          f"is ambiguous: {filename}"
+                      )
+                  canonical_payloads[filename] = archive.read(matches[0])
+
+          for filename, payload in canonical_payloads.items():
+              (Path("v4") / filename).write_bytes(payload)
+
+          aggregate = json.loads(
+              canonical_payloads[
+                  "pons-v2-v4-full.jsonl.manifest.json"
+              ]
+          )
+          provenance = aggregate.get("provenance") or {}
+          if aggregate.get("path") != "pons-v2-v4-full.jsonl":
+              raise SystemExit(
+                  "V2 lifecycle canonical V2/V4 manifest path changed"
+              )
+          if int(provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit(
+                  "V2 lifecycle canonical V2/V4 chain changed"
+              )
+          if int(
+              provenance.get("snapshot_head_block", -1)
+          ) != 54_486_035:
+              raise SystemExit(
+                  "V2 lifecycle canonical V2/V4 snapshot changed"
+              )
+          if int(
+              provenance.get("transition_run_id", -1)
+          ) != transition_run_id:
+              raise SystemExit(
+                  "V2 lifecycle canonical V2/V4 transition run changed"
+              )
+          if provenance.get("storage_mode") != "sharded_artifacts":
+              raise SystemExit(
+                  "canonical V2 V4 tape is not stored as sharded artifacts"
+              )
+
+          try:
+              bindings = resolve_v2_v4_canonical_shard_bindings(
+                  aggregate,
+                  current_run_id=current_run_id,
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "V2 lifecycle canonical shard binding changed: "
+                  f"{exc}"
+              ) from exc
+          partial_value = provenance.get("partial_run_id")
+          partial_run_id = (
+              int(partial_value)
+              if partial_value not in {None, "", 0}
+              else None
+          )
+
+          selected_rows = []
+          for binding in bindings:
+              row = selected_artifact(
+                  binding["run_id"],
+                  binding["artifact_name"],
+                  (
+                      "V2 lifecycle selected V2/V4 shard "
+                      f"run={binding['run_id']} "
+                      f"artifact={binding['artifact_name']}"
+                  ),
+              )
+              selected_rows.append((binding, row))
+
+          def materialize(item):
+              binding, artifact = item
+              blob = artifact_zip(artifact)
+              filename = binding["file"]
+              sidecar_name = filename + ".manifest.json"
+              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                  data_members = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == filename
+                  ]
+                  manifest_members = [
+                      member
+                      for member in archive.infolist()
+                      if not member.is_dir()
+                      and Path(member.filename).name == sidecar_name
+                  ]
+                  if len(data_members) != 1:
+                      raise ValueError(
+                          "selected V2/V4 shard data identity is ambiguous: "
+                          f"{filename}"
+                      )
+                  if len(manifest_members) != 1:
+                      raise ValueError(
+                          "selected V2/V4 shard manifest identity is "
+                          f"ambiguous: {sidecar_name}"
+                      )
+                  data = archive.read(data_members[0])
+                  manifest_bytes = archive.read(manifest_members[0])
+
+              manifest = json.loads(manifest_bytes)
+              shard_provenance = manifest.get("provenance") or {}
+              expected_range = (
+                  binding["from_block"],
+                  binding["to_block"],
+              )
+              observed_range = (
+                  int(shard_provenance.get("from_block", -1)),
+                  int(shard_provenance.get("to_block", -1)),
+              )
+              if manifest.get("path") != filename:
+                  raise ValueError(
+                      f"selected V2/V4 shard path changed: {filename}"
+                  )
+              if manifest.get("sha256") != binding["sha256"]:
+                  raise ValueError(
+                      f"selected V2/V4 shard manifest SHA changed: {filename}"
+                  )
+              if int(manifest.get("records", -1)) != binding["records"]:
+                  raise ValueError(
+                      "selected V2/V4 shard manifest record count changed: "
+                      f"{filename}"
+                  )
+              if observed_range != expected_range:
+                  raise ValueError(
+                      f"selected V2/V4 shard range changed: {filename}"
+                  )
+              if str(shard_provenance.get("source") or "") != "evm_json_rpc":
+                  raise ValueError(
+                      f"selected V2/V4 shard source changed: {filename}"
+                  )
+              if int(shard_provenance.get("chain_id", -1)) != 4663:
+                  raise ValueError(
+                      f"selected V2/V4 shard chain changed: {filename}"
+                  )
+              if str(shard_provenance.get("protocol") or "") != (
+                  "pons_v2_v4_price_events"
+              ):
+                  raise ValueError(
+                      f"selected V2/V4 shard protocol changed: {filename}"
+                  )
+              if str(
+                  shard_provenance.get("registrations") or ""
+              ) != "pons-v2-registrations-full.jsonl":
+                  raise ValueError(
+                      "selected V2/V4 shard frozen input changed: "
+                      f"{filename}"
+                  )
+              if str(
+                  shard_provenance.get("pool_filter_mode") or ""
+              ) != "global_poolmanager_topic_then_registry":
+                  raise ValueError(
+                      "selected V2/V4 shard filter mode changed: "
+                      f"{filename}"
+                  )
+
+              actual_sha = hashlib.sha256(data).hexdigest()
+              actual_records = sum(
+                  1
+                  for line in data.splitlines()
+                  if line.strip()
+              )
+              if actual_sha != binding["sha256"]:
+                  raise ValueError(
+                      f"selected V2/V4 shard data SHA changed: {filename}"
+                  )
+              if actual_records != binding["records"]:
+                  raise ValueError(
+                      "selected V2/V4 shard data record count changed: "
+                      f"{filename}"
+                  )
+
+              target = (
+                  Path("v4-shards")
+                  / str(binding["run_id"])
+              )
+              target.mkdir(parents=True, exist_ok=True)
+              (target / filename).write_bytes(data)
+              (target / sidecar_name).write_bytes(manifest_bytes)
+              return {
+                  "run_id": binding["run_id"],
+                  "artifact_name": binding["artifact_name"],
+                  "file": filename,
+                  "records": binding["records"],
+              }
+
+          materialized = []
+          with concurrent.futures.ThreadPoolExecutor(
+              max_workers=4
+          ) as executor:
+              futures = [
+                  executor.submit(materialize, item)
+                  for item in selected_rows
+              ]
+              for future in futures:
+                  try:
+                      materialized.append(future.result())
+                  except Exception as exc:
+                      raise SystemExit(
+                          "V2 lifecycle selected V2/V4 shard download "
+                          f"failed: {exc}"
+                      ) from exc
+
+          by_run = {}
+          for row in materialized:
+              run_key = str(row["run_id"])
+              by_run[run_key] = by_run.get(run_key, 0) + 1
+
+          print(json.dumps({
+              "v4_run_id": current_run_id,
+              "partial_run_id": partial_run_id,
+              "selected_shards": len(bindings),
+              "selected_shards_by_run": dict(sorted(by_run.items())),
+              "materialized_shards": len(materialized),
+              "resolver": "canonical_manifest_exact_artifacts",
+          }, sort_keys=True))
+          PY
+      - id: download_anchor
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 anchor download before retry
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - id: retry_download_anchor
+        name: Retry V2 anchor artifact download
+        if: ${{ steps.download_anchor.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 anchor download before final retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        run: rm -rf anchor
+      - name: Final V2 anchor artifact download retry
+        if: ${{ steps.retry_download_anchor.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-weth-usdg-anchor-full
+          path: anchor
+          run-id: ${{ inputs.anchor_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_oracle
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 stock oracle download before retry
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - id: retry_download_oracle
+        name: Retry V2 stock oracle artifact download
+        if: ${{ steps.download_oracle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 stock oracle download before final retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        run: rm -rf oracle
+      - name: Final V2 stock oracle artifact download retry
+        if: ${{ steps.retry_download_oracle.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: oracle
+          run-id: ${{ inputs.oracle_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_fallback
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 quote fallback download before retry
+        if: ${{ steps.download_fallback.outcome == 'failure' }}
+        run: rm -rf fallback
+      - id: retry_download_fallback
+        name: Retry V2 quote fallback artifact download
+        if: ${{ steps.download_fallback.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 quote fallback download before final retry
+        if: ${{ steps.retry_download_fallback.outcome == 'failure' }}
+        run: rm -rf fallback
+      - name: Final V2 quote fallback artifact download retry
+        if: ${{ steps.retry_download_fallback.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-quote-fallback-full
+          path: fallback
+          run-id: ${{ inputs.fallback_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate frozen V2 lifecycle input manifests
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          CHAIN_ID = 4663
+
+          specs = [
+              (
+                  Path(
+                      "registry/pons-v2-full-registry.jsonl.manifest.json"
+                  ),
+                  225_951,
+                  "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f",
+              ),
+              (
+                  Path(
+                      "curve/pons-v2-curve-full.jsonl.manifest.json"
+                  ),
+                  9_231_724,
+                  "771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b",
+              ),
+              (
+                  Path(
+                      "transition/pons-v2-graduations-full.jsonl.manifest.json"
+                  ),
+                  3_638,
+                  "492aa1bfd325050395727255b5de93c88935cf8e40bd580256ce69f9b3427f5e",
+              ),
+              (
+                  Path(
+                      "transition/pons-v2-registrations-full.jsonl.manifest.json"
+                  ),
+                  3_638,
+                  "8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93",
+              ),
+              (
+                  Path("v4/pons-v2-v4-full.jsonl.manifest.json"),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "anchor/pons-weth-usdg-anchor-full.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "oracle/pons-stock-oracle-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "fallback/pons-quote-fallback-initial.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+              (
+                  Path(
+                      "fallback/pons-quote-fallback-updates.jsonl.manifest.json"
+                  ),
+                  None,
+                  None,
+              ),
+          ]
+
+          fallback_summary = json.loads(
+              Path(
+                  "fallback/pons-quote-fallback-summary.json"
+              ).read_text()
+          )
+          if int(
+              fallback_summary.get("snapshot_head_block", -1)
+          ) != HEAD:
+              raise SystemExit(
+                  "generic quote fallback summary snapshot changed"
+              )
+          expected_fallback = {
+              "owned_quote_assets": 30,
+              "v3_routes": 26,
+              "v4_routes": 4,
+              "v3_v4_overlap_assets": 0,
+          }
+          observed_fallback = {
+              key: int(fallback_summary.get(key, -1))
+              for key in expected_fallback
+          }
+          if observed_fallback != expected_fallback:
+              raise SystemExit(
+                  "generic quote fallback ownership contract changed: "
+                  f"expected={expected_fallback} "
+                  f"observed={observed_fallback}"
+              )
+          if (
+              int(fallback_summary.get("v3_run_id", -1)) <= 0
+              or int(fallback_summary.get("v4_run_id", -1)) <= 0
+          ):
+              raise SystemExit(
+                  "generic quote fallback has invalid V3/V4 run provenance"
+              )
+
+          validated = []
+          for path, expected_records, expected_sha in specs:
+              if not path.exists():
+                  raise SystemExit(
+                      f"required lifecycle manifest is missing: {path}"
+                  )
+              manifest = json.loads(path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if int(provenance.get("chain_id", -1)) != CHAIN_ID:
+                  raise SystemExit(
+                      f"lifecycle manifest chain mismatch: {path} "
+                      f"chain_id={provenance.get('chain_id')}"
+                  )
+              if int(
+                  provenance.get("snapshot_head_block", -1)
+              ) != HEAD:
+                  raise SystemExit(
+                      f"lifecycle manifest snapshot mismatch: {path} "
+                      "snapshot_head_block="
+                      f"{provenance.get('snapshot_head_block')}"
+                  )
+              if (
+                  expected_records is not None
+                  and int(manifest["records"]) != expected_records
+              ):
+                  raise SystemExit(
+                      f"frozen lifecycle record count changed: {path} "
+                      f"expected={expected_records} "
+                      f"actual={manifest['records']}"
+                  )
+              if (
+                  expected_sha is not None
+                  and manifest["sha256"] != expected_sha
+              ):
+                  raise SystemExit(
+                      f"frozen lifecycle SHA changed: {path} "
+                      f"expected={expected_sha} "
+                      f"actual={manifest['sha256']}"
+                  )
+              validated.append({
+                  "manifest": str(path),
+                  "records": int(manifest["records"]),
+                  "sha256": manifest["sha256"],
+                  "snapshot_head_block": HEAD,
+              })
+
+          report = {
+              "chain_id": CHAIN_ID,
+              "snapshot_head_block": HEAD,
+              "fallback_ownership": observed_fallback,
+              "fallback_v3_run_id": int(
+                  fallback_summary["v3_run_id"]
+              ),
+              "fallback_v4_run_id": int(
+                  fallback_summary["v4_run_id"]
+              ),
+              "validated_manifests": validated,
+              "validated_manifest_count": len(validated),
+          }
+          Path(
+              "artifacts/pons-v2-input-manifest-validation.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Audit V2 quote source ownership before replay
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+          USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "registry/pons-v2-full-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          quote_tokens = {
+              row["pair_token"].lower()
+              for row in registry
+          }
+
+          oracle_state = [
+              json.loads(line)
+              for line in Path(
+                  "oracle/pons-stock-oracle-initial.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          oracle_tokens = {
+              row["quote_token"].lower()
+              for row in oracle_state
+          }
+
+          fallback_tokens = set()
+          state_path = Path(
+              "fallback/pons-quote-fallback-initial.jsonl"
+          )
+          if state_path.exists():
+              with state_path.open() as handle:
+                  for line in handle:
+                      if not line.strip():
+                          continue
+                      fallback_tokens.add(
+                          json.loads(line)["quote_token"].lower()
+                      )
+          event_path = Path(
+              "fallback/pons-quote-fallback-updates.jsonl"
+          )
+          with event_path.open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  fallback_tokens.add(
+                      json.loads(line)["quote_token"].lower()
+                  )
+
+          illegal_fallback = sorted(
+              fallback_tokens - quote_tokens
+          )
+          overlap = sorted(
+              fallback_tokens
+              & (oracle_tokens | {WETH, USDG})
+          )
+          if illegal_fallback or overlap:
+              raise SystemExit(
+                  "invalid V2 quote fallback ownership: "
+                  f"non_v2={illegal_fallback[:10]} "
+                  f"direct_overlap={overlap[:10]}"
+              )
+
+          covered = oracle_tokens | fallback_tokens | {WETH, USDG}
+          uncovered = sorted(quote_tokens - covered)
+          if uncovered:
+              raise SystemExit(
+                  "cannot replay V2 lifecycle with uncovered quote assets: "
+                  f"count={len(uncovered)} sample={uncovered[:10]}"
+              )
+          report = {
+              "v2_launches": len(registry),
+              "v2_quote_assets": len(quote_tokens),
+              "oracle_quote_assets": len(oracle_tokens & quote_tokens),
+              "fallback_quote_assets": len(
+                  fallback_tokens & quote_tokens
+              ),
+              "uncovered_quote_assets": len(uncovered),
+              "uncovered_quote_tokens": uncovered,
+          }
+          Path(
+              "artifacts/pons-v2-quote-source-coverage.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - name: Replay complete V2 lifecycle as token summaries
+        run: |
+          mkdir -p artifacts
+          hlp pons-v2-curve-eligibility \
+            --registry registry/pons-v2-full-registry.jsonl \
+            --curve-events curve/pons-v2-curve-full.jsonl \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --oracle-state oracle/pons-stock-oracle-initial.jsonl \
+            --oracle-events oracle/pons-stock-oracle-updates.jsonl \
+            --fallback-state fallback/pons-quote-fallback-initial.jsonl \
+            --fallback-events fallback/pons-quote-fallback-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --out artifacts/pons-v2-curve-eligibility.jsonl
+
+          hlp pons-v2-lifecycle-eligibility \
+            --registry registry/pons-v2-full-registry.jsonl \
+            --curve-summary artifacts/pons-v2-curve-eligibility.jsonl \
+            --graduations transition/pons-v2-graduations-full.jsonl \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --v4-events-dir v4-shards \
+            --v4-events-manifest v4/pons-v2-v4-full.jsonl.manifest.json \
+            --anchor-events anchor/pons-weth-usdg-anchor-full.jsonl \
+            --anchor-initial anchor/pons-weth-usdg-anchor-initial.json \
+            --oracle-state oracle/pons-stock-oracle-initial.jsonl \
+            --oracle-events oracle/pons-stock-oracle-updates.jsonl \
+            --fallback-state fallback/pons-quote-fallback-initial.jsonl \
+            --fallback-events fallback/pons-quote-fallback-updates.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --out artifacts/pons-v2-lifecycle-eligibility.jsonl
+      - name: Bind V2 lifecycle source run provenance
+        env:
+          V2_REGISTRY_RUN_ID: ${{ inputs.v2_registry_run_id }}
+          CURVE_RUN_ID: ${{ inputs.curve_run_id }}
+          TRANSITION_RUN_ID: ${{ inputs.transition_run_id }}
+          V4_RUN_ID: ${{ inputs.v4_run_id }}
+          ANCHOR_RUN_ID: ${{ inputs.anchor_run_id }}
+          ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
+          FALLBACK_RUN_ID: ${{ inputs.fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/"
+              "pons-v2-lifecycle-eligibility.jsonl.manifest.json"
+          )
+          manifest = json.loads(path.read_text())
+          provenance = dict(manifest.get("provenance") or {})
+          provenance.update({
+              "v2_registry_run_id": int(
+                  os.environ["V2_REGISTRY_RUN_ID"]
+              ),
+              "curve_run_id": int(os.environ["CURVE_RUN_ID"]),
+              "transition_run_id": int(
+                  os.environ["TRANSITION_RUN_ID"]
+              ),
+              "v4_run_id": int(os.environ["V4_RUN_ID"]),
+              "anchor_run_id": int(os.environ["ANCHOR_RUN_ID"]),
+              "oracle_run_id": int(os.environ["ORACLE_RUN_ID"]),
+              "fallback_run_id": int(os.environ["FALLBACK_RUN_ID"]),
+          })
+          manifest["provenance"] = provenance
+          path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(provenance, sort_keys=True))
+          PY
+      - name: Freeze V2 tokens that ever reached the $100k universe gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source = Path("artifacts/pons-v2-lifecycle-eligibility.jsonl")
+          rows = [
+              json.loads(line)
+              for line in source.read_text().splitlines()
+              if line.strip()
+          ]
+          eligible = [
+              row for row in rows
+              if row.get("eligibility_status") == "eligible"
+          ]
+          unknown = [
+              row for row in rows
+              if row.get("eligibility_status") == "unknown"
+          ]
+          eligible.sort(key=lambda row: (row["launch_block"], row["token"]))
+
+          snapshot = write_jsonl_snapshot(
+              eligible,
+              output=Path("artifacts/pons-v2-eligible-100k.jsonl"),
+              provenance={
+                  "source": source.name,
+                  "chain_id": 4663,
+                  "snapshot_head_block": 54_486_035,
+                  "eligibility_threshold_usd": "100000",
+                  "threshold_semantics": (
+                      "reached >=$100k market-cap proxy at least once across "
+                      "the complete observed V2 curve/graduation/V4 lifecycle"
+                  ),
+              },
+          )
+
+          phase_counts = {}
+          for row in eligible:
+              phase = row["max_market_cap_phase"]
+              phase_counts[phase] = phase_counts.get(phase, 0) + 1
+          report = {
+              "snapshot_head_block": 54_486_035,
+              "registry_tokens": len(rows),
+              "eligible_tokens": len(eligible),
+              "eligible_share": (
+                  0 if not rows else len(eligible) / len(rows)
+              ),
+              "eligible_max_phase_counts": phase_counts,
+              "tokens_without_priced_points": sum(
+                  int(row["priced_points"]) == 0 for row in rows
+              ),
+              "tokens_with_partial_pricing": sum(
+                  int(row.get("unpriced_points", 0)) > 0 for row in rows
+              ),
+              "eligibility_unknown_tokens": len(unknown),
+              "unknown_sample": [row["token"] for row in unknown[:20]],
+              "eligible_sha256": snapshot["sha256"],
+          }
+          Path("artifacts/pons-v2-eligibility-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - id: upload_lifecycle
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_lifecycle
+        name: Retry V2 lifecycle eligibility artifact upload
+        if: ${{ steps.upload_lifecycle.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V2 lifecycle eligibility artifact upload retry
+        if: ${{ steps.retry_upload_lifecycle.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-lifecycle-eligibility
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

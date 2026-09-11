@@ -1,0 +1,61 @@
+name: phase1-v1-price-path-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-v1-price-path-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconstruct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Reconstruct one real Pons V1 token
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-v1-price-path             --token 0x468488fa24e2839fae01e7d9dc40ffad50f16b18             --quote-token 0x0bd7d308f8e1639fab988df18a8011f41eacad73             --pool 0x7cf8d18896137a4fd258892353d419fa3e94c746             --from-block 30000757             --to-block 30100756             --chunk-size 2000             --min-chunk-size 50             --out artifacts/v1-token-price-path.jsonl
+      - name: Validate price path
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path("artifacts/v1-token-price-path.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert rows, "real V1 token has no decoded swaps in the 100k-block window"
+          blocks = [row["block_number"] for row in rows]
+          assert blocks == sorted(blocks)
+          prices = [Decimal(row["quote_per_token"]) for row in rows]
+          assert all(price > 0 for price in prices)
+          print(json.dumps({
+              "swaps": len(rows),
+              "first_swap_block": blocks[0],
+              "last_swap_block": blocks[-1],
+              "first_price_quote": str(prices[0]),
+              "last_price_quote": str(prices[-1]),
+              "min_price_quote": str(min(prices)),
+              "max_price_quote": str(max(prices)),
+              "token_decimals": rows[0]["token_decimals"],
+              "total_supply_raw": rows[0]["total_supply_raw"],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-v1-price-path
+          path: artifacts/
+          if-no-files-found: error

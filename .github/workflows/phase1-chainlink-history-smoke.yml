@@ -1,0 +1,124 @@
+name: phase1-chainlink-history-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-chainlink-history-smoke.yml'
+      - 'src/hlp/protocols/chainlink.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Probe NVDA feed history
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.chainlink import (
+              read_chainlink_aggregator,
+              read_chainlink_latest_round,
+          )
+
+          feed = "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15"
+          start = 30_000_000
+          end = 30_099_999
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          start_aggregator = read_chainlink_aggregator(rpc, feed, block=start)
+          end_aggregator = read_chainlink_aggregator(rpc, feed, block=end)
+          start_round = read_chainlink_latest_round(rpc, feed, block=start)
+          end_round = read_chainlink_latest_round(rpc, feed, block=end)
+
+          aggregators = sorted({start_aggregator, end_aggregator})
+          samples = {}
+          counts = {}
+          for aggregator in aggregators:
+              logs = list(
+                  rpc.iter_logs_chunked(
+                      start,
+                      end,
+                      address=aggregator,
+                      chunk_size=2000,
+                      min_chunk_size=25,
+                  )
+              )
+              counter = Counter(row.topics[0] if row.topics else "<none>" for row in logs)
+              counts[aggregator] = dict(counter)
+              by_topic = {}
+              for row in logs:
+                  topic0 = row.topics[0] if row.topics else "<none>"
+                  if topic0 not in by_topic:
+                      by_topic[topic0] = {
+                          "block_number": row.block_number,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                          "topics": row.topics,
+                          "data": row.data,
+                      }
+              samples[aggregator] = by_topic
+
+          result = {
+              "feed": feed.lower(),
+              "start_block": start,
+              "end_block": end,
+              "start_aggregator": start_aggregator,
+              "end_aggregator": end_aggregator,
+              "start_round": {
+                  "description": start_round.description,
+                  "decimals": start_round.decimals,
+                  "answer": str(start_round.answer),
+                  "round_id": start_round.round_id,
+                  "updated_at": start_round.updated_at,
+              },
+              "end_round": {
+                  "description": end_round.description,
+                  "decimals": end_round.decimals,
+                  "answer": str(end_round.answer),
+                  "round_id": end_round.round_id,
+                  "updated_at": end_round.updated_at,
+              },
+              "topic_counts": counts,
+              "first_log_by_topic": samples,
+              "requests_made": rpc.requests_made,
+          }
+          Path("artifacts/nvda-chainlink-history.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True)
+          )
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-chainlink-history
+          path: artifacts/
+          if-no-files-found: error

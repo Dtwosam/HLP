@@ -1,0 +1,153 @@
+name: phase1-pons-residual-sushiv3-route-audit-one-shot
+# Residual-only rerun with canonical anchor decimals.
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-residual-sushiv3-route-audit-one-shot.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-residual-sushiv3-route-audit-one-shot
+  cancel-in-progress: true
+
+env:
+  QUOTE_AUDIT_RUN_ID: '33923299711'
+  PRIMARY_V3_AUDIT_RUN_ID: '33921477647'
+  SUSHISWAP_V3_FACTORY: '0xE51960f1B45f1C9FB6D166E6a884F866fC70433B'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ env.QUOTE_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-unpriced-v3-route-audit
+          path: primary
+          run-id: ${{ env.PRIMARY_V3_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Freeze exact residual quote set
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          primary = [
+              json.loads(line)
+              for line in Path(
+                  "primary/pons-unpriced-v3-route-audit.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          unresolved = {
+              row["quote_token"].lower()
+              for row in primary
+              if not bool(row["v3_causal_ready"])
+          }
+          assert len(unresolved) == 5, sorted(unresolved)
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          residual = [
+              row
+              for row in quotes
+              if row["quote_token"].lower() in unresolved
+          ]
+          assert {row["quote_token"].lower() for row in residual} == unresolved
+          residual.sort(
+              key=lambda row: (
+                  int(row["first_launch_block"]),
+                  row["quote_token"],
+              )
+          )
+          with Path("artifacts/residual-quotes.jsonl").open("w") as handle:
+              for row in residual:
+                  handle.write(json.dumps(row, sort_keys=True) + "\n")
+          print(json.dumps({
+              "residual_assets": len(residual),
+              "residual_launches": sum(int(row["launches"]) for row in residual),
+              "symbols": [row["symbol"] for row in residual],
+          }, sort_keys=True))
+          PY
+      - name: Audit Sushi V3 at causal pre-Pons state
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-unpriced-quote-v3-routes \
+            --quote-registry artifacts/residual-quotes.jsonl \
+            --factory "$SUSHISWAP_V3_FACTORY" \
+            --out artifacts/pons-residual-sushiv3-route-audit.jsonl
+      - name: Summarize residual coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pons-residual-sushiv3-route-audit.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          ready = [row for row in rows if row["v3_causal_ready"]]
+          report = {
+              "audited_assets": len(rows),
+              "causal_ready_assets": len(ready),
+              "covered_launches": sum(int(row["launches"]) for row in ready),
+              "ready": [
+                  {
+                      "symbol": row["symbol"],
+                      "quote_token": row["quote_token"],
+                      "launches": row["launches"],
+                      "ready_candidates": row["v3_ready_candidates"],
+                  }
+                  for row in ready
+              ],
+              "unresolved": [
+                  {
+                      "symbol": row["symbol"],
+                      "quote_token": row["quote_token"],
+                      "launches": row["launches"],
+                      "candidates": row["v3_candidates"],
+                      "lookup_errors": row["lookup_errors"],
+                  }
+                  for row in rows
+                  if not row["v3_causal_ready"]
+              ],
+          }
+          Path("artifacts/pons-residual-sushiv3-summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-residual-sushiv3-route-audit
+          path: artifacts/
+          if-no-files-found: error

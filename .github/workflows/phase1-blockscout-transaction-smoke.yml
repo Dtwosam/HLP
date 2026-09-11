@@ -1,0 +1,159 @@
+name: phase1-blockscout-transaction-smoke
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve one frozen-head transaction and probe Blockscout V2
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          RPC = "https://rpc.mainnet.chain.robinhood.com"
+          BLOCKSCOUT = "https://robinhoodchain.blockscout.com"
+          HEAD = 54_486_035
+          MAX_BLOCK_LOOKBACK = 20
+
+          def rpc(method, params):
+              payload = json.dumps({
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "method": method,
+                  "params": params,
+              }).encode()
+              request = urllib.request.Request(
+                  RPC,
+                  data=payload,
+                  headers={
+                      "content-type": "application/json",
+                      "user-agent": "HLP-Robinhood-Research/0.1",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read()
+              body = json.loads(raw)
+              if body.get("error"):
+                  raise SystemExit(
+                      f"Robinhood RPC error: {body['error']}"
+                  )
+              return body.get("result"), len(raw)
+
+          rpc_requests = 0
+          rpc_bytes = 0
+
+          chain_id, size = rpc("eth_chainId", [])
+          rpc_requests += 1
+          rpc_bytes += size
+          if int(chain_id, 16) != 4663:
+              raise SystemExit(
+                  f"Robinhood RPC chain id changed: {chain_id}"
+              )
+
+          selected = None
+          for block in range(HEAD, HEAD - MAX_BLOCK_LOOKBACK, -1):
+              result, size = rpc(
+                  "eth_getBlockByNumber",
+                  [hex(block), False],
+              )
+              rpc_requests += 1
+              rpc_bytes += size
+              if result and result.get("transactions"):
+                  selected = {
+                      "block_number": block,
+                      "transaction_hash": result["transactions"][0].lower(),
+                  }
+                  break
+          if selected is None:
+              raise SystemExit(
+                  "no transaction found within 20 blocks of snapshot head"
+              )
+
+          url = (
+              f"{BLOCKSCOUT}/api/v2/transactions/"
+              f"{selected['transaction_hash']}"
+          )
+          request = urllib.request.Request(
+              url,
+              headers={
+                  "accept": "application/json",
+                  "user-agent": "HLP-Robinhood-Research/0.1",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  status = int(response.status)
+                  raw = response.read()
+          except urllib.error.HTTPError as exc:
+              raw = exc.read()
+              report = {
+                  **selected,
+                  "snapshot_head_block": HEAD,
+                  "rpc_requests": rpc_requests,
+                  "rpc_response_bytes": rpc_bytes,
+                  "blockscout_status": int(exc.code),
+                  "blockscout_response_bytes": len(raw),
+                  "blockscout_reachable": False,
+                  "blockscout_error_body": raw.decode(
+                      errors="replace"
+                  )[:500],
+              }
+              Path(
+                  "artifacts/blockscout-transaction-smoke.json"
+              ).write_text(
+                  json.dumps(report, indent=2, sort_keys=True) + "\n"
+              )
+              print(json.dumps(report, sort_keys=True))
+              raise SystemExit(
+                  f"Blockscout transaction endpoint returned HTTP {exc.code}"
+              ) from exc
+
+          payload = json.loads(raw)
+          observed_hash = str(payload.get("hash") or "").lower()
+          observed_block = payload.get("block")
+          if status != 200:
+              raise SystemExit(f"unexpected Blockscout status {status}")
+          if observed_hash != selected["transaction_hash"]:
+              raise SystemExit(
+                  "Blockscout transaction hash does not match Robinhood RPC"
+              )
+          if int(observed_block) != selected["block_number"]:
+              raise SystemExit(
+                  "Blockscout transaction block does not match Robinhood RPC"
+              )
+
+          report = {
+              **selected,
+              "snapshot_head_block": HEAD,
+              "rpc_requests": rpc_requests,
+              "rpc_response_bytes": rpc_bytes,
+              "blockscout_status": status,
+              "blockscout_response_bytes": len(raw),
+              "blockscout_reachable": True,
+              "transaction_identity_match": True,
+          }
+          Path(
+              "artifacts/blockscout-transaction-smoke.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-blockscout-transaction-smoke
+          path: artifacts/
+          if-no-files-found: error

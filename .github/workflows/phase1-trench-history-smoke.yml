@@ -1,0 +1,132 @@
+name: phase1-trench-history-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-trench-history-smoke.yml'
+      - 'src/hlp/protocols/trench.py'
+      - 'src/hlp/protocols/trench_state.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Characterize trench.today in block-30M shard
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL, TRENCH_MANAGER
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.trench import TRENCH_CURVE_TOPICS, decode_trench_event
+          from hlp.protocols.trench_state import read_trench_token_info
+
+          start = 30_000_000
+          end = 30_099_999
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          assert rpc.get_code(TRENCH_MANAGER, start) not in {"0x", "0x0", ""}
+
+          raw = list(
+              rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=TRENCH_MANAGER,
+                  topics=[list(TRENCH_CURVE_TOPICS)],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          events = [decode_trench_event(row) for row in raw]
+          counts = Counter(row.event_type for row in events)
+          launches = [row for row in events if row.event_type == "token_create"]
+          syncs = [row for row in events if row.event_type == "sync"]
+          assert launches, counts
+          assert syncs, counts
+
+          supplies = []
+          for launch in launches[:10]:
+              static = read_erc20_static(rpc, launch.token, block=launch.block_number)
+              supplies.append({
+                  "token": launch.token,
+                  "decimals": static.decimals,
+                  "total_supply": static.total_supply,
+              })
+              assert static.decimals == 18
+
+          last_sync = {}
+          for row in syncs:
+              key = (row.token, row.block_number)
+              prior = last_sync.get(key)
+              if prior is None or (
+                  (row.transaction_index or -1, row.log_index)
+                  > (prior.transaction_index or -1, prior.log_index)
+              ):
+                  last_sync[key] = row
+
+          state_checks = []
+          for row in list(last_sync.values())[:12]:
+              state = read_trench_token_info(rpc, row.token, block=row.block_number)
+              state_checks.append({
+                  "token": row.token,
+                  "block": row.block_number,
+                  "sync_real_quote": row.real_quote_reserves_raw,
+                  "state_real_quote": state.real_quote_reserves_raw,
+                  "sync_real_token": row.real_token_reserves_raw,
+                  "state_real_token": state.real_token_reserves_raw,
+                  "sync_virtual_quote": row.virtual_quote_raw,
+                  "state_virtual_quote": state.virtual_quote_raw,
+                  "sync_virtual_token": row.virtual_token_raw,
+                  "state_virtual_token": state.virtual_token_raw,
+                  "quote_token": state.quote_token,
+              })
+              assert state.real_quote_reserves_raw == row.real_quote_reserves_raw
+              assert state.real_token_reserves_raw == row.real_token_reserves_raw
+              assert state.virtual_quote_raw == row.virtual_quote_raw
+              assert state.virtual_token_raw == row.virtual_token_raw
+
+          supply_pairs = sorted({
+              (row["decimals"], row["total_supply"])
+              for row in supplies
+          })
+          print(json.dumps({
+              "from_block": start,
+              "to_block": end,
+              "event_counts": dict(counts),
+              "launches": len(launches),
+              "unique_launch_tokens": len({r.token for r in launches}),
+              "unique_sync_tokens": len({r.token for r in syncs}),
+              "quote_tokens": sorted({r.quote_token for r in launches}),
+              "sample_supply_shapes": supply_pairs,
+              "supply_samples": supplies,
+              "state_checks": state_checks,
+              "limit_reaches": counts.get("limit_reach", 0),
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY

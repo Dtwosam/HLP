@@ -1,0 +1,168 @@
+name: phase1-pons-full-census
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Census all Pons launch generations
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import (
+              PONS_V1_FACTORIES,
+              PONS_V1_FACTORY_DEPLOYMENT_BLOCKS,
+              PONS_V2_DEPLOYMENT_BLOCK,
+              PONS_V2_FACTORY,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.pons import (
+              V1_TOKEN_LAUNCHED_TOPIC,
+              V2_POOL_GRADUATED_TOPIC,
+              V2_TOKEN_LAUNCHED_TOPIC,
+              decode_v1_launch,
+              decode_v2_launch,
+              decode_v2_pool_graduation,
+          )
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+
+          v1_counts = {}
+          v1_pair_counts = Counter()
+          v1_first_last = {}
+          v1_total = 0
+          for factory in PONS_V1_FACTORIES:
+              address = factory.lower()
+              deployment = PONS_V1_FACTORY_DEPLOYMENT_BLOCKS[address]
+              if deployment > head:
+                  v1_counts[address] = 0
+                  continue
+              logs = rpc.iter_logs_chunked(
+                  deployment,
+                  head,
+                  address=address,
+                  topics=[V1_TOKEN_LAUNCHED_TOPIC],
+                  chunk_size=50_000,
+                  min_chunk_size=100,
+              )
+              count = 0
+              first = None
+              last = None
+              for raw in logs:
+                  launch = decode_v1_launch(raw)
+                  count += 1
+                  v1_total += 1
+                  v1_pair_counts[launch.pair_token] += 1
+                  first = first or launch.block_number
+                  last = launch.block_number
+              v1_counts[address] = count
+              v1_first_last[address] = {
+                  "deployment_block": deployment,
+                  "first_launch_block": first,
+                  "last_launch_block": last,
+              }
+
+          v2_launch_logs = rpc.iter_logs_chunked(
+              PONS_V2_DEPLOYMENT_BLOCK,
+              head,
+              address=PONS_V2_FACTORY,
+              topics=[V2_TOKEN_LAUNCHED_TOPIC],
+              chunk_size=50_000,
+              min_chunk_size=100,
+          )
+          v2_count = 0
+          v2_pair_counts = Counter()
+          v2_tokens = set()
+          v2_first = None
+          v2_last = None
+          for raw in v2_launch_logs:
+              launch = decode_v2_launch(raw)
+              v2_count += 1
+              v2_tokens.add(launch.token)
+              v2_pair_counts[launch.pair_token] += 1
+              v2_first = v2_first or launch.block_number
+              v2_last = launch.block_number
+
+          graduation_logs = rpc.iter_logs_chunked(
+              PONS_V2_DEPLOYMENT_BLOCK,
+              head,
+              address=PONS_V2_FACTORY,
+              topics=[V2_POOL_GRADUATED_TOPIC],
+              chunk_size=50_000,
+              min_chunk_size=100,
+          )
+          graduated = set()
+          graduation_first = None
+          graduation_last = None
+          for raw in graduation_logs:
+              row = decode_v2_pool_graduation(raw)
+              assert row.token in v2_tokens, row.token
+              graduated.add(row.token)
+              graduation_first = graduation_first or row.block_number
+              graduation_last = row.block_number
+
+          result = {
+              "chain_id": 4663,
+              "head_block": head,
+              "pons_v1": {
+                  "launches": v1_total,
+                  "launches_by_factory": v1_counts,
+                  "pair_token_counts": dict(v1_pair_counts),
+                  "factory_ranges": v1_first_last,
+              },
+              "pons_v2": {
+                  "deployment_block": PONS_V2_DEPLOYMENT_BLOCK,
+                  "launches": v2_count,
+                  "unique_launch_tokens": len(v2_tokens),
+                  "pair_token_counts": dict(v2_pair_counts),
+                  "first_launch_block": v2_first,
+                  "last_launch_block": v2_last,
+                  "graduated_tokens": len(graduated),
+                  "graduation_rate": (
+                      None if not v2_count else len(graduated) / v2_count
+                  ),
+                  "first_graduation_block": graduation_first,
+                  "last_graduation_block": graduation_last,
+              },
+              "all_pons_launches": v1_total + v2_count,
+              "rpc_requests": rpc.requests_made,
+          }
+          Path("artifacts/pons-full-census.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True)
+          )
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-full-census
+          path: artifacts/
+          if-no-files-found: error

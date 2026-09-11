@@ -1,0 +1,242 @@
+name: phase1-pons-recovered-completion-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-recovered-completion.json
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  config:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch recovered Phase 1 completion generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_eligibility_run_id: ${{ steps.read.outputs.source_eligibility_run_id }}
+      v1_v3_run_id: ${{ steps.read.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ steps.read.outputs.v2_v4_run_id }}
+      prior_transfer_run_id: ${{ steps.read.outputs.prior_transfer_run_id }}
+      pricing_run_id: ${{ steps.read.outputs.pricing_run_id }}
+      v3_fallback_run_id: ${{ steps.read.outputs.v3_fallback_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        name: Read guarded recovery configuration
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          config_path = ".github/phase1-pons-recovered-completion.json"
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "source_eligibility_run_id",
+              "v1_v3_run_id",
+              "v2_v4_run_id",
+              "prior_transfer_run_id",
+              "validation_generation",
+              "pricing_run_id",
+              "v3_fallback_run_id",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit(
+                  "recovered completion config schema changed: "
+                  f"{sorted(config)}"
+              )
+
+          branch = os.environ["BRANCH"]
+          if branch != "phase1/data-acquisition-spike":
+              raise SystemExit("recovered completion launch branch changed")
+
+          raw_launch_message = str(os.environ["LAUNCH_MESSAGE"])
+          launch_message = raw_launch_message.splitlines()[0]
+          if raw_launch_message != launch_message:
+              raise SystemExit(
+                  "recovered completion launch message must be exactly one line"
+              )
+          launch_match = re.fullmatch(
+              r"launch recovered Phase 1 completion generation (\d+)",
+              launch_message,
+          )
+          if launch_match is None:
+              raise SystemExit(
+                  "recovered completion launch requires an exact generation"
+              )
+          requested_generation = int(launch_match.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("recovered completion before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("recovered completion current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          launch_commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(launch_commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "recovered completion launch must be a direct "
+                  "single-parent commit"
+              )
+          launch_files = list(launch_commit.get("files") or [])
+          if (
+              len(launch_files) != 1
+              or str(launch_files[0].get("filename") or "") != config_path
+              or str(launch_files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "recovered completion launch must modify exactly "
+                  "the guarded config file"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          previous_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if previous_payload.get("encoding") != "base64":
+              raise SystemExit(
+                  "recovered completion previous config encoding changed"
+              )
+          previous_config = json.loads(
+              base64.b64decode(previous_payload.get("content") or "")
+          )
+          if set(previous_config) != expected_keys:
+              raise SystemExit(
+                  "recovered completion previous config schema changed"
+              )
+
+          generation = int(config.get("generation", 0))
+          source_id = int(config.get("source_eligibility_run_id", 0))
+          v1_id = int(config.get("v1_v3_run_id", 0))
+          v2_id = int(config.get("v2_v4_run_id", 0))
+          prior_id = int(config.get("prior_transfer_run_id", 0))
+          pricing_id = int(config.get("pricing_run_id", 0))
+          v3_fallback_id = int(config.get("v3_fallback_run_id", 0))
+          previous_generation = int(previous_config.get("generation", -1))
+          validation_generation = int(
+              config.get("validation_generation", -1)
+          )
+          previous_validation_generation = int(
+              previous_config.get("validation_generation", -1)
+          )
+          if generation <= 0:
+              raise SystemExit("recovered completion config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "recovered completion launch/config generation mismatch"
+              )
+          if generation != previous_generation + 1:
+              raise SystemExit(
+                  "recovered completion generation must increment "
+                  "by exactly one"
+              )
+          if (
+              validation_generation != 7
+              or previous_validation_generation != 7
+          ):
+              raise SystemExit(
+                  "recovered completion validation generation changed"
+              )
+          if source_id != 33_982_556_591:
+              raise SystemExit("recovered completion source run changed")
+          if v1_id <= 0:
+              raise SystemExit("recovered completion V1/V3 run must be positive")
+          if (
+              v2_id < 0
+              or prior_id < 0
+              or pricing_id < 0
+              or v3_fallback_id < 0
+          ):
+              raise SystemExit("recovered completion optional run IDs are invalid")
+          if pricing_id > 0 and v2_id <= 0:
+              raise SystemExit(
+                  "reused pricing requires an explicit V2/V4 run ID"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"source_eligibility_run_id={source_id}\n")
+              output.write(f"v1_v3_run_id={v1_id}\n")
+              output.write(
+                  "v2_v4_run_id="
+                  + (str(v2_id) if v2_id else "")
+                  + "\n"
+              )
+              output.write(
+                  "prior_transfer_run_id="
+                  + (str(prior_id) if prior_id else "")
+                  + "\n"
+              )
+              output.write(
+                  "pricing_run_id="
+                  + (str(pricing_id) if pricing_id else "")
+                  + "\n"
+              )
+              output.write(f"v3_fallback_run_id={v3_fallback_id}\n")
+          print(json.dumps({
+              "generation": generation,
+              "previous_generation": previous_generation,
+              "launch_commit_sha": current_sha,
+              "launch_parent_sha": before_sha,
+              "validation_generation": validation_generation,
+              "source_eligibility_run_id": source_id,
+              "v1_v3_run_id": v1_id,
+              "v2_v4_run_id": v2_id,
+              "prior_transfer_run_id": prior_id,
+              "pricing_run_id": pricing_id,
+              "v3_fallback_run_id": v3_fallback_id,
+          }, sort_keys=True))
+          PY
+
+  recover:
+    needs: config
+    if: ${{ needs.config.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-recovered-completion-chain.yml
+    with:
+      source_eligibility_run_id: ${{ needs.config.outputs.source_eligibility_run_id }}
+      v1_v3_run_id: ${{ needs.config.outputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ needs.config.outputs.v2_v4_run_id }}
+      prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
+      pricing_run_id: ${{ needs.config.outputs.pricing_run_id }}
+      v3_fallback_run_id: ${{ needs.config.outputs.v3_fallback_run_id }}
+      oracle_run_id: "33974681334"
+      runner_smoke_run_id: "33920762592"
+      registry_run_id: "33911022718"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      anchor_run_id: "33972109927"
+    secrets: inherit

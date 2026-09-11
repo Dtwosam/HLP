@@ -1,0 +1,511 @@
+name: phase1-pons-acceptance-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligible_universe_run_id:
+        description: "Successful phase1-pons-eligible-universe-freeze run"
+        required: true
+        type: string
+      representative_validation_run_id:
+        description: "Successful phase1-pons-representative-validation run"
+        required: true
+        type: string
+      viability_projection_run_id:
+        description: "Successful phase1-pons-acquisition-viability-projection run"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      eligible_universe_run_id:
+        required: true
+        type: string
+      representative_validation_run_id:
+        required: true
+        type: string
+      viability_projection_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-acceptance-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: provenance
+        name: Verify acceptance caller and evidence provenance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ELIGIBLE_RUN_ID: ${{ inputs.eligible_universe_run_id }}
+          REPRESENTATIVE_RUN_ID: ${{ inputs.representative_validation_run_id }}
+          VIABILITY_RUN_ID: ${{ inputs.viability_projection_run_id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+
+          eligible_run_id = int(os.environ["ELIGIBLE_RUN_ID"])
+          representative_run_id = int(os.environ["REPRESENTATIVE_RUN_ID"])
+          viability_run_id = int(os.environ["VIABILITY_RUN_ID"])
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+
+          if eligible_run_id <= 0:
+              raise SystemExit(
+                  "acceptance evidence run ID must be positive"
+              )
+          if representative_run_id != eligible_run_id:
+              raise SystemExit(
+                  "acceptance eligible and representative artifacts must "
+                  "come from the same evidence handoff"
+              )
+          if viability_run_id != current_run_id:
+              raise SystemExit(
+                  "acceptance viability projection must come from the "
+                  "current final-acceptance run"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          artifact_rows_cache = {}
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_rows_cache:
+                  return artifact_rows_cache[run_id]
+              output = []
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row for row in rows if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "acceptance artifact pagination exceeded 1000: "
+                          f"run={run_id}"
+                      )
+              artifact_rows_cache[run_id] = output
+              return output
+
+          def artifacts(run_id):
+              return {
+                  str(row.get("name") or "")
+                  for row in artifact_rows(run_id)
+              }
+
+          current = get(
+              f"/repos/{repo}/actions/runs/{current_run_id}"
+          )
+          current_path = str(
+              current.get("path") or ""
+          ).split("@", 1)[0]
+          allowed_callers = {
+              ".github/workflows/"
+              "phase1-pons-viability-ledger-finalize-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-final-acceptance-chain.yml",
+          }
+          if current_path not in allowed_callers:
+              raise SystemExit(
+                  "acceptance gate direct caller is not allowed: "
+                  f"{current_path}"
+              )
+          if current.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "acceptance caller branch changed"
+              )
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{eligible_run_id}"
+          )
+          if (
+              evidence.get("status") != "completed"
+              or evidence.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "acceptance evidence run is not successful"
+              )
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  "acceptance evidence workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if evidence.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "acceptance evidence branch changed"
+              )
+          evidence_head_sha = str(evidence.get("head_sha") or "")
+          if len(evidence_head_sha) != 40:
+              raise SystemExit(
+                  "acceptance evidence head SHA is invalid"
+              )
+          comparison = get(
+              f"/repos/{repo}/compare/{evidence_head_sha}..."
+              f"{os.environ['GITHUB_SHA']}"
+          )
+          if comparison.get("status") not in {"ahead", "identical"}:
+              raise SystemExit(
+                  "acceptance evidence is not an ancestor of caller HEAD"
+              )
+
+          evidence_artifact_rows = artifact_rows(
+              eligible_run_id
+          )
+          required = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(
+              required
+              - {
+                  str(row.get("name") or "")
+                  for row in evidence_artifact_rows
+              }
+          )
+          if missing:
+              raise SystemExit(
+                  f"acceptance evidence artifacts missing: {missing}"
+              )
+
+          exact_evidence_ids = {}
+          for output_name, artifact_name in (
+              ("eligible_artifact_id", "phase1-pons-eligible-universe"),
+              (
+                  "representative_artifact_id",
+                  "phase1-pons-representative-validation",
+              ),
+          ):
+              matches = [
+                  row
+                  for row in evidence_artifact_rows
+                  if str(row.get("name") or "") == artifact_name
+              ]
+              try:
+                  artifact = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "acceptance evidence artifact "
+                          f"{artifact_name} run={eligible_run_id}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "acceptance evidence retry artifacts are not "
+                      f"equivalent: {artifact_name}: {exc}"
+                  ) from exc
+              exact_evidence_ids[output_name] = int(artifact["id"])
+
+          projection_rows = [
+              row
+              for row in artifact_rows(current_run_id)
+              if str(row.get("name") or "")
+              == "phase1-pons-acquisition-viability-projection"
+          ]
+          if not projection_rows:
+              raise SystemExit(
+                  "acceptance current run is missing viability projection"
+              )
+          if len(projection_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in projection_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in projection_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in projection_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "acceptance viability projection retry artifacts "
+                      "are not equivalent"
+                  )
+          viability_artifact_id = max(
+              int(row.get("id", 0))
+              for row in projection_rows
+          )
+          if viability_artifact_id <= 0:
+              raise SystemExit(
+                  "acceptance viability projection artifact ID is invalid"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key, value in exact_evidence_ids.items():
+                  output.write(f"{key}={value}\n")
+              output.write(
+                  f"viability_artifact_id={viability_artifact_id}\n"
+              )
+          print(json.dumps({
+              "caller_run_id": current_run_id,
+              "caller_workflow_path": current_path,
+              "evidence_run_id": eligible_run_id,
+              "viability_projection_run_id": viability_run_id,
+              **exact_evidence_ids,
+              "viability_artifact_id": viability_artifact_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - id: download_eligible
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial eligible universe download before retry
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - id: retry_download_eligible
+        name: Retry eligible universe artifact download
+        if: ${{ steps.download_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial eligible universe download before final retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        run: rm -rf eligible
+      - name: Final eligible universe artifact download retry
+        if: ${{ steps.retry_download_eligible.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          path: eligible
+          run-id: ${{ inputs.eligible_universe_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_representative
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative validation download before retry
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - id: retry_download_representative
+        name: Retry representative validation artifact download
+        if: ${{ steps.download_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial representative validation download before final retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        run: rm -rf representative
+      - name: Final representative validation artifact download retry
+        if: ${{ steps.retry_download_representative.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          path: representative
+          run-id: ${{ inputs.representative_validation_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_viability
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability projection download before retry
+        if: ${{ steps.download_viability.outcome == 'failure' }}
+        run: rm -rf viability
+      - id: retry_download_viability
+        name: Retry viability projection artifact download
+        if: ${{ steps.download_viability.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability projection download before final retry
+        if: ${{ steps.retry_download_viability.outcome == 'failure' }}
+        run: rm -rf viability
+      - name: Final viability projection artifact download retry
+        if: ${{ steps.retry_download_viability.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          path: viability
+          run-id: ${{ inputs.viability_projection_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build fail-closed Phase 1 acceptance report
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.phase1_acceptance import (
+              REQUIRED_PHASE1_ACQUISITION_ROUTES,
+              build_phase1_acceptance_report,
+          )
+
+          eligible_summary = json.loads(
+              Path(
+                  "eligible/pons-eligible-universe-summary.json"
+              ).read_text()
+          )
+          eligible_manifest = json.loads(
+              Path(
+                  "eligible/"
+                  "pons-eligible-100k-universe.jsonl.manifest.json"
+              ).read_text()
+          )
+          representative_summary = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation-summary.json"
+              ).read_text()
+          )
+          representative_manifest = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation.jsonl.manifest.json"
+              ).read_text()
+          )
+          viability_projection = json.loads(
+              Path(
+                  "viability/"
+                  "phase1-acquisition-viability-projection.json"
+              ).read_text()
+          )
+
+          report = build_phase1_acceptance_report(
+              eligible_summary,
+              eligible_manifest,
+              representative_summary,
+              representative_manifest,
+              viability_projection,
+          )
+          report.update(
+              {
+                  "eligible_universe_run_id": int(
+                      "${{ inputs.eligible_universe_run_id }}"
+                  ),
+                  "representative_validation_run_id": int(
+                      "${{ inputs.representative_validation_run_id }}"
+                  ),
+                  "viability_projection_run_id": int(
+                      "${{ inputs.viability_projection_run_id }}"
+                  ),
+              }
+          )
+
+          if report["phase1_acceptance_status"] != "pass":
+              raise SystemExit("Phase 1 acceptance report did not PASS")
+          if report["required_acquisition_routes"] != list(
+              REQUIRED_PHASE1_ACQUISITION_ROUTES
+          ):
+              raise SystemExit(
+                  "Phase 1 acceptance route contract changed"
+              )
+
+          Path("artifacts/phase1-acceptance-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - id: upload_acceptance
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acceptance-gate
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_acceptance
+        name: Retry Phase 1 acceptance artifact upload
+        if: ${{ steps.upload_acceptance.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acceptance-gate
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final Phase 1 acceptance artifact upload retry
+        if: ${{ steps.retry_upload_acceptance.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-acceptance-gate
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

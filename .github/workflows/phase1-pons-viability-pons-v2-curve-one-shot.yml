@@ -1,0 +1,26 @@
+name: phase1-pons-viability-pons-v2-curve-one-shot
+run-name: phase1 viability pons_v2_curve ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-viability-pons-v2-curve-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-viability-pons-v2-curve-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: ${{ contains(github.event.head_commit.message, 'launch viability pons_v2_curve') }}
+    uses: ./.github/workflows/phase1-pons-viability-guarded-route.yml
+    with:
+      route: "pons_v2_curve"
+      sequence_id: ${{ github.sha }}
+    secrets: inherit

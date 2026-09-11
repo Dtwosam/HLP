@@ -1,0 +1,71 @@
+name: phase1-pons-v3-route-diagnostics-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-v3-route-diagnostics-one-shot.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-unpriced-v3-route-audit
+          path: audit
+          run-id: '33921477647'
+          github-token: ${{ github.token }}
+      - name: Print unresolved route evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "audit/pons-unpriced-v3-route-audit.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          unresolved = [
+              row for row in rows if not row["v3_causal_ready"]
+          ]
+          compact = []
+          for row in unresolved:
+              compact.append({
+                  "symbol": row["symbol"],
+                  "quote_token": row["quote_token"],
+                  "first_launch_block": row["first_launch_block"],
+                  "launches": row["launches"],
+                  "searched_anchors": row.get("searched_anchors"),
+                  "lookup_errors": row.get("lookup_errors"),
+                  "candidates": [
+                      {
+                          "anchor_token": item["anchor_token"],
+                          "fee": item["fee"],
+                          "pool": item["pool"],
+                          "pool_has_code": item["pool_has_code"],
+                          "active_liquidity": item["active_liquidity"],
+                          "quote_per_token": item["quote_per_token"],
+                          "causal_ready": item["causal_ready"],
+                          "error": item["error"],
+                      }
+                      for item in row.get("v3_candidates", [])
+                  ],
+              })
+          print(json.dumps({
+              "unresolved_assets": len(compact),
+              "unresolved_launches": sum(
+                  int(row["launches"]) for row in unresolved
+              ),
+              "rows": compact,
+          }, sort_keys=True))
+          PY

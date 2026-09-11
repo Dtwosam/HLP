@@ -1,0 +1,240 @@
+"""Chainlink Robinhood feed-directory discovery.
+
+Feed identities are discovered from Chainlink's official address directory.
+Every discovered proxy must still be verified onchain before it is accepted
+for historical pricing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import html
+import re
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+DEFAULT_CHAINLINK_DIRECTORY_URL = (
+    "https://docs.chain.link/data-feeds/price-feeds/addresses?network=robinhood"
+)
+_ADDRESS_RE = r"0x[a-fA-F0-9]{40}"
+
+
+class ChainlinkDirectoryError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class RobinhoodFeedDirectoryEntry:
+    symbol: str
+    name: str
+    path: str
+    proxy_address: str
+    secondary_proxy_address: str | None
+    heartbeat_seconds: int
+    blockchain_name: str
+
+
+@dataclass(slots=True)
+class ChainlinkDirectoryClient:
+    url: str = DEFAULT_CHAINLINK_DIRECTORY_URL
+    timeout: float = 30.0
+    attempts: int = 3
+    backoff_seconds: float = 0.5
+    transport: Callable[[urllib.request.Request, float], bytes] | None = None
+    requests_made: int = field(default=0, init=False)
+    bytes_received: int = field(default=0, init=False)
+    last_sha256: str | None = field(default=None, init=False)
+
+    def _read(self, request: urllib.request.Request) -> bytes:
+        if self.transport is not None:
+            return self.transport(request, self.timeout)
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return response.read()
+
+    def fetch_text(self) -> str:
+        request = urllib.request.Request(
+            self.url,
+            headers={"accept": "text/html", "user-agent": "hlp/0.1"},
+        )
+        last_error: Exception | None = None
+        for attempt in range(1, self.attempts + 1):
+            try:
+                raw = self._read(request)
+                self.requests_made += 1
+                self.bytes_received += len(raw)
+                self.last_sha256 = hashlib.sha256(raw).hexdigest()
+                return html.unescape(raw.decode("utf-8", errors="strict"))
+            except (urllib.error.URLError, TimeoutError, UnicodeDecodeError) as exc:
+                last_error = exc
+                if attempt == self.attempts:
+                    break
+                time.sleep(self.backoff_seconds * attempt)
+        raise ChainlinkDirectoryError(
+            f"Chainlink directory request failed: {last_error}"
+        )
+
+    @staticmethod
+    def _field(segment: str, name: str) -> str | None:
+        match = re.search(
+            rf'"{re.escape(name)}":\[0,"([^"]*)"\]',
+            segment,
+        )
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _int_field(segment: str, name: str) -> int | None:
+        match = re.search(
+            rf'"{re.escape(name)}":\[0,(\d+)\]',
+            segment,
+        )
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _parse_robinhood_named_feed(
+        page_text: str,
+        *,
+        symbol: str,
+        accepted_names: set[str],
+    ) -> RobinhoodFeedDirectoryEntry:
+        symbol = symbol.upper().strip()
+        positions = []
+        for accepted_name in sorted(accepted_names):
+            marker = f'"name":[0,"{accepted_name}"]'
+            cursor = 0
+            while True:
+                position = page_text.find(marker, cursor)
+                if position < 0:
+                    break
+                positions.append((position, marker))
+                cursor = position + len(marker)
+        if not positions:
+            raise ChainlinkDirectoryError(
+                "official Chainlink directory has no exact Robinhood feed "
+                f"for {symbol}: {sorted(accepted_names)}"
+            )
+
+        candidates: list[RobinhoodFeedDirectoryEntry] = []
+        for position, marker in sorted(positions):
+            # The server-rendered feed records place one heartbeat field before
+            # each name. Bound each occurrence to adjacent heartbeat records.
+            start = page_text.rfind('"heartbeat":[0,', 0, position)
+            if start < 0:
+                continue
+            end = page_text.find('"heartbeat":[0,', position + len(marker))
+            if end < 0:
+                end = min(len(page_text), position + 20_000)
+            segment = page_text[start:end]
+
+            name = ChainlinkDirectoryClient._field(segment, "name")
+            path = ChainlinkDirectoryClient._field(segment, "path")
+            proxy = ChainlinkDirectoryClient._field(segment, "proxyAddress")
+            secondary = ChainlinkDirectoryClient._field(
+                segment, "secondaryProxyAddress"
+            )
+            heartbeat = ChainlinkDirectoryClient._int_field(segment, "heartbeat")
+            blockchain = ChainlinkDirectoryClient._field(
+                segment, "blockchainName"
+            )
+
+            if name not in accepted_names or blockchain != "Robinhood":
+                continue
+            # Feed-directory paths have changed naming families over time.
+            # Identity is the exact official feed name + Robinhood chain +
+            # proxy address. Keep only a weak path sanity check rather than
+            # coupling discovery to one historical slug convention.
+            if not path:
+                continue
+            path_lower = path.lower()
+            if "usd" not in path_lower or symbol.lower() not in path_lower:
+                continue
+            if not proxy or not re.fullmatch(_ADDRESS_RE, proxy):
+                continue
+            if secondary is not None and not re.fullmatch(_ADDRESS_RE, secondary):
+                continue
+            if heartbeat is None or heartbeat <= 0:
+                continue
+
+            candidates.append(
+                RobinhoodFeedDirectoryEntry(
+                    symbol=symbol,
+                    name=name,
+                    path=path,
+                    proxy_address=proxy.lower(),
+                    secondary_proxy_address=(
+                        secondary.lower() if secondary is not None else None
+                    ),
+                    heartbeat_seconds=heartbeat,
+                    blockchain_name=blockchain,
+                )
+            )
+
+        unique = {
+            (
+                row.name,
+                row.path,
+                row.proxy_address,
+                row.secondary_proxy_address,
+                row.heartbeat_seconds,
+                row.blockchain_name,
+            ): row
+            for row in candidates
+        }
+        if not unique:
+            raise ChainlinkDirectoryError(
+                f"{symbol}: no valid Robinhood feed record found"
+            )
+        if len(unique) != 1:
+            raise ChainlinkDirectoryError(
+                f"{symbol}: conflicting official feed records: "
+                f"{sorted(unique)}"
+            )
+        return next(iter(unique.values()))
+
+    @staticmethod
+    def parse_robinhood_feed(
+        page_text: str,
+        symbol: str,
+    ) -> RobinhoodFeedDirectoryEntry:
+        """Resolve one Stock Token feed across old and current name families."""
+        symbol = symbol.upper().strip()
+        return ChainlinkDirectoryClient._parse_robinhood_named_feed(
+            page_text,
+            symbol=symbol,
+            accepted_names={
+                f"Robinhood {symbol} / USD",
+                f"Robinhood {symbol}-USD",
+                f"RH{symbol} / USD",
+                f"RH{symbol}-USD",
+            },
+        )
+
+    @staticmethod
+    def parse_robinhood_crypto_usd_feed(
+        page_text: str,
+        symbol: str,
+    ) -> RobinhoodFeedDirectoryEntry:
+        """Resolve a non-Stock-Token crypto/USD feed on Robinhood Chain."""
+        symbol = symbol.upper().strip()
+        return ChainlinkDirectoryClient._parse_robinhood_named_feed(
+            page_text,
+            symbol=symbol,
+            accepted_names={
+                f"{symbol} / USD",
+                f"{symbol}-USD",
+            },
+        )
+
+    def robinhood_feeds(
+        self,
+        symbols: list[str] | tuple[str, ...] | set[str],
+    ) -> list[RobinhoodFeedDirectoryEntry]:
+        page = self.fetch_text()
+        rows = [
+            self.parse_robinhood_feed(page, symbol)
+            for symbol in sorted({value.upper() for value in symbols})
+        ]
+        return rows

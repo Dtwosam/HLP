@@ -1,0 +1,30 @@
+name: phase1-pons-post-eligibility-evidence-one-shot
+# validation-generation: 2
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-evidence-launch.txt
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evidence:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 evidence handoff') }}
+    uses: ./.github/workflows/phase1-pons-post-eligibility-evidence-chain.yml
+    with:
+      source_eligibility_run_id: "33982556591"
+      prior_transfer_run_id: ""
+      oracle_run_id: "33974681334"
+      runner_smoke_run_id: "33920762592"
+      registry_run_id: "33911022718"
+      v2_curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+      anchor_run_id: "33972109927"
+    secrets: inherit
