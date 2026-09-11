@@ -205,6 +205,7 @@ jobs:
                   + (str(pricing_id) if pricing_id else "")
                   + "\n"
               )
+              output.write(f"v3_fallback_run_id={v3_fallback_id}\n")
           print(json.dumps({
               "generation": generation,
               "previous_generation": previous_generation,
