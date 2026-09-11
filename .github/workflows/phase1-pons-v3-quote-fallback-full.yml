@@ -555,6 +555,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp routes/pons-v3-quote-routes.jsonl artifacts/
+          cp routes/pons-v3-quote-routes.jsonl.manifest.json artifacts/
           cp routes/pons-v3-quote-route-selection-summary.json artifacts/
           python - <<'PY'
           import json
