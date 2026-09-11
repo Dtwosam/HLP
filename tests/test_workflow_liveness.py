@@ -4161,6 +4161,7 @@ def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
     assert "pricing_run_id" in content
     assert "v3_fallback_run_id" in content
     assert "needs.config.outputs.v3_fallback_run_id" in content
+    assert 'output.write(f"v3_fallback_run_id={v3_fallback_id}\\n")' in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "phase1-pons-recovered-completion-chain.yml" in content
     assert "fetch_github_actions_json(" in content
