@@ -15,6 +15,11 @@ on:
         description: "Successful phase1-pons-v2-v4-full run"
         required: true
         type: string
+      v3_fallback_run_id:
+        description: "Optional completed canonical V3 fallback run to resume from"
+        required: false
+        default: ""
+        type: string
       anchor_run_id:
         description: "Canonical recovered WETH/USDG anchor run"
         required: true
@@ -71,6 +76,10 @@ on:
       v2_v4_run_id:
         required: true
         type: string
+      v3_fallback_run_id:
+        required: false
+        default: ""
+        type: string
       anchor_run_id:
         required: true
         type: string
@@ -120,6 +129,7 @@ jobs:
     secrets: inherit
 
   skhy_v3:
+    if: ${{ inputs.v3_fallback_run_id == '' }}
     uses: ./.github/workflows/phase1-pons-skhy-v3-weth-segmented.yml
     with:
       route_audit_run_id: ${{ inputs.route_audit_run_id }}
@@ -141,7 +151,7 @@ jobs:
     needs:
       - skhy_v3
       - skhy_v4
-    if: ${{ always() && needs.skhy_v3.result == 'success' && (needs.skhy_v3.outputs.completion_status == 'route_resolved' || (needs.skhy_v4.result == 'success' && needs.skhy_v4.outputs.route_ready == 'true')) }}
+    if: ${{ always() && inputs.v3_fallback_run_id == '' && needs.skhy_v3.result == 'success' && (needs.skhy_v3.outputs.completion_status == 'route_resolved' || (needs.skhy_v4.result == 'success' && needs.skhy_v4.outputs.route_ready == 'true')) }}
     uses: ./.github/workflows/phase1-pons-v3-quote-fallback-full.yml
     with:
       route_audit_run_id: ${{ inputs.route_audit_run_id }}
@@ -152,7 +162,7 @@ jobs:
 
   v3_fallback_recovery:
     needs: v3_fallback
-    if: ${{ always() && (needs.v3_fallback.result == 'failure' || needs.v3_fallback.result == 'cancelled') }}
+    if: ${{ always() && inputs.v3_fallback_run_id == '' && (needs.v3_fallback.result == 'failure' || needs.v3_fallback.result == 'cancelled') }}
     uses: ./.github/workflows/phase1-pons-v3-quote-fallback-recover-gaps.yml
     with:
       partial_run_id: ${{ format('{0}', github.run_id) }}
@@ -166,13 +176,13 @@ jobs:
       - skhy_v4
       - v3_fallback
       - v3_fallback_recovery
-    if: ${{ always() && (needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped') }}
+    if: ${{ always() && (inputs.v3_fallback_run_id != '' || ((needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped'))) }}
     uses: ./.github/workflows/phase1-pons-v4-quote-fallback-full.yml
     with:
       probe_run_id: ${{ inputs.residual_v4_probe_run_id }}
       probe_artifact_name: phase1-pons-residual-v4-forward-probe
       probe_filename: pons-residual-v4-forward-probe.jsonl
-      v3_run_id: ${{ format('{0}', github.run_id) }}
+      v3_run_id: ${{ inputs.v3_fallback_run_id != '' && inputs.v3_fallback_run_id || format('{0}', github.run_id) }}
       skhy_v4_run_id: ${{ needs.skhy_v4.result == 'success' && format('{0}', github.run_id) || '' }}
     secrets: inherit
 
@@ -192,10 +202,10 @@ jobs:
       - v3_fallback_recovery
       - v4_fallback
       - v4_fallback_recovery
-    if: ${{ always() && (needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.v4_fallback.result == 'success' || needs.v4_fallback_recovery.result == 'success') }}
+    if: ${{ always() && (inputs.v3_fallback_run_id != '' || needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.v4_fallback.result == 'success' || needs.v4_fallback_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-quote-fallback-full.yml
     with:
-      v3_run_id: ${{ format('{0}', github.run_id) }}
+      v3_run_id: ${{ inputs.v3_fallback_run_id != '' && inputs.v3_fallback_run_id || format('{0}', github.run_id) }}
       v4_run_id: ${{ format('{0}', github.run_id) }}
     secrets: inherit
 

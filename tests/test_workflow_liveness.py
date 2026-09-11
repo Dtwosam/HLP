@@ -2397,6 +2397,9 @@ def test_pricing_eligibility_chain_branches_on_frozen_skhy_completion():
     assert "needs.skhy_v3.outputs.completion_status == 'route_resolved'" in content
     assert "phase1-pons-skhy-v4-known-pool-segmented.yml" in content
     assert "phase1-pons-v3-quote-fallback-full.yml" in content
+    assert "v3_fallback_run_id" in trigger_block
+    assert "inputs.v3_fallback_run_id == ''" in content
+    assert "inputs.v3_fallback_run_id != ''" in content
     assert "phase1-pons-v3-quote-fallback-recover-gaps.yml" in content
     assert "needs.v3_fallback_recovery.result == 'success'" in content
     assert "phase1-pons-v4-quote-fallback-full.yml" in content
