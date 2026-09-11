@@ -32,6 +32,11 @@ on:
         required: false
         default: ""
         type: string
+      v3_fallback_run_id:
+        description: "Optional prior run containing completed canonical V3 fallback artifacts"
+        required: false
+        default: ""
+        type: string
       oracle_run_id:
         required: true
         default: "33974681334"
@@ -81,6 +86,10 @@ on:
         default: false
         type: boolean
       pricing_run_id:
+        required: false
+        default: ""
+        type: string
+      v3_fallback_run_id:
         required: false
         default: ""
         type: string
@@ -139,6 +148,7 @@ jobs:
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
           PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
+          V3_FALLBACK_RUN_ID: ${{ inputs.v3_fallback_run_id }}
           ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
           RUNNER_SMOKE_RUN_ID: ${{ inputs.runner_smoke_run_id }}
           REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
@@ -173,9 +183,16 @@ jobs:
           v2_id = int(v2_text) if v2_text else 0
           pricing_text = os.environ["PRICING_RUN_ID"].strip()
           pricing_id = int(pricing_text) if pricing_text else 0
+          v3_fallback_text = os.environ["V3_FALLBACK_RUN_ID"].strip()
+          v3_fallback_id = int(v3_fallback_text) if v3_fallback_text else 0
           if source_id != 33_982_556_591:
               raise SystemExit("recovery source eligibility run changed")
-          if v1_id <= 0 or v2_id < 0 or pricing_id < 0:
+          if (
+              v1_id <= 0
+              or v2_id < 0
+              or pricing_id < 0
+              or v3_fallback_id < 0
+          ):
               raise SystemExit("recovery run IDs are invalid")
           if pricing_id > 0 and v2_id <= 0:
               raise SystemExit(
@@ -943,6 +960,45 @@ jobs:
                   expected_upstream_run_id=33_912_452_330,
               )
 
+          if v3_fallback_id:
+              v3_fallback = get(
+                  f"/repos/{repo}/actions/runs/{v3_fallback_id}"
+              )
+              if v3_fallback.get("status") != "completed":
+                  raise SystemExit(
+                      "reused V3 fallback run is not terminal"
+                  )
+              v3_fallback_path = str(
+                  v3_fallback.get("path") or ""
+              ).split("@", 1)[0]
+              allowed_v3_fallback_paths = {
+                  ".github/workflows/"
+                  "phase1-pons-recovered-completion-one-shot.yml",
+                  ".github/workflows/"
+                  "phase1-pons-pricing-eligibility-chain.yml",
+              }
+              if v3_fallback_path not in allowed_v3_fallback_paths:
+                  raise SystemExit(
+                      "reused V3 fallback workflow path is not allowed: "
+                      f"{v3_fallback_path}"
+                  )
+              if v3_fallback.get("head_branch") != (
+                  "phase1/data-acquisition-spike"
+              ):
+                  raise SystemExit("reused V3 fallback branch changed")
+              required_v3_fallback_artifacts = {
+                  "phase1-pons-v3-quote-fallback-full",
+                  "phase1-pons-v3-quote-routes-selected",
+              }
+              missing_v3_fallback = sorted(
+                  required_v3_fallback_artifacts - artifacts(v3_fallback_id)
+              )
+              if missing_v3_fallback:
+                  raise SystemExit(
+                      "reused V3 fallback run is missing required artifacts: "
+                      f"{missing_v3_fallback}"
+                  )
+
           if pricing_id:
               pricing = get(
                   f"/repos/{repo}/actions/runs/{pricing_id}"
@@ -983,6 +1039,7 @@ jobs:
               "v1_v3_run_id": v1_id,
               "v2_v4_run_id": v2_id,
               "pricing_run_id": pricing_id,
+              "v3_fallback_run_id": v3_fallback_id,
               "support_run_ids": observed_support_runs,
               "source_missing_artifacts": missing_source_artifacts,
               "source_v2_partial_artifacts": source_v2_shards,
@@ -1027,6 +1084,7 @@ jobs:
       route_audit_run_id: "33921477647"
       delayed_probe_run_id: "33923160281"
       residual_v4_probe_run_id: "33926428274"
+      v3_fallback_run_id: ${{ inputs.v3_fallback_run_id }}
       source_registry_run_id: ${{ inputs.registry_run_id }}
       quote_audit_run_id: ${{ inputs.quote_audit_run_id }}
       v2_registry_run_id: "33912235341"

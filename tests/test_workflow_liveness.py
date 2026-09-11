@@ -3968,6 +3968,12 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "phase1-pons-v2-v4-full" in content
     assert "inputs.v2_v4_run_id == ''" in content
     assert "pricing_run_id:" in content
+    assert "v3_fallback_run_id:" in content
+    assert "V3_FALLBACK_RUN_ID" in content
+    assert "reused V3 fallback run is not terminal" in content
+    assert "reused V3 fallback workflow path is not allowed" in content
+    assert "reused V3 fallback run is missing required artifacts" in content
+    assert "v3_fallback_run_id: ${{ inputs.v3_fallback_run_id }}" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "recovered completion support run IDs changed" in content
     assert "recovered completion support run is not successful" in content
@@ -4153,6 +4159,8 @@ def test_recovered_completion_launcher_is_config_guarded_and_unarmed():
     assert "source_id != 33_982_556_591" in content
     assert "v1_id <= 0" in content
     assert "pricing_run_id" in content
+    assert "v3_fallback_run_id" in content
+    assert "needs.config.outputs.v3_fallback_run_id" in content
     assert "reused pricing requires an explicit V2/V4 run ID" in content
     assert "phase1-pons-recovered-completion-chain.yml" in content
     assert "fetch_github_actions_json(" in content
