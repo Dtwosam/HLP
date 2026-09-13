@@ -1,5 +1,5 @@
 name: phase1-pons-stock-oracle-promote-v2-delta-one-shot
-# resume-generation: 3
+# resume-generation: 4
 
 on:
   push:
