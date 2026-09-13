@@ -1,5 +1,5 @@
 name: phase1-v2-native-ownership-patch
-# trigger-generation: 2
+# trigger-generation: 3
 
 on:
   push:
@@ -24,22 +24,22 @@ jobs:
           from pathlib import Path
           path = Path('.github/workflows/phase1-pons-v2-lifecycle-eligibility.yml')
           text = path.read_text()
-          marker = "direct_covered = {"
-          start = text.index(marker)
-          end = text.index("}", start)
-          block = text[start:end + 1]
-          if "ZERO_ADDRESS" not in block:
-              block = block[:-1] + "\n              ZERO_ADDRESS,\n          }"
-              text = text[:start] + block + text[end + 1:]
-          import_anchor = "from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH"
-          if "from hlp.data.quote_usd import ZERO_ADDRESS" not in text:
-              if import_anchor not in text:
-                  raise SystemExit('config import anchor not found')
-              text = text.replace(import_anchor, import_anchor + "\n          from hlp.data.quote_usd import ZERO_ADDRESS", 1)
+          constants = '''          WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"\n          USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"'''
+          replacement = constants + '''\n          ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"'''
+          if replacement not in text:
+              if constants not in text:
+                  raise SystemExit('WETH/USDG constant block not found')
+              text = text.replace(constants, replacement, 1)
+          old = 'covered = oracle_tokens | fallback_tokens | {WETH, USDG}'
+          new = 'covered = oracle_tokens | fallback_tokens | {WETH, USDG, ZERO_ADDRESS}'
+          if new not in text:
+              if old not in text:
+                  raise SystemExit('covered ownership expression not found')
+              text = text.replace(old, new, 1)
           path.write_text(text)
           PY
           git diff --check
-          grep -n -A8 -B3 'direct_covered = {' .github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
+          grep -n -A4 -B4 'covered = oracle_tokens' .github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
       - name: Commit patch
         run: |
           git config user.name "github-actions[bot]"
