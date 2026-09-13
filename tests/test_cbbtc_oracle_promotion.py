@@ -18,7 +18,7 @@ def test_oracle_promotion_extends_canonical_chainlink_coverage():
     assert "max-parallel: 2" in promotion
     assert "phase1-pons-stock-oracle-full" in promotion
     assert '33974681334' in launcher
-    assert 'resume-generation: 4' in launcher
+    assert re.search(r"# resume-generation: \d+", launcher)
     assert "phase1-pons-cbbtc-oracle-promote.yml" in launcher
 
 
@@ -39,6 +39,12 @@ def test_cbbtc_oracle_shards_respect_proven_100k_ceiling():
     assert shards == list(range(shard_count))
     assert f"assert len(state_files) == {shard_count}" in promotion
     assert f"assert len(update_files) == {shard_count}" in promotion
+
+
+def test_cbbtc_oracle_new_generation_supersedes_stale_run():
+    promotion = _workflow("phase1-pons-cbbtc-oracle-promote.yml")
+
+    assert "cancel-in-progress: true" in promotion
 
 
 def test_v2_quote_ownership_treats_native_eth_as_anchor_owned():

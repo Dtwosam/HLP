@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: phase1-pons-cbbtc-oracle-promote-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   SNAPSHOT_HEAD: '54486035'
