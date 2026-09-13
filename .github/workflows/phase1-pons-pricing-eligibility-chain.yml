@@ -311,7 +311,7 @@ jobs:
 
   v2_eligibility:
     needs: quote_fallback
-    if: ${{ needs.quote_fallback.result == 'success' }}
+    if: ${{ always() && needs.quote_fallback.result == 'success' }}
     uses: ./.github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
     with:
       v2_registry_run_id: ${{ inputs.v2_registry_run_id }}
@@ -327,7 +327,7 @@ jobs:
     needs:
       - v1_eligibility
       - v2_eligibility
-    if: ${{ needs.v1_eligibility.result == 'success' && needs.v2_eligibility.result == 'success' }}
+    if: ${{ always() && needs.v1_eligibility.result == 'success' && needs.v2_eligibility.result == 'success' }}
     uses: ./.github/workflows/phase1-pons-eligible-universe-freeze.yml
     with:
       v1_eligibility_run_id: ${{ format('{0}', github.run_id) }}
