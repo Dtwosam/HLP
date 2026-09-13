@@ -1,4 +1,5 @@
 import re
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,27 @@ def test_exact_v4_artifact_patterns_do_not_mix_shards_and_gaps():
 
     assert [artifact["id"] for artifact in shards] == [1, 2]
     assert [artifact["id"] for artifact in gaps] == [3]
+
+
+def test_cross_host_artifact_redirect_drops_repository_token():
+    from hlp.github_artifacts import SafeArtifactRedirectHandler
+
+    request = urllib.request.Request(
+        "https://api.github.com/repos/Dtwosam/HLP/actions/artifacts/1/zip",
+        headers={"Authorization": "Bearer secret", "User-Agent": "hlp-test"},
+    )
+    redirected = SafeArtifactRedirectHandler().redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://signed.example.invalid/artifact.zip",
+    )
+
+    assert redirected is not None
+    assert redirected.get_header("Authorization") is None
+    assert redirected.get_header("User-Agent") == "hlp-test"
 
 
 def test_v4_salvage_accepts_overlapping_coverage_but_rejects_real_gaps():
