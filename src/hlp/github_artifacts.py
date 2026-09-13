@@ -9,9 +9,26 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable, Iterable
+from urllib.parse import urlparse
 
 
 _API_ROOT = "https://api.github.com"
+
+
+class SafeArtifactRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward GitHub authorization to signed artifact storage hosts."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(
+            req, fp, code, msg, headers, newurl
+        )
+        if redirected is None:
+            return None
+        if urlparse(req.full_url).hostname != urlparse(newurl).hostname:
+            redirected.remove_header("Authorization")
+            redirected.remove_header("X-GitHub-Api-Version")
+            redirected.remove_header("Accept")
+        return redirected
 
 
 def _request(url: str, token: str) -> urllib.request.Request:
@@ -32,7 +49,8 @@ def _get_json(url: str, token: str) -> dict:
 
 
 def _get_bytes(url: str, token: str) -> bytes:
-    with urllib.request.urlopen(_request(url, token), timeout=120) as response:
+    opener = urllib.request.build_opener(SafeArtifactRedirectHandler())
+    with opener.open(_request(url, token), timeout=120) as response:
         return response.read()
 
 
