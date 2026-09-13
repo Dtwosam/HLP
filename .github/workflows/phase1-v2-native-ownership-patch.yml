@@ -1,4 +1,5 @@
 name: phase1-v2-native-ownership-patch
+# trigger-generation: 1
 
 on:
   push:
