@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 def test_run_artifact_listing_paginates_past_first_100(monkeypatch):
     from hlp.github_artifacts import list_run_artifacts
@@ -54,16 +56,30 @@ def test_exact_v4_artifact_patterns_do_not_mix_shards_and_gaps():
     assert [artifact["id"] for artifact in gaps] == [3]
 
 
-def test_v4_gap_recovery_uses_paginated_exact_artifact_downloads():
+def test_v4_salvage_accepts_overlapping_coverage_but_rejects_real_gaps():
+    from hlp.v4_salvage import validate_full_coverage
+
+    assert validate_full_coverage(10, 30, [(10, 19), (15, 24), (25, 30)]) == [
+        (10, 19),
+        (15, 24),
+        (25, 30),
+    ]
+
+    with pytest.raises(ValueError, match="uncovered V4 range"):
+        validate_full_coverage(10, 30, [(10, 19), (21, 30)])
+
+
+def test_v4_salvage_workflow_uses_paginated_exact_artifact_downloads():
     workflow = (
         Path(__file__).parents[1]
         / ".github"
         / "workflows"
-        / "phase1-pons-v4-quote-fallback-recover-gaps.yml"
+        / "phase1-pons-v4-quote-fallback-salvage-one-shot.yml"
     ).read_text()
 
-    assert workflow.count("python -m hlp.github_artifacts download-run") >= 4
+    assert workflow.count("python -m hlp.github_artifacts download-run") >= 3
     assert "^phase1-pons-v4-quote-fallback-[0-9]+$" in workflow
     assert "^phase1-pons-v4-quote-fallback-gap-[0-9]{3}$" in workflow
-    assert 'Path("partial-gaps").glob(' in workflow
-    assert 'Path("partial-gaps").glob("v4-quote-events-gap-*.jsonl")' in workflow
+    assert "^phase1-pons-v4-quote-routes-selected$" in workflow
+    assert "python -m hlp.v4_salvage" in workflow
+    assert "launch V4 salvage generation" in workflow
