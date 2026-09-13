@@ -8,14 +8,17 @@ def _workflow(name: str) -> str:
 
 
 def test_oracle_promotion_extends_canonical_chainlink_coverage():
-    promotion = _workflow("phase1-pons-stock-oracle-promote-v2-delta.yml")
+    promotion = _workflow("phase1-pons-cbbtc-oracle-promote.yml")
     launcher = _workflow("phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml")
 
     assert "CHAINLINK_PRICED_STATUSES" in promotion
-    assert 'phase1-pons-stock-oracle-full' in promotion
+    assert "priced_chainlink_crypto_token" in promotion
+    assert "0xcec185eb182c47d1ba1efc84e6959e18cd620be4" in promotion
+    assert "max-parallel: 2" in promotion
+    assert "phase1-pons-stock-oracle-full" in promotion
     assert '33974681334' in launcher
     assert 'resume-generation: 3' in launcher
-    assert 'PONS_CBBTC' in promotion
+    assert "phase1-pons-cbbtc-oracle-promote.yml" in launcher
 
 
 def test_v2_quote_ownership_treats_native_eth_as_anchor_owned():

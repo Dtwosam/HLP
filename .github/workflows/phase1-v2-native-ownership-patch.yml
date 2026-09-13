@@ -1,0 +1,50 @@
+name: phase1-v2-native-ownership-patch
+
+on:
+  push:
+    branches:
+      - phase1/cbbtc-oracle-promotion
+    paths:
+      - .github/workflows/phase1-v2-native-ownership-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, 'apply native ownership patch') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase1/cbbtc-oracle-promotion
+      - name: Patch V2 quote ownership audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/phase1-pons-v2-lifecycle-eligibility.yml')
+          text = path.read_text()
+          marker = "direct_covered = {"
+          start = text.index(marker)
+          end = text.index("}", start)
+          block = text[start:end + 1]
+          if "ZERO_ADDRESS" not in block:
+              insertion = "\n              ZERO_ADDRESS,"
+              block = block[:-1] + insertion + "\n          }"
+              text = text[:start] + block + text[end + 1:]
+          import_anchor = "from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH"
+          if "from hlp.data.quote_usd import ZERO_ADDRESS" not in text:
+              if import_anchor not in text:
+                  raise SystemExit('config import anchor not found')
+              text = text.replace(import_anchor, import_anchor + "\n          from hlp.data.quote_usd import ZERO_ADDRESS", 1)
+          path.write_text(text)
+          PY
+          git diff --check
+          grep -n -A8 -B3 'direct_covered = {' .github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
+          git commit -m "account native ETH as anchor-owned quote"
+          git push origin HEAD:phase1/cbbtc-oracle-promotion

@@ -1,0 +1,173 @@
+name: phase1-pons-cbbtc-oracle-promote
+
+on:
+  workflow_call:
+    inputs:
+      quote_audit_run_id:
+        required: true
+        type: string
+      prior_oracle_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-cbbtc-oracle-promote-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  CBBTC_FIRST_USE: '48515552'
+  CBBTC_ADDRESS: '0xcec185eb182c47d1ba1efc84e6959e18cd620be4'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: '16'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Freeze cbBTC Chainlink quote row
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from hlp.data.quote_registry import CHAINLINK_PRICED_STATUSES
+          target = os.environ['CBBTC_ADDRESS'].lower()
+          rows = [json.loads(line) for line in Path('quotes/pons-quote-registry.jsonl').read_text().splitlines() if line.strip()]
+          matches = [row for row in rows if row['quote_token'].lower() == target and row['pricing_status'] in CHAINLINK_PRICED_STATUSES]
+          assert len(matches) == 1, matches
+          row = matches[0]
+          assert row['pricing_status'] == 'priced_chainlink_crypto_token', row
+          assert int(row['first_launch_block']) == 48_515_552, row
+          Path('cbbtc.jsonl').write_text(json.dumps(row, sort_keys=True) + '\n')
+          PY
+      - id: bounds
+        name: Compute exact cbBTC shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ['CBBTC_FIRST_USE'])
+          head = int(os.environ['SNAPSHOT_HEAD'])
+          i = int(os.environ['SHARD_INDEX'])
+          n = int(os.environ['SHARD_COUNT'])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
+              handle.write(f'lo={lo}\nhi={hi}\n')
+          PY
+      - name: Acquire cbBTC oracle shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          printf -v SHARD "%02d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 rpc-pons-stock-oracle-lifecycle --quote-registry cbbtc.jsonl --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" --chunk-size "$CHUNK" --min-chunk-size 25 --state-out "artifacts/cbbtc-state-shard-${SHARD}.jsonl" --out "artifacts/cbbtc-updates-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-cbbtc-oracle-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: prior
+          run-id: ${{ inputs.prior_oracle_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-cbbtc-oracle-*
+          path: cbbtc
+          merge-multiple: true
+      - name: Promote cbBTC into canonical Chainlink oracle tape
+        env:
+          PRIOR_ORACLE_RUN_ID: ${{ inputs.prior_oracle_run_id }}
+          QUOTE_AUDIT_RUN_ID: ${{ inputs.quote_audit_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from hlp.data.quote_usd import merge_quote_usd_tapes
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def rows(path):
+              with Path(path).open() as handle:
+                  for line in handle:
+                      if line.strip():
+                          yield json.loads(line)
+
+          state_files = sorted(Path('cbbtc').glob('cbbtc-state-shard-*.jsonl'))
+          update_files = sorted(Path('cbbtc').glob('cbbtc-updates-shard-*.jsonl'))
+          assert len(state_files) == 16, state_files
+          assert len(update_files) == 16, update_files
+          checkpoints = [row for path in state_files for row in rows(path)]
+          checkpoints.sort(key=lambda row: (int(row['block_number']), row['quote_token'].lower()))
+          assert checkpoints, 'cbBTC checkpoint set is empty'
+          cb_token = os.environ['CBBTC_ADDRESS'].lower()
+          assert {row['quote_token'].lower() for row in checkpoints} == {cb_token}
+          cb_state = [checkpoints[0]]
+          assert int(cb_state[0]['activation_block']) == 48_515_552, cb_state[0]
+          assert cb_state[0]['pricing_status'] == 'priced_chainlink_crypto_token', cb_state[0]
+
+          def cb_updates():
+              for path in update_files:
+                  yield from rows(path)
+
+          merged_states, merged_updates = merge_quote_usd_tapes([
+              (rows('prior/pons-stock-oracle-initial.jsonl'), rows('prior/pons-stock-oracle-updates.jsonl')),
+              (cb_state, cb_updates()),
+          ])
+          tokens = {row['quote_token'].lower() for row in merged_states}
+          assert cb_token in tokens
+          assert len(tokens) == 24, sorted(tokens)
+          state_manifest = write_jsonl_snapshot(merged_states, output=Path('artifacts/pons-stock-oracle-initial.jsonl'), provenance={'source': 'canonical_chainlink_oracle_plus_cbbtc', 'chain_id': 4663, 'snapshot_head_block': 54_486_035, 'prior_oracle_run_id': int(os.environ['PRIOR_ORACLE_RUN_ID']), 'quote_audit_run_id': int(os.environ['QUOTE_AUDIT_RUN_ID'])})
+          update_manifest = write_jsonl_snapshot(merged_updates, output=Path('artifacts/pons-stock-oracle-updates.jsonl'), provenance={'source': 'canonical_chainlink_oracle_plus_cbbtc', 'chain_id': 4663, 'snapshot_head_block': 54_486_035, 'prior_oracle_run_id': int(os.environ['PRIOR_ORACLE_RUN_ID']), 'quote_audit_run_id': int(os.environ['QUOTE_AUDIT_RUN_ID'])})
+          summary = {'snapshot_head_block': 54_486_035, 'chainlink_quote_assets': 24, 'prior_oracle_run_id': int(os.environ['PRIOR_ORACLE_RUN_ID']), 'quote_audit_run_id': int(os.environ['QUOTE_AUDIT_RUN_ID']), 'cbbtc_quote_token': cb_token, 'initial_sha256': state_manifest['sha256'], 'updates_sha256': update_manifest['sha256']}
+          Path('artifacts/pons-stock-oracle-summary.json').write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-stock-oracle-full
+          path: artifacts/
+          if-no-files-found: error
