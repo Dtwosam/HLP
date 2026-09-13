@@ -20,6 +20,11 @@ on:
         required: false
         default: ""
         type: string
+      v4_fallback_run_id:
+        description: "Validated canonical V4 fallback checkpoint to resume from"
+        required: false
+        default: "34754839901"
+        type: string
       anchor_run_id:
         description: "Canonical recovered WETH/USDG anchor run"
         required: true
@@ -80,6 +85,10 @@ on:
         required: false
         default: ""
         type: string
+      v4_fallback_run_id:
+        required: false
+        default: "34754839901"
+        type: string
       anchor_run_id:
         required: true
         type: string
@@ -117,6 +126,96 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  v4_checkpoint:
+    if: ${{ inputs.v4_fallback_run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate reusable V4 fallback checkpoint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          V4_FALLBACK_RUN_ID: ${{ inputs.v4_fallback_run_id }}
+        run: |
+          python - <<'PY'
+          import os
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          run_id = int(os.environ["V4_FALLBACK_RUN_ID"])
+          if run_id <= 0:
+              raise SystemExit("V4 fallback checkpoint run ID must be positive")
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if (
+              run.get("status") != "completed"
+              or run.get("conclusion") != "success"
+          ):
+              raise SystemExit("V4 fallback checkpoint run is not successful")
+          path = str(run.get("path") or "").split("@", 1)[0]
+          allowed_paths = {
+              ".github/workflows/"
+              "phase1-pons-v4-quote-fallback-salvage-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-pricing-eligibility-chain.yml",
+          }
+          if path not in allowed_paths:
+              raise SystemExit(
+                  "V4 fallback checkpoint workflow path is not allowed: "
+                  f"{path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("V4 fallback checkpoint branch changed")
+
+          artifact_names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              artifact_names.update(
+                  str(row.get("name"))
+                  for row in rows
+                  if not row.get("expired")
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "V4 fallback checkpoint artifact pagination exceeded 1000"
+                  )
+          required = {"phase1-pons-v4-quote-fallback-full"}
+          missing = sorted(required - artifact_names)
+          if missing:
+              raise SystemExit(
+                  "V4 fallback checkpoint is missing required artifacts: "
+                  f"{missing}"
+              )
+          print(
+              f"validated V4 fallback checkpoint run={run_id} path={path}"
+          )
+          PY
+
   v1_eligibility:
     uses: ./.github/workflows/phase1-pons-v1-lifecycle-eligibility.yml
     with:
@@ -176,7 +275,7 @@ jobs:
       - skhy_v4
       - v3_fallback
       - v3_fallback_recovery
-    if: ${{ always() && (inputs.v3_fallback_run_id != '' || ((needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped'))) }}
+    if: ${{ always() && inputs.v4_fallback_run_id == '' && (inputs.v3_fallback_run_id != '' || ((needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.skhy_v4.result == 'success' || needs.skhy_v4.result == 'skipped'))) }}
     uses: ./.github/workflows/phase1-pons-v4-quote-fallback-full.yml
     with:
       probe_run_id: ${{ inputs.residual_v4_probe_run_id }}
@@ -188,7 +287,7 @@ jobs:
 
   v4_fallback_recovery:
     needs: v4_fallback
-    if: ${{ always() && (needs.v4_fallback.result == 'failure' || needs.v4_fallback.result == 'cancelled') }}
+    if: ${{ always() && inputs.v4_fallback_run_id == '' && (needs.v4_fallback.result == 'failure' || needs.v4_fallback.result == 'cancelled') }}
     uses: ./.github/workflows/phase1-pons-v4-quote-fallback-recover-gaps.yml
     with:
       partial_run_id: ${{ format('{0}', github.run_id) }}
@@ -198,15 +297,16 @@ jobs:
 
   quote_fallback:
     needs:
+      - v4_checkpoint
       - v3_fallback
       - v3_fallback_recovery
       - v4_fallback
       - v4_fallback_recovery
-    if: ${{ always() && (inputs.v3_fallback_run_id != '' || needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && (needs.v4_fallback.result == 'success' || needs.v4_fallback_recovery.result == 'success') }}
+    if: ${{ always() && (inputs.v3_fallback_run_id != '' || needs.v3_fallback.result == 'success' || needs.v3_fallback_recovery.result == 'success') && ((inputs.v4_fallback_run_id != '' && needs.v4_checkpoint.result == 'success') || (inputs.v4_fallback_run_id == '' && (needs.v4_fallback.result == 'success' || needs.v4_fallback_recovery.result == 'success'))) }}
     uses: ./.github/workflows/phase1-pons-quote-fallback-full.yml
     with:
       v3_run_id: ${{ inputs.v3_fallback_run_id != '' && inputs.v3_fallback_run_id || format('{0}', github.run_id) }}
-      v4_run_id: ${{ format('{0}', github.run_id) }}
+      v4_run_id: ${{ inputs.v4_fallback_run_id != '' && inputs.v4_fallback_run_id || format('{0}', github.run_id) }}
     secrets: inherit
 
   v2_eligibility:
