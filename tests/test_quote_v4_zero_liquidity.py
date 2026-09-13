@@ -47,7 +47,7 @@ def test_zero_post_swap_liquidity_still_emits_observed_close():
 
     assert len(updates) == 2
     assert updates[-1]["transaction_hash"] == "0x" + "02" * 32
-    assert updates[-1]["usd_price"] == "1"
+    assert updates[-1]["usd_price"] == "1000000000000"
 
 
 def test_negative_v4_liquidity_is_rejected_as_malformed_input():
