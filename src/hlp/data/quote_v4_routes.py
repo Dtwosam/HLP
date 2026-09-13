@@ -455,8 +455,8 @@ def build_v4_route_usd_updates(
             continue
         if int(event["sqrt_price_x96"]) <= 0:
             raise ValueError("V4 fallback swap price must be positive")
-        if int(event["liquidity"]) <= 0:
-            raise ValueError("V4 fallback swap must have positive liquidity")
+        if int(event["liquidity"]) < 0:
+            raise ValueError("V4 fallback swap liquidity cannot be negative")
 
         quote_per_token = v3_v4_quote_per_token(
             int(event["sqrt_price_x96"]),
