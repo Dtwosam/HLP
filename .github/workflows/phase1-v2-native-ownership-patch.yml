@@ -1,5 +1,5 @@
 name: phase1-v2-native-ownership-patch
-# trigger-generation: 1
+# trigger-generation: 2
 
 on:
   push:
@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ contains(github.event.head_commit.message, 'apply native ownership patch') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,8 +29,7 @@ jobs:
           end = text.index("}", start)
           block = text[start:end + 1]
           if "ZERO_ADDRESS" not in block:
-              insertion = "\n              ZERO_ADDRESS,"
-              block = block[:-1] + insertion + "\n          }"
+              block = block[:-1] + "\n              ZERO_ADDRESS,\n          }"
               text = text[:start] + block + text[end + 1:]
           import_anchor = "from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH"
           if "from hlp.data.quote_usd import ZERO_ADDRESS" not in text:
