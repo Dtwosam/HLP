@@ -24,6 +24,5 @@ def test_oracle_promotion_extends_canonical_chainlink_coverage():
 def test_v2_quote_ownership_treats_native_eth_as_anchor_owned():
     eligibility = _workflow("phase1-pons-v2-lifecycle-eligibility.yml")
 
-    assert "ZERO_ADDRESS" in eligibility
-    assert "direct_covered" in eligibility
-    assert "ZERO_ADDRESS," in eligibility
+    assert 'ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"' in eligibility
+    assert "covered = oracle_tokens | fallback_tokens | {WETH, USDG, ZERO_ADDRESS}" in eligibility
