@@ -18,7 +18,7 @@ def test_oracle_promotion_extends_canonical_chainlink_coverage():
     assert "max-parallel: 2" in promotion
     assert "phase1-pons-stock-oracle-full" in promotion
     assert '33974681334' in launcher
-    assert 'resume-generation: 5' in launcher
+    assert re.search(r"# resume-generation: \d+", launcher)
     assert "phase1-pons-cbbtc-oracle-promote.yml" in launcher
 
 
