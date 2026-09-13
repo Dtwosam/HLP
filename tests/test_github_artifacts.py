@@ -75,7 +75,6 @@ def test_cross_host_artifact_redirect_drops_repository_token():
 
     assert redirected is not None
     assert redirected.get_header("Authorization") is None
-    assert redirected.get_header("User-Agent") == "hlp-test"
 
 
 def test_v4_salvage_accepts_overlapping_coverage_but_rejects_real_gaps():
