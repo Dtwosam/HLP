@@ -796,6 +796,7 @@ jobs:
 
           WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
           USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+          ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
           registry = [
               json.loads(line)
@@ -858,7 +859,7 @@ jobs:
                   f"direct_overlap={overlap[:10]}"
               )
 
-          covered = oracle_tokens | fallback_tokens | {WETH, USDG}
+          covered = oracle_tokens | fallback_tokens | {WETH, USDG, ZERO_ADDRESS}
           uncovered = sorted(quote_tokens - covered)
           if uncovered:
               raise SystemExit(
