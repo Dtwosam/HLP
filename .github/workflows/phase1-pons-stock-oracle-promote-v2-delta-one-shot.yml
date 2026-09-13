@@ -1,5 +1,5 @@
 name: phase1-pons-stock-oracle-promote-v2-delta-one-shot
-# resume-generation: 2
+# resume-generation: 3
 
 on:
   push:
@@ -15,10 +15,8 @@ permissions:
 jobs:
   promote:
     if: ${{ contains(github.event.head_commit.message, 'launch stock oracle promotion') }}
-    uses: ./.github/workflows/phase1-pons-stock-oracle-promote-v2-delta.yml
+    uses: ./.github/workflows/phase1-pons-cbbtc-oracle-promote.yml
     with:
-      full_quote_audit_run_id: "33923299711"
-      full_quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
-      v2_oracle_run_id: "33912985322"
-      prior_delta_run_id: "33972806063"
+      quote_audit_run_id: "33923299711"
+      prior_oracle_run_id: "33974681334"
     secrets: inherit
