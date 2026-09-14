@@ -763,8 +763,9 @@ jobs:
               if embedded_plan != current_plan:
                   raise SystemExit(
                       "recovery venue embedded plan does not match lineage "
-                      f"plan run={run_id}"
+                      f"plan: run={run_id}"
                   )
+
               summary = recovery_artifact_json(
                   run_id,
                   artifact,
@@ -772,7 +773,7 @@ jobs:
                   identity_label="recovery venue summary",
               )
               try:
-                    if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+                  if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
                       raise SystemExit(
                           "recovery venue summary snapshot changed: "
                           f"run={run_id}"
