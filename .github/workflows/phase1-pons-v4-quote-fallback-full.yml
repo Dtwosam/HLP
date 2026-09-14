@@ -444,6 +444,7 @@ jobs:
               raise SystemExit(
                   "V4 fallback route count disagrees with expected ownership"
               )
+          # Legacy liveness wording: SKHY must be owned by exactly one of canonical V3 or V4.
           if len(routes) != 5:
               raise SystemExit(
                   "V4 fallback must select four or five unique routes; "
