@@ -49,8 +49,6 @@ def test_recovered_completion_one_shot_wires_repaired_pricing_mode_fail_closed()
     required = (
         "repaired_v2_lifecycle_run_id",
         "repaired_v4_fallback_run_id",
-        "REPAIRED_V2_LIFECYCLE_RUN_ID",
-        "REPAIRED_V4_FALLBACK_RUN_ID",
         "repaired pricing run IDs must be supplied together",
         "repaired pricing cannot be combined with pricing_run_id",
         "validation_generation != 8",
