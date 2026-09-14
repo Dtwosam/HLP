@@ -3,6 +3,11 @@ from pathlib import Path
 import pytest
 
 import hlp.data.quote_causality as qc
+from hlp.data.quote_v4_causal_candidates import (
+    EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES,
+    POOL_MANAGER_DEPLOYMENT_BLOCK,
+    RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID,
+)
 
 
 WORKFLOW = (
@@ -19,6 +24,9 @@ MERGE_WORKFLOW = (
 )
 
 SKHY = "0x84cab63bc87912e71ad199ff14a0ba45de68fef8"
+RIVN = "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b"
+FIG = "0x41f4267525a8aff329540ef24fd83d9044758b33"
+BULL = "0xcef9027c7d6985b85f0ba431125073529a947a68"
 OTHER = "0x" + "11" * 20
 OTHER_V4 = "0x" + "22" * 20
 
@@ -45,7 +53,6 @@ def test_v4_quote_full_promotes_skhy_from_causal_point_state():
     assert '"fee": 33_000' in content
     assert '"tick_spacing": 330' in content
     assert "SKHY causal V4 point state" in content
-    assert "RIVN must remain delayed" in content
 
 
 def test_skhy_point_state_uses_verified_public_rpc_path():
@@ -53,6 +60,62 @@ def test_skhy_point_state_uses_verified_public_rpc_path():
     assert "solidrpc_public_skhy_causal_point_state" in plan
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in plan
     assert "SOLIDRPC_AUTH_RPC_URL" not in plan
+
+
+def test_exhaustive_residual_candidates_are_frozen_from_completed_scan():
+    assert RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID == 34883018674
+    assert POOL_MANAGER_DEPLOYMENT_BLOCK == 9_070
+    expected = {
+        RIVN: {
+            "pool_id": "0xbc98f7458578286c304a6ced4aa33a562f37805f95c26ad391cf02da46dab99e",
+            "coverage_to_block": 36_002_594,
+            "initialize_events": 7,
+            "causal_point_states": 6,
+            "activation_liquidity": 25_970_859_276_841,
+        },
+        FIG: {
+            "pool_id": "0x8d7e57e6fca7c6ed5744549b19f35be72c8004ab6b3d12c9dd972e31994c4ba1",
+            "coverage_to_block": 52_956_725,
+            "initialize_events": 40,
+            "causal_point_states": 13,
+            "activation_liquidity": 962_439_577_120_207_465,
+        },
+        BULL: {
+            "pool_id": "0x1bda41eb5701e01bb4ff3659e9e614cd92260efa25731ce3d6ee18e1e25e2cd6",
+            "coverage_to_block": 54_419_646,
+            "initialize_events": 41,
+            "causal_point_states": 9,
+            "activation_liquidity": 404_061_919_866_128_484,
+        },
+    }
+    assert set(EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES) == set(expected)
+    for token, values in expected.items():
+        evidence = EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES[token]
+        assert evidence["coverage_from_block"] == 9_070
+        assert evidence["coverage_complete"] is True
+        assert evidence["selection_rule"] == "highest_active_liquidity_then_pool_id"
+        for key, value in values.items():
+            if key == "pool_id":
+                assert evidence["candidate"][key] == value
+            else:
+                assert evidence[key] == value
+
+
+def test_v4_quote_full_promotes_all_exhaustively_proven_point_states():
+    content = _content()
+    assert "EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES" in content
+    assert "RIVN must remain delayed" not in content
+    for token in (RIVN, FIG, BULL):
+        assert token in content
+    assert "all five V4 residual routes must be causal at first use" in content
+    assert "residual_causal_history_scan_run_id" in content
+
+
+def test_generic_merge_requires_all_30_causal_initial_states():
+    content = MERGE_WORKFLOW.read_text()
+    assert "exactly 30 causal initial" in content
+    assert "after all five V4 residual promotions" in content
+    assert "exactly 27 causal initial" not in content
 
 
 def test_v4_quote_full_derives_scan_start_from_selected_routes():
