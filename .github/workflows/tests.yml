@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   python:
@@ -35,4 +36,3 @@ jobs:
       anchor_run_id: "33972109927"
       oracle_run_id: "34765335793"
       fallback_run_id: "34894335995"
-    secrets: inherit
