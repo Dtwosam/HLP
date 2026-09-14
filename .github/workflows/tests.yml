@@ -33,12 +33,17 @@ jobs:
 
           source = Path('tests/test_workflow_liveness.py')
           text = source.read_text()
-          old = '        "33_974_681_334",\n'
-          new = '        "34_765_335_793",\n'
-          assert text.count(old) == 1
-          assert text.count(new) == 0
+          old = '''    for run_id in (
+              "33_974_681_334",
+              "33_920_762_592",
+          '''
+          new = '''    for run_id in (
+              "34_765_335_793",
+              "33_920_762_592",
+          '''
+          assert old in text
           target = Path('/tmp/oracle-handoff/test_workflow_liveness.py')
-          target.write_text(text.replace(old, new))
+          target.write_text(text.replace(old, new, 1))
           PY
       - name: Upload exact promoted-oracle liveness test patch
         if: ${{ always() }}
