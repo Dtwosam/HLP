@@ -40,6 +40,7 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
+  ROBINHOOD_ARCHIVE_RPC_URL: https://rpc.mainnet.chain.robinhood.com
 
 jobs:
   plan:
