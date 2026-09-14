@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   python:
@@ -25,60 +24,3 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
-
-  dispatch-corrected-pricing:
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'phase1/v4-causal-history-fix' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch corrected pricing chain
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          payload = {
-              "ref": "phase1/v4-causal-history-fix",
-              "inputs": {
-                  "oracle_run_id": "34765335793",
-                  "v1_v3_run_id": "34228430753",
-                  "v2_v4_run_id": "34471480180",
-                  "v3_fallback_run_id": "34480161440",
-                  "v4_fallback_run_id": "",
-                  "anchor_run_id": "33972109927",
-                  "route_audit_run_id": "33921477647",
-                  "delayed_probe_run_id": "33923160281",
-                  "residual_v4_probe_run_id": "33926428274",
-                  "source_registry_run_id": "33911022718",
-                  "quote_audit_run_id": "33923299711",
-                  "v2_registry_run_id": "33912235341",
-                  "curve_run_id": "33936232604",
-                  "transition_run_id": "33912452330",
-              },
-          }
-          request = urllib.request.Request(
-              (
-                  os.environ["GITHUB_API_URL"]
-                  + "/repos/"
-                  + os.environ["GITHUB_REPOSITORY"]
-                  + "/actions/workflows/"
-                  + "phase1-pons-pricing-eligibility-chain.yml/dispatches"
-              ),
-              data=json.dumps(payload).encode(),
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
-                  "X-GitHub-Api-Version": "2022-11-28",
-                  "Content-Type": "application/json",
-              },
-              method="POST",
-          )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              if response.status != 204:
-                  raise SystemExit(
-                      f"workflow dispatch failed: status={response.status}"
-                  )
-          print("dispatched corrected Phase 1 pricing chain")
-          PY
