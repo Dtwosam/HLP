@@ -13,16 +13,15 @@ from hlp.protocols.uniswap import (
 
 SKHY_POOL = "0x4c4a74bd3b9a224b06379c60af2843c2238156446c8003e3796456a3192f5e6b"
 SKHY_INIT_BLOCK = 33_534_851
-SKHY_FIRST_USE = 52_263_525
 
 
-def test_live_skhy_known_pool_pre_use_witness():
+def test_live_skhy_known_pool_initial_swap_witness():
     rpc = RpcClient(
         SOLIDRPC_PUBLIC_RPC_URL,
         timeout=30,
         attempts=3,
         min_interval_seconds=0.1,
-        route_label="solidrpc_public_skhy_causal_witness_discovery",
+        route_label="solidrpc_public_skhy_initial_swap_witness",
     )
     init_logs = list(
         rpc.iter_logs_chunked(
@@ -37,11 +36,11 @@ def test_live_skhy_known_pool_pre_use_witness():
     initialized = [decode_v4_pool_initialized(raw) for raw in init_logs]
     swaps = []
     for raw in rpc.iter_logs_chunked(
-        SKHY_FIRST_USE - 100_000,
-        SKHY_FIRST_USE - 1,
+        SKHY_INIT_BLOCK,
+        SKHY_INIT_BLOCK + 1_000,
         address=UNISWAP_V4_POOL_MANAGER,
         topics=[V4_SWAP_TOPIC, SKHY_POOL],
-        chunk_size=50_000,
+        chunk_size=1_000,
         min_chunk_size=25,
     ):
         swap = decode_v4_swap(raw)
