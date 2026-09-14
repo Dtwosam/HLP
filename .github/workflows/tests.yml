@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - phase1/v4-causal-history-fix
   pull_request:
 
 permissions:
@@ -25,65 +24,3 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
-
-  skhy-point-state:
-    if: ${{ github.event_name == 'push' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-      - name: Install
-        run: python -m pip install -e .
-      - name: Verify SKHY causal V4 point state on public RPC
-        run: |
-          python - <<'PY'
-          import json
-
-          from hlp.config import (
-              ROBINHOOD_USDG,
-              SOLIDRPC_PUBLIC_RPC_URL,
-              UNISWAP_V4_POOL_MANAGER,
-          )
-          from hlp.data.quote_v4_causal_history import (
-              select_v4_usdg_causal_state_witness,
-          )
-          from hlp.data.rpc import RpcClient
-
-          skhy = "0x84cab63bc87912e71ad199ff14a0ba45de68fef8"
-          source = {
-              "quote_token": skhy,
-              "symbol": "SKHY",
-              "quote_decimals": 18,
-              "first_launch_block": 52_263_525,
-              "launches": 129,
-              "versions": {"v2": 129},
-          }
-          rpc = RpcClient(
-              SOLIDRPC_PUBLIC_RPC_URL,
-              timeout=30,
-              attempts=5,
-              min_interval_seconds=0.6,
-              route_label="solidrpc_public_skhy_causal_point_state_push",
-          )
-          route = select_v4_usdg_causal_state_witness(
-              rpc,
-              source,
-              [{
-                  "pool_id": (
-                      "0x4c4a74bd3b9a224b06379c60af2843c"
-                      "2238156446c8003e3796456a3192f5e6b"
-                  ),
-                  "currency0": ROBINHOOD_USDG,
-                  "currency1": skhy,
-                  "fee": 33_000,
-                  "tick_spacing": 330,
-                  "hooks": "0x" + "00" * 20,
-                  "initialize_block": 33_534_851,
-              }],
-              pool_manager=UNISWAP_V4_POOL_MANAGER,
-          )
-          print("SKHY_CAUSAL_POINT_STATE=" + json.dumps(route, sort_keys=True))
-          PY
