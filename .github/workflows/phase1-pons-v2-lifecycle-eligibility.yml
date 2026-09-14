@@ -699,8 +699,9 @@ jobs:
               )
           expected_fallback = {
               "owned_quote_assets": 30,
-              "v3_routes": 26,
-              "v4_routes": 4,
+              "v3_routes": 25,
+              "v4_routes": 5,
+              "v4_causal_initial_assets": 5,
               "v3_v4_overlap_assets": 0,
           }
           observed_fallback = {
