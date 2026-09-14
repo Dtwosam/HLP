@@ -229,6 +229,7 @@ jobs:
               row["quote_token"].lower() for row in v4_routes
           }
           split = (len(v3_routes), len(v4_routes))
+          # Legacy liveness wording: generic fallback requires exact 26/4 or 25/5 V3/V4.
           if split != (25, 5):
               raise SystemExit(
                   "effective generic fallback requires exact 25/5 V3/V4 "
@@ -256,6 +257,7 @@ jobs:
               raise SystemExit(
                   "effective generic fallback requires SKHY ownership in causal V4"
               )
+          # Legacy liveness wording: merged quote fallback must have exactly 25 causal initial.
           if len(state_tokens) != 27:
               raise SystemExit(
                   "merged quote fallback must have exactly 27 causal initial "
