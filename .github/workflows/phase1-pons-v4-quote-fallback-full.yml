@@ -446,7 +446,8 @@ jobs:
               )
           if len(routes) != 5:
               raise SystemExit(
-                  "V4 fallback must select five unique routes after SKHY handoff"
+                  "V4 fallback must select four or five unique routes; "
+                  "causal SKHY handoff now requires exactly five"
               )
           if skhy not in route_tokens:
               raise SystemExit("SKHY causal V4 route is missing")
