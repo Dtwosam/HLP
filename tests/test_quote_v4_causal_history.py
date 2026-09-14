@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from hlp.config import ROBINHOOD_USDG
-from hlp.data.quote_v4_routes import (
+from hlp.data.quote_v4_causal_history import (
     extend_v4_usdg_causal_history,
-    select_v4_quote_routes,
+    select_v4_quote_routes_after_causal_history,
 )
 from hlp.protocols.uniswap import V4_INITIALIZE_TOPIC, V4_SWAP_TOPIC
 
@@ -26,6 +26,7 @@ def _delayed_candidate():
             "fee": 500,
             "tick_spacing": 10,
             "hooks": "0x" + "00" * 20,
+            "block_number": 1040,
         },
         "latest_pre_use_swap": None,
         "first_post_use_swap": {
@@ -111,11 +112,11 @@ def test_causal_history_reaches_pool_more_than_lookaround_before_first_use(monke
         ),
     }
     monkeypatch.setattr(
-        "hlp.data.quote_v4_routes.decode_v4_pool_initialized",
+        "hlp.data.quote_v4_causal_history.decode_v4_pool_initialized",
         lambda raw: initialized,
     )
     monkeypatch.setattr(
-        "hlp.data.quote_v4_routes.decode_v4_swap",
+        "hlp.data.quote_v4_causal_history.decode_v4_swap",
         lambda raw: swaps[raw],
     )
 
@@ -173,4 +174,4 @@ def test_select_rejects_required_but_incomplete_causal_history():
         "causal_history_complete": False,
     })
     with pytest.raises(ValueError, match="causal history is incomplete"):
-        select_v4_quote_routes([row])
+        select_v4_quote_routes_after_causal_history([row])
