@@ -23,6 +23,9 @@ from hlp.protocols.uniswap import (
 
 
 MAX_CAUSAL_HISTORY_SEGMENT_BLOCKS = 100_000
+_V4_POOLS_SLOT = 6
+_V4_LIQUIDITY_OFFSET = 3
+_EXTSLOAD_SELECTOR = keccak(text="extsload(bytes32)")[:4]
 
 
 def _address_word(address: str) -> bytes:
@@ -61,6 +64,38 @@ def v4_pool_id(
         _address_word(hooks),
     ))
     return "0x" + keccak(encoded).hex()
+
+
+def _v4_pool_state_slot(pool_id: str) -> bytes:
+    candidate = pool_id.lower()
+    if not candidate.startswith("0x") or len(candidate) != 66:
+        raise ValueError(f"invalid V4 pool id: {pool_id!r}")
+    raw_pool_id = bytes.fromhex(candidate[2:])
+    return keccak(raw_pool_id + _V4_POOLS_SLOT.to_bytes(32, "big"))
+
+
+def _v4_extsload_data(slot: bytes) -> str:
+    if len(slot) != 32:
+        raise ValueError("V4 storage slot must be bytes32")
+    return "0x" + (_EXTSLOAD_SELECTOR + slot).hex()
+
+
+def _rpc_word(value) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, bytes):
+        return int.from_bytes(value, "big")
+    return int(str(value), 16)
+
+
+def _read_v4_word(rpc, pool_manager: str, slot: bytes, block: int) -> int:
+    return _rpc_word(
+        rpc.eth_call(
+            pool_manager,
+            _v4_extsload_data(slot),
+            int(block),
+        )
+    )
 
 
 def _best_causal_candidate(candidates: Iterable[dict]) -> dict | None:
@@ -217,6 +252,180 @@ def validate_v4_usdg_causal_swap_witness(
         "pool_key_verified": True,
     })
     return route
+
+
+def validate_v4_usdg_causal_state_witness(
+    rpc,
+    quote_row: dict,
+    *,
+    pool_id: str,
+    currency0: str,
+    currency1: str,
+    fee: int,
+    tick_spacing: int,
+    hooks: str,
+    initialize_block: int,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> dict:
+    """Validate exact V4 pool state at first Pons use minus one.
+
+    The supplied PoolKey is bound to ``pool_id``, its exact Initialize event
+    is re-read on-chain, and PoolManager storage is read at the causal block.
+    A route is accepted only when both the initialized price and active
+    liquidity are positive.  No Swap-history scan is required.
+    """
+    source = dict(quote_row)
+    token = source["quote_token"].lower()
+    usdg = ROBINHOOD_USDG.lower()
+    manager = pool_manager.lower()
+    currency0 = currency0.lower()
+    currency1 = currency1.lower()
+    hooks = hooks.lower()
+    if {currency0, currency1} != {token, usdg}:
+        raise ValueError("causal V4 witness currencies are not quote/USDG")
+
+    candidate_pool = pool_id.lower()
+    if not candidate_pool.startswith("0x") or len(candidate_pool) != 66:
+        raise ValueError(f"invalid V4 pool id: {pool_id!r}")
+    int(candidate_pool[2:], 16)
+    computed = v4_pool_id(
+        currency0=currency0,
+        currency1=currency1,
+        fee=int(fee),
+        tick_spacing=int(tick_spacing),
+        hooks=hooks,
+    )
+    if computed != candidate_pool:
+        raise ValueError(
+            "V4 witness pool id does not match pool key: "
+            f"expected={candidate_pool} computed={computed}"
+        )
+
+    first_use = int(source["first_launch_block"])
+    causal_block = first_use - 1
+    init_block = int(initialize_block)
+    if causal_block < 0 or init_block < 0 or init_block > causal_block:
+        raise ValueError(
+            "V4 Initialize block must be at or before the causal block: "
+            f"initialize={init_block} causal={causal_block}"
+        )
+
+    initialize_logs = rpc.get_logs(
+        init_block,
+        init_block,
+        address=pool_manager,
+        topics=[V4_INITIALIZE_TOPIC, candidate_pool],
+    )
+    if len(initialize_logs) != 1:
+        raise ValueError(
+            "V4 causal state witness requires exactly one Initialize event: "
+            f"pool={candidate_pool} block={init_block} observed={len(initialize_logs)}"
+        )
+    initialized = decode_v4_pool_initialized(initialize_logs[0])
+    initialized_key = (
+        initialized.pool_manager.lower() == manager
+        and initialized.pool_id.lower() == candidate_pool
+        and initialized.currency0.lower() == currency0
+        and initialized.currency1.lower() == currency1
+        and int(initialized.fee) == int(fee)
+        and int(initialized.tick_spacing) == int(tick_spacing)
+        and initialized.hooks.lower() == hooks
+        and int(initialized.block_number) == init_block
+    )
+    if not initialized_key:
+        raise ValueError("Initialize event does not match pool key")
+
+    state_slot = _v4_pool_state_slot(candidate_pool)
+    liquidity_slot = (
+        int.from_bytes(state_slot, "big") + _V4_LIQUIDITY_OFFSET
+    ).to_bytes(32, "big")
+    slot0_word = _read_v4_word(rpc, pool_manager, state_slot, causal_block)
+    liquidity_word = _read_v4_word(
+        rpc,
+        pool_manager,
+        liquidity_slot,
+        causal_block,
+    )
+    sqrt_price_x96 = slot0_word & ((1 << 160) - 1)
+    liquidity = liquidity_word & ((1 << 128) - 1)
+    if sqrt_price_x96 <= 0:
+        raise ValueError("causal V4 point state has no initialized price")
+    if liquidity <= 0:
+        raise ValueError("causal V4 point state has no positive active liquidity")
+
+    token_is_token0 = currency0 == token
+    quote_per_token = v3_v4_quote_per_token(
+        sqrt_price_x96,
+        token_is_token0=token_is_token0,
+        token_decimals=int(source["quote_decimals"]),
+        quote_decimals=6,
+    )
+    if quote_per_token <= 0:
+        raise ValueError("causal V4 point-state price is not positive")
+
+    return {
+        "quote_token": token,
+        "symbol": source.get("symbol"),
+        "quote_decimals": int(source["quote_decimals"]),
+        "launches": int(source["launches"]),
+        "versions": source.get("versions", {}),
+        "pool_manager": manager,
+        "pool_id": candidate_pool,
+        "currency0": currency0,
+        "currency1": currency1,
+        "token_is_token0": token_is_token0,
+        "anchor_token": usdg,
+        "anchor_decimals": 6,
+        "fee": int(fee),
+        "tick_spacing": int(tick_spacing),
+        "hooks": hooks,
+        "activation_liquidity": liquidity,
+        "activation_block": first_use,
+        "causal_state_block": causal_block,
+        "route_type": "uniswap_v4_direct_usdg",
+        "initial_usd_price": quote_per_token,
+        "initial_quote_per_token": quote_per_token,
+        "state_transaction_hash": None,
+        "state_transaction_index": None,
+        "state_log_index": None,
+        "state_evidence_type": "point_in_time_pool_state",
+        "sqrt_price_x96": sqrt_price_x96,
+        "witness_validation": "causal_block_v4_pool_state",
+        "witness_block": causal_block,
+        "initialize_block": init_block,
+        "initialize_transaction_hash": initialized.transaction_hash,
+        "initialize_transaction_index": initialized.transaction_index,
+        "initialize_log_index": int(initialized.log_index),
+        "pool_key_verified": True,
+    }
+
+
+def select_v4_usdg_causal_state_witness(
+    rpc,
+    quote_row: dict,
+    candidates: Iterable[dict],
+    *,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> dict:
+    """Validate known causal candidates and select the strongest point state."""
+    validated = [
+        validate_v4_usdg_causal_state_witness(
+            rpc,
+            quote_row,
+            pool_manager=pool_manager,
+            **dict(candidate),
+        )
+        for candidate in candidates
+    ]
+    if not validated:
+        raise ValueError("no V4 causal point-state candidates supplied")
+    return max(
+        validated,
+        key=lambda route: (
+            int(route["activation_liquidity"]),
+            route["pool_id"],
+        ),
+    )
 
 
 def extend_v4_usdg_causal_history(
