@@ -13,19 +13,19 @@ if text.count(config_bump) != 1:
     )
 text = text.replace(config_bump, "", 1)
 
-old_validation = '''    text = replace_once(
-        text,
-        """              validation_generation != 7\n              or previous_validation_generation != 7\n""",
-        """              validation_generation != 8\n              or previous_validation_generation != 8\n""",
-        "one-shot validation generation",
-    )
-'''
-if text.count(old_validation) != 1:
+validation_marker = '        "one-shot validation generation",\n'
+if text.count(validation_marker) != 1:
     raise SystemExit(
-        "temporary helper validation one-shot target changed: "
-        f"{text.count(old_validation)}"
+        "temporary helper validation label changed: "
+        f"{text.count(validation_marker)}"
     )
-text = text.replace(old_validation, "", 1)
+validation_index = text.index(validation_marker)
+validation_start = text.rfind("    text = replace_once(\n", 0, validation_index)
+validation_end = text.find("    )\n", validation_index)
+if validation_start < 0 or validation_end < 0:
+    raise SystemExit("temporary helper validation boundaries not found")
+validation_end += len("    )\n")
+text = text[:validation_start] + text[validation_end:]
 
 # Narrow the one ambiguous env replacement to the unique provenance step.
 marker = '        "chain verified pricing source run",\n'
