@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
+from eth_utils import keccak
+
 from hlp.config import ROBINHOOD_USDG, UNISWAP_V4_POOL_MANAGER
 from hlp.data.quote_v4_routes import (
     _address_topic,
@@ -21,6 +23,44 @@ from hlp.protocols.uniswap import (
 
 
 MAX_CAUSAL_HISTORY_SEGMENT_BLOCKS = 100_000
+
+
+def _address_word(address: str) -> bytes:
+    value = address.lower()
+    if not value.startswith("0x") or len(value) != 42:
+        raise ValueError(f"invalid EVM address: {address!r}")
+    number = int(value[2:], 16)
+    return number.to_bytes(32, "big")
+
+
+def v4_pool_id(
+    *,
+    currency0: str,
+    currency1: str,
+    fee: int,
+    tick_spacing: int,
+    hooks: str,
+) -> str:
+    """Return the Uniswap V4 PoolId for one exact PoolKey."""
+    token0 = currency0.lower()
+    token1 = currency1.lower()
+    if int(token0, 16) >= int(token1, 16):
+        raise ValueError("V4 PoolKey currencies must be strictly ordered")
+    fee_value = int(fee)
+    if fee_value < 0 or fee_value >= 1 << 24:
+        raise ValueError("V4 pool fee must fit uint24")
+    spacing = int(tick_spacing)
+    if spacing < -(1 << 23) or spacing >= 1 << 23:
+        raise ValueError("V4 tick spacing must fit int24")
+    spacing_word = spacing if spacing >= 0 else (1 << 256) + spacing
+    encoded = b"".join((
+        _address_word(token0),
+        _address_word(token1),
+        fee_value.to_bytes(32, "big"),
+        spacing_word.to_bytes(32, "big"),
+        _address_word(hooks),
+    ))
+    return "0x" + keccak(encoded).hex()
 
 
 def _best_causal_candidate(candidates: Iterable[dict]) -> dict | None:
@@ -58,6 +98,125 @@ def _swap_evidence(source: dict, candidate: dict, swap) -> dict:
         "usd_price": str(quote_per_token),
     })
     return row
+
+
+def validate_v4_usdg_causal_swap_witness(
+    rpc,
+    quote_row: dict,
+    *,
+    pool_id: str,
+    currency0: str,
+    currency1: str,
+    fee: int,
+    tick_spacing: int,
+    hooks: str,
+    witness_block: int,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> dict:
+    """Validate one exact positive pre-use V4 swap and return a causal route.
+
+    This is a positive-witness path, not an exhaustive-history claim.  The
+    supplied pool key is cryptographically bound to ``pool_id`` before a
+    single-block PoolManager Swap query is accepted as causal evidence.
+    """
+    source = dict(quote_row)
+    token = source["quote_token"].lower()
+    usdg = ROBINHOOD_USDG.lower()
+    currency0 = currency0.lower()
+    currency1 = currency1.lower()
+    if {currency0, currency1} != {token, usdg}:
+        raise ValueError("causal V4 witness currencies are not quote/USDG")
+
+    candidate_pool = pool_id.lower()
+    if not candidate_pool.startswith("0x") or len(candidate_pool) != 66:
+        raise ValueError(f"invalid V4 pool id: {pool_id!r}")
+    int(candidate_pool[2:], 16)
+    computed = v4_pool_id(
+        currency0=currency0,
+        currency1=currency1,
+        fee=int(fee),
+        tick_spacing=int(tick_spacing),
+        hooks=hooks,
+    )
+    if computed != candidate_pool:
+        raise ValueError(
+            "V4 witness pool id does not match pool key: "
+            f"expected={candidate_pool} computed={computed}"
+        )
+
+    block = int(witness_block)
+    first_use = int(source["first_launch_block"])
+    if block < 0 or block >= first_use:
+        raise ValueError(
+            "V4 causal witness block must be before first Pons use: "
+            f"witness={block} first_use={first_use}"
+        )
+
+    raw_logs = rpc.iter_logs_chunked(
+        block,
+        block,
+        address=pool_manager,
+        topics=[V4_SWAP_TOPIC, candidate_pool],
+        chunk_size=1,
+        min_chunk_size=1,
+    )
+    positive = []
+    for raw in raw_logs:
+        swap = decode_v4_swap(raw)
+        if swap.pool_id.lower() != candidate_pool:
+            raise ValueError("V4 witness Swap pool id mismatch")
+        if swap.pool_manager.lower() != pool_manager.lower():
+            raise ValueError("V4 witness Swap PoolManager mismatch")
+        if int(swap.block_number) != block:
+            raise ValueError("V4 witness Swap escaped requested block")
+        if int(swap.sqrt_price_x96) <= 0 or int(swap.liquidity) <= 0:
+            continue
+        positive.append(swap)
+    if not positive:
+        raise ValueError("V4 causal witness has no positive-liquidity Swap")
+
+    latest = max(
+        positive,
+        key=lambda swap: (
+            int(swap.block_number),
+            -1 if swap.transaction_index is None else int(swap.transaction_index),
+            int(swap.log_index),
+        ),
+    )
+    candidate = {
+        "pool_id": candidate_pool,
+        "initialize": {
+            "pool_manager": pool_manager.lower(),
+            "pool_id": candidate_pool,
+            "currency0": currency0,
+            "currency1": currency1,
+            "fee": int(fee),
+            "tick_spacing": int(tick_spacing),
+            "hooks": hooks.lower(),
+        },
+        "latest_pre_use_swap": None,
+        "first_post_use_swap": None,
+        "swap_count_in_window": len(positive),
+    }
+    candidate["latest_pre_use_swap"] = _swap_evidence(source, candidate, latest)
+    probe = {
+        **source,
+        "v4_candidates": [candidate],
+        "causal_route_ready": True,
+        "delayed_route_ready": False,
+        "selected_causal_candidate": candidate,
+        "selected_delayed_candidate": None,
+    }
+    routes = select_v4_quote_routes([probe])
+    if len(routes) != 1:
+        raise ValueError("V4 causal witness did not produce exactly one route")
+    route = dict(routes[0])
+    route.update({
+        "witness_validation": "single_block_positive_v4_swap",
+        "witness_block": block,
+        "pool_key_verified": True,
+    })
+    return route
 
 
 def extend_v4_usdg_causal_history(
