@@ -41,9 +41,9 @@ def test_v4_quote_full_promotes_skhy_from_causal_point_state():
     assert "select_v4_usdg_causal_state_witness" in content
     assert "0x4c4a74bd3b9a224b06379c60af2843c" in content
     assert "2238156446c8003e3796456a3192f5e6b" in content
-    assert "initialize_block=33_534_851" in content
-    assert "fee=33_000" in content
-    assert "tick_spacing=330" in content
+    assert '"initialize_block": 33_534_851' in content
+    assert '"fee": 33_000' in content
+    assert '"tick_spacing": 330' in content
     assert "SKHY causal V4 point state" in content
     assert "RIVN must remain delayed" in content
 
