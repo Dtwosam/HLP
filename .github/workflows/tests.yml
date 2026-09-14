@@ -10,49 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  patch-stale-v2-contract-test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: phase1/v4-causal-history-fix
-      - name: Align V2 fallback liveness contract
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("tests/test_workflow_liveness.py")
-          content = path.read_text()
-          old = '''    assert '\"v3_routes\": 26' in content
-    assert '\"v4_routes\": 4' in content
-    assert '\"v3_v4_overlap_assets\": 0' in content
-'''
-          new = '''    assert '\"v3_routes\": 25' in content
-    assert '\"v4_routes\": 5' in content
-    assert '\"v4_causal_initial_assets\": 5' in content
-    assert '\"v3_v4_overlap_assets\": 0' in content
-'''
-          count = content.count(old)
-          if count == 0:
-              if new in content:
-                  print("V2 fallback liveness contract already aligned")
-                  raise SystemExit(0)
-              raise SystemExit("expected stale V2 fallback liveness block not found")
-          if count != 1:
-              raise SystemExit(f"stale V2 fallback liveness block count changed: {count}")
-          path.write_text(content.replace(old, new, 1))
-          PY
-          if git diff --quiet -- tests/test_workflow_liveness.py; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/test_workflow_liveness.py
-          git commit -m "test: align V2 fallback liveness contract"
-          git push origin HEAD:phase1/v4-causal-history-fix
-
   python:
     runs-on: ubuntu-latest
     steps:
