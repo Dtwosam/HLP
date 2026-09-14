@@ -122,3 +122,22 @@ def test_repaired_pricing_promotion_is_exact_artifact_only_and_causal():
     assert blocks
     for index, block in enumerate(blocks):
         compile(block, f"repaired-pricing-promote:{index}", "exec")
+
+
+def test_representative_preflight_allows_only_current_recovered_run_to_be_active():
+    content = _workflow("phase1-pons-representative-evidence-chain.yml")
+    required = (
+        "CURRENT_RUN_ID: ${{ github.run_id }}",
+        "CURRENT_HEAD_SHA: ${{ github.sha }}",
+        "eligibility_run_id == current_run_id",
+        ".github/workflows/phase1-pons-recovered-completion-one-shot.yml",
+        "representative current eligibility workflow changed",
+        "representative current eligibility run is not active",
+        "representative current eligibility head changed",
+        "representative eligibility run is not successful",
+    )
+    for needle in required:
+        assert needle in content, needle
+
+    assert 'eligibility_run.get("status") != "completed"' in content
+    assert 'eligibility_run.get("conclusion") != "success"' in content
