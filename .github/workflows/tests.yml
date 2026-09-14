@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   python:
@@ -24,3 +25,23 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
+
+  corrected-pricing-evidence:
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'phase1/v4-causal-history-fix' }}
+    uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
+    with:
+      oracle_run_id: '34765335793'
+      v1_v3_run_id: '34228430753'
+      v2_v4_run_id: '34471480180'
+      v3_fallback_run_id: '34480161440'
+      v4_fallback_run_id: ''
+      anchor_run_id: '33972109927'
+      route_audit_run_id: '33921477647'
+      delayed_probe_run_id: '33923160281'
+      residual_v4_probe_run_id: '33926428274'
+      source_registry_run_id: '33911022718'
+      quote_audit_run_id: '33923299711'
+      v2_registry_run_id: '33912235341'
+      curve_run_id: '33936232604'
+      transition_run_id: '33912452330'
+    secrets: inherit
