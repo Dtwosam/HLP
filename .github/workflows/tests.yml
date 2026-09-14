@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   python:
@@ -24,48 +24,3 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
-
-  patch-v4-chunking:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: phase1/v4-causal-history-fix
-          fetch-depth: 0
-      - name: Apply verified 50k V4 tape chunking
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          paths = [
-              Path('.github/workflows/phase1-pons-v4-quote-fallback-full.yml'),
-              Path('.github/workflows/phase1-pons-v4-quote-fallback-recover-gaps.yml'),
-          ]
-          old = 'if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi'
-          new = 'CHUNK=50000'
-          official = 'ROBINHOOD_ARCHIVE_RPC_URL: https://rpc.mainnet.chain.robinhood.com'
-          changed = False
-          for path in paths:
-              text = path.read_text()
-              if official not in text:
-                  raise SystemExit(f'{path}: official Robinhood RPC binding missing')
-              count = text.count(old)
-              if count == 1:
-                  path.write_text(text.replace(old, new))
-                  changed = True
-              elif count == 0 and new in text and 'CHUNK=2000' not in text:
-                  pass
-              else:
-                  raise SystemExit(f'{path}: unexpected V4 chunk conditional count={count}')
-          if not changed:
-              print('verified 50k V4 chunking already applied')
-          PY
-          git diff --check
-          if git diff --quiet -- .github/workflows/phase1-pons-v4-quote-fallback-full.yml .github/workflows/phase1-pons-v4-quote-fallback-recover-gaps.yml; then
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/phase1-pons-v4-quote-fallback-full.yml .github/workflows/phase1-pons-v4-quote-fallback-recover-gaps.yml
-          git commit -m 'ci: use verified 50k V4 tape chunks'
-          git push origin HEAD:phase1/v4-causal-history-fix
