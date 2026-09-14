@@ -3,6 +3,31 @@ from pathlib import Path
 
 path = Path(".github/scripts/apply_repaired_pricing_promotion.py")
 text = path.read_text()
+
+# The existing launcher guard already exact-checks the config schema. Keep its
+# validation generation stable while adding the repaired source keys.
+config_bump = '    config["validation_generation"] = 8\n'
+if text.count(config_bump) != 1:
+    raise SystemExit(
+        f"temporary helper validation config target changed: {text.count(config_bump)}"
+    )
+text = text.replace(config_bump, "", 1)
+
+old_validation = '''    text = replace_once(
+        text,
+        """              validation_generation != 7\n              or previous_validation_generation != 7\n""",
+        """              validation_generation != 8\n              or previous_validation_generation != 8\n""",
+        "one-shot validation generation",
+    )
+'''
+if text.count(old_validation) != 1:
+    raise SystemExit(
+        "temporary helper validation one-shot target changed: "
+        f"{text.count(old_validation)}"
+    )
+text = text.replace(old_validation, "", 1)
+
+# Narrow the one ambiguous env replacement to the unique provenance step.
 marker = '        "chain verified pricing source run",\n'
 if text.count(marker) != 1:
     raise SystemExit(
