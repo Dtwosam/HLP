@@ -37,6 +37,16 @@ on:
         required: false
         default: ""
         type: string
+      repaired_v2_lifecycle_run_id:
+        description: "Exact repaired V2 lifecycle evidence run; must be paired with repaired V4 fallback evidence"
+        required: false
+        default: ""
+        type: string
+      repaired_v4_fallback_run_id:
+        description: "Exact repaired V4/generic fallback evidence run; must be paired with repaired V2 lifecycle evidence"
+        required: false
+        default: ""
+        type: string
       oracle_run_id:
         required: true
         default: "34765335793"
@@ -90,6 +100,14 @@ on:
         default: ""
         type: string
       v3_fallback_run_id:
+        required: false
+        default: ""
+        type: string
+      repaired_v2_lifecycle_run_id:
+        required: false
+        default: ""
+        type: string
+      repaired_v4_fallback_run_id:
         required: false
         default: ""
         type: string
@@ -149,6 +167,8 @@ jobs:
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
           PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
           V3_FALLBACK_RUN_ID: ${{ inputs.v3_fallback_run_id }}
+          REPAIRED_V2_LIFECYCLE_RUN_ID: ${{ inputs.repaired_v2_lifecycle_run_id }}
+          REPAIRED_V4_FALLBACK_RUN_ID: ${{ inputs.repaired_v4_fallback_run_id }}
           ORACLE_RUN_ID: ${{ inputs.oracle_run_id }}
           RUNNER_SMOKE_RUN_ID: ${{ inputs.runner_smoke_run_id }}
           REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
@@ -185,6 +205,14 @@ jobs:
           pricing_id = int(pricing_text) if pricing_text else 0
           v3_fallback_text = os.environ["V3_FALLBACK_RUN_ID"].strip()
           v3_fallback_id = int(v3_fallback_text) if v3_fallback_text else 0
+          repaired_v2_text = os.environ[
+              "REPAIRED_V2_LIFECYCLE_RUN_ID"
+          ].strip()
+          repaired_v2_id = int(repaired_v2_text) if repaired_v2_text else 0
+          repaired_v4_text = os.environ[
+              "REPAIRED_V4_FALLBACK_RUN_ID"
+          ].strip()
+          repaired_v4_id = int(repaired_v4_text) if repaired_v4_text else 0
           if source_id != 33_982_556_591:
               raise SystemExit("recovery source eligibility run changed")
           if (
@@ -192,11 +220,29 @@ jobs:
               or v2_id < 0
               or pricing_id < 0
               or v3_fallback_id < 0
+              or repaired_v2_id < 0
+              or repaired_v4_id < 0
           ):
               raise SystemExit("recovery run IDs are invalid")
           if pricing_id > 0 and v2_id <= 0:
               raise SystemExit(
                   "reused pricing requires an explicit V2/V4 run ID"
+              )
+          if bool(repaired_v2_id) != bool(repaired_v4_id):
+              raise SystemExit(
+                  "repaired pricing run IDs must be supplied together"
+              )
+          if pricing_id > 0 and repaired_v2_id > 0:
+              raise SystemExit(
+                  "repaired pricing cannot be combined with pricing_run_id"
+              )
+          if repaired_v2_id > 0 and v2_id <= 0:
+              raise SystemExit(
+                  "repaired pricing requires an explicit V2/V4 run ID"
+              )
+          if repaired_v2_id > 0 and v3_fallback_id <= 0:
+              raise SystemExit(
+                  "repaired pricing requires v3_fallback_run_id"
               )
 
           support_contracts = {
@@ -1040,19 +1086,24 @@ jobs:
               "v2_v4_run_id": v2_id,
               "pricing_run_id": pricing_id,
               "v3_fallback_run_id": v3_fallback_id,
+              "repaired_v2_lifecycle_run_id": repaired_v2_id,
+              "repaired_v4_fallback_run_id": repaired_v4_id,
               "support_run_ids": observed_support_runs,
               "source_missing_artifacts": missing_source_artifacts,
               "source_v2_partial_artifacts": source_v2_shards,
               "source_has_complete_pricing": source_has_complete_pricing,
-              "resume_v2_v4": v2_id == 0 and pricing_id == 0,
+              "resume_v2_v4": (
+                  v2_id == 0 and pricing_id == 0 and repaired_v2_id == 0
+              ),
               "reuse_pricing": pricing_id > 0,
+              "promote_repaired_pricing": repaired_v2_id > 0,
               "preflight": "pass",
           }, sort_keys=True))
           PY
 
   v2_v4:
     needs: preflight
-    if: ${{ needs.preflight.result == 'success' && inputs.pricing_run_id == '' && inputs.v2_v4_run_id == '' }}
+    if: ${{ needs.preflight.result == 'success' && inputs.pricing_run_id == '' && inputs.repaired_v2_lifecycle_run_id == '' && inputs.repaired_v4_fallback_run_id == '' && inputs.v2_v4_run_id == '' }}
     uses: ./.github/workflows/phase1-pons-v2-v4-full.yml
     with:
       transition_run_id: ${{ inputs.transition_run_id }}
@@ -1074,7 +1125,7 @@ jobs:
       - preflight
       - v2_v4
       - v2_v4_recovery
-    if: ${{ always() && inputs.pricing_run_id == '' && needs.preflight.result == 'success' && (inputs.v2_v4_run_id != '' || needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
+    if: ${{ always() && inputs.pricing_run_id == '' && inputs.repaired_v2_lifecycle_run_id == '' && inputs.repaired_v4_fallback_run_id == '' && needs.preflight.result == 'success' && (inputs.v2_v4_run_id != '' || needs.v2_v4.result == 'success' || needs.v2_v4_recovery.result == 'success') }}
     uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml
     with:
       oracle_run_id: ${{ inputs.oracle_run_id }}
@@ -1092,6 +1143,25 @@ jobs:
       transition_run_id: ${{ inputs.transition_run_id }}
     secrets: inherit
 
+  promote_repaired_pricing:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && inputs.repaired_v2_lifecycle_run_id != '' && inputs.repaired_v4_fallback_run_id != '' }}
+    uses: ./.github/workflows/phase1-pons-repaired-pricing-promote.yml
+    with:
+      v1_v3_run_id: ${{ inputs.v1_v3_run_id }}
+      v2_v4_run_id: ${{ inputs.v2_v4_run_id }}
+      v3_fallback_run_id: ${{ inputs.v3_fallback_run_id }}
+      repaired_v2_lifecycle_run_id: ${{ inputs.repaired_v2_lifecycle_run_id }}
+      repaired_v4_fallback_run_id: ${{ inputs.repaired_v4_fallback_run_id }}
+
+  promote_repaired_universe:
+    needs: promote_repaired_pricing
+    if: ${{ needs.promote_repaired_pricing.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-eligible-universe-promote.yml
+    with:
+      source_eligibility_run_id: ${{ github.run_id }}
+    secrets: inherit
+
   promote_reused_universe:
     needs: preflight
     if: ${{ needs.preflight.result == 'success' && inputs.pricing_run_id != '' }}
@@ -1101,8 +1171,10 @@ jobs:
     secrets: inherit
 
   verify_reused_pricing:
-    needs: promote_reused_universe
-    if: ${{ needs.promote_reused_universe.result == 'success' && inputs.pricing_run_id != '' }}
+    needs:
+      - promote_reused_universe
+      - promote_repaired_universe
+    if: ${{ always() && ((inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success') || (inputs.repaired_v2_lifecycle_run_id != '' && needs.promote_repaired_universe.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -1136,7 +1208,7 @@ jobs:
         env:
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
-          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}
+          PRICING_RUN_ID: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}
         run: |
           python - <<'PY'
           import json
@@ -1185,9 +1257,11 @@ jobs:
     needs:
       - preflight
       - pricing
+      - promote_repaired_pricing
       - promote_reused_universe
+      - promote_repaired_universe
       - verify_reused_pricing
-    if: ${{ always() && needs.preflight.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
+    if: ${{ always() && needs.preflight.result == 'success' && ((inputs.pricing_run_id == '' && inputs.repaired_v2_lifecycle_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success') || (inputs.repaired_v2_lifecycle_run_id != '' && needs.promote_repaired_pricing.result == 'success' && needs.promote_repaired_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
     uses: ./.github/workflows/phase1-pons-representative-evidence-chain.yml
     with:
       eligibility_run_id: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}
@@ -1208,10 +1282,12 @@ jobs:
   ready:
     needs:
       - pricing
+      - promote_repaired_pricing
       - promote_reused_universe
+      - promote_repaired_universe
       - verify_reused_pricing
       - representative
-    if: ${{ always() && needs.representative.result == 'success' && ((inputs.pricing_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
+    if: ${{ always() && needs.representative.result == 'success' && ((inputs.pricing_run_id == '' && inputs.repaired_v2_lifecycle_run_id == '' && needs.pricing.result == 'success') || (inputs.pricing_run_id != '' && needs.promote_reused_universe.result == 'success' && needs.verify_reused_pricing.result == 'success') || (inputs.repaired_v2_lifecycle_run_id != '' && needs.promote_repaired_pricing.result == 'success' && needs.promote_repaired_universe.result == 'success' && needs.verify_reused_pricing.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
