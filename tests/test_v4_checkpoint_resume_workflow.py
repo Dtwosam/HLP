@@ -34,7 +34,7 @@ def test_recovered_completion_inherits_pricing_v4_checkpoint_default():
     ).read_text()
 
     pricing = content.split("\n  pricing:\n", 1)[1].split(
-        "\n  promote_reused_universe:\n", 1
+        "\n  promote_repaired_pricing:\n", 1
     )[0]
     assert "uses: ./.github/workflows/phase1-pons-pricing-eligibility-chain.yml" in pricing
     assert "v3_fallback_run_id: ${{ inputs.v3_fallback_run_id }}" in pricing
