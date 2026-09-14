@@ -39,7 +39,7 @@ on:
         type: string
       oracle_run_id:
         required: true
-        default: "33974681334"
+        default: "34765335793"
         type: string
       runner_smoke_run_id:
         required: true
@@ -95,7 +95,7 @@ on:
         type: string
       oracle_run_id:
         required: false
-        default: "33974681334"
+        default: "34765335793"
         type: string
       runner_smoke_run_id:
         required: false
@@ -201,7 +201,7 @@ jobs:
 
           support_contracts = {
               "ORACLE_RUN_ID": {
-                  "run_id": 33_974_681_334,
+                  "run_id": 34_765_335_793,
                   "path": (
                       ".github/workflows/"
                       "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml"
@@ -763,9 +763,8 @@ jobs:
               if embedded_plan != current_plan:
                   raise SystemExit(
                       "recovery venue embedded plan does not match lineage "
-                      f"plan: run={run_id}"
+                      f"plan run={run_id}"
                   )
-
               summary = recovery_artifact_json(
                   run_id,
                   artifact,
@@ -773,7 +772,7 @@ jobs:
                   identity_label="recovery venue summary",
               )
               try:
-                  if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
+                    if int(summary.get("snapshot_head_block", -1)) != 54_486_035:
                       raise SystemExit(
                           "recovery venue summary snapshot changed: "
                           f"run={run_id}"
