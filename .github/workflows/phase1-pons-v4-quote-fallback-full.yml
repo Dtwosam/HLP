@@ -61,7 +61,6 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
-  FIRST_V4_FALLBACK_SWAP: '36023158'
   SKHY_TOKEN: '0x84cab63bc87912e71ad199ff14a0ba45de68fef8'
   WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
 
@@ -140,7 +139,16 @@ jobs:
           import os
           from pathlib import Path
 
+          from hlp.config import (
+              ROBINHOOD_USDG,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.quote_v4_causal_history import (
+              validate_v4_usdg_causal_swap_witness,
+          )
           from hlp.data.quote_v4_routes import select_v4_quote_routes
+          from hlp.data.rpc import RpcClient
           from hlp.data.snapshot import write_jsonl_snapshot
 
           probe_rows = [
@@ -308,6 +316,49 @@ jobs:
               ownership_mode = "25_v3_5_v4"
 
           routes = select_v4_quote_routes(probe_rows)
+          ttwo = "0x5e81213613b6b86eab4c6c50d718d34359459786"
+          if ttwo in v3_tokens:
+              raise SystemExit("TTWO must remain V4-owned in residual pricing")
+          ttwo_sources = [
+              row for row in probe_rows
+              if row["quote_token"].lower() == ttwo
+          ]
+          if len(ttwo_sources) != 1:
+              raise SystemExit("frozen residual probe must contain exactly one TTWO row")
+          rpc = RpcClient(
+              SOLIDRPC_PUBLIC_RPC_URL,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              route_label="solidrpc_public_ttwu_causal_witness",
+          )
+          ttwo_route = validate_v4_usdg_causal_swap_witness(
+              rpc,
+              ttwo_sources[0],
+              pool_id=(
+                  "0xaf313f02e31e8adbc5aabbdfa5b02377"
+                  "bfa794089b06c60404a63d1a54b042fa"
+              ),
+              currency0=ttwo,
+              currency1=ROBINHOOD_USDG,
+              fee=40_000,
+              tick_spacing=400,
+              hooks="0x" + "00" * 20,
+              witness_block=35_389_234,
+              pool_manager=UNISWAP_V4_POOL_MANAGER,
+          )
+          ttwo_replacements = 0
+          causal_routes = []
+          for row in routes:
+              if row["quote_token"].lower() == ttwo:
+                  causal_routes.append(ttwo_route)
+                  ttwo_replacements += 1
+              else:
+                  causal_routes.append(row)
+          if ttwo_replacements != 1:
+              raise SystemExit("selected V4 routes must contain exactly one TTWO route")
+          routes = causal_routes
+
           route_tokens = {
               row["quote_token"].lower() for row in routes
           }
@@ -339,11 +390,6 @@ jobs:
               )
 
           earliest = min(int(row["activation_block"]) for row in routes)
-          configured = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
-          if earliest < configured:
-              raise SystemExit(
-                  "canonical V4 route activates before frozen scan start"
-              )
 
           write_jsonl_snapshot(
               routes,
@@ -469,8 +515,16 @@ jobs:
         name: Compute exact V4 quote shard bounds
         run: |
           python - <<'PY'
+          import json
           import os
-          start = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
+          from pathlib import Path
+
+          routes = [
+              json.loads(line)
+              for line in Path("routes/pons-v4-quote-routes.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          start = min(int(row["activation_block"]) for row in routes)
           head = int(os.environ["SNAPSHOT_HEAD"])
           i = int(os.environ["SHARD_INDEX"])
           n = int(os.environ["SHARD_COUNT"])
@@ -600,7 +654,12 @@ jobs:
           from hlp.data.reconstruct import event_order
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          START = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
+          routes = [
+              json.loads(line)
+              for line in Path("routes/pons-v4-quote-routes.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          START = min(int(row["activation_block"]) for row in routes)
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
           files = sorted(
               Path("downloads").glob("v4-quote-events-shard-*.jsonl")
