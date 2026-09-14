@@ -992,8 +992,9 @@ def test_v2_eligibility_fails_fast_on_uncovered_quote_assets():
     assert "if uncovered:" in content
     assert "cannot replay V2 lifecycle with uncovered quote assets" in content
     assert '"owned_quote_assets": 30' in content
-    assert '"v3_routes": 26' in content
-    assert '"v4_routes": 4' in content
+    assert '"v3_routes": 25' in content
+    assert '"v4_routes": 5' in content
+    assert '"v4_causal_initial_assets": 5' in content
     assert '"v3_v4_overlap_assets": 0' in content
     assert "generic quote fallback ownership contract changed" in content
 

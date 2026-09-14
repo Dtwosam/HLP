@@ -39,8 +39,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FIRST_V4_FALLBACK_SWAP: '36023158'
   SNAPSHOT_HEAD: '54486035'
+  ROBINHOOD_ARCHIVE_RPC_URL: https://rpc.mainnet.chain.robinhood.com
 
 jobs:
   plan:
@@ -172,7 +172,6 @@ jobs:
 
           from hlp.data.ranges import plan_missing_subranges
 
-          start = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
           head = int(os.environ["SNAPSHOT_HEAD"])
           max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
           if not 1 <= max_blocks <= 100_000:
@@ -189,6 +188,7 @@ jobs:
           ]
           if not routes:
               raise SystemExit("frozen V4 quote route selection is empty")
+          start = min(int(row["activation_block"]) for row in routes)
 
           manifests = (
               sorted(
@@ -351,7 +351,7 @@ jobs:
           GAP_ID: ${{ matrix.id }}
         run: |
           mkdir -p artifacts
-          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          CHUNK=50000
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             rpc-v4-quote-route-tape \
             --routes routes/pons-v4-quote-routes.jsonl \
@@ -569,7 +569,6 @@ jobs:
           from hlp.data.reconstruct import event_order
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          START = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
 
           routes = [
@@ -579,6 +578,9 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          if not routes:
+              raise SystemExit("frozen V4 quote route selection is empty")
+          START = min(int(row["activation_block"]) for row in routes)
           activation_by_pool = {
               row["pool_id"].lower(): int(row["activation_block"])
               for row in routes
