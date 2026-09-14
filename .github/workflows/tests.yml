@@ -24,26 +24,3 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
-      - name: Build exact oracle-checkpoint chain patch
-        if: ${{ always() }}
-        run: |
-          mkdir -p /tmp/oracle-handoff
-          python - <<'PY'
-          from pathlib import Path
-
-          source = Path('.github/workflows/phase1-pons-recovered-completion-chain.yml')
-          text = source.read_text()
-          assert text.count('default: "33974681334"') == 2
-          assert text.count('"run_id": 33_974_681_334') == 1
-          text = text.replace('default: "33974681334"', 'default: "34765335793"')
-          text = text.replace('"run_id": 33_974_681_334', '"run_id": 34_765_335_793')
-          target = Path('/tmp/oracle-handoff/phase1-pons-recovered-completion-chain.yml')
-          target.write_text(text)
-          PY
-      - name: Upload exact oracle-checkpoint chain patch
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: oracle-checkpoint-chain-patch
-          path: /tmp/oracle-handoff/phase1-pons-recovered-completion-chain.yml
-          if-no-files-found: error
