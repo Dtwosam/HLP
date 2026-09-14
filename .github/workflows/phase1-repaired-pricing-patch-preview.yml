@@ -32,22 +32,18 @@ jobs:
         run: pytest -q tests/test_recovered_pricing_promotion.py tests/test_workflow_liveness.py
       - name: Compile
         run: python -m compileall -q src tests
-      - name: Commit tested source-of-truth patch and remove preview machinery
+      - name: Stage exact tested source blobs under non-workflow paths
         run: |
-          rm .github/scripts/apply_repaired_pricing_promotion.py
-          rm .github/scripts/scope_repaired_patch_helper.py
-          rm .github/workflows/phase1-repaired-pricing-patch-preview.yml
-          printf 'delete me to trigger normal PR CI\n' > .github/repaired-pricing-ci-trigger
+          mkdir -p .github/repaired-pricing-stage
+          cp .github/phase1-pons-recovered-completion.json \
+            .github/repaired-pricing-stage/config.json
+          cp .github/workflows/phase1-pons-recovered-completion-one-shot.yml \
+            .github/repaired-pricing-stage/one-shot.txt
+          cp .github/workflows/phase1-pons-recovered-completion-chain.yml \
+            .github/repaired-pricing-stage/chain.txt
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add \
-            .github/phase1-pons-recovered-completion.json \
-            .github/workflows/phase1-pons-recovered-completion-one-shot.yml \
-            .github/workflows/phase1-pons-recovered-completion-chain.yml \
-            .github/repaired-pricing-ci-trigger \
-            .github/scripts/apply_repaired_pricing_promotion.py \
-            .github/scripts/scope_repaired_patch_helper.py \
-            .github/workflows/phase1-repaired-pricing-patch-preview.yml
+          git add .github/repaired-pricing-stage
           git diff --cached --check
-          git commit -m "feat: wire repaired pricing promotion into recovery"
+          git commit -m "ci: stage tested repaired pricing blobs"
           git push origin HEAD:phase1/repaired-pricing-promotion
