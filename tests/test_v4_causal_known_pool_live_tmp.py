@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 from hlp.config import SOLIDRPC_PUBLIC_RPC_URL, UNISWAP_V4_POOL_MANAGER
 from hlp.data.rpc import RpcClient
@@ -54,6 +55,6 @@ def test_live_skhy_known_pool_pre_use_witness():
             })
     raise AssertionError(json.dumps({
         "requests": rpc.requests_made,
-        "initialize": [vars(row) for row in initialized],
+        "initialize": [asdict(row) for row in initialized],
         "positive_swaps": swaps,
     }, sort_keys=True, default=str))
