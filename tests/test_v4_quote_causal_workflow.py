@@ -48,6 +48,13 @@ def test_v4_quote_full_promotes_skhy_from_causal_point_state():
     assert "RIVN must remain delayed" in content
 
 
+def test_skhy_point_state_uses_verified_public_rpc_path():
+    content = _content()
+    assert "solidrpc_public_skhy_causal_point_state" in content
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
+    assert "SOLIDRPC_AUTH_RPC_URL" not in content
+
+
 def test_v4_quote_full_derives_scan_start_from_selected_routes():
     content = _content()
     assert "FIRST_V4_FALLBACK_SWAP" not in content
