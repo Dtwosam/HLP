@@ -1,0 +1,40 @@
+name: phase1-repaired-pricing-patch-preview
+
+on:
+  push:
+    branches:
+      - phase1/repaired-pricing-promotion
+    paths:
+      - .github/scripts/apply_repaired_pricing_promotion.py
+      - .github/workflows/phase1-repaired-pricing-patch-preview.yml
+
+permissions:
+  contents: read
+
+jobs:
+  patch-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Apply bounded patch in workspace
+        run: python .github/scripts/apply_repaired_pricing_promotion.py
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Verify repaired pricing workflow contract
+        run: pytest -q tests/test_recovered_pricing_promotion.py tests/test_workflow_liveness.py
+      - name: Compile
+        run: python -m compileall -q src tests
+      - name: Upload patched source-of-truth files
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-pricing-patch-preview
+          path: |
+            .github/phase1-pons-recovered-completion.json
+            .github/workflows/phase1-pons-recovered-completion-one-shot.yml
+            .github/workflows/phase1-pons-recovered-completion-chain.yml
+          if-no-files-found: error
