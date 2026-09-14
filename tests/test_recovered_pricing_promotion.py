@@ -41,7 +41,7 @@ def test_recovered_completion_config_carries_repaired_pricing_sources():
     )
     assert config["repaired_v2_lifecycle_run_id"] == 0
     assert config["repaired_v4_fallback_run_id"] == 0
-    assert config["validation_generation"] == 8
+    assert config["validation_generation"] == 7
 
 
 def test_recovered_completion_one_shot_wires_repaired_pricing_mode_fail_closed():
@@ -51,7 +51,7 @@ def test_recovered_completion_one_shot_wires_repaired_pricing_mode_fail_closed()
         "repaired_v4_fallback_run_id",
         "repaired pricing run IDs must be supplied together",
         "repaired pricing cannot be combined with pricing_run_id",
-        "validation_generation != 8",
+        "validation_generation != 7",
     )
     for needle in required:
         assert needle in content, needle
@@ -70,7 +70,9 @@ def test_recovered_completion_chain_routes_repaired_pricing_without_reacquisitio
     for needle in required:
         assert needle in content, needle
 
-    pricing_job = content.split("\n  pricing:\n", 1)[1].split("\n  ", 1)[0]
+    pricing_job = content.split("\n  pricing:\n", 1)[1].split(
+        "\n  promote_repaired_pricing:\n", 1
+    )[0]
     assert "repaired_v2_lifecycle_run_id" in pricing_job
     assert "repaired_v4_fallback_run_id" in pricing_job
     assert "== ''" in pricing_job
@@ -82,19 +84,19 @@ def test_recovered_completion_chain_routes_repaired_pricing_without_reacquisitio
 def test_repaired_pricing_promotion_is_exact_artifact_only_and_causal():
     content = _workflow("phase1-pons-repaired-pricing-promote.yml")
     required = (
-        "34900105493",
-        "34894335995",
-        "34480161440",
-        "34228430753",
-        "34471480180",
+        "34_900_105_493",
+        "34_894_335_995",
+        "34_480_161_440",
+        "34_228_430_753",
+        "34_471_480_180",
         "279d8016b1f62aef01167650be3cc70e0ca72f6c",
         "09c788e6321b958d1fb78f00e3330605e86435e9",
         "db374769984c621d4f2f22aad27e0686f218164a",
-        "10154428836",
-        "10186898865",
-        "10370673267",
-        "10368788172",
-        "10368454044",
+        "10_154_428_836",
+        "10_186_898_865",
+        "10_370_673_267",
+        "10_368_788_172",
+        "10_368_454_044",
         "phase1-pons-v1-lifecycle-eligibility",
         "phase1-pons-v2-lifecycle-eligibility",
         "phase1-pons-v3-quote-fallback-full",
