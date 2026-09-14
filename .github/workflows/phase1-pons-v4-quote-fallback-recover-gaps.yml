@@ -39,7 +39,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FIRST_V4_FALLBACK_SWAP: '36023158'
   SNAPSHOT_HEAD: '54486035'
 
 jobs:
@@ -172,7 +171,6 @@ jobs:
 
           from hlp.data.ranges import plan_missing_subranges
 
-          start = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
           head = int(os.environ["SNAPSHOT_HEAD"])
           max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
           if not 1 <= max_blocks <= 100_000:
@@ -189,6 +187,7 @@ jobs:
           ]
           if not routes:
               raise SystemExit("frozen V4 quote route selection is empty")
+          start = min(int(row["activation_block"]) for row in routes)
 
           manifests = (
               sorted(
@@ -569,7 +568,6 @@ jobs:
           from hlp.data.reconstruct import event_order
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          START = int(os.environ["FIRST_V4_FALLBACK_SWAP"])
           HEAD = int(os.environ["SNAPSHOT_HEAD"])
 
           routes = [
@@ -579,6 +577,9 @@ jobs:
               ).read_text().splitlines()
               if line.strip()
           ]
+          if not routes:
+              raise SystemExit("frozen V4 quote route selection is empty")
+          START = min(int(row["activation_block"]) for row in routes)
           activation_by_pool = {
               row["pool_id"].lower(): int(row["activation_block"])
               for row in routes
