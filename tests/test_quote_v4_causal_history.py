@@ -167,6 +167,63 @@ def test_causal_history_reaches_pool_more_than_lookaround_before_first_use(monke
     ] == 950
 
 
+def test_complete_history_without_causal_swap_restores_delayed_route():
+    class Rpc:
+        def iter_logs_chunked(self, start, end, **kwargs):
+            assert kwargs["topics"][0] == V4_INITIALIZE_TOPIC
+            return iter(())
+
+    row = extend_v4_usdg_causal_history(
+        Rpc(),
+        [_prior_row()],
+        lower_bound_by_token={TOKEN: 600},
+        segment_blocks=400,
+        pool_manager=MANAGER,
+    )[0]
+
+    assert row["causal_history_complete"] is True
+    assert row["causal_route_ready"] is False
+    assert row["delayed_route_ready"] is True
+    route = select_v4_quote_routes_after_causal_history([row])[0]
+    assert route["route_type"] == "uniswap_v4_direct_usdg_delayed"
+    assert route["activation_block"] == 1050
+
+
+def test_complete_history_is_chain_safe_noop():
+    complete = _prior_row()
+    complete.update({
+        "causal_history_required": True,
+        "causal_history_from_block": 600,
+        "causal_history_to_block": 999,
+        "causal_history_scanned_through": 999,
+        "causal_history_complete": True,
+    })
+
+    class Rpc:
+        def iter_logs_chunked(self, *args, **kwargs):
+            raise AssertionError("completed causal history must not issue RPC")
+
+    rows = extend_v4_usdg_causal_history(
+        Rpc(),
+        [complete],
+        lower_bound_by_token={TOKEN: 600},
+        segment_blocks=100,
+        pool_manager=MANAGER,
+    )
+    assert rows == [complete]
+
+
+def test_causal_history_segment_is_hard_capped_at_100k():
+    with pytest.raises(ValueError, match="between 1 and 100000"):
+        extend_v4_usdg_causal_history(
+            object(),
+            [_prior_row()],
+            lower_bound_by_token={TOKEN: 600},
+            segment_blocks=100_001,
+            pool_manager=MANAGER,
+        )
+
+
 def test_select_rejects_required_but_incomplete_causal_history():
     row = _prior_row()
     row.update({
