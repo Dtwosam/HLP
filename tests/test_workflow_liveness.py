@@ -3981,7 +3981,7 @@ def test_recovered_completion_chain_is_terminal_gated_and_resumable():
     assert "recovered completion support branch changed" in content
     assert "recovered completion support artifact missing or" in content
     for run_id in (
-        "33_974_681_334",
+        "34_765_335_793",
         "33_920_762_592",
         "33_911_022_718",
         "33_936_232_604",
