@@ -25,10 +25,10 @@ jobs:
       - name: Compile
         run: python -m compileall -q src tests
 
-  residual-v4-discovery:
+  residual-v4-provider-probe:
     if: ${{ github.event_name == 'pull_request' && github.head_ref == 'phase1/v4-causal-history-fix' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,135 +36,70 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - name: Exhaust residual direct USDG V4 Initialize history
+      - name: Probe historical filtered-log range support
         run: |
           python - <<'PY'
           import json
 
           from hlp.config import (
+              DEFAULT_RPC_URL,
+              NODEFLARE_PUBLIC_RPC_URL,
               ROBINHOOD_USDG,
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V4_POOL_MANAGER,
           )
-          from hlp.data.quote_v4_causal_history import (
-              validate_v4_usdg_causal_state_witness,
-          )
-          from hlp.data.quote_v4_routes import _address_topic, _record_dict
+          from hlp.data.quote_v4_routes import _address_topic
           from hlp.data.rpc import RpcClient
-          from hlp.protocols.uniswap import (
+          from hlp.protocols.uniswap import V4_INITIALIZE_TOPIC
+
+          token = "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b"
+          currency0, currency1 = sorted(
+              (token, ROBINHOOD_USDG.lower()), key=lambda value: int(value, 16)
+          )
+          topics = [
               V4_INITIALIZE_TOPIC,
-              decode_v4_pool_initialized,
-          )
-
-          assets = {
-              "RIVN": {
-                  "quote_token": "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b",
-                  "first_launch_block": 36_002_595,
-              },
-              "FIG": {
-                  "quote_token": "0x41f4267525a8aff329540ef24fd83d9044758b33",
-                  "first_launch_block": 52_956_726,
-              },
-              "BULL": {
-                  "quote_token": "0xcef9027c7d6985b85f0ba431125073529a947a68",
-                  "first_launch_block": 54_419_647,
-              },
+              None,
+              _address_topic(currency0),
+              _address_topic(currency1),
+          ]
+          providers = {
+              "official": DEFAULT_RPC_URL,
+              "nodeflare": NODEFLARE_PUBLIC_RPC_URL,
+              "solidrpc": SOLIDRPC_PUBLIC_RPC_URL,
           }
-          rpc = RpcClient(
-              SOLIDRPC_PUBLIC_RPC_URL,
-              timeout=30,
-              attempts=5,
-              min_interval_seconds=0.05,
-              route_label="solidrpc_public_residual_v4_initialize_exhaustion",
-          )
-          manager = UNISWAP_V4_POOL_MANAGER.lower()
-          deployment = rpc.find_first_code_block(
-              manager,
-              low=0,
-              high=min(row["first_launch_block"] for row in assets.values()),
-          )
-          before = rpc.get_code(manager, deployment - 1) if deployment else "0x"
-          at = rpc.get_code(manager, deployment)
-          if before not in {"0x", "0x0", ""} or at in {"0x", "0x0", ""}:
-              raise SystemExit("PoolManager deployment boundary is not exact")
-          print("POOL_MANAGER_DEPLOYMENT_BLOCK=" + str(deployment))
-
-          output = {}
-          for symbol, raw_source in assets.items():
-              source = {
-                  **raw_source,
-                  "symbol": symbol,
-                  "quote_decimals": 18,
-                  "launches": 0,
-                  "versions": {},
-              }
-              token = source["quote_token"].lower()
-              currency0, currency1 = sorted(
-                  (token, ROBINHOOD_USDG.lower()),
-                  key=lambda value: int(value, 16),
+          results = {}
+          for label, url in providers.items():
+              rpc = RpcClient(
+                  url,
+                  timeout=30,
+                  attempts=2,
+                  min_interval_seconds=0.1,
+                  route_label=f"residual_v4_provider_probe_{label}",
               )
-              target = int(source["first_launch_block"]) - 1
-              logs = list(
-                  rpc.iter_logs_chunked(
-                      deployment,
-                      target,
-                      address=manager,
-                      topics=[
-                          V4_INITIALIZE_TOPIC,
-                          None,
-                          _address_topic(currency0),
-                          _address_topic(currency1),
-                      ],
-                      chunk_size=100_000,
-                      min_chunk_size=2_000,
-                  )
-              )
-              candidates = []
-              for raw in logs:
-                  event = decode_v4_pool_initialized(raw)
-                  row = _record_dict(event)
-                  if {event.currency0.lower(), event.currency1.lower()} != {
-                      token,
-                      ROBINHOOD_USDG.lower(),
-                  }:
-                      raise SystemExit(f"{symbol} Initialize currency mismatch")
-                  candidate = {
-                      "pool_id": event.pool_id.lower(),
-                      "currency0": event.currency0.lower(),
-                      "currency1": event.currency1.lower(),
-                      "fee": int(event.fee),
-                      "tick_spacing": int(event.tick_spacing),
-                      "hooks": event.hooks.lower(),
-                      "initialize_block": int(event.block_number),
-                  }
-                  state = None
-                  error = None
+              row = {}
+              for span in (100_000, 1_000_000):
+                  start = 9_070
+                  end = start + span - 1
                   try:
-                      state = validate_v4_usdg_causal_state_witness(
-                          rpc,
-                          source,
-                          **candidate,
-                          pool_manager=manager,
+                      logs = rpc.get_logs(
+                          start,
+                          end,
+                          address=UNISWAP_V4_POOL_MANAGER,
+                          topics=topics,
                       )
+                      row[str(span)] = {
+                          "ok": True,
+                          "records": len(logs),
+                      }
                   except Exception as exc:
-                      error = f"{type(exc).__name__}: {exc}"
-                  candidates.append({
-                      **candidate,
-                      "initialize": row,
-                      "causal_state": state,
-                      "causal_state_error": error,
-                  })
-              output[symbol] = {
-                  "from_block": deployment,
-                  "to_block": target,
-                  "initialize_events": len(candidates),
-                  "candidates": candidates,
-              }
-              print(
-                  "RESIDUAL_V4_DISCOVERY="
-                  + json.dumps({symbol: output[symbol]}, sort_keys=True)
-              )
-
-          print("RESIDUAL_V4_DISCOVERY_ALL=" + json.dumps(output, sort_keys=True))
-          print("RPC_REQUESTS=" + str(rpc.requests_made))
+                      row[str(span)] = {
+                          "ok": False,
+                          "error": f"{type(exc).__name__}: {exc}",
+                      }
+              row["requests"] = rpc.requests_made
+              results[label] = row
+              print("PROVIDER_PROBE=" + json.dumps({label: row}, sort_keys=True))
+          print("PROVIDER_PROBE_ALL=" + json.dumps(results, sort_keys=True))
+          if not any(row["100000"]["ok"] for row in results.values()):
+              raise SystemExit("no approved provider supports 100k filtered log ranges")
           PY
