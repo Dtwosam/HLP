@@ -68,6 +68,8 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -141,10 +143,12 @@ jobs:
 
           from hlp.config import (
               ROBINHOOD_USDG,
+              SOLIDRPC_AUTH_RPC_URL,
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V4_POOL_MANAGER,
           )
           from hlp.data.quote_v4_causal_history import (
+              select_v4_usdg_causal_state_witness,
               validate_v4_usdg_causal_swap_witness,
           )
           from hlp.data.quote_v4_routes import select_v4_quote_routes
@@ -227,7 +231,7 @@ jobs:
                   raise SystemExit(
                       "26-route V3 manifest does not prove resolved SKHY"
                   )
-              ownership_mode = "26_v3_4_v4"
+              ownership_mode = "26_raw_v3_5_v4_causal_skhy"
           else:
               if residual_v3_owned:
                   raise SystemExit(
@@ -313,7 +317,7 @@ jobs:
                       "SKHY row"
                   )
               probe_rows = promoted_probe
-              ownership_mode = "25_v3_5_v4"
+              ownership_mode = "25_v3_5_v4_causal_skhy"
 
           routes = select_v4_quote_routes(probe_rows)
           ttwo = "0x5e81213613b6b86eab4c6c50d718d34359459786"
@@ -359,27 +363,93 @@ jobs:
               raise SystemExit("selected V4 routes must contain exactly one TTWO route")
           routes = causal_routes
 
+          skhy_sources = [
+              row for row in probe_rows
+              if row["quote_token"].lower() == skhy
+          ]
+          if len(skhy_sources) != 1:
+              raise SystemExit(
+                  "frozen residual probe must contain exactly one SKHY row"
+              )
+          archive_key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          if not archive_key:
+              raise SystemExit(
+                  "SKHY causal V4 point state requires archive RPC API key"
+              )
+          archive_rpc = RpcClient(
+              SOLIDRPC_AUTH_RPC_URL,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": archive_key},
+              route_label="solidrpc_authenticated_skhy_causal_point_state",
+          )
+          skhy_route = select_v4_usdg_causal_state_witness(
+              archive_rpc,
+              skhy_sources[0],
+              [{
+                  "pool_id": (
+                      "0x4c4a74bd3b9a224b06379c60af2843c"
+                      "2238156446c8003e3796456a3192f5e6b"
+                  ),
+                  "currency0": ROBINHOOD_USDG,
+                  "currency1": skhy,
+                  "fee": 33_000,
+                  "tick_spacing": 330,
+                  "hooks": "0x" + "00" * 20,
+                  "initialize_block": 33_534_851,
+              }],
+              pool_manager=UNISWAP_V4_POOL_MANAGER,
+          )
+          if skhy_route.get("causal_state_block") is None:
+              raise SystemExit("SKHY causal V4 point state was not proven")
+          skhy_replacements = 0
+          promoted_routes = []
+          for row in routes:
+              if row["quote_token"].lower() == skhy:
+                  promoted_routes.append(skhy_route)
+                  skhy_replacements += 1
+              else:
+                  promoted_routes.append(row)
+          if skhy_replacements > 1:
+              raise SystemExit("selected V4 routes contain duplicate SKHY routes")
+          if skhy_replacements == 0:
+              promoted_routes.append(skhy_route)
+          routes = promoted_routes
+
+          rivn = "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b"
+          rivn_routes = [
+              row for row in routes
+              if row["quote_token"].lower() == rivn
+          ]
+          if (
+              len(rivn_routes) != 1
+              or rivn_routes[0].get("causal_state_block") is not None
+              or not str(rivn_routes[0].get("route_type", "")).endswith("_delayed")
+          ):
+              raise SystemExit(
+                  "RIVN must remain delayed until separate causal evidence is proven"
+              )
+
           route_tokens = {
               row["quote_token"].lower() for row in routes
           }
-          expected_v4_tokens = probe_tokens - v3_tokens
+          expected_v4_tokens = (probe_tokens - v3_tokens) | {skhy}
           if route_tokens != expected_v4_tokens:
               raise SystemExit(
                   "V3/V4 residual ownership does not cover the five frozen "
-                  "V3 misses exactly"
+                  "V3 misses with causal SKHY handoff exactly"
               )
           if len(routes) != len(expected_v4_tokens):
               raise SystemExit(
                   "V4 fallback route count disagrees with expected ownership"
               )
-          if len(routes) not in {4, 5}:
+          if len(routes) != 5:
               raise SystemExit(
-                  "V4 fallback must select four or five unique routes"
+                  "V4 fallback must select five unique routes after SKHY handoff"
               )
-          if bool(skhy in v3_tokens) == bool(skhy in route_tokens):
-              raise SystemExit(
-                  "SKHY must be owned by exactly one of canonical V3 or V4"
-              )
+          if skhy not in route_tokens:
+              raise SystemExit("SKHY causal V4 route is missing")
           if not all(
               row["anchor_token"].lower()
               == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
@@ -404,6 +474,7 @@ jobs:
                       int(skhy_v4_run) if skhy_v4_run else None
                   ),
                   "ownership_mode": ownership_mode,
+                  "skhy_causal_v4_point_state": True,
                   "routes": len(routes),
               },
           )
