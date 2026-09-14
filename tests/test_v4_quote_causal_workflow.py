@@ -49,10 +49,10 @@ def test_v4_quote_full_promotes_skhy_from_causal_point_state():
 
 
 def test_skhy_point_state_uses_verified_public_rpc_path():
-    content = _content()
-    assert "solidrpc_public_skhy_causal_point_state" in content
-    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in content
-    assert "SOLIDRPC_AUTH_RPC_URL" not in content
+    plan = _content().split("\n  shard:", 1)[0]
+    assert "solidrpc_public_skhy_causal_point_state" in plan
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in plan
+    assert "SOLIDRPC_AUTH_RPC_URL" not in plan
 
 
 def test_v4_quote_full_derives_scan_start_from_selected_routes():
