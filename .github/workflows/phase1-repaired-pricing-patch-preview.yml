@@ -6,6 +6,7 @@ on:
       - phase1/repaired-pricing-promotion
     paths:
       - .github/scripts/apply_repaired_pricing_promotion.py
+      - .github/scripts/scope_repaired_patch_helper.py
       - .github/workflows/phase1-repaired-pricing-patch-preview.yml
 
 permissions:
@@ -22,30 +23,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Scope temporary patch helper replacement
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path(".github/scripts/apply_repaired_pricing_promotion.py")
-          text = path.read_text()
-          old = '''        text,
-        """          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}\n""",
-        """          PRICING_RUN_ID: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}\n""",
-        "chain verified pricing source run",
-    )
-'''
-          new = '''        text,
-        """          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}\n          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}\n          PRICING_RUN_ID: ${{ inputs.pricing_run_id }}\n""",
-        """          V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}\n          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}\n          PRICING_RUN_ID: ${{ inputs.pricing_run_id != '' && inputs.pricing_run_id || format('{0}', github.run_id) }}\n""",
-        "chain verified pricing source run",
-    )
-'''
-          if text.count(old) != 1:
-              raise SystemExit(
-                  f"temporary helper scope target changed: {text.count(old)}"
-              )
-          path.write_text(text.replace(old, new, 1))
-          PY
+        run: python .github/scripts/scope_repaired_patch_helper.py
       - name: Apply bounded patch in workspace
         run: python .github/scripts/apply_repaired_pricing_promotion.py
       - name: Install
