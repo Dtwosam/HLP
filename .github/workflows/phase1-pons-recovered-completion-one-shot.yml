@@ -232,7 +232,7 @@ jobs:
       prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
       pricing_run_id: ${{ needs.config.outputs.pricing_run_id }}
       v3_fallback_run_id: ${{ needs.config.outputs.v3_fallback_run_id }}
-      oracle_run_id: "33974681334"
+      oracle_run_id: "34765335793"
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
       v2_curve_run_id: "33936232604"
