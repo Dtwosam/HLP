@@ -144,6 +144,12 @@ jobs:
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V4_POOL_MANAGER,
           )
+          from hlp.data.quote_v4_causal_candidates import (
+              EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES,
+              POOL_MANAGER_DEPLOYMENT_BLOCK,
+              RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID,
+              promote_exhaustive_causal_point_state_routes,
+          )
           from hlp.data.quote_v4_causal_history import (
               select_v4_usdg_causal_state_witness,
               validate_v4_usdg_causal_swap_witness,
@@ -228,7 +234,7 @@ jobs:
                   raise SystemExit(
                       "26-route V3 manifest does not prove resolved SKHY"
                   )
-              ownership_mode = "26_raw_v3_5_v4_causal_skhy"
+              ownership_mode = "26_raw_v3_5_v4_all_causal"
           else:
               if residual_v3_owned:
                   raise SystemExit(
@@ -314,7 +320,7 @@ jobs:
                       "SKHY row"
                   )
               probe_rows = promoted_probe
-              ownership_mode = "25_v3_5_v4_causal_skhy"
+              ownership_mode = "25_v3_5_v4_all_causal"
 
           routes = select_v4_quote_routes(probe_rows)
           ttwo = "0x5e81213613b6b86eab4c6c50d718d34359459786"
@@ -408,19 +414,26 @@ jobs:
               promoted_routes.append(skhy_route)
           routes = promoted_routes
 
-          rivn = "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b"
-          rivn_routes = [
-              row for row in routes
-              if row["quote_token"].lower() == rivn
-          ]
-          if (
-              len(rivn_routes) != 1
-              or rivn_routes[0].get("causal_state_block") is not None
-              or not str(rivn_routes[0].get("route_type", "")).endswith("_delayed")
-          ):
-              raise SystemExit(
-                  "RIVN must remain delayed until separate causal evidence is proven"
-              )
+          expected_exhaustive_tokens = {
+              "0xb1bf26c1d20ff267a4f93550d1e0d06ac40a114b",
+              "0x41f4267525a8aff329540ef24fd83d9044758b33",
+              "0xcef9027c7d6985b85f0ba431125073529a947a68",
+          }
+          if set(EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES) != expected_exhaustive_tokens:
+              raise SystemExit("frozen exhaustive causal V4 asset set changed")
+          residual_rpc = RpcClient(
+              SOLIDRPC_PUBLIC_RPC_URL,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              route_label="solidrpc_public_residual_causal_point_states",
+          )
+          routes = promote_exhaustive_causal_point_state_routes(
+              residual_rpc,
+              routes,
+              probe_rows,
+              pool_manager=UNISWAP_V4_POOL_MANAGER,
+          )
 
           route_tokens = {
               row["quote_token"].lower() for row in routes
@@ -439,10 +452,18 @@ jobs:
           if len(routes) != 5:
               raise SystemExit(
                   "V4 fallback must select four or five unique routes; "
-                  "causal SKHY handoff now requires exactly five"
+                  "all-causal repair now requires exactly five"
               )
           if skhy not in route_tokens:
               raise SystemExit("SKHY causal V4 route is missing")
+          if not all(
+              row.get("causal_state_block") is not None
+              and int(row["causal_state_block"]) < int(row["activation_block"])
+              for row in routes
+          ):
+              raise SystemExit(
+                  "all five V4 residual routes must be causal at first use"
+              )
           if not all(
               row["anchor_token"].lower()
               == "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
@@ -468,6 +489,13 @@ jobs:
                   ),
                   "ownership_mode": ownership_mode,
                   "skhy_causal_v4_point_state": True,
+                  "residual_causal_history_scan_run_id": (
+                      RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID
+                  ),
+                  "pool_manager_deployment_block": POOL_MANAGER_DEPLOYMENT_BLOCK,
+                  "exhaustive_point_state_assets": sorted(
+                      EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES
+                  ),
                   "routes": len(routes),
               },
           )
@@ -477,12 +505,18 @@ jobs:
               "externally_resolved_quote_tokens": sorted(residual_v3_owned),
               "unresolved_assets": 0,
               "selected_routes": len(routes),
+              "causal_initial_routes": sum(
+                  row.get("causal_state_block") is not None for row in routes
+              ),
               "covered_launches": sum(int(row["launches"]) for row in routes),
               "v3_run_id": int("${{ inputs.v3_run_id }}"),
               "skhy_v4_run_id": (
                   int(skhy_v4_run) if skhy_v4_run else None
               ),
               "ownership_mode": ownership_mode,
+              "residual_causal_history_scan_run_id": (
+                  RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID
+              ),
               "earliest_activation_block": earliest,
               "routes": [
                   {
@@ -490,6 +524,8 @@ jobs:
                       "quote_token": row["quote_token"],
                       "pool_id": row["pool_id"],
                       "activation_block": row["activation_block"],
+                      "causal_state_block": row.get("causal_state_block"),
+                      "witness_validation": row.get("witness_validation"),
                       "route_type": row["route_type"],
                       "launches": row["launches"],
                   }
@@ -731,9 +767,6 @@ jobs:
           assert len(files) == 128, [p.name for p in files]
 
           manifests = []
-          previous_hi = None
-          prior = None
-          records = 0
 
           def rows():
               nonlocal_state = {"previous_hi": None, "prior": None, "records": 0}
