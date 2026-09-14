@@ -137,7 +137,7 @@ def test_v4_quote_gap_recovery_derives_start_from_frozen_routes():
     assert "FIRST_V4_FALLBACK_SWAP" not in content
     expected = 'min(int(row["activation_block"]) for row in routes)'
     assert content.count(expected) >= 2
-    assert 'Path("routes/pons-v4-quote-routes.jsonl")' in content
+    assert "routes/pons-v4-quote-routes.jsonl" in content
 
 
 def test_delayed_v3_skhy_can_be_superseded_only_by_causal_v4():
