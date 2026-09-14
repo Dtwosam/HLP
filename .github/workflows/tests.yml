@@ -24,3 +24,15 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
+
+  focused-v2-evidence:
+    uses: ./.github/workflows/phase1-pons-v2-lifecycle-eligibility.yml
+    with:
+      v2_registry_run_id: "33912235341"
+      curve_run_id: "33936232604"
+      transition_run_id: "33912452330"
+      v4_run_id: "34471480180"
+      anchor_run_id: "33972109927"
+      oracle_run_id: "34765335793"
+      fallback_run_id: "34894335995"
+    secrets: inherit
