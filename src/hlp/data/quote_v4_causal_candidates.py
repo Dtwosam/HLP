@@ -2,11 +2,17 @@
 
 Run 34883018674 scanned every direct quote/USDG V4 Initialize interval from
 PoolManager deployment through each quote asset's first Pons use minus one in
-segments no larger than 100,000 blocks.  Every discovered PoolKey was then
-validated against PoolManager state at the causal block.  These records freeze
+segments no larger than 100,000 blocks. Every discovered PoolKey was then
+validated against PoolManager state at the causal block. These records freeze
 the deterministic highest-active-liquidity winner for the residual assets that
 were previously classified as delayed by the narrow discovery probe.
 """
+
+from collections.abc import Iterable
+
+from hlp.config import UNISWAP_V4_POOL_MANAGER
+from hlp.data.quote_v4_causal_history import select_v4_usdg_causal_state_witness
+
 
 RESIDUAL_CAUSAL_HISTORY_SCAN_RUN_ID = 34883018674
 POOL_MANAGER_DEPLOYMENT_BLOCK = 9_070
@@ -79,3 +85,68 @@ EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES = {
         },
     },
 }
+
+
+def promote_exhaustive_causal_point_state_routes(
+    rpc,
+    routes: Iterable[dict],
+    probe_rows: Iterable[dict],
+    *,
+    pool_manager: str = UNISWAP_V4_POOL_MANAGER,
+) -> list[dict]:
+    """Replace residual delayed routes with exhaustively proven causal winners."""
+    route_rows = [dict(row) for row in routes]
+    source_by_token = {}
+    for raw in probe_rows:
+        source = dict(raw)
+        token = source["quote_token"].lower()
+        if token in source_by_token:
+            raise ValueError(f"duplicate residual V4 probe row: {token}")
+        source_by_token[token] = source
+
+    for token, evidence in EXHAUSTIVE_CAUSAL_POINT_STATE_CANDIDATES.items():
+        source = source_by_token.get(token)
+        if source is None:
+            raise ValueError(f"missing residual V4 probe row: {token}")
+        expected_to = int(source["first_launch_block"]) - 1
+        if (
+            evidence.get("coverage_complete") is not True
+            or int(evidence["coverage_from_block"]) != POOL_MANAGER_DEPLOYMENT_BLOCK
+            or int(evidence["coverage_to_block"]) != expected_to
+            or int(evidence["segment_blocks_max"]) > 100_000
+            or evidence.get("selection_rule") != SELECTION_RULE
+        ):
+            raise ValueError(f"incomplete frozen causal V4 coverage: {token}")
+
+        promoted = select_v4_usdg_causal_state_witness(
+            rpc,
+            source,
+            [dict(evidence["candidate"])],
+            pool_manager=pool_manager,
+        )
+        if int(promoted["activation_liquidity"]) != int(
+            evidence["activation_liquidity"]
+        ):
+            raise ValueError(f"causal V4 winner liquidity changed: {token}")
+
+        replacements = 0
+        next_rows = []
+        for row in route_rows:
+            if row["quote_token"].lower() == token:
+                next_rows.append(promoted)
+                replacements += 1
+            else:
+                next_rows.append(row)
+        if replacements != 1:
+            raise ValueError(
+                f"selected V4 routes must contain exactly one residual route: {token}"
+            )
+        route_rows = next_rows
+
+    route_rows.sort(
+        key=lambda row: (
+            int(row["activation_block"]),
+            row["quote_token"].lower(),
+        )
+    )
+    return route_rows
