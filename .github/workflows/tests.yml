@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   python:
@@ -25,46 +24,3 @@ jobs:
         run: pytest -q
       - name: Compile
         run: python -m compileall -q src tests
-
-  official-rpc-v4-shard-benchmark:
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'phase1/v4-causal-history-fix' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      ROBINHOOD_ARCHIVE_RPC_URL: https://rpc.mainnet.chain.robinhood.com
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install
-        run: python -m pip install -e .
-      - uses: actions/download-artifact@v4
-        with:
-          name: phase1-pons-v4-quote-routes-selected
-          path: routes
-          run-id: '34885390164'
-          github-token: ${{ github.token }}
-      - name: Reproduce frozen shard zero on official RPC
-        run: |
-          mkdir -p benchmark
-          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
-            rpc-v4-quote-route-tape \
-            --routes routes/pons-v4-quote-routes.jsonl \
-            --from-block 35997893 --to-block 36142330 \
-            --chunk-size 50000 --min-chunk-size 25 \
-            --out benchmark/v4-official-shard-000.jsonl
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          manifest = json.loads(
-              Path('benchmark/v4-official-shard-000.jsonl.manifest.json').read_text()
-          )
-          assert int(manifest['records']) == 2102, manifest
-          assert manifest['sha256'] == 'a1418b0e0aca0cb80e40814e39c8be5cd2df7ea1ed79f3242402e7be022d9be0', manifest
-          print(json.dumps({
-              'records': manifest['records'],
-              'sha256': manifest['sha256'],
-              'rpc_route': (manifest.get('provenance') or {}).get('rpc_route'),
-          }, sort_keys=True))
-          PY
