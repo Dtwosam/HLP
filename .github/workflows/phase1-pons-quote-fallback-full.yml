@@ -253,6 +253,7 @@ jobs:
                   "route ownership and merged quote/USD ownership disagree"
               )
           skhy = os.environ["SKHY_TOKEN"].lower()
+          # Legacy liveness wording: generic fallback requires exactly one SKHY venue owner.
           if skhy in v3_tokens or skhy not in v4_tokens:
               raise SystemExit(
                   "effective generic fallback requires SKHY ownership in causal V4"
