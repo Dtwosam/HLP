@@ -10,7 +10,7 @@ on:
       - .github/workflows/phase1-repaired-pricing-patch-preview.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   patch-preview:
@@ -32,12 +32,22 @@ jobs:
         run: pytest -q tests/test_recovered_pricing_promotion.py tests/test_workflow_liveness.py
       - name: Compile
         run: python -m compileall -q src tests
-      - name: Upload patched source-of-truth files
-        uses: actions/upload-artifact@v4
-        with:
-          name: repaired-pricing-patch-preview
-          path: |
-            .github/phase1-pons-recovered-completion.json
-            .github/workflows/phase1-pons-recovered-completion-one-shot.yml
-            .github/workflows/phase1-pons-recovered-completion-chain.yml
-          if-no-files-found: error
+      - name: Commit tested source-of-truth patch and remove preview machinery
+        run: |
+          rm .github/scripts/apply_repaired_pricing_promotion.py
+          rm .github/scripts/scope_repaired_patch_helper.py
+          rm .github/workflows/phase1-repaired-pricing-patch-preview.yml
+          printf 'delete me to trigger normal PR CI\n' > .github/repaired-pricing-ci-trigger
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            .github/phase1-pons-recovered-completion.json \
+            .github/workflows/phase1-pons-recovered-completion-one-shot.yml \
+            .github/workflows/phase1-pons-recovered-completion-chain.yml \
+            .github/repaired-pricing-ci-trigger \
+            .github/scripts/apply_repaired_pricing_promotion.py \
+            .github/scripts/scope_repaired_patch_helper.py \
+            .github/workflows/phase1-repaired-pricing-patch-preview.yml
+          git diff --cached --check
+          git commit -m "feat: wire repaired pricing promotion into recovery"
+          git push origin HEAD:phase1/repaired-pricing-promotion
