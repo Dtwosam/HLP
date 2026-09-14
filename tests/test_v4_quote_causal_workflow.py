@@ -16,6 +16,12 @@ WORKFLOW = (
     / "workflows"
     / "phase1-pons-v4-quote-fallback-full.yml"
 )
+RECOVERY_WORKFLOW = (
+    Path(__file__).parents[1]
+    / ".github"
+    / "workflows"
+    / "phase1-pons-v4-quote-fallback-recover-gaps.yml"
+)
 MERGE_WORKFLOW = (
     Path(__file__).parents[1]
     / ".github"
@@ -123,6 +129,14 @@ def test_v4_quote_full_derives_scan_start_from_selected_routes():
     assert "FIRST_V4_FALLBACK_SWAP" not in content
     expected = 'min(int(row["activation_block"]) for row in routes)'
     assert content.count(expected) >= 3
+    assert 'Path("routes/pons-v4-quote-routes.jsonl")' in content
+
+
+def test_v4_quote_gap_recovery_derives_start_from_frozen_routes():
+    content = RECOVERY_WORKFLOW.read_text()
+    assert "FIRST_V4_FALLBACK_SWAP" not in content
+    expected = 'min(int(row["activation_block"]) for row in routes)'
+    assert content.count(expected) >= 2
     assert 'Path("routes/pons-v4-quote-routes.jsonl")' in content
 
 
