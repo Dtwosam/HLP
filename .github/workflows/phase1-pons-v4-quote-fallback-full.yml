@@ -68,8 +68,6 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -143,7 +141,6 @@ jobs:
 
           from hlp.config import (
               ROBINHOOD_USDG,
-              SOLIDRPC_AUTH_RPC_URL,
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V4_POOL_MANAGER,
           )
@@ -371,21 +368,15 @@ jobs:
               raise SystemExit(
                   "frozen residual probe must contain exactly one SKHY row"
               )
-          archive_key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
-          if not archive_key:
-              raise SystemExit(
-                  "SKHY causal V4 point state requires archive RPC API key"
-              )
-          archive_rpc = RpcClient(
-              SOLIDRPC_AUTH_RPC_URL,
+          skhy_rpc = RpcClient(
+              SOLIDRPC_PUBLIC_RPC_URL,
               timeout=30,
               attempts=5,
-              min_interval_seconds=0.1,
-              extra_headers={"X-API-Key": archive_key},
-              route_label="solidrpc_authenticated_skhy_causal_point_state",
+              min_interval_seconds=0.6,
+              route_label="solidrpc_public_skhy_causal_point_state",
           )
           skhy_route = select_v4_usdg_causal_state_witness(
-              archive_rpc,
+              skhy_rpc,
               skhy_sources[0],
               [{
                   "pool_id": (
