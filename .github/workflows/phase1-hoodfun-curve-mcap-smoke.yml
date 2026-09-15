@@ -1,0 +1,172 @@
+name: phase1-hoodfun-curve-mcap-smoke
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  hood-mcap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Acquire first current-generation hood.fun cohort
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-hood-fun-tape \
+            --from-block 5611265 --to-block 5711264 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/hood-events.jsonl
+      - name: Build registry
+        run: |
+          hlp hood-fun-registry \
+            --events artifacts/hood-events.jsonl \
+            --out artifacts/hood-registry.jsonl
+      - name: Validate supply and sequential reserve conservation
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+
+          events = [
+              json.loads(x)
+              for x in Path("artifacts/hood-events.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          registry = [
+              json.loads(x)
+              for x in Path("artifacts/hood-registry.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          by_token = {row["token"]: row for row in registry}
+
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          supply_checks = []
+          for row in registry:
+              static = read_erc20_static(
+                  rpc, row["token"], block=row["launch_block"]
+              )
+              supply_checks.append({
+                  "token": row["token"],
+                  "registry_supply": row["supply_raw"],
+                  "erc20_supply": static.total_supply,
+                  "decimals": static.decimals,
+              })
+              assert static.decimals == 18
+              assert static.total_supply == row["supply_raw"]
+              assert row["curve_inventory_raw"] * 5 == row["supply_raw"] * 4
+
+          state = {
+              row["token"]: {
+                  "quote": row["initial_virtual_quote_raw"],
+                  "token": row["initial_virtual_token_raw"],
+              }
+              for row in registry
+          }
+          formulas = Counter()
+          checked = 0
+          for row in sorted(
+              [x for x in events if x["event_type"] == "trade"],
+              key=lambda x: (
+                  x["block_number"],
+                  -1 if x["transaction_index"] is None else x["transaction_index"],
+                  x["log_index"],
+              ),
+          ):
+              current = state.get(row["token"])
+              if current is None:
+                  continue
+              prev_q = current["quote"]
+              prev_t = current["token"]
+              if row["is_buy"]:
+                  candidates = {
+                      "buy_plus_net": prev_q + row["quote_amount_raw"] - row["fee_raw"],
+                      "buy_plus_gross": prev_q + row["quote_amount_raw"],
+                  }
+                  expected_token = prev_t - row["token_amount_raw"]
+              else:
+                  candidates = {
+                      "sell_minus_gross": prev_q - row["quote_amount_raw"],
+                      "sell_minus_net": prev_q - row["quote_amount_raw"] - row["fee_raw"],
+                      "sell_minus_gross_plus_fee": prev_q - row["quote_amount_raw"] + row["fee_raw"],
+                  }
+                  expected_token = prev_t + row["token_amount_raw"]
+
+              matches = [
+                  name for name, value in candidates.items()
+                  if value == row["virtual_quote_raw"]
+              ]
+              assert len(matches) == 1, (row, current, candidates)
+              assert expected_token == row["virtual_token_raw"], (row, current)
+              formulas[matches[0]] += 1
+              current["quote"] = row["virtual_quote_raw"]
+              current["token"] = row["virtual_token_raw"]
+              checked += 1
+
+          print(json.dumps({
+              "registry_tokens": len(registry),
+              "supply_checks": supply_checks,
+              "checked_sequential_trades": checked,
+              "reserve_formula_counts": dict(formulas),
+              "rpc_requests": rpc.requests_made,
+          }, sort_keys=True))
+          PY
+      - name: Price hood.fun curve
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.6 \
+            rpc-hood-fun-curve-market-cap-window \
+            --events artifacts/hood-events.jsonl \
+            --registry artifacts/hood-registry.jsonl \
+            --from-block 5611265 --to-block 5711264 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/hood-market-caps.jsonl \
+            --summary-out artifacts/hood-summary.jsonl
+      - name: Report eligibility
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              json.loads(x)
+              for x in Path("artifacts/hood-summary.jsonl").read_text().splitlines()
+              if x.strip()
+          ]
+          winners = [row for row in rows if row["crossed_100k"]]
+          print(json.dumps({
+              "tokens_priced": sum(row["priced_points"] > 0 for row in rows),
+              "tokens": len(rows),
+              "tokens_crossed_100k": len(winners),
+              "winner_examples": winners,
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-hoodfun-curve-mcap
+          path: artifacts/
+          if-no-files-found: error

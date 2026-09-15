@@ -1,0 +1,1040 @@
+name: phase1-pons-live-venue-rescue-one-shot
+
+on:
+  push:
+    paths:
+      - ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-live-venue-rescue-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LAUNCH_VALIDATION_GENERATION: '11'
+
+jobs:
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') || startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      prior_gap_run_id: ${{ steps.guard.outputs.prior_gap_run_id }}
+      prior_reusable_gap_count: ${{ steps.guard.outputs.prior_reusable_gap_count }}
+      prior_missing_success_artifacts: ${{ steps.guard.outputs.prior_missing_success_artifacts }}
+      prior_non_success_gap_artifacts: ${{ steps.guard.outputs.prior_non_success_gap_artifacts }}
+      prior_terminal_snapshot_sha256: ${{ steps.guard.outputs.prior_terminal_snapshot_sha256 }}
+    steps:
+      - id: guard
+        name: Refuse rescue while frozen parent is active or already complete
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+          RESCUE_V1: ${{ startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+          RESCUE_V2: ${{ startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          VALIDATION_GENERATION: ${{ env.LAUNCH_VALIDATION_GENERATION }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          run_id = 33_982_556_591
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          transient_http_codes = {
+              403,
+              408,
+              409,
+              425,
+              429,
+              500,
+              502,
+              503,
+              504,
+          }
+
+          def get(path, attempts=3):
+              attempt_count = int(attempts)
+              if attempt_count <= 0:
+                  raise SystemExit(
+                      "live venue rescue GitHub API attempts "
+                      "must be positive"
+                  )
+              for attempt in range(attempt_count):
+                  request = urllib.request.Request(
+                      api + path,
+                      headers={
+                          "Authorization": f"Bearer {token}",
+                          "Accept": "application/vnd.github+json",
+                          "X-GitHub-Api-Version": "2022-11-28",
+                      },
+                  )
+                  try:
+                      with urllib.request.urlopen(
+                          request,
+                          timeout=30,
+                      ) as response:
+                          return json.load(response)
+                  except urllib.error.HTTPError as exc:
+                      if (
+                          exc.code in transient_http_codes
+                          and attempt + 1 < attempt_count
+                      ):
+                          continue
+                      body = exc.read().decode(
+                          errors="replace"
+                      )
+                      raise SystemExit(
+                          "live venue rescue GitHub API request "
+                          f"failed: HTTP {exc.code}: {body[:500]}"
+                      ) from exc
+                  except (
+                      urllib.error.URLError,
+                      TimeoutError,
+                  ) as exc:
+                      if attempt + 1 < attempt_count:
+                          continue
+                      raise SystemExit(
+                          "live venue rescue GitHub API request "
+                          f"failed: {exc}"
+                      ) from exc
+              raise SystemExit(
+                  "live venue rescue GitHub API retry loop exhausted"
+              )
+
+          def artifacts(source_run_id):
+              names = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  names.update(
+                      str(row.get("name"))
+                      for row in rows
+                      if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "live venue rescue artifact pagination exceeded 2000"
+                      )
+              return names
+
+          repair_job_pattern = re.compile(
+              r"(?:^| / )recover_[1-4] \((\d{3}),"
+          )
+
+          def successful_repair_gap_ids(source_run_id):
+              successful = set()
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = repair_job_pattern.search(
+                          str(row.get("name") or "")
+                      )
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "live venue rescue job pagination exceeded 1000"
+                      )
+              return successful
+
+          def repair_job_terminal_snapshot(source_run_id):
+              counts = {}
+              gap_id_counts = {}
+              nonterminal = []
+              repair_jobs = 0
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/jobs"
+                      f"?filter=all&per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = repair_job_pattern.search(
+                          str(row.get("name") or "")
+                      )
+                      if match is None:
+                          continue
+                      repair_jobs += 1
+                      gap_id = match.group(1)
+                      gap_id_counts[gap_id] = (
+                          gap_id_counts.get(gap_id, 0) + 1
+                      )
+                      state = (
+                          str(row.get("conclusion") or "")
+                          or str(row.get("status") or "")
+                          or "unknown"
+                      )
+                      counts[state] = counts.get(state, 0) + 1
+                      if str(row.get("status") or "") != "completed":
+                          nonterminal.append({
+                              "id": int(row["id"]),
+                              "name": str(row.get("name") or ""),
+                              "status": row.get("status"),
+                          })
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "live venue rescue terminal job pagination "
+                          "exceeded 1000"
+                      )
+              duplicate_gap_ids = sorted(
+                  [
+                      gap_id
+                      for gap_id, count in gap_id_counts.items()
+                      if count > 1
+                  ],
+                  key=int,
+              )
+              return {
+                  "repair_jobs": repair_jobs,
+                  "counts": counts,
+                  "duplicate_gap_ids": duplicate_gap_ids,
+                  "nonterminal": nonterminal,
+              }
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed":
+              raise SystemExit(
+                  "live venue rescue is blocked while source parent is active"
+              )
+
+          rescue_v1 = os.environ["RESCUE_V1"] == "true"
+          rescue_v2 = os.environ["RESCUE_V2"] == "true"
+          if rescue_v1 == rescue_v2:
+              raise SystemExit(
+                  "live venue rescue requires exactly one venue target"
+              )
+          launch_marker = (
+              "launch V1 V3 rescue"
+              if rescue_v1
+              else "launch V2 V4 rescue"
+          )
+          generation_pattern = re.compile(
+              "^"
+              + re.escape(launch_marker)
+              + r" generation (\d+)$"
+          )
+          raw_launch_message = str(
+              os.environ["LAUNCH_MESSAGE"]
+          )
+          launch_message = raw_launch_message.splitlines()[0]
+          if raw_launch_message != launch_message:
+              raise SystemExit(
+                  "live venue rescue launch message must be exactly "
+                  "one line"
+              )
+          generation_match = generation_pattern.match(
+              launch_message
+          )
+          if generation_match is None:
+              raise SystemExit(
+                  "live venue rescue launch requires an explicit "
+                  "generation number"
+              )
+          requested_generation = int(
+              generation_match.group(1)
+          )
+          validation_generation = int(
+              os.environ["VALIDATION_GENERATION"]
+          )
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit(
+                  "live venue rescue before SHA is invalid"
+              )
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit(
+                  "live venue rescue current SHA is invalid"
+              )
+
+          launch_commit = get(
+              f"/repos/{repo}/commits/{current_sha}"
+          )
+          parents = list(launch_commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "live venue rescue launch must be a direct "
+                  "single-parent commit"
+              )
+          launch_files = list(launch_commit.get("files") or [])
+          if len(launch_files) != 1:
+              raise SystemExit(
+                  "live venue rescue launch commit must change "
+                  "exactly one file"
+              )
+          launch_file = launch_files[0]
+          expected_launch_file = (
+              ".github/workflows/"
+              "phase1-pons-live-venue-rescue-one-shot.yml"
+          )
+          if str(launch_file.get("filename") or "") != (
+              expected_launch_file
+          ):
+              raise SystemExit(
+                  "live venue rescue launch commit changed the "
+                  "wrong file"
+              )
+          if str(launch_file.get("status") or "") != "modified":
+              raise SystemExit(
+                  "live venue rescue launch wrapper status changed"
+              )
+          patch = str(launch_file.get("patch") or "")
+          changed_lines = [
+              line
+              for line in patch.splitlines()
+              if line.startswith(("+", "-"))
+          ]
+          marker_pattern = re.compile(
+              r"^([+-])  LAUNCH_VALIDATION_GENERATION: '(\d+)'$"
+          )
+          marker_changes = []
+          for line in changed_lines:
+              match = marker_pattern.fullmatch(line)
+              if match is None:
+                  raise SystemExit(
+                      "live venue rescue launch commit contains "
+                      "non-marker changes"
+                  )
+              marker_changes.append(
+                  (match.group(1), int(match.group(2)))
+              )
+          if (
+              len(marker_changes) != 2
+              or marker_changes[0][0] != "-"
+              or marker_changes[1][0] != "+"
+          ):
+              raise SystemExit(
+                  "live venue rescue launch marker diff changed"
+              )
+          old_validation_generation = marker_changes[0][1]
+          new_validation_generation = marker_changes[1][1]
+          if (
+              new_validation_generation
+              != old_validation_generation + 1
+          ):
+              raise SystemExit(
+                  "live venue rescue launch marker must increment "
+                  "by exactly one"
+              )
+          if new_validation_generation != validation_generation:
+              raise SystemExit(
+                  "live venue rescue launch marker does not match "
+                  "workflow validation generation"
+              )
+
+          if rescue_v2:
+              expected_validation_generation = (
+                  requested_generation + 7
+              )
+              if (
+                  validation_generation
+                  != expected_validation_generation
+              ):
+                  raise SystemExit(
+                      "V2/V4 rescue validation generation changed: "
+                      f"observed={validation_generation} "
+                      f"expected={expected_validation_generation}"
+                  )
+          prior_plan_artifact = (
+              "phase1-pons-v1-v3-gap-plan"
+              if rescue_v1
+              else "phase1-pons-v2-v4-gap-plan"
+          )
+          prior_gap_prefix = (
+              "phase1-pons-v1-v3-gap-"
+              if rescue_v1
+              else "phase1-pons-v2-v4-gap-"
+          )
+          prior_gap_pattern = re.compile(
+              "^" + re.escape(prior_gap_prefix) + r"(\d+)$"
+          )
+          requested_artifact = (
+              "phase1-pons-v1-v3-full"
+              if rescue_v1
+              else "phase1-pons-v2-v4-full"
+          )
+
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          branch = os.environ["BRANCH"]
+          if branch != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "live venue rescue launch branch changed"
+              )
+          workflow_file = urllib.parse.quote(
+              "phase1-pons-live-venue-rescue-one-shot.yml",
+              safe="",
+          )
+          encoded_branch = urllib.parse.quote(branch, safe="")
+          active_siblings = []
+          terminal_target_runs = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/{workflow_file}/runs"
+                  f"?branch={encoded_branch}&per_page=100&page={page}"
+              )
+              rows = list(payload.get("workflow_runs") or [])
+              for row in rows:
+                  row_id = int(row["id"])
+                  if row_id == current_run_id:
+                      continue
+                  if row.get("status") != "completed":
+                      active_siblings.append(
+                          {
+                              "id": row_id,
+                              "status": row.get("status"),
+                              "head_sha": row.get("head_sha"),
+                          }
+                      )
+                      continue
+                  display_title = str(row.get("display_title") or "")
+                  if (
+                      generation_pattern.fullmatch(display_title)
+                      is not None
+                  ):
+                      terminal_target_runs.append(
+                          {
+                              "id": row_id,
+                              "conclusion": row.get("conclusion"),
+                              "head_sha": row.get("head_sha"),
+                              "display_title": display_title,
+                          }
+                      )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "live venue rescue run pagination exceeded 1000"
+                  )
+          if active_siblings:
+              raise SystemExit(
+                  "live venue rescue is blocked while another rescue "
+                  f"run is active: {active_siblings}"
+              )
+
+          terminal_target_runs.sort(
+              key=lambda row: int(row["id"]),
+              reverse=True,
+          )
+          target_plan_job_name = (
+              "v1_v3_rescue / plan"
+              if rescue_v1
+              else "v2_v4_rescue / plan"
+          )
+
+          def target_plan_succeeded(source_run_id):
+              page = 1
+              while True:
+                  payload = get(
+                      f"/repos/{repo}/actions/runs/{source_run_id}/jobs"
+                      f"?filter=all&per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for job in rows:
+                      if (
+                          str(job.get("name") or "")
+                          == target_plan_job_name
+                          and str(job.get("conclusion") or "")
+                          == "success"
+                      ):
+                          return True
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "live venue rescue generation-plan job "
+                          "pagination exceeded 1000"
+                      )
+              return False
+
+          consumed_generation_runs = {}
+          unconsumed_terminal_generations = []
+          for row in terminal_target_runs:
+              match = generation_pattern.match(
+                  str(row.get("display_title") or "")
+              )
+              if match is None:
+                  continue
+              generation = int(match.group(1))
+              if target_plan_succeeded(int(row["id"])):
+                  consumed_generation_runs.setdefault(
+                      generation,
+                      [],
+                  ).append(int(row["id"]))
+              else:
+                  unconsumed_terminal_generations.append({
+                      "generation": generation,
+                      "run_id": int(row["id"]),
+                      "conclusion": row.get("conclusion"),
+                  })
+          ambiguous_consumed_generations = {
+              generation: sorted(run_ids)
+              for generation, run_ids
+              in consumed_generation_runs.items()
+              if len(set(run_ids)) > 1
+          }
+          if ambiguous_consumed_generations:
+              raise SystemExit(
+                  "live venue rescue consumed generation history "
+                  "is ambiguous: "
+                  f"{ambiguous_consumed_generations}"
+              )
+          consumed_generations = sorted(
+              consumed_generation_runs
+          )
+          expected_generation = (
+              max(consumed_generations, default=0) + 1
+          )
+          if requested_generation != expected_generation:
+              raise SystemExit(
+                  "live venue rescue generation is not monotonic: "
+                  f"requested={requested_generation} "
+                  f"expected={expected_generation}"
+              )
+
+          expected_prior_consumed_run_id = ""
+          if requested_generation >= 2:
+              prior_generation = requested_generation - 1
+              prior_consumed_runs = sorted(set(
+                  consumed_generation_runs.get(prior_generation, [])
+              ))
+              if len(prior_consumed_runs) != 1:
+                  venue_label = "V1/V3" if rescue_v1 else "V2/V4"
+                  raise SystemExit(
+                      f"{venue_label} next rescue generation requires "
+                      "exactly one consumed immediate prior generation: "
+                      f"generation={prior_generation} "
+                      f"runs={prior_consumed_runs}"
+                  )
+              expected_prior_consumed_run_id = str(
+                  prior_consumed_runs[0]
+              )
+
+          prior_gap_run_id = ""
+          selected_prior_row = None
+          selected_prior_reusable_gap_ids = []
+          selected_prior_missing_success_artifacts = []
+          selected_prior_non_success_gap_artifacts = []
+          prior_terminal_snapshot = None
+          prior_terminal_snapshot_sha256 = ""
+          prior_gap_diagnostics = {
+              "reusable_gap_count": 0,
+              "missing_success_artifacts": [],
+              "non_success_gap_artifacts": [],
+          }
+          for candidate in terminal_target_runs:
+              candidate_artifacts = artifacts(candidate["id"])
+              if (
+                  str(candidate.get("conclusion") or "") == "success"
+                  and requested_artifact in candidate_artifacts
+              ):
+                  raise SystemExit(
+                      "live venue rescue is unnecessary because prior "
+                      "successful canonical rescue is complete: "
+                      f"run={candidate['id']} "
+                      f"artifact={requested_artifact}"
+                  )
+              successful_gap_ids = successful_repair_gap_ids(
+                  candidate["id"]
+              )
+              artifact_gap_ids = set()
+              for name in candidate_artifacts:
+                  match = prior_gap_pattern.fullmatch(name)
+                  if match is not None:
+                      artifact_gap_ids.add(match.group(1))
+              reusable_gap_ids = sorted(
+                  successful_gap_ids & artifact_gap_ids,
+                  key=int,
+              )
+              missing_success_artifacts = sorted(
+                  successful_gap_ids - artifact_gap_ids,
+                  key=int,
+              )
+              non_success_gap_artifacts = sorted(
+                  artifact_gap_ids - successful_gap_ids,
+                  key=int,
+              )
+              has_plan = prior_plan_artifact in candidate_artifacts
+              has_gap = bool(reusable_gap_ids)
+              candidate_id = str(candidate["id"])
+              is_expected_consumed_prior = (
+                  not expected_prior_consumed_run_id
+                  or candidate_id == expected_prior_consumed_run_id
+              )
+              can_select_plan_only = bool(
+                  expected_prior_consumed_run_id
+                  and candidate_id == expected_prior_consumed_run_id
+              )
+              if (
+                  not prior_gap_run_id
+                  and is_expected_consumed_prior
+                  and has_plan
+                  and (has_gap or can_select_plan_only)
+              ):
+                  prior_gap_run_id = candidate_id
+                  selected_prior_row = dict(candidate)
+                  selected_prior_reusable_gap_ids = list(
+                      reusable_gap_ids
+                  )
+                  selected_prior_missing_success_artifacts = list(
+                      missing_success_artifacts
+                  )
+                  selected_prior_non_success_gap_artifacts = list(
+                      non_success_gap_artifacts
+                  )
+                  prior_gap_diagnostics = {
+                      "reusable_gap_count": len(reusable_gap_ids),
+                      "missing_success_artifacts": (
+                          missing_success_artifacts[:20]
+                      ),
+                      "non_success_gap_artifacts": (
+                          non_success_gap_artifacts[:20]
+                      ),
+                  }
+
+          if expected_prior_consumed_run_id and (
+              prior_gap_run_id != expected_prior_consumed_run_id
+          ):
+              venue_label = "V1/V3" if rescue_v1 else "V2/V4"
+              raise SystemExit(
+                  f"{venue_label} next rescue generation did not select "
+                  "the immediate consumed prior run: "
+                  f"selected={prior_gap_run_id or None} "
+                  f"expected={expected_prior_consumed_run_id}"
+              )
+
+          if prior_gap_run_id:
+              fresh_prior = get(
+                  f"/repos/{repo}/actions/runs/{prior_gap_run_id}"
+              )
+              if fresh_prior.get("status") != "completed":
+                  raise SystemExit(
+                      "selected prior rescue is not terminal on fresh snapshot"
+                  )
+              if selected_prior_row is None:
+                  raise SystemExit(
+                      "selected prior rescue row is missing"
+                  )
+              if (
+                  str(fresh_prior.get("head_sha") or "")
+                  != str(selected_prior_row.get("head_sha") or "")
+                  or str(fresh_prior.get("display_title") or "")
+                  != str(selected_prior_row.get("display_title") or "")
+                  or str(fresh_prior.get("conclusion") or "")
+                  != str(selected_prior_row.get("conclusion") or "")
+              ):
+                  raise SystemExit(
+                      "selected prior rescue identity changed during "
+                      "fresh terminal snapshot"
+                  )
+
+              fresh_job_snapshot = repair_job_terminal_snapshot(
+                  int(prior_gap_run_id)
+              )
+              if fresh_job_snapshot["nonterminal"]:
+                  raise SystemExit(
+                      "selected prior rescue still has nonterminal "
+                      "repair jobs on fresh snapshot: "
+                      f"{fresh_job_snapshot['nonterminal'][:20]}"
+                  )
+              if fresh_job_snapshot["duplicate_gap_ids"]:
+                  raise SystemExit(
+                      "selected prior rescue has duplicate repair gap "
+                      "IDs on fresh snapshot: "
+                      f"{fresh_job_snapshot['duplicate_gap_ids'][:20]}"
+                  )
+              fresh_artifacts = artifacts(
+                  int(prior_gap_run_id)
+              )
+              if prior_plan_artifact not in fresh_artifacts:
+                  raise SystemExit(
+                      "selected prior rescue plan artifact disappeared "
+                      "during fresh terminal snapshot"
+                  )
+              if (
+                  str(fresh_prior.get("conclusion") or "") == "success"
+                  and requested_artifact in fresh_artifacts
+              ):
+                  raise SystemExit(
+                      "live venue rescue became unnecessary because "
+                      "fresh prior snapshot is canonically complete: "
+                      f"run={prior_gap_run_id} "
+                      f"artifact={requested_artifact}"
+                  )
+              fresh_successful_gap_ids = (
+                  successful_repair_gap_ids(
+                      int(prior_gap_run_id)
+                  )
+              )
+              fresh_artifact_gap_ids = set()
+              for name in fresh_artifacts:
+                  match = prior_gap_pattern.fullmatch(name)
+                  if match is not None:
+                      fresh_artifact_gap_ids.add(match.group(1))
+              fresh_reusable_gap_ids = sorted(
+                  fresh_successful_gap_ids
+                  & fresh_artifact_gap_ids,
+                  key=int,
+              )
+              fresh_missing_success_artifacts = sorted(
+                  fresh_successful_gap_ids
+                  - fresh_artifact_gap_ids,
+                  key=int,
+              )
+              fresh_non_success_gap_artifacts = sorted(
+                  fresh_artifact_gap_ids
+                  - fresh_successful_gap_ids,
+                  key=int,
+              )
+              if (
+                  fresh_reusable_gap_ids
+                  != selected_prior_reusable_gap_ids
+                  or fresh_missing_success_artifacts
+                  != selected_prior_missing_success_artifacts
+                  or fresh_non_success_gap_artifacts
+                  != selected_prior_non_success_gap_artifacts
+              ):
+                  raise SystemExit(
+                      "selected prior rescue reconciliation changed "
+                      "during fresh terminal snapshot"
+                  )
+              prior_gap_diagnostics = {
+                  "reusable_gap_count": len(
+                      fresh_reusable_gap_ids
+                  ),
+                  "missing_success_artifacts": (
+                      fresh_missing_success_artifacts[:20]
+                  ),
+                  "non_success_gap_artifacts": (
+                      fresh_non_success_gap_artifacts[:20]
+                  ),
+              }
+              prior_terminal_binding = {
+                  "run_id": int(prior_gap_run_id),
+                  "status": fresh_prior.get("status"),
+                  "conclusion": fresh_prior.get("conclusion"),
+                  "head_sha": fresh_prior.get("head_sha"),
+                  "display_title": fresh_prior.get(
+                      "display_title"
+                  ),
+                  "run_attempt": fresh_prior.get("run_attempt"),
+                  "reusable_gap_ids": fresh_reusable_gap_ids,
+                  "missing_success_artifacts": (
+                      fresh_missing_success_artifacts
+                  ),
+                  "non_success_gap_artifacts": (
+                      fresh_non_success_gap_artifacts
+                  ),
+                  "plan_artifact_present": (
+                      prior_plan_artifact in fresh_artifacts
+                  ),
+                  "canonical_artifact_present": (
+                      requested_artifact in fresh_artifacts
+                  ),
+              }
+              prior_terminal_snapshot_sha256 = hashlib.sha256(
+                  json.dumps(
+                      prior_terminal_binding,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ).encode()
+              ).hexdigest()
+              prior_terminal_snapshot = {
+                  **prior_terminal_binding,
+                  "updated_at": fresh_prior.get("updated_at"),
+                  "repair_job_count": fresh_job_snapshot[
+                      "repair_jobs"
+                  ],
+                  "repair_job_counts": fresh_job_snapshot["counts"],
+                  "duplicate_repair_gap_ids": fresh_job_snapshot[
+                      "duplicate_gap_ids"
+                  ][:20],
+                  "repair_nonterminal_count": len(
+                      fresh_job_snapshot["nonterminal"]
+                  ),
+                  "reusable_gap_count": len(
+                      fresh_reusable_gap_ids
+                  ),
+                  "missing_success_artifact_count": len(
+                      fresh_missing_success_artifacts
+                  ),
+                  "non_success_gap_artifact_count": len(
+                      fresh_non_success_gap_artifacts
+                  ),
+                  "snapshot_binding_sha256": (
+                      prior_terminal_snapshot_sha256
+                  ),
+              }
+
+          if rescue_v2 and requested_generation == 3:
+              expected_prior_run_id = 34_234_471_190
+              expected_prior_head_sha = (
+                  "0e146b6f46491caab81f00a241fd29611a252c4c"
+              )
+              expected_prior_title = (
+                  "launch V2 V4 rescue generation 2"
+              )
+              pinned_prior_rows = [
+                  row
+                  for row in terminal_target_runs
+                  if int(row["id"]) == expected_prior_run_id
+              ]
+              if len(pinned_prior_rows) != 1:
+                  raise SystemExit(
+                      "V2/V4 generation 3 pinned prior run is unavailable"
+                  )
+              pinned_prior = pinned_prior_rows[0]
+              if prior_terminal_snapshot is None:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior snapshot is missing"
+                  )
+              if str(
+                  prior_terminal_snapshot.get("head_sha") or ""
+              ) != expected_prior_head_sha:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior launch SHA changed"
+                  )
+              if str(
+                  prior_terminal_snapshot.get("display_title") or ""
+              ) != expected_prior_title:
+                  raise SystemExit(
+                      "V2/V4 generation 3 fresh prior launch title changed"
+                  )
+              if str(pinned_prior.get("head_sha") or "") != (
+                  expected_prior_head_sha
+              ):
+                  raise SystemExit(
+                      "V2/V4 generation 3 prior launch SHA changed"
+                  )
+              if str(pinned_prior.get("display_title") or "") != (
+                  expected_prior_title
+              ):
+                  raise SystemExit(
+                      "V2/V4 generation 3 prior launch title changed"
+                  )
+              if prior_gap_run_id != str(expected_prior_run_id):
+                  raise SystemExit(
+                      "V2/V4 generation 3 must reuse pinned generation 2 run"
+                  )
+
+          fresh_active_siblings = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/{workflow_file}/runs"
+                  f"?branch={encoded_branch}&per_page=100&page={page}"
+              )
+              rows = list(payload.get("workflow_runs") or [])
+              for row in rows:
+                  row_id = int(row["id"])
+                  if row_id == current_run_id:
+                      continue
+                  if row.get("status") != "completed":
+                      fresh_active_siblings.append({
+                          "id": row_id,
+                          "status": row.get("status"),
+                          "head_sha": row.get("head_sha"),
+                          "display_title": row.get(
+                              "display_title"
+                          ),
+                      })
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "live venue rescue fresh sibling pagination "
+                      "exceeded 1000"
+                  )
+          if fresh_active_siblings:
+              raise SystemExit(
+                  "live venue rescue sibling state changed before "
+                  f"handoff: {fresh_active_siblings[:20]}"
+              )
+
+          requested_artifacts = {requested_artifact}
+
+          source_artifacts = artifacts(run_id)
+          already_complete = sorted(requested_artifacts & source_artifacts)
+          if already_complete:
+              raise SystemExit(
+                  "live venue rescue is unnecessary for complete source "
+                  f"artifacts: {already_complete}"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          ):
+              raise SystemExit("live venue rescue source workflow path changed")
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("live venue rescue source branch changed")
+          if str(run.get("head_sha") or "") != (
+              "c53b3a63156976a5873752c332fa7578011249b0"
+          ):
+              raise SystemExit(
+                  "live venue rescue source launch commit changed"
+              )
+
+          print(json.dumps({
+              "source_run_id": run_id,
+              "status": run.get("status"),
+              "conclusion": run.get("conclusion"),
+              "rescue_target": (
+                  "v1_v3" if rescue_v1 else "v2_v4"
+              ),
+              "missing_requested_artifacts": sorted(
+                  requested_artifacts - source_artifacts
+              ),
+              "active_sibling_rescues": active_siblings,
+              "fresh_active_sibling_rescues": fresh_active_siblings,
+              "prior_gap_run_id": prior_gap_run_id,
+              "prior_gap_diagnostics": prior_gap_diagnostics,
+              "prior_terminal_snapshot": prior_terminal_snapshot,
+              "prior_terminal_snapshot_sha256": (
+                  prior_terminal_snapshot_sha256
+              ),
+              "requested_generation": requested_generation,
+              "expected_generation": expected_generation,
+              "consumed_generations": consumed_generations,
+              "consumed_generation_runs": {
+                  str(generation): sorted(run_ids)
+                  for generation, run_ids
+                  in sorted(consumed_generation_runs.items())
+              },
+              "unconsumed_terminal_generations": (
+                  unconsumed_terminal_generations
+              ),
+              "validation_generation": validation_generation,
+              "launch_commit_sha": current_sha,
+              "launch_parent_sha": before_sha,
+              "launch_marker_from": old_validation_generation,
+              "launch_marker_to": new_validation_generation,
+              "preflight": "pass",
+          }, sort_keys=True))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"prior_gap_run_id={prior_gap_run_id}\n")
+              handle.write(
+                  "prior_reusable_gap_count="
+                  f"{prior_gap_diagnostics['reusable_gap_count']}\n"
+              )
+              handle.write(
+                  "prior_missing_success_artifacts="
+                  + json.dumps(
+                      prior_gap_diagnostics[
+                          "missing_success_artifacts"
+                      ],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "prior_non_success_gap_artifacts="
+                  + json.dumps(
+                      prior_gap_diagnostics[
+                          "non_success_gap_artifacts"
+                      ],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "prior_terminal_snapshot_sha256="
+                  f"{prior_terminal_snapshot_sha256}\n"
+              )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(
+                  "### Venue rescue terminal preflight\n\n"
+                  f"- target: "
+                  f"{'v1_v3' if rescue_v1 else 'v2_v4'}\n"
+                  f"- generation: {requested_generation}\n"
+                  f"- consumed generations: "
+                  f"{consumed_generations}\n"
+                  f"- consumed generation runs: "
+                  f"{consumed_generation_runs}\n"
+                  f"- unconsumed terminal generations: "
+                  f"{unconsumed_terminal_generations}\n"
+                  f"- fresh active siblings: "
+                  f"{fresh_active_siblings}\n"
+                  f"- validation generation: "
+                  f"{validation_generation}\n"
+                  f"- prior gap run: {prior_gap_run_id or 'none'}\n"
+                  f"- prior terminal snapshot: "
+                  f"{prior_terminal_snapshot}\n"
+                  f"- prior snapshot binding SHA-256: "
+                  f"{prior_terminal_snapshot_sha256 or 'none'}\n"
+                  f"- reusable successful gap artifacts: "
+                  f"{prior_gap_diagnostics['reusable_gap_count']}\n"
+                  f"- successful jobs missing artifacts: "
+                  f"{prior_gap_diagnostics['missing_success_artifacts']}\n"
+                  f"- non-success gap artifacts ignored: "
+                  f"{prior_gap_diagnostics['non_success_gap_artifacts']}\n"
+              )
+          PY
+
+  v1_v3_rescue:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && startsWith(github.event.head_commit.message, 'launch V1 V3 rescue') }}
+    uses: ./.github/workflows/phase1-pons-v1-v3-recover-gaps.yml
+    with:
+      source_registry_run_id: "33911022718"
+      partial_run_id: "33982556591"
+      prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
+      expected_prior_reusable_gap_count: ${{ needs.preflight.outputs.prior_reusable_gap_count }}
+      expected_prior_terminal_snapshot_sha256: ${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}
+      max_gap_blocks: "50000"
+    secrets: inherit
+
+  v2_v4_rescue:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && startsWith(github.event.head_commit.message, 'launch V2 V4 rescue') }}
+    uses: ./.github/workflows/phase1-pons-v2-v4-recover-gaps.yml
+    with:
+      transition_run_id: "33912452330"
+      partial_run_id: "33982556591"
+      prior_gap_run_id: ${{ needs.preflight.outputs.prior_gap_run_id }}
+      expected_prior_reusable_gap_count: ${{ needs.preflight.outputs.prior_reusable_gap_count }}
+      expected_prior_terminal_snapshot_sha256: ${{ needs.preflight.outputs.prior_terminal_snapshot_sha256 }}
+      max_gap_blocks: "50000"
+    secrets: inherit

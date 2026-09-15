@@ -1,0 +1,516 @@
+name: phase1-pons-viability-guarded-route
+
+on:
+  workflow_call:
+    inputs:
+      route:
+        required: true
+        type: string
+      sequence_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source_eligibility_run_id: ${{ steps.check.outputs.source_eligibility_run_id }}
+      evidence_run_id: ${{ steps.check.outputs.evidence_run_id }}
+      quote_fallback_run_id: ${{ steps.routing.outputs.lifecycle_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        name: Verify completed evidence handoff before any route RPC
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ROUTE: ${{ inputs.route }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          config = json.loads(
+              Path(".github/phase1-pons-viability-ready.json").read_text()
+          )
+          generation = int(config.get("generation", 0))
+          evidence_run_id = int(config.get("evidence_run_id", 0))
+          source_run_id = int(config.get("source_eligibility_run_id", 0))
+          if generation <= 0:
+              raise SystemExit("viability evidence readiness is not armed")
+          if evidence_run_id <= 0 or source_run_id <= 0:
+              raise SystemExit("viability readiness run IDs must be positive")
+          if source_run_id != 33_982_556_591:
+              raise SystemExit("viability source eligibility run changed")
+
+          ledger = json.loads(
+              Path(".github/phase1-pons-viability-runs.json").read_text()
+          )
+          if int(ledger.get("generation", 0)) <= 0:
+              raise SystemExit("viability run ledger is not armed")
+          if int(ledger.get("evidence_run_id", 0)) != evidence_run_id:
+              raise SystemExit(
+                  "viability run ledger evidence does not match readiness"
+              )
+          routes = dict(ledger.get("routes") or {})
+          route = os.environ["ROUTE"]
+          expected_routes = {
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          }
+          if set(routes) != expected_routes:
+              raise SystemExit("viability run ledger route set changed")
+          if route not in routes:
+              raise SystemExit(f"viability route is not in ledger: {route}")
+          recorded_run_id = int(routes[route])
+          if recorded_run_id > 0:
+              raise SystemExit(
+                  f"viability route already recorded in ledger: "
+                  f"{route} run={recorded_run_id}"
+              )
+          if recorded_run_id < 0:
+              raise SystemExit(
+                  f"viability route ledger run ID cannot be negative: {route}"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          run = get(f"/repos/{repo}/actions/runs/{evidence_run_id}")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit(
+                  "evidence handoff run is not completed successfully: "
+                  f"status={run.get('status')} conclusion={run.get('conclusion')}"
+              )
+          allowed_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          evidence_path = str(run.get("path") or "").split("@", 1)[0]
+          if evidence_path not in allowed_evidence_paths:
+              raise SystemExit(
+                  f"evidence handoff workflow path is not allowed: "
+                  f"{evidence_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("evidence handoff branch changed")
+
+          live_artifacts = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{evidence_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              artifacts = list(payload.get("artifacts") or [])
+              live_artifacts.extend(
+                  artifact
+                  for artifact in artifacts
+                  if not artifact.get("expired")
+              )
+              if len(artifacts) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit("evidence artifact pagination exceeded 1000")
+
+          names = {
+              str(artifact.get("name") or "")
+              for artifact in live_artifacts
+          }
+          required = {
+              "phase1-pons-post-eligibility-evidence-ready",
+              "phase1-pons-eligible-universe",
+              "phase1-pons-representative-validation",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  f"evidence handoff is missing required artifacts: {missing}"
+              )
+
+          handoff_rows = [
+              artifact
+              for artifact in live_artifacts
+              if str(artifact.get("name") or "")
+              == "phase1-pons-post-eligibility-evidence-ready"
+          ]
+          if len(handoff_rows) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in handoff_rows
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in handoff_rows
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get(
+                              "head_sha"
+                          )
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get(
+                              "head_branch"
+                          )
+                          or ""
+                      ),
+                  )
+                  for row in handoff_rows
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "evidence-ready retry artifacts are not equivalent"
+                  )
+          evidence_artifact_id = max(
+              int(row.get("id", 0))
+              for row in handoff_rows
+          )
+          if evidence_artifact_id <= 0:
+              raise SystemExit(
+                  "evidence-ready artifact ID is invalid"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"source_eligibility_run_id={source_run_id}\n")
+              output.write(f"evidence_run_id={evidence_run_id}\n")
+              output.write(
+                  f"evidence_artifact_id={evidence_artifact_id}\n"
+              )
+          print(json.dumps({
+              "generation": generation,
+              "evidence_run_id": evidence_run_id,
+              "source_eligibility_run_id": source_run_id,
+              "route": route,
+              "ledger_recorded_run_id": recorded_run_id,
+              "preflight": "pass",
+          }, sort_keys=True))
+          PY
+      - id: download_handoff
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff before retry
+        if: ${{ steps.download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - id: retry_download_handoff
+        name: Retry viability evidence handoff artifact download
+        if: ${{ steps.download_handoff.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial viability evidence handoff before final retry
+        if: ${{ steps.retry_download_handoff.outcome == 'failure' }}
+        run: rm -rf handoff
+      - name: Final viability evidence handoff artifact download retry
+        if: ${{ steps.retry_download_handoff.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.check.outputs.evidence_artifact_id }}
+          path: handoff
+          run-id: ${{ steps.check.outputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+      - id: routing
+        name: Resolve quote-fallback artifact source from evidence handoff
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ steps.check.outputs.evidence_run_id }}
+          SOURCE_RUN_ID: ${{ steps.check.outputs.source_eligibility_run_id }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
+          source_run_id = int(os.environ["SOURCE_RUN_ID"])
+          report = json.loads(
+              Path(
+                  "handoff/"
+                  "phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          if report.get("status") != "ready":
+              raise SystemExit("evidence handoff status is not ready")
+          if int(report.get("evidence_run_id", 0)) != evidence_run_id:
+              raise SystemExit("evidence handoff run ID mismatch")
+          if int(report.get("source_eligibility_run_id", 0)) != source_run_id:
+              raise SystemExit("evidence handoff source run mismatch")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          evidence = get(
+              f"/repos/{repo}/actions/runs/{evidence_run_id}"
+          )
+          evidence_path = str(
+              evidence.get("path") or ""
+          ).split("@", 1)[0]
+          normal_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          )
+          if evidence_path not in {
+              normal_evidence_path,
+              recovered_evidence_path,
+          }:
+              raise SystemExit(
+                  "viability handoff evidence workflow path changed: "
+                  f"{evidence_path}"
+              )
+
+          lifecycle_run_id = int(report.get("lifecycle_run_id", 0))
+          if lifecycle_run_id <= 0:
+              raise SystemExit(
+                  "evidence handoff lifecycle run ID must be positive"
+              )
+          for field in ("v1_v3_run_id", "v2_v4_run_id"):
+              if int(report.get(field, 0)) <= 0:
+                  raise SystemExit(
+                      f"evidence handoff venue run ID is invalid: {field}"
+                  )
+          recovery_mode = report.get("recovery_mode")
+          if not isinstance(recovery_mode, bool):
+              raise SystemExit(
+                  "evidence handoff recovery mode must be boolean"
+              )
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit("evidence handoff snapshot head changed")
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit("evidence handoff Pons launch count changed")
+          if int(report.get("eligible_tokens", 0)) <= 0:
+              raise SystemExit("evidence handoff eligible universe is empty")
+          if int(report.get("representative_tokens", -1)) != 10:
+              raise SystemExit(
+                  "evidence handoff representative token count changed"
+              )
+          explorer_required = report.get("explorer_evidence_required", False)
+          if not isinstance(explorer_required, bool):
+              raise SystemExit(
+                  "evidence handoff explorer requirement must be boolean"
+              )
+          explorer_run_id = int(
+              report.get("explorer_crosscheck_run_id", 0)
+          )
+          if explorer_run_id < 0:
+              raise SystemExit(
+                  "evidence handoff explorer run ID is invalid"
+              )
+          if explorer_required and explorer_run_id <= 0:
+              raise SystemExit(
+                  "evidence handoff explorer evidence is required without a run"
+              )
+          if not explorer_required and explorer_run_id != 0:
+              raise SystemExit(
+                  "evidence handoff explorer run is present while optional"
+              )
+          evidence_hashes = {}
+          for field in (
+              "eligible_universe_sha256",
+              "representative_validation_sha256",
+              "representative_sample_sha256",
+              "representative_token_set_sha256",
+              "representative_source_coverage_sha256",
+              "v1_eligibility_sha256",
+              "v2_eligibility_sha256",
+              "runner_smoke_universe_sha256",
+              "runner_smoke_outcomes_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value) != 64:
+                  raise SystemExit(
+                      f"evidence handoff hash is invalid: {field}"
+                  )
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"evidence handoff hash is invalid: {field}"
+                  ) from exc
+              evidence_hashes[field] = value
+
+          if int(report.get("runner_smoke_run_id", -1)) != 33_920_762_592:
+              raise SystemExit(
+                  "evidence handoff runner-smoke run changed"
+              )
+          if evidence_hashes["runner_smoke_universe_sha256"] != (
+              "4861b2af1d549eb41c53341a07f6de71dce4d9486"
+              "b769543c1376beab9c19ab9"
+          ):
+              raise SystemExit(
+                  "evidence handoff runner-smoke universe SHA changed"
+              )
+          if evidence_hashes["runner_smoke_outcomes_sha256"] != (
+              "6fb40693b77d7434d4e579a2225fed2c65061841"
+              "a5ea9d0ba56f785071fc6ef2"
+          ):
+              raise SystemExit(
+                  "evidence handoff runner-smoke outcomes SHA changed"
+              )
+
+          if evidence_path == normal_evidence_path:
+              if recovery_mode:
+                  raise SystemExit(
+                      "viability normal evidence is marked recovered"
+                  )
+              if (
+                  lifecycle_run_id != source_run_id
+                  or int(report["v1_v3_run_id"]) != source_run_id
+                  or int(report["v2_v4_run_id"]) != source_run_id
+              ):
+                  raise SystemExit(
+                      "normal evidence handoff routing changed"
+                  )
+          elif not recovery_mode:
+              raise SystemExit(
+                  "viability recovered evidence is not marked recovered"
+              )
+
+          lifecycle = get(
+              f"/repos/{repo}/actions/runs/{lifecycle_run_id}"
+          )
+          if lifecycle.get("status") != "completed":
+              raise SystemExit(
+                  "evidence lifecycle/pricing run is not terminal"
+              )
+          allowed_paths = {
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+          }
+          lifecycle_path = str(
+              lifecycle.get("path") or ""
+          ).split("@", 1)[0]
+          if lifecycle_path not in allowed_paths:
+              raise SystemExit(
+                  "evidence lifecycle/pricing workflow path is not allowed: "
+                  f"{lifecycle_path}"
+              )
+          if lifecycle.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "evidence lifecycle/pricing branch changed"
+              )
+
+          names = set()
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{lifecycle_run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              names.update(
+                  str(row.get("name"))
+                  for row in rows
+                  if not row.get("expired")
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "lifecycle artifact pagination exceeded 2000"
+                  )
+          required = {
+              "phase1-pons-v3-quote-fallback-full",
+              "phase1-pons-v4-quote-fallback-full",
+              "phase1-pons-quote-fallback-full",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(
+                  "evidence lifecycle/pricing run is missing fallback "
+                  f"artifacts: {missing}"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"lifecycle_run_id={lifecycle_run_id}\n")
+          print(json.dumps({
+              "evidence_run_id": evidence_run_id,
+              "source_eligibility_run_id": source_run_id,
+              "lifecycle_run_id": lifecycle_run_id,
+              "recovery_mode": recovery_mode,
+              "required_fallback_artifacts": sorted(required),
+              "evidence_hashes": evidence_hashes,
+              "routing": "pass",
+          }, sort_keys=True))
+          PY
+
+  measure:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    uses: ./.github/workflows/phase1-pons-viability-route-measurement.yml
+    with:
+      route: ${{ inputs.route }}
+      from_block: "54436036"
+      to_block: "54486035"
+      eligibility_run_id: ${{ needs.preflight.outputs.quote_fallback_run_id }}
+      evidence_run_id: ${{ needs.preflight.outputs.evidence_run_id }}
+      source_eligibility_run_id: ${{ needs.preflight.outputs.source_eligibility_run_id }}
+      sequence_id: ${{ inputs.sequence_id }}
+      registry_run_id: "33911022718"
+      v2_registry_run_id: "33912235341"
+      transition_run_id: "33912452330"
+      quote_audit_run_id: "33923299711"
+      quote_audit_artifact_name: "phase1-pons-full-quote-audit-current"
+    secrets: inherit

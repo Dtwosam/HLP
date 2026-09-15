@@ -1,0 +1,138 @@
+name: phase1-pools-trade-lbp-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pools-trade-lbp-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit Robinhood LBP strategy event surface
+        run: |
+          python - <<'PY'
+          import json, os
+          from collections import Counter,defaultdict
+          from hlp.config import (
+              POOLS_TRADE_LAUNCHER_CURRENT,POOLS_TRADE_LAUNCHER_ORIGINAL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.evm import function_selector,word_address,data_words
+          from hlp.protocols.pools_trade import (
+              TOKEN_CREATED_TOPIC,TOKEN_DISTRIBUTED_TOPIC,
+              decode_pools_trade_token_created,decode_pools_trade_token_distributed,
+          )
+
+          start=30_000_000
+          end=30_099_999
+          LBP="0x05d552391067389ee44fec3924157ed33f976000"
+          rpc=RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL",SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,attempts=5,min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key":os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY") else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          factory_result=rpc.eth_call(LBP,function_selector("initializerFactory()"),start)
+          factory_words=data_words(factory_result)
+          assert len(factory_words)==1
+          initializer_factory=word_address(factory_words[0])
+
+          ll=list(rpc.iter_logs_chunked(
+              start,end,address=[POOLS_TRADE_LAUNCHER_CURRENT,POOLS_TRADE_LAUNCHER_ORIGINAL],
+              topics=[[TOKEN_CREATED_TOPIC,TOKEN_DISTRIBUTED_TOPIC]],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          created={decode_pools_trade_token_created(x).token for x in ll if x.topics[0]==TOKEN_CREATED_TOPIC}
+          lbp_dist=[
+              decode_pools_trade_token_distributed(x) for x in ll
+              if x.topics[0]==TOKEN_DISTRIBUTED_TOPIC
+          ]
+          lbp_dist=[x for x in lbp_dist if x.token in created and x.strategy==LBP]
+          tx_to_tokens=defaultdict(list)
+          for row in lbp_dist:
+              tx_to_tokens[row.transaction_hash].append(row.token)
+
+          logs=list(rpc.iter_logs_chunked(
+              start,end,address=LBP,chunk_size=2000,min_chunk_size=25,
+          ))
+          counts=Counter(x.topics[0] if x.topics else "<none>" for x in logs)
+          correlated=defaultdict(list)
+          first_by_topic={}
+          for row in logs:
+              topic=row.topics[0] if row.topics else "<none>"
+              first_by_topic.setdefault(topic,{
+                  "block":row.block_number,"tx":row.transaction_hash,
+                  "topics":list(row.topics),"data":row.data,
+                  "data_words":len(row.data.removeprefix("0x"))//64
+                    if len(row.data.removeprefix("0x"))%64==0 else None,
+              })
+              if row.transaction_hash in tx_to_tokens:
+                  correlated[row.transaction_hash].append({
+                      "tokens":tx_to_tokens[row.transaction_hash],
+                      "block":row.block_number,
+                      "log_index":row.log_index,
+                      "topics":list(row.topics),
+                      "data":row.data,
+                  })
+
+          # Candidate initializer addresses are indexed addresses emitted by the
+          # LBP in the same tx as token distribution, excluding known token/strategy.
+          candidates=set()
+          for rows in correlated.values():
+              tokens=set(rows[0]["tokens"])
+              for row in rows:
+                  for topic in row["topics"][1:]:
+                      addr="0x"+topic[-40:]
+                      if addr not in tokens and addr!=LBP:
+                          candidates.add(addr)
+
+          candidate_state=[]
+          for addr in sorted(candidates)[:50]:
+              code=rpc.get_code(addr,start)
+              if code in {"0x","0x0",""}:
+                  # Candidate may deploy later in shard; find from correlated block.
+                  blocks=[
+                      row["block"] for rows in correlated.values() for row in rows
+                      if any(("0x"+t[-40:])==addr for t in row["topics"][1:])
+                  ]
+                  probe=min(blocks) if blocks else start
+                  code=rpc.get_code(addr,probe)
+              candidate_state.append({
+                  "address":addr,
+                  "has_code":code not in {"0x","0x0",""},
+                  "code_bytes":len(code.removeprefix("0x"))//2,
+              })
+
+          print(json.dumps({
+              "lbp_strategy":LBP,
+              "initializer_factory":initializer_factory,
+              "lbp_token_distributions":len(lbp_dist),
+              "unique_lbp_tokens":len({x.token for x in lbp_dist}),
+              "lbp_logs":len(logs),
+              "topic_counts":dict(counts),
+              "first_by_topic":first_by_topic,
+              "correlated_distribution_txs":len(correlated),
+              "correlated_samples":list(correlated.items())[:8],
+              "candidate_indexed_addresses":candidate_state,
+              "requests_made":rpc.requests_made,
+          },sort_keys=True))
+          PY

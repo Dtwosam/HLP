@@ -1,0 +1,156 @@
+name: phase1-flap-history-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-flap-history-smoke.yml'
+      - 'src/hlp/protocols/flap.py'
+      - 'src/hlp/protocols/flap_state.py'
+      - 'src/hlp/protocols/evm.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Characterize Flap in block-30M shard
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          from hlp.config import FLAP_PORTAL, SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.flap import (
+              FLAP_RECONSTRUCTION_TOPICS,
+              decode_flap_event,
+          )
+          from hlp.protocols.flap_state import read_flap_token_v8
+
+          start = 30_000_000
+          end = 30_099_999
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+          code = rpc.get_code(FLAP_PORTAL, start)
+          assert code not in {"0x", "0x0", ""}
+
+          raw = list(
+              rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=FLAP_PORTAL,
+                  topics=[list(FLAP_RECONSTRUCTION_TOPICS)],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          events = [decode_flap_event(row) for row in raw]
+          counts = Counter(row.event_type for row in events)
+          launches = [row for row in events if row.event_type == "token_created"]
+          trades = [
+              row for row in events
+              if row.event_type in {"token_bought", "token_sold"}
+          ]
+          graduations = [
+              row for row in events if row.event_type == "launched_to_dex"
+          ]
+
+          assert launches, counts
+          assert trades, counts
+
+          supply_samples = []
+          for launch in launches[:10]:
+              state = read_erc20_static(
+                  rpc, launch.token, block=launch.block_number
+              )
+              supply_samples.append(
+                  {
+                      "token": launch.token,
+                      "decimals": state.decimals,
+                      "total_supply": state.total_supply,
+                  }
+              )
+              assert state.decimals == 18
+              assert state.total_supply == 1_000_000_000 * 10**18
+
+          # Compare the final trade for a token in a block to end-of-block
+          # Portal state. Later progress/supply logs do not change price.
+          last_trade_by_token_block = {}
+          for trade in trades:
+              key = (trade.token, trade.block_number)
+              prior = last_trade_by_token_block.get(key)
+              if prior is None or (
+                  (trade.transaction_index or -1, trade.log_index)
+                  > (prior.transaction_index or -1, prior.log_index)
+              ):
+                  last_trade_by_token_block[key] = trade
+
+          price_checks = []
+          quote_tokens = set()
+          for trade in list(last_trade_by_token_block.values())[:12]:
+              state = read_flap_token_v8(
+                  rpc, trade.token, block=trade.block_number
+              )
+              quote_tokens.add(state.quote_token)
+              price_checks.append(
+                  {
+                      "token": trade.token,
+                      "block": trade.block_number,
+                      "event_type": trade.event_type,
+                      "post_price_raw": trade.post_price_raw,
+                      "state_price_raw": state.price_raw,
+                      "quote_token": state.quote_token,
+                      "reserve_raw": state.reserve_raw,
+                      "circulating_supply_raw": state.circulating_supply_raw,
+                      "progress": state.progress,
+                      "status": state.status,
+                  }
+              )
+              assert state.price_raw == trade.post_price_raw, (
+                  trade.token,
+                  trade.block_number,
+                  trade.post_price_raw,
+                  state.price_raw,
+              )
+
+          graduation_pools = {row.pool for row in graduations if row.pool}
+          print(json.dumps({
+              "from_block": start,
+              "to_block": end,
+              "event_counts": dict(counts),
+              "launches": len(launches),
+              "unique_launch_tokens": len({row.token for row in launches}),
+              "trades": len(trades),
+              "unique_traded_tokens": len({row.token for row in trades}),
+              "graduations": len(graduations),
+              "graduation_pools": len(graduation_pools),
+              "quote_tokens_in_price_sample": sorted(quote_tokens),
+              "supply_samples": supply_samples,
+              "price_checks": price_checks,
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY

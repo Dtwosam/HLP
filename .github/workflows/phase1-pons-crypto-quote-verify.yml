@@ -1,0 +1,177 @@
+name: phase1-pons-crypto-quote-verify
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-crypto-quote-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-crypto-quote-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QUOTE_AUDIT_RUN_ID: '33917802816'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ env.QUOTE_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Verify unsupported quote identity and historical oracle causality
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
+          from hlp.data.chainlink_directory import ChainlinkDirectoryClient
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.chainlink import (
+              read_chainlink_aggregator,
+              read_chainlink_latest_round,
+          )
+          from hlp.protocols.erc20 import read_erc20_static, read_erc20_symbol
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          unsupported = [
+              row for row in rows
+              if row["pricing_status"] == "unsupported_quote"
+          ]
+          assert len(unsupported) == 1, unsupported
+          source = unsupported[0]
+          token = source["quote_token"].lower()
+          first_use = int(source["first_launch_block"])
+          prior = first_use - 1
+
+          api_key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          rpc = RpcClient(
+              SOLIDRPC_AUTH_RPC_URL if api_key else SOLIDRPC_PUBLIC_RPC_URL,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1 if api_key else 0.6,
+              extra_headers={"X-API-Key": api_key} if api_key else None,
+          )
+          rpc.assert_robinhood()
+          directory = ChainlinkDirectoryClient(timeout=30, attempts=5)
+
+          report = {
+              "quote_token": token,
+              "first_launch_block": first_use,
+              "causal_state_block": prior,
+              "symbol": None,
+              "quote_decimals": None,
+              "directory_name": None,
+              "directory_path": None,
+              "feed": None,
+              "proxy_has_code_before_first_use": False,
+              "aggregator": None,
+              "aggregator_has_code_before_first_use": False,
+              "onchain_description": None,
+              "oracle_decimals": None,
+              "usd_price_before_first_use": None,
+              "causal_ready": False,
+              "error": None,
+          }
+          try:
+              symbol = read_erc20_symbol(rpc, token, block=prior)
+              static = read_erc20_static(rpc, token, block=prior)
+              report["symbol"] = symbol
+              report["quote_decimals"] = static.decimals
+
+              page = directory.fetch_text()
+              feed = directory.parse_robinhood_crypto_usd_feed(page, symbol)
+              report["directory_name"] = feed.name
+              report["directory_path"] = feed.path
+              report["feed"] = feed.proxy_address
+
+              proxy_code = rpc.get_code(feed.proxy_address, prior)
+              report["proxy_has_code_before_first_use"] = (
+                  proxy_code not in {"0x", "0x0", ""}
+              )
+              if not report["proxy_has_code_before_first_use"]:
+                  raise RuntimeError(
+                      "Chainlink crypto feed proxy did not exist before first Pons use"
+                  )
+
+              aggregator = read_chainlink_aggregator(
+                  rpc, feed.proxy_address, block=prior
+              )
+              report["aggregator"] = aggregator
+              aggregator_code = rpc.get_code(aggregator, prior)
+              report["aggregator_has_code_before_first_use"] = (
+                  aggregator_code not in {"0x", "0x0", ""}
+              )
+              if not report["aggregator_has_code_before_first_use"]:
+                  raise RuntimeError(
+                      "Chainlink crypto aggregator did not exist before first Pons use"
+                  )
+
+              latest = read_chainlink_latest_round(
+                  rpc, feed.proxy_address, block=prior
+              )
+              report["onchain_description"] = latest.description
+              report["oracle_decimals"] = latest.decimals
+              report["usd_price_before_first_use"] = str(latest.answer)
+              if latest.description != feed.name:
+                  raise ValueError(
+                      f"directory/onchain feed mismatch: "
+                      f"{feed.name!r} != {latest.description!r}"
+                  )
+              report["causal_ready"] = True
+          except Exception as exc:
+              report["error"] = f"{type(exc).__name__}: {exc}"
+
+          report["archive_rpc_requests"] = rpc.requests_made
+          report["chainlink_directory_requests"] = directory.requests_made
+          report["chainlink_directory_sha256"] = directory.last_sha256
+          Path("artifacts/pons-crypto-quote-verification.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-pons-crypto-quote-verification
+          path: artifacts/
+          if-no-files-found: error
+      - name: Fail closed unless historical crypto/USD pricing is causal
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(
+              Path("artifacts/pons-crypto-quote-verification.json").read_text()
+          )
+          if not report["causal_ready"]:
+              raise SystemExit(report["error"])
+          PY

@@ -1,0 +1,2693 @@
+name: phase1-pons-v2-v4-recover-gaps
+
+on:
+  workflow_dispatch:
+    inputs:
+      transition_run_id:
+        description: "Run containing phase1-pons-v2-transition-full"
+        required: true
+        default: "33912452330"
+        type: string
+      partial_run_id:
+        description: "Interrupted phase1-pons-v2-v4-full run with successful shard artifacts"
+        required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier V4 gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      expected_prior_reusable_gap_count:
+        description: "Optional launcher-pinned reusable prior-gap artifact count"
+        required: false
+        default: ""
+        type: string
+      expected_prior_terminal_snapshot_sha256:
+        description: "Optional launcher-pinned prior terminal snapshot digest"
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        default: "50000"
+        type: string
+  workflow_call:
+    inputs:
+      transition_run_id:
+        description: "Run containing phase1-pons-v2-transition-full"
+        required: true
+        type: string
+      partial_run_id:
+        description: "Interrupted phase1-pons-v2-v4-full run with successful shard artifacts"
+        required: true
+        type: string
+      prior_gap_run_id:
+        description: "Optional earlier V4 gap-recovery run whose successful gaps must be reused"
+        required: false
+        default: ""
+        type: string
+      expected_prior_reusable_gap_count:
+        description: "Optional launcher-pinned reusable prior-gap artifact count"
+        required: false
+        default: ""
+        type: string
+      expected_prior_terminal_snapshot_sha256:
+        description: "Optional launcher-pinned prior terminal snapshot digest"
+        required: false
+        default: ""
+        type: string
+      max_gap_blocks:
+        description: "Maximum blocks per retry job"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-v4-recover-gaps-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GENERATION_START: '26841846'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      matrix_1: ${{ steps.plan.outputs.matrix_1 }}
+      matrix_2: ${{ steps.plan.outputs.matrix_2 }}
+      matrix_3: ${{ steps.plan.outputs.matrix_3 }}
+      matrix_4: ${{ steps.plan.outputs.matrix_4 }}
+      gap_count: ${{ steps.plan.outputs.gap_count }}
+      gap_count_1: ${{ steps.plan.outputs.gap_count_1 }}
+      gap_count_2: ${{ steps.plan.outputs.gap_count_2 }}
+      gap_count_3: ${{ steps.plan.outputs.gap_count_3 }}
+      gap_count_4: ${{ steps.plan.outputs.gap_count_4 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Verify frozen V2 transition input
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ inputs.transition_run_id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import urllib.request
+          import zipfile
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["UPSTREAM_RUN_ID"])
+          expected_run_id = 33_912_452_330
+          expected_path = ".github/workflows/phase1-pons-v2-transition-full.yml"
+          expected_sha = "7ce5eac5c1980e8618173e1a8ff0effb06ecb327"
+          artifact_name = "phase1-pons-v2-transition-full"
+          manifest_name = "pons-v2-registrations-full.jsonl.manifest.json"
+
+          if run_id != expected_run_id:
+              raise SystemExit(
+                  "V2 transition run ID changed: "
+                  f"observed={run_id} expected={expected_run_id}"
+              )
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=60,
+              )
+
+          run = request(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed" or (
+              run.get("conclusion") != "success"
+          ):
+              raise SystemExit(
+                  "V2 transition run is not successful"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != expected_path:
+              raise SystemExit(
+                  "V2 transition workflow path changed"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "V2 transition branch changed"
+              )
+          if str(run.get("head_sha") or "") != expected_sha:
+              raise SystemExit(
+                  "V2 transition launch commit changed"
+              )
+
+          matches = []
+          page = 1
+          while True:
+              payload = request(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              matches.extend(
+                  row
+                  for row in rows
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == artifact_name
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "V2 transition artifact pagination exceeded 2000"
+                  )
+          if len(matches) != 1:
+              raise SystemExit(
+                  "V2 transition artifact identity is ambiguous"
+              )
+
+          payload = fetch_github_actions_artifact_zip(
+              api
+              + f"/repos/{repo}/actions/artifacts/"
+              + f"{int(matches[0]['id'])}/zip",
+              token,
+          )
+          with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+              names = [
+                  name
+                  for name in archive.namelist()
+                  if name.rsplit("/", 1)[-1] == manifest_name
+              ]
+              if len(names) != 1:
+                  raise SystemExit(
+                      "V2 transition manifest identity is ambiguous"
+                  )
+              manifest = json.loads(archive.read(names[0]))
+              data_names = [
+                  name
+                  for name in archive.namelist()
+                  if name.rsplit("/", 1)[-1] == "pons-v2-registrations-full.jsonl"
+              ]
+              if len(data_names) != 1:
+                  raise SystemExit(
+                      "V2 transition data identity is ambiguous"
+                  )
+              actual_digest = hashlib.sha256()
+              actual_records = 0
+              with archive.open(data_names[0]) as handle:
+                  for raw in handle:
+                      actual_digest.update(raw)
+                      if raw.strip():
+                          actual_records += 1
+
+          provenance = manifest.get("provenance") or {}
+          checks = {
+              "path": manifest.get("path") == "pons-v2-registrations-full.jsonl",
+              "records": int(manifest.get("records", -1)) == 3_638,
+              "sha256": str(manifest.get("sha256") or "") == (
+                  "8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93"
+              ),
+              "chain_id": int(provenance.get("chain_id", -1)) == 4663,
+              "snapshot_head": int(
+                  provenance.get("snapshot_head_block", -1)
+              ) == 54_486_035,
+              "source": str(provenance.get("source") or "") == (
+                  "merged_shared_v2_transition_shards"
+              ),
+              "registry_sha256": str(
+                  provenance.get("registry_sha256") or ""
+              ) == (
+                  "06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f"
+              ),
+          }
+          checks["actual_sha256"] = (
+              actual_digest.hexdigest() == str(manifest.get("sha256") or "")
+          )
+          checks["actual_records"] = (
+              actual_records == int(manifest.get("records", -1))
+          )
+          failed = sorted(
+              key for key, passed in checks.items() if not passed
+          )
+          if failed:
+              raise SystemExit(
+                  "V2 transition manifest changed: "
+                  + ", ".join(failed)
+              )
+          print(json.dumps({
+              "run_id": run_id,
+              "artifact": artifact_name,
+              "manifest": manifest_name,
+              "records": int(manifest["records"]),
+              "sha256": manifest["sha256"],
+              "actual_records": actual_records,
+              "actual_sha256": actual_digest.hexdigest(),
+              "verification": "pass",
+          }, sort_keys=True))
+          PY
+      - name: Refuse frozen-parent recovery while source is active
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
+          if partial_run_id != 33_982_556_591:
+              raise SystemExit(0)
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          run = fetch_github_actions_json(
+              api + f"/repos/{repo}/actions/runs/{partial_run_id}",
+              token,
+              timeout=30,
+          )
+          if run.get("status") != "completed":
+              raise SystemExit(
+                  "frozen parent recovery is blocked while source is active"
+              )
+          if str(run.get("path") or "").split("@", 1)[0] != (
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+          ):
+              raise SystemExit(
+                  "frozen parent recovery source workflow path changed"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit(
+                  "frozen parent recovery source branch changed"
+              )
+          if str(run.get("head_sha") or "") != (
+              "c53b3a63156976a5873752c332fa7578011249b0"
+          ):
+              raise SystemExit(
+                  "frozen parent recovery source launch commit changed"
+              )
+          PY
+      - name: Verify recursive prior recovery lineage
+        if: ${{ inputs.prior_gap_run_id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+          PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import urllib.request
+          import zipfile
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
+          )
+
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
+          prior_run_id = int(os.environ["PRIOR_GAP_RUN_ID"])
+          if partial_run_id <= 0 or prior_run_id <= 0:
+              raise SystemExit(
+                  "recovery lineage run IDs must be positive"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          artifact_name = "phase1-pons-v2-v4-gap-plan"
+          plan_name = "v4-gap-plan.json"
+          allowed_paths = {
+              ".github/workflows/phase1-pons-v2-v4-recover-gaps.yml",
+              ".github/workflows/phase1-pons-live-venue-rescue-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-full-eligibility-acquisition-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml"
+          }
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path, *, decode_json=True):
+              payload = fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+              if not decode_json:
+                  raise SystemExit(
+                      "raw metadata reads are not supported here"
+                  )
+              return payload
+
+          def plan_for(run_id):
+              run = request(f"/repos/{repo}/actions/runs/{run_id}")
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      "prior recovery lineage run is not terminal: "
+                      f"{run_id}"
+                  )
+              path = str(run.get("path") or "").split("@", 1)[0]
+              if path not in allowed_paths:
+                  raise SystemExit(
+                      "prior recovery lineage workflow path is not allowed: "
+                      f"{path}"
+                  )
+              if run.get("head_branch") != "phase1/data-acquisition-spike":
+                  raise SystemExit(
+                      "prior recovery lineage branch changed: "
+                      f"{run_id}"
+                  )
+
+              matches = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  matches.extend(
+                      row
+                      for row in rows
+                      if not row.get("expired")
+                      and str(row.get("name")) == artifact_name
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "prior recovery artifact pagination exceeded 2000"
+                      )
+              try:
+                  plan_artifact_row = select_equivalent_artifact_retry(
+                      matches,
+                      label=(
+                          "prior recovery plan artifact "
+                          f"run={run_id}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior recovery plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={run_id}: {exc}"
+                  ) from exc
+
+              payload = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(plan_artifact_row['id'])}/zip",
+                  token,
+              )
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == plan_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "prior recovery plan identity is ambiguous: "
+                          f"run={run_id}"
+                      )
+                  plan = json.loads(archive.read(names[0]))
+
+              if "partial_run_id" not in plan or "prior_gap_run_id" not in plan:
+                  raise SystemExit(
+                      "prior recovery plan lacks bound lineage metadata: "
+                      f"run={run_id}"
+                  )
+              if int(plan["partial_run_id"]) != partial_run_id:
+                  raise SystemExit(
+                      "prior recovery partial run does not match current "
+                      f"partial source: run={run_id}"
+                  )
+              if int(plan.get("snapshot_head", -1)) != 54_486_035:
+                  raise SystemExit(
+                      "prior recovery plan snapshot head changed"
+                  )
+              if int(plan.get("generation_start", -1)) != 26_841_846:
+                  raise SystemExit(
+                      "prior V2/V4 recovery plan start block changed"
+                  )
+              return plan
+
+          seen = set()
+          depth = 0
+          cursor = prior_run_id
+          while cursor:
+              if cursor in seen:
+                  raise SystemExit(
+                      "prior recovery lineage contains a cycle"
+                  )
+              seen.add(cursor)
+              depth += 1
+              if depth > 20:
+                  raise SystemExit(
+                      "prior recovery lineage exceeds 20 generations"
+                  )
+              plan = plan_for(cursor)
+              parent = plan.get("prior_gap_run_id")
+              cursor = int(parent) if parent not in {None, "", 0} else 0
+
+          print(json.dumps({
+              "partial_run_id": partial_run_id,
+              "prior_gap_run_id": prior_run_id,
+              "verified_generations": depth,
+              "lineage": "pass",
+          }, sort_keys=True))
+          PY
+      - name: Discover original V2/V4 shard coverage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+        run: |
+          mkdir -p source-metadata
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          from hlp.data.ranges import indexed_shard_bounds
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["PARTIAL_RUN_ID"])
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = 192
+          name_pattern = re.compile(r"^phase1-pons-v2-v4-(\d+)$")
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=60,
+              )
+
+          selected = []
+          page = 1
+          while True:
+              payload = request(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              for row in rows:
+                  match = name_pattern.fullmatch(str(row.get("name") or ""))
+                  if not match or row.get("expired"):
+                      continue
+                  index = int(match.group(1))
+                  lo, hi = indexed_shard_bounds(
+                      start,
+                      head,
+                      index,
+                      shard_count,
+                  )
+                  selected.append({
+                      "artifact_id": int(row["id"]),
+                      "artifact_name": str(row["name"]),
+                      "shard_index": index,
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "V2/V4 source artifact pagination exceeded 2000"
+                  )
+
+          selected.sort(key=lambda row: row["shard_index"])
+          indexes = [row["shard_index"] for row in selected]
+          if len(indexes) != len(set(indexes)):
+              raise SystemExit(
+                  "V2/V4 source contains duplicate shard artifact indexes"
+              )
+
+          empty_source_proof = None
+          if not selected:
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              observed_jobs = {}
+              job_page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={job_page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      name = str(row.get("name") or "")
+                      if name in expected_jobs:
+                          observed_jobs[name] = {
+                              "status": row.get("status"),
+                              "conclusion": row.get("conclusion"),
+                          }
+                  if len(rows) < 100:
+                      break
+                  job_page += 1
+                  if job_page > 10:
+                      raise SystemExit(
+                          "V2/V4 source job pagination exceeded 1000"
+                      )
+              if observed_jobs != expected_jobs:
+                  raise SystemExit(
+                      "V2/V4 empty source is not proven by skipped "
+                      f"frozen-parent jobs: {observed_jobs}"
+                  )
+              empty_source_proof = {
+                  "source_run_id": run_id,
+                  "expected_jobs": expected_jobs,
+                  "observed_jobs": observed_jobs,
+              }
+              Path(
+                  "source-metadata/v2-v4-empty-source-proof.json"
+              ).write_text(
+                  json.dumps(
+                      empty_source_proof,
+                      indent=2,
+                      sort_keys=True,
+                  )
+                  + "\n"
+              )
+
+          Path(
+              "source-metadata/v2-v4-original-shards.json"
+          ).write_text(
+              json.dumps(selected, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              "source_run_id": run_id,
+              "source_artifact_pages": page,
+              "original_shard_artifacts": len(selected),
+              "first_shard_index": indexes[0] if indexes else None,
+              "last_shard_index": indexes[-1] if indexes else None,
+              "empty_source_proven": empty_source_proof is not None,
+              "planning_source_bytes_downloaded": 0,
+          }, sort_keys=True))
+          PY
+      - name: Discover reusable prior V2/V4 gap coverage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+          PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
+          EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256: ${{ inputs.expected_prior_terminal_snapshot_sha256 }}
+        run: |
+          mkdir -p source-metadata
+          python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              build_rescue_terminal_binding,
+              fetch_github_actions_artifact_zip,
+              rescue_terminal_binding_sha256,
+              select_equivalent_artifact_retry,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
+          cursor = int(os.environ["PRIOR_GAP_RUN_ID"] or 0)
+          immediate_prior_id = cursor
+          expected_snapshot_sha256 = os.environ[
+              "EXPECTED_PRIOR_TERMINAL_SNAPSHOT_SHA256"
+          ]
+          if expected_snapshot_sha256 and not re.fullmatch(
+              r"[0-9a-f]{64}",
+              expected_snapshot_sha256,
+          ):
+              raise SystemExit(
+                  "V2/V4 expected prior terminal snapshot SHA-256 "
+                  "is invalid"
+              )
+          if (
+              immediate_prior_id == 34_234_471_190
+              and not expected_snapshot_sha256
+          ):
+              raise SystemExit(
+                  "V2/V4 generation 3 requires launcher-pinned "
+                  "prior terminal snapshot SHA-256"
+              )
+          plan_artifact = "phase1-pons-v2-v4-gap-plan"
+          plan_name = "v4-gap-plan.json"
+          gap_pattern = re.compile(r"^phase1-pons-v2-v4-gap-(\d+)$")
+          expected_start = 26_841_846
+          expected_head = 54_486_035
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=60,
+              )
+
+          def artifact_rows(run_id):
+              output = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row for row in rows if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "prior gap coverage artifact pagination "
+                          "exceeded 2000"
+                      )
+              return output
+
+          def successful_repair_gap_ids(run_id):
+              pattern = re.compile(
+                  r"(?:^| / )recover_[1-4] \((\d{3}),"
+              )
+              successful = set()
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = pattern.search(str(row.get("name") or ""))
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "V2/V4 prior gap job pagination "
+                          "exceeded 1000"
+                      )
+              return successful
+
+          coverage = []
+          generation_plans = []
+          ignored_non_success_artifacts = 0
+          seen_runs = set()
+          depth = 0
+          while cursor:
+              if cursor in seen_runs:
+                  raise SystemExit(
+                      "prior gap coverage lineage contains a cycle"
+                  )
+              seen_runs.add(cursor)
+              depth += 1
+              if depth > 20:
+                  raise SystemExit(
+                      "prior gap coverage lineage exceeds 20 generations"
+                  )
+
+              rows = artifact_rows(cursor)
+              successful_gap_ids = successful_repair_gap_ids(cursor)
+              plan_rows = [
+                  row
+                  for row in rows
+                  if str(row.get("name") or "") == plan_artifact
+              ]
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "prior gap coverage plan artifact "
+                          f"run={cursor}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior gap coverage plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
+
+              payload = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(plan_row['id'])}/zip",
+                  token,
+              )
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == plan_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "prior gap coverage plan file identity "
+                          f"is ambiguous: run={cursor}"
+                      )
+                  plan = json.loads(archive.read(names[0]))
+
+              if int(plan.get("partial_run_id", 0)) != partial_run_id:
+                  raise SystemExit(
+                      "prior gap coverage partial source changed"
+                  )
+              if int(plan.get("snapshot_head", -1)) != expected_head:
+                  raise SystemExit(
+                      "prior gap coverage snapshot head changed"
+                  )
+              if int(plan.get("generation_start", -1)) != expected_start:
+                  raise SystemExit(
+                      "prior gap coverage start block changed"
+                  )
+
+              from hlp.data.ranges import validate_gap_plan_jobs
+
+              try:
+                  planned = validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=expected_head,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "prior gap coverage plan structure changed: "
+                      f"{exc}"
+                  ) from exc
+
+              observed_groups = {}
+              for row in rows:
+                  match = gap_pattern.fullmatch(
+                      str(row.get("name") or "")
+                  )
+                  if not match:
+                      continue
+                  gap_id = match.group(1)
+                  observed_groups.setdefault(gap_id, []).append(row)
+
+              observed = {}
+              collapsed_retry_artifacts = 0
+              for gap_id, candidates in observed_groups.items():
+                  try:
+                      observed[gap_id] = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "prior V2/V4 gap artifact "
+                              f"run={cursor} gap={gap_id}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "prior gap coverage duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={cursor} gap={gap_id}: {exc}"
+                      ) from exc
+                  collapsed_retry_artifacts += len(candidates) - 1
+
+              reusable_gap_ids = []
+              for gap_id, row in observed.items():
+                  if gap_id not in planned:
+                      raise SystemExit(
+                          "prior gap artifact is not bound by its plan: "
+                          f"run={cursor} gap={gap_id}"
+                      )
+                  if gap_id not in successful_gap_ids:
+                      ignored_non_success_artifacts += 1
+                      continue
+                  bounds = planned[gap_id]
+                  reusable_gap_ids.append(gap_id)
+                  coverage.append({
+                      "run_id": cursor,
+                      "artifact_id": int(row["id"]),
+                      "artifact_name": str(row["name"]),
+                      "gap_id": gap_id,
+                      "from_block": bounds[0],
+                      "to_block": bounds[1],
+                  })
+
+              observed_snapshot_sha256 = None
+              if cursor == immediate_prior_id and expected_snapshot_sha256:
+                  prior_run = request(
+                      f"/repos/{repo}/actions/runs/{cursor}"
+                  )
+                  artifact_names = {
+                      str(row.get("name") or "")
+                      for row in rows
+                  }
+                  terminal_binding = build_rescue_terminal_binding(
+                      run_id=cursor,
+                      status=prior_run.get("status"),
+                      conclusion=prior_run.get("conclusion"),
+                      head_sha=prior_run.get("head_sha"),
+                      display_title=prior_run.get("display_title"),
+                      run_attempt=prior_run.get("run_attempt"),
+                      reusable_gap_ids=reusable_gap_ids,
+                      missing_success_artifacts=(
+                          successful_gap_ids - set(observed)
+                      ),
+                      non_success_gap_artifacts=(
+                          set(observed) - successful_gap_ids
+                      ),
+                      plan_artifact_present=(
+                          plan_artifact in artifact_names
+                      ),
+                      canonical_artifact_present=(
+                          "phase1-pons-v2-v4-full"
+                          in artifact_names
+                      ),
+                  )
+                  observed_snapshot_sha256 = (
+                      rescue_terminal_binding_sha256(
+                          terminal_binding
+                      )
+                  )
+                  if observed_snapshot_sha256 != (
+                      expected_snapshot_sha256
+                  ):
+                      raise SystemExit(
+                          "V2/V4 launcher/child prior terminal "
+                          "snapshot digest changed"
+                      )
+
+              parent = plan.get("prior_gap_run_id")
+              generation_plans.append({
+                  "run_id": cursor,
+                  "prior_gap_run_id": (
+                      int(parent)
+                      if parent not in {None, "", 0}
+                      else None
+                  ),
+                  "max_gap_blocks": int(plan["max_gap_blocks"]),
+                  "planned_gap_count": len(planned),
+                  "gap_blocks": int(plan["gap_blocks"]),
+                  "gap_wave_job_counts": [
+                      int(value)
+                      for value in plan["gap_wave_job_counts"]
+                  ],
+                  "successful_sources": list(
+                      plan.get("successful_sources") or []
+                  ),
+                  "planned_ranges": [
+                      {
+                          "gap_id": gap_id,
+                          "from_block": bounds[0],
+                          "to_block": bounds[1],
+                      }
+                      for gap_id, bounds in planned.items()
+                  ],
+                  "reusable_gap_ids": sorted(
+                      reusable_gap_ids,
+                      key=int,
+                  ),
+                  "reusable_ranges": [
+                      {
+                          "gap_id": row["gap_id"],
+                          "from_block": int(row["from_block"]),
+                          "to_block": int(row["to_block"]),
+                      }
+                      for row in coverage
+                      if int(row["run_id"]) == cursor
+                  ],
+                  "successful_jobs_missing_artifacts": sorted(
+                      successful_gap_ids - set(observed),
+                      key=int,
+                  ),
+                  "non_success_gap_artifacts": sorted(
+                      set(observed) - successful_gap_ids,
+                      key=int,
+                  ),
+                  "terminal_snapshot_sha256": (
+                      observed_snapshot_sha256
+                  ),
+                  "collapsed_equivalent_retry_artifacts": (
+                      collapsed_retry_artifacts
+                  ),
+              })
+              cursor = (
+                  int(parent)
+                  if parent not in {None, "", 0}
+                  else 0
+              )
+
+          Path("source-metadata/v2-v4-prior-gap-coverage.json").write_text(
+              json.dumps(coverage, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "source-metadata/v2-v4-prior-gap-generations.json"
+          ).write_text(
+              json.dumps(
+                  generation_plans,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          print(json.dumps({
+              "prior_gap_generations": depth,
+              "reusable_prior_gap_artifacts": len(coverage),
+              "ignored_non_success_artifacts": (
+                  ignored_non_success_artifacts
+              ),
+              "planning_prior_gap_jsonl_bytes_downloaded": 0,
+          }, sort_keys=True))
+          PY
+      - id: plan
+        name: Derive only missing V4 ranges
+        env:
+          MAX_GAP_BLOCKS: ${{ inputs.max_gap_blocks }}
+          EXPECTED_PRIOR_REUSABLE_GAP_COUNT: ${{ inputs.expected_prior_reusable_gap_count }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import (
+              coalesce_covered_ranges,
+              plan_missing_subranges,
+              split_range,
+              validate_gap_plan_jobs,
+          )
+
+          start = int(os.environ["GENERATION_START"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          max_blocks = int(os.environ["MAX_GAP_BLOCKS"])
+          if not 1 <= max_blocks <= 100_000:
+              raise SystemExit(
+                  "max_gap_blocks must be between 1 and 100000"
+              )
+
+          source_rows = json.loads(
+              Path(
+                  "source-metadata/v2-v4-original-shards.json"
+              ).read_text()
+          )
+          prior_gap_rows = json.loads(
+              Path("source-metadata/v2-v4-prior-gap-coverage.json").read_text()
+          )
+          prior_gap_generations = json.loads(
+              Path(
+                  "source-metadata/v2-v4-prior-gap-generations.json"
+              ).read_text()
+          )
+          if not source_rows and not prior_gap_rows:
+              proof_path = Path(
+                  "source-metadata/v2-v4-empty-source-proof.json"
+              )
+              if not proof_path.exists():
+                  raise SystemExit(
+                      "V2/V4 recovery has no source coverage and no "
+                      "skipped-source proof"
+                  )
+              proof = json.loads(proof_path.read_text())
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              if int(proof.get("source_run_id", 0)) != int(
+                  "${{ inputs.partial_run_id }}"
+              ):
+                  raise SystemExit(
+                      "V2/V4 empty-source proof run ID changed"
+                  )
+              if proof.get("expected_jobs") != expected_jobs or (
+                  proof.get("observed_jobs") != expected_jobs
+              ):
+                  raise SystemExit(
+                      "V2/V4 empty-source proof job states changed"
+                  )
+
+          covered = []
+          sources = []
+          for row in source_rows:
+              lo = int(row["from_block"])
+              hi = int(row["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "source": "partial-run-artifact-metadata",
+                  "artifact": row["artifact_name"],
+                  "artifact_id": int(row["artifact_id"]),
+                  "shard_index": int(row["shard_index"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          for row in prior_gap_rows:
+              lo = int(row["from_block"])
+              hi = int(row["to_block"])
+              covered.append((lo, hi))
+              sources.append({
+                  "source": "prior-gap-artifact-metadata",
+                  "run_id": int(row["run_id"]),
+                  "artifact": row["artifact_name"],
+                  "artifact_id": int(row["artifact_id"]),
+                  "gap_id": row["gap_id"],
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+          covered = coalesce_covered_ranges(
+              start,
+              head,
+              covered,
+          )
+          gaps = plan_missing_subranges(
+              start,
+              head,
+              covered,
+              max_blocks=max_blocks,
+          )
+
+          prior_retry_accounting = None
+          immediate_prior_id = int(
+              "${{ inputs.prior_gap_run_id }}" or 0
+          )
+          expected_prior_reusable = os.environ[
+              "EXPECTED_PRIOR_REUSABLE_GAP_COUNT"
+          ]
+          expected_prior_reusable_count = None
+          if expected_prior_reusable:
+              expected_prior_reusable_count = int(
+                  expected_prior_reusable
+              )
+              if expected_prior_reusable_count < 0:
+                  raise SystemExit(
+                      "V2/V4 expected reusable prior-gap count "
+                      "must be non-negative"
+                  )
+          if (
+              immediate_prior_id == 34_234_471_190
+              and (
+                  expected_prior_reusable_count is None
+                  or expected_prior_reusable_count <= 0
+              )
+          ):
+              raise SystemExit(
+                  "V2/V4 generation 3 requires launcher-pinned "
+                  "reusable prior-gap count"
+              )
+          if immediate_prior_id:
+              immediate_rows = [
+                  row
+                  for row in prior_gap_generations
+                  if int(row["run_id"]) == immediate_prior_id
+              ]
+              if len(immediate_rows) != 1:
+                  raise SystemExit(
+                      "V2/V4 immediate prior generation metadata "
+                      "identity is ambiguous"
+                  )
+              immediate = immediate_rows[0]
+              if immediate_prior_id == 34_234_471_190:
+                  expected_generation_2_ranges = split_range(
+                      start,
+                      head,
+                      max_blocks=50_000,
+                  )
+                  expected_generation_2_rows = [
+                      {
+                          "gap_id": f"{index:03d}",
+                          "from_block": lo,
+                          "to_block": hi,
+                      }
+                      for index, (lo, hi) in enumerate(
+                          expected_generation_2_ranges
+                      )
+                  ]
+                  if immediate["prior_gap_run_id"] is not None:
+                      raise SystemExit(
+                          "V2/V4 generation 2 prior lineage changed"
+                      )
+                  if immediate["successful_sources"] != []:
+                      raise SystemExit(
+                          "V2/V4 generation 2 successful source set changed"
+                      )
+                  if int(immediate["max_gap_blocks"]) != 50_000:
+                      raise SystemExit(
+                          "V2/V4 generation 2 max gap size changed"
+                      )
+                  if int(immediate["planned_gap_count"]) != 553:
+                      raise SystemExit(
+                          "V2/V4 generation 2 planned job count changed"
+                      )
+                  if int(immediate["gap_blocks"]) != 27_644_190:
+                      raise SystemExit(
+                          "V2/V4 generation 2 planned block count changed"
+                      )
+                  if immediate["gap_wave_job_counts"] != [
+                      240,
+                      240,
+                      73,
+                      0,
+                  ]:
+                      raise SystemExit(
+                          "V2/V4 generation 2 wave shape changed"
+                      )
+                  if immediate["planned_ranges"] != (
+                      expected_generation_2_rows
+                  ):
+                      raise SystemExit(
+                          "V2/V4 generation 2 deterministic plan changed"
+                      )
+                  if immediate["planned_ranges"][53] != {
+                      "gap_id": "053",
+                      "from_block": 29_491_846,
+                      "to_block": 29_541_845,
+                  }:
+                      raise SystemExit(
+                          "V2/V4 generation 2 gap 053 bounds changed"
+                      )
+              observed_prior_reusable = len(
+                  immediate["reusable_ranges"]
+              )
+              if expected_prior_reusable_count is not None:
+                  if (
+                      observed_prior_reusable
+                      != expected_prior_reusable_count
+                  ):
+                      raise SystemExit(
+                          "V2/V4 launcher/planner reusable prior-gap "
+                          "count changed"
+                      )
+              prior_planned_ranges = [
+                  (
+                      int(row["from_block"]),
+                      int(row["to_block"]),
+                  )
+                  for row in immediate["planned_ranges"]
+              ]
+              prior_reusable_ranges = [
+                  (
+                      int(row["from_block"]),
+                      int(row["to_block"]),
+                  )
+                  for row in immediate["reusable_ranges"]
+              ]
+              expected_retry_cover = coalesce_covered_ranges(
+                  start,
+                  head,
+                  prior_planned_ranges,
+              )
+              observed_retry_cover = coalesce_covered_ranges(
+                  start,
+                  head,
+                  [*prior_reusable_ranges, *gaps],
+              )
+              if observed_retry_cover != expected_retry_cover:
+                  raise SystemExit(
+                      "V2/V4 retry ranges do not exactly reconstruct "
+                      "the immediate prior gap plan"
+                  )
+              prior_max_blocks = int(
+                  immediate["max_gap_blocks"]
+              )
+              if max_blocks == prior_max_blocks:
+                  expected_count = int(
+                      immediate["planned_gap_count"]
+                  )
+                  observed_count = (
+                      len(prior_reusable_ranges) + len(gaps)
+                  )
+                  if observed_count != expected_count:
+                      raise SystemExit(
+                          "V2/V4 retry job accounting changed under "
+                          "the same max_gap_blocks"
+                      )
+              prior_retry_accounting = {
+                  "run_id": immediate_prior_id,
+                  "prior_max_gap_blocks": prior_max_blocks,
+                  "prior_planned_gap_count": int(
+                      immediate["planned_gap_count"]
+                  ),
+                  "reusable_gap_count": len(
+                      prior_reusable_ranges
+                  ),
+                  "launcher_expected_reusable_gap_count": (
+                      expected_prior_reusable_count
+                  ),
+                  "retry_gap_count": len(gaps),
+                  "successful_jobs_missing_artifacts": (
+                      immediate[
+                          "successful_jobs_missing_artifacts"
+                      ]
+                  ),
+                  "non_success_gap_artifacts": (
+                      immediate["non_success_gap_artifacts"]
+                  ),
+                  "exact_range_reconstruction": True,
+                  "generation_2_plan_fingerprint_valid": (
+                      immediate_prior_id == 34_234_471_190
+                  ),
+              }
+
+          if (
+              not immediate_prior_id
+              and expected_prior_reusable_count is not None
+              and expected_prior_reusable_count != 0
+          ):
+              raise SystemExit(
+                  "V2/V4 launcher expected prior reusable gaps "
+                  "without a prior run"
+              )
+
+          if len(gaps) > 960:
+              raise SystemExit(
+                  "V4 gap plan exceeds four serialized 240-job waves"
+              )
+          include = [
+              {
+                  "id": f"{index:03d}",
+                  "from_block": lo,
+                  "to_block": hi,
+              }
+              for index, (lo, hi) in enumerate(gaps)
+          ]
+          wave_1 = include[:240]
+          wave_2 = include[240:480]
+          wave_3 = include[480:720]
+          wave_4 = include[720:]
+          report = {
+              "generation_start": start,
+              "snapshot_head": head,
+              "partial_run_id": int("${{ inputs.partial_run_id }}"),
+              "prior_gap_run_id": (
+                  int("${{ inputs.prior_gap_run_id }}")
+                  if "${{ inputs.prior_gap_run_id }}"
+                  else None
+              ),
+              "max_gap_blocks": max_blocks,
+              "successful_sources": sources,
+              "prior_retry_accounting": prior_retry_accounting,
+              "gap_jobs": include,
+              "gap_job_count": len(include),
+              "gap_wave_job_counts": [
+                  len(wave_1),
+                  len(wave_2),
+                  len(wave_3),
+                  len(wave_4),
+              ],
+              "gap_blocks": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in include
+              ),
+          }
+          try:
+              validate_gap_plan_jobs(
+                  report,
+                  expected_start=start,
+                  expected_end=head,
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  "V2/V4 generated gap plan is invalid: "
+                  f"{exc}"
+              ) from exc
+          Path("artifacts/v4-gap-plan.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "matrix_1="
+                  + json.dumps({"include": wave_1}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(
+                  "matrix_2="
+                  + json.dumps({"include": wave_2}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(
+                  "matrix_3="
+                  + json.dumps({"include": wave_3}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(
+                  "matrix_4="
+                  + json.dumps({"include": wave_4}, separators=(",", ":"))
+                  + "\n"
+              )
+              handle.write(f"gap_count={len(include)}\n")
+              handle.write(f"gap_count_1={len(wave_1)}\n")
+              handle.write(f"gap_count_2={len(wave_2)}\n")
+              handle.write(f"gap_count_3={len(wave_3)}\n")
+              handle.write(f"gap_count_4={len(wave_4)}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(
+                  "### V2/V4 retry planner\n\n"
+                  f"- prior gap run: "
+                  f"{report['prior_gap_run_id'] or 'none'}\n"
+                  f"- planned retry jobs: {report['gap_job_count']}\n"
+                  f"- retry waves: {report['gap_wave_job_counts']}\n"
+              )
+              if prior_retry_accounting is not None:
+                  handle.write(
+                      f"- prior planned gaps: "
+                      f"{prior_retry_accounting['prior_planned_gap_count']}\n"
+                      f"- reusable prior gaps: "
+                      f"{prior_retry_accounting['reusable_gap_count']}\n"
+                      f"- launcher expected reusable gaps: "
+                      f"{prior_retry_accounting['launcher_expected_reusable_gap_count']}\n"
+                      f"- exact prior-plan reconstruction: "
+                      f"{prior_retry_accounting['exact_range_reconstruction']}\n"
+                  )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - id: upload_plan
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_plan
+        name: Retry V2/V4 gap-plan artifact upload
+        if: ${{ steps.upload_plan.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final V2/V4 gap-plan artifact upload retry
+        if: ${{ steps.retry_upload_plan.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-plan
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  recover_1:
+    needs: plan
+    if: ${{ needs.plan.outputs.gap_count_1 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_1) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry frozen V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final frozen V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V4 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-pool-scan \
+            --out "artifacts/v4-events-gap-${GAP_ID}.jsonl"
+      - id: upload_gap
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
+        if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  recover_2:
+    needs: [plan, recover_1]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'failure' || needs.recover_1.result == 'skipped') && needs.plan.outputs.gap_count_2 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_2) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry frozen V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final frozen V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V4 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-pool-scan \
+            --out "artifacts/v4-events-gap-${GAP_ID}.jsonl"
+      - id: upload_gap
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
+        if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  recover_3:
+    needs: [plan, recover_2]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_2.result == 'success' || needs.recover_2.result == 'failure' || needs.recover_2.result == 'skipped') && needs.plan.outputs.gap_count_3 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_3) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry frozen V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final frozen V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V4 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-pool-scan \
+            --out "artifacts/v4-events-gap-${GAP_ID}.jsonl"
+      - id: upload_gap
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
+        if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  recover_4:
+    needs: [plan, recover_3]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_3.result == 'success' || needs.recover_3.result == 'failure' || needs.recover_3.result == 'skipped') && needs.plan.outputs.gap_count_4 != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_4) }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry frozen V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final frozen V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Acquire exact missing V4 interval
+        env:
+          FROM_BLOCK: ${{ matrix.from_block }}
+          TO_BLOCK: ${{ matrix.to_block }}
+          GAP_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then CHUNK=50000; else CHUNK=2000; fi
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" --min-chunk-size 25 \
+            --global-pool-scan \
+            --out "artifacts/v4-events-gap-${GAP_ID}.jsonl"
+      - id: upload_gap
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_gap
+        name: Retry gap artifact upload
+        if: ${{ steps.upload_gap.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final gap artifact upload retry
+        if: ${{ steps.retry_upload_gap.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-gap-${{ matrix.id }}
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  merge:
+    needs: [plan, recover_1, recover_2, recover_3, recover_4]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.recover_1.result == 'success' || needs.recover_1.result == 'skipped') && (needs.recover_2.result == 'success' || needs.recover_2.result == 'skipped') && (needs.recover_3.result == 'success' || needs.recover_3.result == 'skipped') && (needs.recover_4.result == 'success' || needs.recover_4.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Download every original V2/V4 shard artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          run_id = int(os.environ["PARTIAL_RUN_ID"])
+          name_pattern = re.compile(r"^phase1-pons-v2-v4-(\d+)$")
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path, *, decode_json=True):
+              payload = fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=60,
+              )
+              if not decode_json:
+                  raise SystemExit(
+                      "raw metadata reads are not supported here"
+                  )
+              return payload
+
+          selected = []
+          page = 1
+          while True:
+              payload = request(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              for row in rows:
+                  match = name_pattern.fullmatch(str(row.get("name") or ""))
+                  if match and not row.get("expired"):
+                      selected.append((int(match.group(1)), row))
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 20:
+                  raise SystemExit(
+                      "V2/V4 source artifact pagination exceeded 2000"
+                  )
+
+          selected.sort(key=lambda item: item[0])
+          indexes = [index for index, _ in selected]
+          if len(indexes) != len(set(indexes)):
+              raise SystemExit(
+                  "V2/V4 source contains duplicate shard artifact indexes"
+              )
+
+          empty_source_proven = False
+          if not selected:
+              expected_jobs = {
+                  "acquire / v2_v4": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+                  "acquire / v2_v4_recovery": {
+                      "status": "completed",
+                      "conclusion": "skipped",
+                  },
+              }
+              observed_jobs = {}
+              job_page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={job_page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      name = str(row.get("name") or "")
+                      if name in expected_jobs:
+                          observed_jobs[name] = {
+                              "status": row.get("status"),
+                              "conclusion": row.get("conclusion"),
+                          }
+                  if len(rows) < 100:
+                      break
+                  job_page += 1
+                  if job_page > 10:
+                      raise SystemExit(
+                          "V2/V4 merge source job pagination exceeded 1000"
+                      )
+              if observed_jobs != expected_jobs:
+                  raise SystemExit(
+                      "V2/V4 merge empty source is not proven by skipped "
+                      f"frozen-parent jobs: {observed_jobs}"
+                  )
+              empty_source_proven = True
+
+          target = Path("partial")
+          target.mkdir(parents=True, exist_ok=True)
+          extracted = 0
+          for index, artifact in selected:
+              blob = fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
+              )
+              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                  for member in archive.infolist():
+                      if member.is_dir():
+                          continue
+                      name = Path(member.filename).name
+                      if not name:
+                          continue
+                      destination = target / name
+                      if destination.exists():
+                          raise SystemExit(
+                              "duplicate V2/V4 shard file while downloading "
+                              f"artifact index {index}: {name}"
+                          )
+                      destination.write_bytes(archive.read(member))
+                      extracted += 1
+
+          print(json.dumps({
+              "source_run_id": run_id,
+              "source_artifact_pages": page,
+              "original_shard_artifacts": len(selected),
+              "first_shard_index": indexes[0] if indexes else None,
+              "last_shard_index": indexes[-1] if indexes else None,
+              "empty_source_proven": empty_source_proven,
+              "extracted_files": extracted,
+          }, sort_keys=True))
+          PY
+      - name: Download recursive paginated V2/V4 gap artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTIAL_RUN_ID: ${{ inputs.partial_run_id }}
+          PRIOR_GAP_RUN_ID: ${{ inputs.prior_gap_run_id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_GAP_COUNT: ${{ needs.plan.outputs.gap_count }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              select_equivalent_artifact_retry,
+          )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          partial_run_id = int(os.environ["PARTIAL_RUN_ID"])
+          prior_run_id = int(os.environ["PRIOR_GAP_RUN_ID"] or 0)
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          current_gap_count = int(os.environ["CURRENT_GAP_COUNT"])
+          plan_artifact = "phase1-pons-v2-v4-gap-plan"
+          plan_name = "v4-gap-plan.json"
+          expected_start = 26_841_846
+          expected_head = 54_486_035
+          gap_pattern = re.compile(
+              r"^phase1-pons-v2-v4-gap-(\d+)$"
+          )
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+          )
+
+          def request(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=60,
+              )
+
+          def artifact_rows(run_id):
+              output = []
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(
+                      row for row in rows if not row.get("expired")
+                  )
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      raise SystemExit(
+                          "V2/V4 merge gap artifact pagination "
+                          "exceeded 2000"
+                      )
+              return output, page
+
+          def successful_repair_gap_ids(run_id):
+              pattern = re.compile(
+                  r"(?:^| / )recover_[1-4] \((\d{3}),"
+              )
+              successful = set()
+              page = 1
+              while True:
+                  payload = request(
+                      f"/repos/{repo}/actions/runs/{run_id}/jobs"
+                      f"?per_page=100&page={page}"
+                  )
+                  rows = list(payload.get("jobs") or [])
+                  for row in rows:
+                      match = pattern.search(str(row.get("name") or ""))
+                      if (
+                          match is not None
+                          and str(row.get("conclusion") or "") == "success"
+                      ):
+                          successful.add(match.group(1))
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 10:
+                      raise SystemExit(
+                          "V2/V4 merge prior gap job pagination "
+                          "exceeded 1000"
+                      )
+              return successful
+
+          def artifact_zip(artifact):
+              return fetch_github_actions_artifact_zip(
+                  api
+                  + f"/repos/{repo}/actions/artifacts/"
+                  + f"{int(artifact['id'])}/zip",
+                  token,
+              )
+
+          def gap_rows(rows, run_id):
+              grouped = {}
+              for row in rows:
+                  match = gap_pattern.fullmatch(
+                      str(row.get("name") or "")
+                  )
+                  if match:
+                      grouped.setdefault(
+                          match.group(1),
+                          [],
+                      ).append(row)
+
+              selected = []
+              for gap_id, candidates in grouped.items():
+                  try:
+                      artifact = select_equivalent_artifact_retry(
+                          candidates,
+                          label=(
+                              "V2/V4 merge gap artifact "
+                              f"run={run_id} gap={gap_id}"
+                          ),
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          "V2/V4 merge duplicate retry artifacts "
+                          "are not equivalent: "
+                          f"run={run_id} gap={gap_id}: {exc}"
+                      ) from exc
+                  selected.append((gap_id, artifact))
+              selected.sort(key=lambda item: int(item[0]))
+              return selected
+
+          def extract_rows(selected, target, run_id, planned):
+              target.mkdir(parents=True, exist_ok=True)
+              extracted = 0
+              for gap_id, artifact in selected:
+                  if gap_id not in planned:
+                      raise SystemExit(
+                          "V2/V4 merge gap artifact is not bound "
+                          f"by its plan: run={run_id} gap={gap_id}"
+                      )
+                  expected_bounds = tuple(planned[gap_id])
+                  blob = artifact_zip(artifact)
+                  with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                      manifest_members = [
+                          member
+                          for member in archive.infolist()
+                          if not member.is_dir()
+                          and Path(member.filename).name.endswith(
+                              ".jsonl.manifest.json"
+                          )
+                      ]
+                      if len(manifest_members) != 1:
+                          raise SystemExit(
+                              "V2/V4 merge gap manifest identity "
+                              f"is ambiguous: run={run_id} gap={gap_id}"
+                          )
+                      manifest = json.loads(
+                          archive.read(manifest_members[0])
+                      )
+                      provenance = manifest.get("provenance") or {}
+                      observed_bounds = (
+                          int(provenance.get("from_block", -1)),
+                          int(provenance.get("to_block", -1)),
+                      )
+                      if observed_bounds != expected_bounds:
+                          raise SystemExit(
+                              "V2/V4 merge gap manifest range "
+                              "does not match plan: "
+                              f"run={run_id} gap={gap_id} "
+                              f"observed={observed_bounds} "
+                              f"expected={expected_bounds}"
+                          )
+                      if str(provenance.get("source") or "") != "evm_json_rpc":
+                          raise SystemExit(
+                              "V2/V4 merge gap source changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if int(provenance.get("chain_id", -1)) != 4663:
+                          raise SystemExit(
+                              "V2/V4 merge gap chain changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(provenance.get("protocol") or "") != (
+                          "pons_v2_v4_price_events"
+                      ):
+                          raise SystemExit(
+                              "V2/V4 merge gap protocol changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(provenance.get("registrations") or "") != (
+                          "pons-v2-registrations-full.jsonl"
+                      ):
+                          raise SystemExit(
+                              "V2/V4 merge gap frozen input changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      if str(
+                          provenance.get("pool_filter_mode") or ""
+                      ) != "global_poolmanager_topic_then_registry":
+                          raise SystemExit(
+                              "V2/V4 merge gap filter mode changed: "
+                              f"run={run_id} gap={gap_id}"
+                          )
+                      for member in archive.infolist():
+                          if member.is_dir():
+                              continue
+                          name = Path(member.filename).name
+                          if not name:
+                              continue
+                          destination = target / name
+                          if destination.exists():
+                              raise SystemExit(
+                                  "duplicate V2/V4 gap file while "
+                                  "downloading paginated artifacts: "
+                                  f"run={run_id} gap={gap_id} file={name}"
+                              )
+                          destination.write_bytes(
+                              archive.read(member)
+                          )
+                          extracted += 1
+              return extracted
+
+          prior_total = 0
+          prior_ignored_non_success = 0
+          prior_generations = 0
+          seen_runs = set()
+          cursor = prior_run_id
+          while cursor:
+              if cursor in seen_runs:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap lineage contains a cycle"
+                  )
+              seen_runs.add(cursor)
+              prior_generations += 1
+              if prior_generations > 20:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap lineage exceeds 20 generations"
+                  )
+
+              rows, pages = artifact_rows(cursor)
+              successful_gap_ids = successful_repair_gap_ids(cursor)
+              plan_rows = [
+                  row
+                  for row in rows
+                  if str(row.get("name") or "") == plan_artifact
+              ]
+              try:
+                  plan_row = select_equivalent_artifact_retry(
+                      plan_rows,
+                      label=(
+                          "V2/V4 merge prior gap plan artifact "
+                          f"run={cursor}"
+                      ),
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "V2/V4 merge prior plan retry artifacts are not "
+                      "equivalent: "
+                      f"run={cursor}: {exc}"
+                  ) from exc
+              payload = artifact_zip(plan_row)
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = [
+                      name
+                      for name in archive.namelist()
+                      if name.rsplit("/", 1)[-1] == plan_name
+                  ]
+                  if len(names) != 1:
+                      raise SystemExit(
+                          "V2/V4 merge prior gap plan file identity "
+                          f"is ambiguous: run={cursor}"
+                      )
+                  plan = json.loads(archive.read(names[0]))
+
+              if int(plan.get("partial_run_id", 0)) != partial_run_id:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap partial source changed"
+                  )
+              if int(plan.get("snapshot_head", -1)) != expected_head:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap snapshot head changed"
+                  )
+              if int(plan.get("generation_start", -1)) != expected_start:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap start block changed"
+                  )
+
+              from hlp.data.ranges import validate_gap_plan_jobs
+
+              try:
+                  planned = validate_gap_plan_jobs(
+                      plan,
+                      expected_start=expected_start,
+                      expected_end=expected_head,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      "V2/V4 merge prior gap plan structure changed: "
+                      f"{exc}"
+                  ) from exc
+
+              selected = gap_rows(rows, cursor)
+              for gap_id, _ in selected:
+                  if gap_id not in planned:
+                      raise SystemExit(
+                          "V2/V4 merge prior gap artifact is not bound "
+                          f"by its plan: run={cursor} gap={gap_id}"
+                      )
+              ignored_gap_ids = [
+                  gap_id
+                  for gap_id, _ in selected
+                  if gap_id not in successful_gap_ids
+              ]
+              selected = [
+                  item
+                  for item in selected
+                  if item[0] in successful_gap_ids
+              ]
+              prior_ignored_non_success += len(ignored_gap_ids)
+              target = Path("prior-gaps") / str(cursor)
+              extracted = extract_rows(
+                  selected,
+                  target,
+                  cursor,
+                  planned,
+              )
+              prior_total += len(selected)
+              print(json.dumps({
+                  "run_id": cursor,
+                  "artifact_pages": pages,
+                  "gap_artifacts": len(selected),
+                  "ignored_non_success_artifacts": len(
+                      ignored_gap_ids
+                  ),
+                  "extracted_files": extracted,
+              }, sort_keys=True))
+
+              parent = plan.get("prior_gap_run_id")
+              cursor = (
+                  int(parent)
+                  if parent not in {None, "", 0}
+                  else 0
+              )
+
+          current_rows, current_pages = artifact_rows(current_run_id)
+          current_plan_rows = [
+              row
+              for row in current_rows
+              if str(row.get("name") or "") == plan_artifact
+          ]
+          try:
+              current_plan_row = select_equivalent_artifact_retry(
+                  current_plan_rows,
+                  label=(
+                      "V2/V4 merge current gap plan artifact "
+                      f"run={current_run_id}"
+                  ),
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  "V2/V4 merge current plan retry artifacts are not "
+                  "equivalent: "
+                  f"run={current_run_id}: {exc}"
+              ) from exc
+          current_plan_payload = artifact_zip(current_plan_row)
+          with zipfile.ZipFile(
+              io.BytesIO(current_plan_payload)
+          ) as archive:
+              current_plan_names = [
+                  name
+                  for name in archive.namelist()
+                  if name.rsplit("/", 1)[-1] == plan_name
+              ]
+              if len(current_plan_names) != 1:
+                  raise SystemExit(
+                      "V2/V4 merge current gap plan file identity "
+                      f"is ambiguous: run={current_run_id}"
+                  )
+              current_plan_bytes = archive.read(
+                  current_plan_names[0]
+              )
+              current_plan = json.loads(current_plan_bytes)
+          if int(
+              current_plan.get("partial_run_id", 0)
+          ) != partial_run_id:
+              raise SystemExit(
+                  "V2/V4 merge current gap partial source changed"
+              )
+          if int(
+              current_plan.get("snapshot_head", -1)
+          ) != expected_head:
+              raise SystemExit(
+                  "V2/V4 merge current gap snapshot head changed"
+              )
+          if int(
+              current_plan.get("generation_start", -1)
+          ) != expected_start:
+              raise SystemExit(
+                  "V2/V4 merge current gap start block changed"
+              )
+          current_parent = current_plan.get("prior_gap_run_id")
+          current_parent_id = (
+              int(current_parent)
+              if current_parent not in {None, "", 0}
+              else 0
+          )
+          if current_parent_id != prior_run_id:
+              raise SystemExit(
+                  "V2/V4 merge current gap prior lineage changed"
+              )
+          from hlp.data.ranges import validate_gap_plan_jobs
+
+          try:
+              current_planned = validate_gap_plan_jobs(
+                  current_plan,
+                  expected_start=expected_start,
+                  expected_end=expected_head,
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  "V2/V4 merge current gap plan structure changed: "
+                  f"{exc}"
+              ) from exc
+
+          current_selected = gap_rows(
+              current_rows,
+              current_run_id,
+          )
+          current_gap_ids = {
+              gap_id for gap_id, _ in current_selected
+          }
+          if current_gap_ids != set(current_planned):
+              raise SystemExit(
+                  "current V2/V4 gap artifact IDs do not match "
+                  "plan: "
+                  f"observed={sorted(current_gap_ids)} "
+                  f"expected={sorted(current_planned)}"
+              )
+          if len(current_selected) != current_gap_count:
+              raise SystemExit(
+                  "current V2/V4 gap artifact count does not match "
+                  f"plan: observed={len(current_selected)} "
+                  f"expected={current_gap_count}"
+              )
+          current_extracted = extract_rows(
+              current_selected,
+              Path("gaps"),
+              current_run_id,
+              current_planned,
+          )
+          Path("plan").mkdir(parents=True, exist_ok=True)
+          (Path("plan") / plan_name).write_bytes(current_plan_bytes)
+          print(json.dumps({
+              "prior_gap_generations": prior_generations,
+              "prior_gap_artifacts": prior_total,
+              "prior_ignored_non_success_artifacts": (
+                  prior_ignored_non_success
+              ),
+              "current_run_id": current_run_id,
+              "current_artifact_pages": current_pages,
+              "current_gap_artifacts": len(current_selected),
+              "current_extracted_files": current_extracted,
+              "current_gap_count": current_gap_count,
+          }, sort_keys=True))
+          PY
+      - id: download_transition
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before retry
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - id: retry_download_transition
+        name: Retry frozen V2 transition artifact download
+        if: ${{ steps.download_transition.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial V2 transition download before final retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        run: rm -rf transition
+      - name: Final frozen V2 transition artifact download retry
+        if: ${{ steps.retry_download_transition.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ inputs.transition_run_id }}
+          github-token: ${{ github.token }}
+      - name: Merge recovered V4 event tape
+        run: |
+          mkdir -p artifacts
+          cp plan/v4-gap-plan.json artifacts/
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.ranges import select_contiguous_cover
+          from hlp.data.reconstruct import event_order
+          from hlp.data.sharded_tape import (
+              canonical_jsonl_bytes,
+              write_virtual_jsonl_manifest,
+          )
+
+          START = int(os.environ["GENERATION_START"])
+          HEAD = int(os.environ["SNAPSHOT_HEAD"])
+          files = (
+              list(Path("partial").glob("v4-events-shard-*.jsonl"))
+              + list(Path("prior-gaps").rglob("v4-events-gap-*.jsonl"))
+              + list(Path("gaps").glob("v4-events-gap-*.jsonl"))
+          )
+          if not files:
+              raise SystemExit("no V4 artifacts available for final merge")
+
+          candidates = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              prov = manifest["provenance"]
+              candidates.append((
+                  int(prov["from_block"]),
+                  int(prov["to_block"]),
+                  path,
+                  manifest,
+              ))
+          selected_indexes = select_contiguous_cover(
+              START,
+              HEAD,
+              [(lo, hi) for lo, hi, _, _ in candidates],
+          )
+          entries = [candidates[index] for index in selected_indexes]
+          candidate_source_files = len(candidates)
+          dropped_overlapping_source_files = (
+              candidate_source_files - len(entries)
+          )
+
+          previous_hi = None
+          manifests = []
+          expected_records = 0
+          for lo, hi, path, manifest in entries:
+              if previous_hi is None:
+                  assert lo == START, (lo, START, path.name)
+              else:
+                  assert lo == previous_hi + 1, (
+                      previous_hi, lo, path.name
+                  )
+              previous_hi = hi
+              expected_records += int(manifest["records"])
+              manifests.append({
+                  "source": path.parent.name,
+                  "file": path.name,
+                  "sha256": manifest["sha256"],
+                  "records": int(manifest["records"]),
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+          assert previous_hi == HEAD, (previous_hi, HEAD)
+
+          registrations = [
+              json.loads(line)
+              for line in Path(
+                  "transition/pons-v2-registrations-full.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          registered_ids = {
+              row["pool_id"].lower() for row in registrations
+          }
+
+          counts = {
+              "records": 0,
+              "v4_initialize": 0,
+              "v4_swap": 0,
+          }
+          initialized_ids = set()
+          matched_ids = set()
+
+          def rows():
+              prior_order = None
+              for _, _, path, manifest in entries:
+                  assert manifest.get("path") == path.name, (
+                      path.name,
+                      manifest.get("path"),
+                  )
+                  local = 0
+                  local_digest = hashlib.sha256()
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          local_digest.update(raw)
+                          if not raw.strip():
+                              continue
+                          row = json.loads(raw)
+                          order = event_order(row)
+                          if prior_order is not None:
+                              assert prior_order < order, (
+                                  prior_order, order, path.name
+                              )
+                          prior_order = order
+                          pool_id = row["pool_id"].lower()
+                          assert pool_id in registered_ids, pool_id
+                          matched_ids.add(pool_id)
+                          event_type = row["event_type"]
+                          assert event_type in {
+                              "v4_initialize",
+                              "v4_swap",
+                          }, event_type
+                          counts[event_type] += 1
+                          if event_type == "v4_initialize":
+                              initialized_ids.add(pool_id)
+                          counts["records"] += 1
+                          local += 1
+                          yield row
+                  assert local == int(manifest["records"]), (
+                      path.name, local, manifest["records"]
+                  )
+                  assert local_digest.hexdigest() == manifest["sha256"], (
+                      path.name,
+                      local_digest.hexdigest(),
+                      manifest["sha256"],
+                  )
+
+          digest = hashlib.sha256()
+          for row in rows():
+              digest.update(canonical_jsonl_bytes(row))
+          snapshot = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/pons-v2-v4-full.jsonl.manifest.json"
+              ),
+              path_name="pons-v2-v4-full.jsonl",
+              records=counts["records"],
+              sha256=digest.hexdigest(),
+              provenance={
+                  "source": "manifest_gap_aware_v4_recovery",
+                  "chain_id": 4663,
+                  "snapshot_head_block": HEAD,
+                  "transition_run_id": int(
+                      "${{ inputs.transition_run_id }}"
+                  ),
+                  "partial_run_id": int("${{ inputs.partial_run_id }}"),
+                  "prior_gap_run_id": (
+                      int("${{ inputs.prior_gap_run_id }}")
+                      if "${{ inputs.prior_gap_run_id }}"
+                      else None
+                  ),
+                  "storage_mode": "sharded_artifacts",
+                  "filter_semantics": (
+                      "PoolManager Initialize/Swap global topic scan followed "
+                      "by frozen Pons V2 registration membership"
+                  ),
+                  "shards": manifests,
+              },
+          )
+          assert counts["records"] == expected_records
+          missing_initializes = sorted(
+              registered_ids - initialized_ids
+          )
+          assert not missing_initializes, (
+              "registered Pons V2 pools missing V4 Initialize",
+              missing_initializes[:20],
+              len(missing_initializes),
+          )
+          summary = {
+              "snapshot_head_block": HEAD,
+              "registered_pool_ids": len(registered_ids),
+              "matched_pool_ids": len(matched_ids),
+              "v4_initializes": counts["v4_initialize"],
+              "v4_swaps": counts["v4_swap"],
+              "records": counts["records"],
+              "missing_initialize_pool_ids": 0,
+              "tape_sha256": snapshot["sha256"],
+              "source_files": len(entries),
+              "candidate_source_files": candidate_source_files,
+              "dropped_overlapping_source_files": (
+                  dropped_overlapping_source_files
+              ),
+          }
+          Path("artifacts/pons-v2-v4-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - id: upload_full
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_full
+        name: Retry canonical V2/V4 artifact upload
+        if: ${{ steps.upload_full.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final canonical V2/V4 artifact upload retry
+        if: ${{ steps.retry_upload_full.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-v4-full
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

@@ -1,0 +1,57 @@
+name: phase1-pons-v2-history-sample
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Acquire first 100k blocks of Pons V2 launch history
+        run: |
+          hlp             --timeout 30 --attempts 5 --min-interval 0.6             rpc-pons-sample             --version v2             --from-block 26841846             --to-block 26941845             --limit 10000             --chunk-size 2000             --min-chunk-size 50             --out artifacts/pons-v2-first-100k.jsonl
+      - name: Validate and summarize decoded launches
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/pons-v2-first-100k.jsonl")
+          rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+          # The factory deployment window is allowed to contain zero launches;
+          # this workflow is retained as evidence of that observed boundary.
+          blocks = [row["block_number"] for row in rows]
+          assert blocks == sorted(blocks), "launches not chronological"
+          assert len({row["token"] for row in rows}) == len(rows), "duplicate launch token"
+          assert all(row["version"] == "v2" for row in rows)
+          assert all(row["curve"] for row in rows)
+          print(json.dumps({
+              "launches": len(rows),
+              "first_block": min(blocks),
+              "last_block": max(blocks),
+              "first_five": [
+                  {
+                      "token": row["token"],
+                      "curve": row["curve"],
+                      "block": row["block_number"],
+                      "tx": row["transaction_hash"],
+                  }
+                  for row in rows[:5]
+              ],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-v2-first-100k
+          path: artifacts/
+          if-no-files-found: error
