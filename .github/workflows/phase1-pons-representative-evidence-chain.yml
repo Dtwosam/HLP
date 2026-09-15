@@ -164,7 +164,7 @@ jobs:
 
           contracts = {
               "ORACLE_RUN_ID": {
-                  "run_id": 33_974_681_334,
+                  "run_id": 34_765_335_793,
                   "path": (
                       ".github/workflows/"
                       "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml"
