@@ -12,18 +12,24 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 text = PATH.read_text()
-text = replace_once(
-    text,
-    """          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
-        run: |
-""",
-    """          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          CURRENT_HEAD_SHA: ${{ github.sha }}
-        run: |
-""",
-    "representative preflight current-run env",
+step_marker = "      - name: Verify frozen representative support inputs\n"
+if text.count(step_marker) != 1:
+    raise SystemExit("representative preflight step marker changed")
+step_start = text.index(step_marker)
+run_marker = "        run: |\n"
+run_start = text.index(run_marker, step_start)
+step_prefix = text[step_start:run_start]
+env_needle = "          V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}\n"
+if step_prefix.count(env_needle) != 1:
+    raise SystemExit("representative preflight V2/V4 env anchor changed")
+step_prefix = step_prefix.replace(
+    env_needle,
+    env_needle
+    + "          CURRENT_RUN_ID: ${{ github.run_id }}\n"
+    + "          CURRENT_HEAD_SHA: ${{ github.sha }}\n",
+    1,
 )
+text = text[:step_start] + step_prefix + text[run_start:]
 text = replace_once(
     text,
     """          eligibility_run = get(
