@@ -221,7 +221,7 @@ jobs:
           pattern: phase1-pons-v1-v3-*
           path: v1v3-shards/current
           merge-multiple: true
-          run-id: ${{ inputs.v1_v1_v3_run_id }}
+          run-id: ${{ inputs.v1_v3_run_id }}
           github-token: ${{ github.token }}
       - id: download_v1v3_partial
         if: ${{ steps.v1v3_sources.outputs.partial_run_id != '' && steps.v1v3_sources.outputs.partial_run_id != inputs.v1_v3_run_id }}
