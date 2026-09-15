@@ -162,3 +162,26 @@ def test_representative_preflight_allows_only_current_recovered_run_to_be_active
 
     assert 'eligibility_run.get("status") != "completed"' in content
     assert 'eligibility_run.get("conclusion") != "success"' in content
+
+
+def test_representative_support_contract_uses_recovered_cbbtc_oracle():
+    recovered = _workflow("phase1-pons-recovered-completion-chain.yml")
+    representative = _workflow("phase1-pons-representative-evidence-chain.yml")
+
+    oracle_marker = '"ORACLE_RUN_ID": {'
+    recovered_oracle = recovered.split(oracle_marker, 1)[1].split(
+        '"RUNNER_SMOKE_RUN_ID": {', 1
+    )[0]
+    representative_oracle = representative.split(oracle_marker, 1)[1].split(
+        '"RUNNER_SMOKE_RUN_ID": {', 1
+    )[0]
+
+    for contract in (recovered_oracle, representative_oracle):
+        assert '"run_id": 34_765_335_793' in contract
+        assert (
+            "phase1-pons-stock-oracle-promote-v2-delta-one-shot.yml"
+            in contract
+        )
+        assert '"artifact": "phase1-pons-stock-oracle-full"' in contract
+
+    assert '"run_id": 33_974_681_334' not in representative_oracle
