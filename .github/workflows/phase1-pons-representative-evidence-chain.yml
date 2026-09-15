@@ -152,6 +152,8 @@ jobs:
           ELIGIBILITY_RUN_ID: ${{ inputs.eligibility_run_id }}
           V1_V3_RUN_ID: ${{ inputs.v1_v3_run_id }}
           V2_V4_RUN_ID: ${{ inputs.v2_v4_run_id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_HEAD_SHA: ${{ github.sha }}
         run: |
           python - <<'PY'
           import json
@@ -307,10 +309,36 @@ jobs:
                   "representative evidence run IDs must be positive"
               )
 
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          current_head_sha = os.environ["CURRENT_HEAD_SHA"].strip()
           eligibility_run = get(
               f"/repos/{repo}/actions/runs/{eligibility_run_id}"
           )
-          if (
+          eligibility_path = str(
+              eligibility_run.get("path") or ""
+          ).split("@", 1)[0]
+          if eligibility_run_id == current_run_id:
+              if eligibility_path != (
+                  ".github/workflows/phase1-pons-recovered-completion-one-shot.yml"
+              ):
+                  raise SystemExit(
+                      "representative current eligibility workflow changed"
+                  )
+              if str(eligibility_run.get("status") or "") not in {
+                  "queued",
+                  "in_progress",
+                  "waiting",
+                  "requested",
+                  "pending",
+              }:
+                  raise SystemExit(
+                      "representative current eligibility run is not active"
+                  )
+              if eligibility_run.get("head_sha") != current_head_sha:
+                  raise SystemExit(
+                      "representative current eligibility head changed"
+                  )
+          elif (
               eligibility_run.get("status") != "completed"
               or eligibility_run.get("conclusion") != "success"
           ):

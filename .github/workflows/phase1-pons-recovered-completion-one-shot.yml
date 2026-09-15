@@ -23,6 +23,8 @@ jobs:
       prior_transfer_run_id: ${{ steps.read.outputs.prior_transfer_run_id }}
       pricing_run_id: ${{ steps.read.outputs.pricing_run_id }}
       v3_fallback_run_id: ${{ steps.read.outputs.v3_fallback_run_id }}
+      repaired_v2_lifecycle_run_id: ${{ steps.read.outputs.repaired_v2_lifecycle_run_id }}
+      repaired_v4_fallback_run_id: ${{ steps.read.outputs.repaired_v4_fallback_run_id }}
     steps:
       - uses: actions/checkout@v4
       - id: read
@@ -56,6 +58,8 @@ jobs:
               "validation_generation",
               "pricing_run_id",
               "v3_fallback_run_id",
+              "repaired_v2_lifecycle_run_id",
+              "repaired_v4_fallback_run_id",
           }
           if set(config) != expected_keys:
               raise SystemExit(
@@ -146,6 +150,12 @@ jobs:
           prior_id = int(config.get("prior_transfer_run_id", 0))
           pricing_id = int(config.get("pricing_run_id", 0))
           v3_fallback_id = int(config.get("v3_fallback_run_id", 0))
+          repaired_v2_id = int(
+              config.get("repaired_v2_lifecycle_run_id", 0)
+          )
+          repaired_v4_id = int(
+              config.get("repaired_v4_fallback_run_id", 0)
+          )
           previous_generation = int(previous_config.get("generation", -1))
           validation_generation = int(
               config.get("validation_generation", -1)
@@ -180,11 +190,29 @@ jobs:
               or prior_id < 0
               or pricing_id < 0
               or v3_fallback_id < 0
+              or repaired_v2_id < 0
+              or repaired_v4_id < 0
           ):
               raise SystemExit("recovered completion optional run IDs are invalid")
           if pricing_id > 0 and v2_id <= 0:
               raise SystemExit(
                   "reused pricing requires an explicit V2/V4 run ID"
+              )
+          if bool(repaired_v2_id) != bool(repaired_v4_id):
+              raise SystemExit(
+                  "repaired pricing run IDs must be supplied together"
+              )
+          if pricing_id > 0 and repaired_v2_id > 0:
+              raise SystemExit(
+                  "repaired pricing cannot be combined with pricing_run_id"
+              )
+          if repaired_v2_id > 0 and v2_id <= 0:
+              raise SystemExit(
+                  "repaired pricing requires an explicit V2/V4 run ID"
+              )
+          if repaired_v2_id > 0 and v3_fallback_id <= 0:
+              raise SystemExit(
+                  "repaired pricing requires v3_fallback_run_id"
               )
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -206,6 +234,16 @@ jobs:
                   + "\n"
               )
               output.write(f"v3_fallback_run_id={v3_fallback_id}\n")
+              output.write(
+                  "repaired_v2_lifecycle_run_id="
+                  + (str(repaired_v2_id) if repaired_v2_id else "")
+                  + "\n"
+              )
+              output.write(
+                  "repaired_v4_fallback_run_id="
+                  + (str(repaired_v4_id) if repaired_v4_id else "")
+                  + "\n"
+              )
           print(json.dumps({
               "generation": generation,
               "previous_generation": previous_generation,
@@ -218,6 +256,8 @@ jobs:
               "prior_transfer_run_id": prior_id,
               "pricing_run_id": pricing_id,
               "v3_fallback_run_id": v3_fallback_id,
+              "repaired_v2_lifecycle_run_id": repaired_v2_id,
+              "repaired_v4_fallback_run_id": repaired_v4_id,
           }, sort_keys=True))
           PY
 
@@ -232,6 +272,8 @@ jobs:
       prior_transfer_run_id: ${{ needs.config.outputs.prior_transfer_run_id }}
       pricing_run_id: ${{ needs.config.outputs.pricing_run_id }}
       v3_fallback_run_id: ${{ needs.config.outputs.v3_fallback_run_id }}
+      repaired_v2_lifecycle_run_id: ${{ needs.config.outputs.repaired_v2_lifecycle_run_id }}
+      repaired_v4_fallback_run_id: ${{ needs.config.outputs.repaired_v4_fallback_run_id }}
       oracle_run_id: "34765335793"
       runner_smoke_run_id: "33920762592"
       registry_run_id: "33911022718"
