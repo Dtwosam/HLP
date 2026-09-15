@@ -39,8 +39,8 @@ def test_recovered_completion_config_carries_repaired_pricing_sources():
     config = json.loads(
         (ROOT / ".github" / "phase1-pons-recovered-completion.json").read_text()
     )
-    assert config["repaired_v2_lifecycle_run_id"] == 0
-    assert config["repaired_v4_fallback_run_id"] == 0
+    assert config["repaired_v2_lifecycle_run_id"] == 34_900_105_493
+    assert config["repaired_v4_fallback_run_id"] == 34_894_335_995
     assert config["validation_generation"] == 7
 
 
@@ -122,6 +122,27 @@ def test_repaired_pricing_promotion_is_exact_artifact_only_and_causal():
     assert blocks
     for index, block in enumerate(blocks):
         compile(block, f"repaired-pricing-promote:{index}", "exec")
+
+
+def test_failed_v3_parent_requires_exact_successful_producer_jobs():
+    content = _workflow("phase1-pons-repaired-pricing-promote.yml")
+    source_contract = content.split("34_480_161_440: {", 1)[1].split(
+        "34_900_105_493: {", 1
+    )[0]
+    assert '"conclusion": "failure"' in source_contract
+
+    required = (
+        "102_880_847_690",
+        "recover / pricing / v1_eligibility / eligibility",
+        "103_164_491_961",
+        "recover / pricing / v3_fallback / merge",
+        "103_165_686_004",
+        "recover / pricing / v4_fallback / plan",
+        "repaired pricing source producer job changed",
+        "repaired pricing known downstream failure changed",
+    )
+    for needle in required:
+        assert needle in content, needle
 
 
 def test_representative_preflight_allows_only_current_recovered_run_to_be_active():
