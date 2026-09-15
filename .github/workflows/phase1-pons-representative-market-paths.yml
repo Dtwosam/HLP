@@ -654,7 +654,10 @@ jobs:
 
           v2_curve_manifest, v2_curve_provenance = require_manifest(
               "v2curve/pons-v2-curve-full.jsonl.manifest.json",
-              source="stream_merged_pons_specific_curve_shards",
+              source={
+                  "stream_merged_pons_specific_curve_shards",
+                  "manifest_gap_aware_curve_recovery",
+              },
           )
           expected_v2_registry_sha = (
               "06dc7d373f79dd43aa3bb4070187b5a8"
