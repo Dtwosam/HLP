@@ -59,8 +59,7 @@ text = replace_once(
           ).split(\"@\", 1)[0]
           if eligibility_run_id == current_run_id:
               if eligibility_path != (
-                  \".github/workflows/\"
-                  \"phase1-pons-recovered-completion-one-shot.yml\"
+                  \".github/workflows/phase1-pons-recovered-completion-one-shot.yml\"
               ):
                   raise SystemExit(
                       \"representative current eligibility workflow changed\"
