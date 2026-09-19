@@ -405,10 +405,32 @@ jobs:
           provenance = manifest.get("provenance") or {}
           if provenance.get("storage_mode") != "sharded_artifacts":
               raise SystemExit("representative V2 V4 tape is not sharded")
+
+          known_sources = {
+              int(value)
+              for key in ("partial_run_id", "prior_gap_run_id")
+              if (value := provenance.get(key)) is not None
+          }
+          numeric_shard_sources = {
+              int(source)
+              for shard in provenance.get("shards") or []
+              if (source := str(shard.get("source") or "")).isdigit()
+          }
+          legacy_sources = sorted(numeric_shard_sources - known_sources)
+          if len(legacy_sources) > 1:
+              raise SystemExit(
+                  "representative V2 V4 manifest requires multiple nested "
+                  f"legacy source runs: {legacy_sources}"
+              )
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               for key in ("partial_run_id", "prior_gap_run_id"):
                   value = provenance.get(key)
                   handle.write(f"{key}={'' if value is None else int(value)}\n")
+              handle.write(
+                  "legacy_gap_run_id="
+                  f"{legacy_sources[0] if legacy_sources else ''}\n"
+              )
           PY
       - id: download_v2v4_current
         continue-on-error: true
@@ -517,6 +539,42 @@ jobs:
           merge-multiple: true
           run-id: ${{ steps.v2v4_sources.outputs.prior_gap_run_id }}
           github-token: ${{ github.token }}
+      - id: download_v2v4_legacy
+        if: ${{ steps.v2v4_sources.outputs.legacy_gap_run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/legacy
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.legacy_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial legacy V2/V4 shard bundle download before retry
+        if: ${{ steps.download_v2v4_legacy.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/legacy
+      - id: retry_download_v2v4_legacy
+        name: Retry legacy V2/V4 shard bundle artifact download
+        if: ${{ steps.download_v2v4_legacy.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/legacy
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.legacy_gap_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial legacy V2/V4 shard bundle download before final retry
+        if: ${{ steps.retry_download_v2v4_legacy.outcome == 'failure' }}
+        run: rm -rf v2v4-shards/legacy
+      - name: Final legacy V2/V4 shard bundle artifact download retry
+        if: ${{ steps.retry_download_v2v4_legacy.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: phase1-pons-v2-v4-*
+          path: v2v4-shards/legacy
+          merge-multiple: true
+          run-id: ${{ steps.v2v4_sources.outputs.legacy_gap_run_id }}
+          github-token: ${{ github.token }}
       - name: Freeze representative launch and market-event paths
         run: |
           mkdir -p artifacts
@@ -536,7 +594,10 @@ jobs:
               resolve_representative_v2_curve_registry_sha256,
               summarize_representative_market_paths,
           )
-          from hlp.data.sharded_tape import iter_sharded_jsonl
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl_matching_field_values,
+              iter_validated_jsonl_matching_field_values,
+          )
           from hlp.data.snapshot import write_jsonl_snapshot
 
           SNAPSHOT_HEAD = 54_486_035
@@ -761,27 +822,101 @@ jobs:
               + "\n"
           )
 
+          sample_tokens = {
+              str(row["token"]).lower()
+              for row in sample
+          }
+          representative_registry = list(
+              iter_validated_jsonl_matching_field_values(
+                  Path("registry/pons-full-launch-registry.jsonl"),
+                  Path(
+                      "registry/"
+                      "pons-full-launch-registry.jsonl.manifest.json"
+                  ),
+                  field="token",
+                  values=sample_tokens,
+              )
+          )
+          launch_by_token = {}
+          for row in representative_registry:
+              token = str(row["token"]).lower()
+              if token in launch_by_token:
+                  raise SystemExit(
+                      "representative prefilter found duplicate launch: "
+                      f"{token}"
+                  )
+              launch_by_token[token] = row
+          missing_launches = sorted(sample_tokens - set(launch_by_token))
+          if missing_launches:
+              raise SystemExit(
+                  "representative prefilter launch coverage missing: "
+                  f"{missing_launches}"
+              )
+
+          v1_pools = {
+              str(launch_by_token[str(row["token"]).lower()]["pool"]).lower()
+              for row in sample
+              if row["pons_version"] == "v1"
+          }
+          v2_curves = {
+              str(launch_by_token[str(row["token"]).lower()]["curve"]).lower()
+              for row in sample
+              if row["pons_version"] == "v2"
+          }
+          v2_tokens = {
+              str(row["token"]).lower()
+              for row in sample
+              if row["pons_version"] == "v2"
+          }
+          graduation_rows = list(
+              iter_validated_jsonl_matching_field_values(
+                  Path("transition/pons-v2-graduations-full.jsonl"),
+                  Path(
+                      "transition/"
+                      "pons-v2-graduations-full.jsonl.manifest.json"
+                  ),
+                  field="token",
+                  values=v2_tokens,
+              )
+          )
+          registration_rows = list(
+              iter_validated_jsonl_matching_field_values(
+                  Path("transition/pons-v2-registrations-full.jsonl"),
+                  Path(
+                      "transition/"
+                      "pons-v2-registrations-full.jsonl.manifest.json"
+                  ),
+                  field="token",
+                  values=v2_tokens,
+              )
+          )
+          registered_pool_ids = {
+              str(row["pool_id"]).lower()
+              for row in registration_rows
+          }
+
           rows = build_representative_market_path_rows(
               sample,
-              read_jsonl(
-                  "registry/pons-full-launch-registry.jsonl"
-              ),
-              v1_v3_rows=iter_sharded_jsonl(
+              representative_registry,
+              v1_v3_rows=iter_sharded_jsonl_matching_field_values(
                   Path("v1v3-shards"),
                   Path("v1v3/pons-v1-v3-full.jsonl.manifest.json"),
+                  field="pool",
+                  values=v1_pools,
               ),
-              v2_curve_rows=read_jsonl(
-                  "v2curve/pons-v2-curve-full.jsonl"
+              v2_curve_rows=iter_validated_jsonl_matching_field_values(
+                  Path("v2curve/pons-v2-curve-full.jsonl"),
+                  Path("v2curve/pons-v2-curve-full.jsonl.manifest.json"),
+                  field="curve",
+                  values=v2_curves,
               ),
-              graduation_rows=read_jsonl(
-                  "transition/pons-v2-graduations-full.jsonl"
-              ),
-              registration_rows=read_jsonl(
-                  "transition/pons-v2-registrations-full.jsonl"
-              ),
-              v2_v4_rows=iter_sharded_jsonl(
+              graduation_rows=graduation_rows,
+              registration_rows=registration_rows,
+              v2_v4_rows=iter_sharded_jsonl_matching_field_values(
                   Path("v2v4-shards"),
                   Path("v2v4/pons-v2-v4-full.jsonl.manifest.json"),
+                  field="pool_id",
+                  values=registered_pool_ids,
               ),
           )
           summary_rows = summarize_representative_market_paths(
@@ -807,6 +942,13 @@ jobs:
               "transition_run_id": int("${{ inputs.transition_run_id }}"),
               "v2_v4_run_id": expected_v2_v4_run_id,
           }
+          legacy_v2_v4_run_id = (
+              "${{ steps.v2v4_sources.outputs.legacy_gap_run_id }}".strip()
+          )
+          if legacy_v2_v4_run_id:
+              source_runs["v2_v4_legacy_gap_run_id"] = int(
+                  legacy_v2_v4_run_id
+              )
           path_snapshot = write_jsonl_snapshot(
               rows,
               output=Path(

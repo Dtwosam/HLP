@@ -95,3 +95,27 @@ def test_future_curve_recovery_persists_registry_identity() -> None:
     assert "name: phase1-pons-v2-full-registry" in recovery
     assert '"v2_registry_run_id": int(' in recovery
     assert '"registry_sha256": registry_sha256' in recovery
+
+
+
+def test_representative_market_paths_filter_full_tapes_fail_closed() -> None:
+    market_paths = Path(
+        ".github/workflows/phase1-pons-representative-market-paths.yml"
+    ).read_text()
+
+    assert "iter_sharded_jsonl_matching_field_values" in market_paths
+    assert "iter_validated_jsonl_matching_field_values" in market_paths
+    assert 'field="pool"' in market_paths
+    assert 'field="curve"' in market_paths
+    assert 'field="pool_id"' in market_paths
+
+
+def test_representative_v2_v4_downloads_nested_legacy_source() -> None:
+    market_paths = Path(
+        ".github/workflows/phase1-pons-representative-market-paths.yml"
+    ).read_text()
+
+    assert "numeric_shard_sources" in market_paths
+    assert "legacy_gap_run_id=" in market_paths
+    assert "path: v2v4-shards/legacy" in market_paths
+    assert "steps.v2v4_sources.outputs.legacy_gap_run_id" in market_paths

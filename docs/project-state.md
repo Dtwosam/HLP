@@ -1587,6 +1587,34 @@ its run ID plus SHA256 in the final manifest. No acceptance threshold, timeout,
 gate, representative cohort, or acquisition scope was changed, and no expensive
 acquisition was restarted for this repair.
 
+The Generation 12 frozen sample's actual market-event condition has also now
+been reproduced from the preserved lifecycle summaries before changing the
+market-path extractor. All eight V1 representatives have V3 swap-derived
+pricing points and a populated `v3_swap_max_market_cap_block` (between **976**
+and **4,939** points per token). The two V2 representatives have **83** and
+**266** curve-phase price points respectively; because each V2 curve summary
+contains exactly one synthetic `curve_initialized` point before observable
+curve deltas, both have many real curve market events. Both V2 representatives
+also graduate and have V4 price points. Those summaries are lineage-bound to
+V1/V3 run **34228430753**, V2 curve run **33936232604**, transition run
+**33912452330**, and V2/V4 run **34471480180**. Market-event absence is
+therefore not the next representative-freeze blocker.
+
+The deterministic tape path had two concrete execution defects behind that
+preflight. First, it JSON-decoded every row of the full tapes before discarding
+non-representative pools/curves. The reader now retains full record-count,
+per-shard SHA256, aggregate SHA256, and monolithic-file SHA256 validation while
+decoding only rows whose canonical string field can match a representative
+`token`, `pool`, `curve`, or `pool_id`. Second, canonical V2/V4 run
+**34471480180** contains **553** shards: **312** are sourced from nested
+predecessor run **34234471190** and **241** from run **34331335575**. The
+representative workflow previously downloaded only the latter predecessor.
+It now derives any single nested legacy source run from the immutable aggregate
+manifest and downloads it into a separate source directory, allowing
+`iter_sharded_jsonl` identity resolution to distinguish reused gap filenames.
+No tape bytes are skipped for integrity validation, and no acceptance threshold,
+timeout, gate, cohort, or acquisition scope is changed.
+
 Evidence handoffs are now guarded before any representative RPC at three
 layers. The reusable representative-evidence preflight now retries transient
 GitHub metadata reads up to three times without sleeps and retries both

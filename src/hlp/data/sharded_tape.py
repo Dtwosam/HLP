@@ -6,7 +6,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterable, Iterator
 
 
 def canonical_jsonl_bytes(row: dict) -> bytes:
@@ -88,11 +88,67 @@ def _find_shard(
     return matches[0]
 
 
-def iter_sharded_jsonl(
+def _field_value_matcher(
+    field: str,
+    values: Iterable[str],
+) -> Callable[[bytes], bool]:
+    """Match canonical JSONL string fields without decoding unrelated rows."""
+    expected = {str(value).encode("utf-8") for value in values}
+    prefix = (json.dumps(str(field)) + ':"').encode("utf-8")
+
+    def matches(raw: bytes) -> bool:
+        start = raw.find(prefix)
+        if start < 0:
+            return False
+        start += len(prefix)
+        end = raw.find(b'"', start)
+        return end >= 0 and raw[start:end] in expected
+
+    return matches
+
+
+def iter_validated_jsonl_matching_field_values(
+    path: Path,
+    manifest_path: Path,
+    *,
+    field: str,
+    values: Iterable[str],
+) -> Iterator[dict]:
+    """Stream matching rows while validating every byte of one JSONL snapshot.
+
+    Canonical snapshots serialize string fields without spaces. This lets small
+    representative cohorts avoid JSON-decoding millions of unrelated rows while
+    retaining the original full-file record-count and SHA256 checks.
+    """
+    manifest = json.loads(manifest_path.read_text())
+    matches = _field_value_matcher(field, values)
+    records = 0
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if not raw.strip():
+                continue
+            records += 1
+            if matches(raw):
+                yield json.loads(raw)
+
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+
+
+def _iter_sharded_jsonl(
     root: Path,
     aggregate_manifest_path: Path,
+    *,
+    raw_matcher: Callable[[bytes], bool] | None,
 ) -> Iterator[dict]:
-    """Stream and validate a logical JSONL tape from its ordered shard list."""
     aggregate = json.loads(aggregate_manifest_path.read_text())
     provenance = aggregate.get("provenance") or {}
     if provenance.get("storage_mode") != "sharded_artifacts":
@@ -127,7 +183,8 @@ def iter_sharded_jsonl(
                     continue
                 local_records += 1
                 total_records += 1
-                yield json.loads(raw)
+                if raw_matcher is None or raw_matcher(raw):
+                    yield json.loads(raw)
 
         if local_records != int(shard["records"]):
             raise ValueError(
@@ -144,3 +201,30 @@ def iter_sharded_jsonl(
         )
     if aggregate_digest.hexdigest() != aggregate.get("sha256"):
         raise ValueError("aggregate sharded tape SHA changed")
+
+
+def iter_sharded_jsonl(
+    root: Path,
+    aggregate_manifest_path: Path,
+) -> Iterator[dict]:
+    """Stream and validate a logical JSONL tape from its ordered shard list."""
+    yield from _iter_sharded_jsonl(
+        root,
+        aggregate_manifest_path,
+        raw_matcher=None,
+    )
+
+
+def iter_sharded_jsonl_matching_field_values(
+    root: Path,
+    aggregate_manifest_path: Path,
+    *,
+    field: str,
+    values: Iterable[str],
+) -> Iterator[dict]:
+    """Validate a full sharded tape but decode only matching string-field rows."""
+    yield from _iter_sharded_jsonl(
+        root,
+        aggregate_manifest_path,
+        raw_matcher=_field_value_matcher(field, values),
+    )

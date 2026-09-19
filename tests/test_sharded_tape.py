@@ -6,6 +6,8 @@ import pytest
 from hlp.data.sharded_tape import (
     canonical_jsonl_bytes,
     iter_sharded_jsonl,
+    iter_sharded_jsonl_matching_field_values,
+    iter_validated_jsonl_matching_field_values,
     write_virtual_jsonl_manifest,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
@@ -143,3 +145,78 @@ def test_iter_sharded_jsonl_resolves_reused_gap_names_by_identity(tmp_path):
         )
     )
     assert [row["block_number"] for row in rows] == [10, 12]
+
+
+
+def test_filtered_sharded_reader_decodes_only_matching_field_values(tmp_path):
+    _build_tape(tmp_path)
+    rows = list(
+        iter_sharded_jsonl_matching_field_values(
+            tmp_path,
+            tmp_path / "events-full.jsonl.manifest.json",
+            field="value",
+            values={"b"},
+        )
+    )
+    assert rows == [{"block_number": 11, "value": "b"}]
+
+
+def test_filtered_sharded_reader_still_validates_unmatched_bytes(tmp_path):
+    _build_tape(tmp_path)
+    path = tmp_path / "events-000.jsonl"
+    path.write_bytes(
+        path.read_bytes().replace(
+            b'"value":"a"',
+            b'"value":"z"',
+            1,
+        )
+    )
+    with pytest.raises(ValueError, match="SHA"):
+        list(
+            iter_sharded_jsonl_matching_field_values(
+                tmp_path,
+                tmp_path / "events-full.jsonl.manifest.json",
+                field="value",
+                values={"b"},
+            )
+        )
+
+
+def test_filtered_single_file_reader_validates_full_snapshot(tmp_path):
+    rows = [
+        {"block_number": 10, "pool": "0xaaa"},
+        {"block_number": 11, "pool": "0xbbb"},
+        {"block_number": 12, "pool": "0xccc"},
+    ]
+    path = tmp_path / "events.jsonl"
+    write_jsonl_snapshot(
+        rows,
+        output=path,
+        provenance={"chain_id": 4663},
+    )
+    selected = list(
+        iter_validated_jsonl_matching_field_values(
+            path,
+            tmp_path / "events.jsonl.manifest.json",
+            field="pool",
+            values={"0xbbb"},
+        )
+    )
+    assert selected == [{"block_number": 11, "pool": "0xbbb"}]
+
+    path.write_bytes(
+        path.read_bytes().replace(
+            b'"pool":"0xaaa"',
+            b'"pool":"0xddd"',
+            1,
+        )
+    )
+    with pytest.raises(ValueError, match="SHA"):
+        list(
+            iter_validated_jsonl_matching_field_values(
+                path,
+                tmp_path / "events.jsonl.manifest.json",
+                field="pool",
+                values={"0xbbb"},
+            )
+        )
