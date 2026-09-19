@@ -18,6 +18,58 @@ _STAGE_ORDER = {
 }
 
 
+_CANONICAL_V2_REGISTRY_SHA256 = (
+    "06dc7d373f79dd43aa3bb4070187b5a8"
+    "ee426f0690f3f4f7f8d5cfce3cd3d48f"
+)
+_LEGACY_RECOVERED_V2_CURVE_RUN_ID = 33_936_232_604
+_LEGACY_RECOVERED_V2_CURVE_SHA256 = (
+    "771c9147ef1a84bd673532842972e16e0"
+    "ee12cae1513a41b402f53b5c444c50b"
+)
+_LEGACY_RECOVERED_V2_CURVE_RECORDS = 9_231_724
+_LEGACY_RECOVERED_V2_CURVE_LINEAGE = {
+    "preserved_run_id": 33_912_593_934,
+    "partial_recovery_run_id": 33_925_648_297,
+    "prior_gap_run_id": 33_935_705_953,
+}
+
+
+def resolve_representative_v2_curve_registry_sha256(
+    manifest: dict,
+    *,
+    curve_run_id: int,
+) -> str | None:
+    """Resolve V2 curve registry identity without weakening legacy provenance.
+
+    The canonical recovered tape predates top-level registry SHA propagation.
+    Accept that omission only for its exact immutable artifact and recovery
+    lineage; all other recovered manifests must carry registry_sha256 directly.
+    """
+    provenance = manifest.get("provenance") or {}
+    observed = provenance.get("registry_sha256")
+    if observed:
+        return str(observed)
+
+    if int(curve_run_id) != _LEGACY_RECOVERED_V2_CURVE_RUN_ID:
+        return None
+    if provenance.get("source") != "manifest_gap_aware_curve_recovery":
+        return None
+    if manifest.get("sha256") != _LEGACY_RECOVERED_V2_CURVE_SHA256:
+        return None
+    try:
+        if int(manifest.get("records", -1)) != _LEGACY_RECOVERED_V2_CURVE_RECORDS:
+            return None
+        if any(
+            int(provenance.get(key, -1)) != expected
+            for key, expected in _LEGACY_RECOVERED_V2_CURVE_LINEAGE.items()
+        ):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return _CANONICAL_V2_REGISTRY_SHA256
+
+
 def _sample_index(sample_rows: Iterable[dict]) -> dict[str, dict]:
     sample: dict[str, dict] = {}
     for source in sample_rows:

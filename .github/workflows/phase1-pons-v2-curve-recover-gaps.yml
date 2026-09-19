@@ -278,6 +278,12 @@ jobs:
         run: python -m pip install -e .
       - uses: actions/download-artifact@v4
         with:
+          name: phase1-pons-v2-full-registry
+          path: registry
+          run-id: ${{ inputs.v2_registry_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
           pattern: phase1-pons-v2-curve-*
           path: preserved
           merge-multiple: true
@@ -322,6 +328,23 @@ jobs:
 
           start = int(os.environ["GENERATION_START"])
           head = int(os.environ["SNAPSHOT_HEAD"])
+          registry_manifest = json.loads(
+              Path(
+                  "registry/pons-v2-full-registry.jsonl.manifest.json"
+              ).read_text()
+          )
+          registry_provenance = registry_manifest.get("provenance") or {}
+          if int(registry_provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit("V2 curve recovery registry chain changed")
+          if int(
+              registry_provenance.get("snapshot_head_block", -1)
+          ) != head:
+              raise SystemExit("V2 curve recovery registry snapshot changed")
+          if int(registry_manifest.get("records", -1)) != 225_951:
+              raise SystemExit(
+                  "V2 curve recovery registry record count changed"
+              )
+          registry_sha256 = str(registry_manifest["sha256"])
           files = (
               list(Path("preserved").glob("v2-curve-shard-*.jsonl"))
               + list(Path("partial").glob("v2-curve-recovery-*.jsonl"))
@@ -406,6 +429,10 @@ jobs:
                   "source": "manifest_gap_aware_curve_recovery",
                   "chain_id": 4663,
                   "snapshot_head_block": head,
+                  "v2_registry_run_id": int(
+                      "${{ inputs.v2_registry_run_id }}"
+                  ),
+                  "registry_sha256": registry_sha256,
                   "preserved_run_id": int(
                       "${{ inputs.preserved_run_id }}"
                   ),

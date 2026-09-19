@@ -533,6 +533,7 @@ jobs:
           )
           from hlp.data.pons_representative_paths import (
               build_representative_market_path_rows,
+              resolve_representative_v2_curve_registry_sha256,
               summarize_representative_market_paths,
           )
           from hlp.data.sharded_tape import iter_sharded_jsonl
@@ -663,10 +664,13 @@ jobs:
               "06dc7d373f79dd43aa3bb4070187b5a8"
               "ee426f0690f3f4f7f8d5cfce3cd3d48f"
           )
-          if (
-              v2_curve_provenance.get("registry_sha256")
-              != expected_v2_registry_sha
-          ):
+          observed_v2_registry_sha = (
+              resolve_representative_v2_curve_registry_sha256(
+                  v2_curve_manifest,
+                  curve_run_id=int("${{ inputs.v2_curve_run_id }}"),
+              )
+          )
+          if observed_v2_registry_sha != expected_v2_registry_sha:
               raise SystemExit(
                   "representative V2 curve tape registry identity changed"
               )

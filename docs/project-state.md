@@ -1567,6 +1567,26 @@ ledger generation and exact nine route run IDs to match the current ledger
 before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
 artifact from an older evidence or route ledger therefore cannot close Phase 1.
 
+Generation **12** of recovered completion reached the representative
+market-path freeze and failed before any full market-tape scan. Job
+**104581414926** exited on the V2 curve registry-identity guard because canonical
+curve run **33936232604** was produced by the gap-recovery merger with
+**9,231,724** rows and tape SHA256
+`771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b`, but
+that legacy recovery manifest omitted the top-level `registry_sha256`. The
+producer lineage is still exact: preserved run **33912593934**, partial recovery
+**33925648297**, and prior-gap run **33935705953** all use V2 registry run
+**33912235341**, whose frozen registry SHA256 is
+`06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f`;
+canonical transition run **33912452330** records the same registry identity.
+Representative validation therefore recognizes the missing legacy field only
+for that exact immutable tape hash, record count, run ID, source and recovery
+lineage; any other missing or changed identity still fails closed. Future V2
+curve gap-recovery merges download the configured frozen V2 registry and persist
+its run ID plus SHA256 in the final manifest. No acceptance threshold, timeout,
+gate, representative cohort, or acquisition scope was changed, and no expensive
+acquisition was restarted for this repair.
+
 Evidence handoffs are now guarded before any representative RPC at three
 layers. The reusable representative-evidence preflight now retries transient
 GitHub metadata reads up to three times without sleeps and retries both
