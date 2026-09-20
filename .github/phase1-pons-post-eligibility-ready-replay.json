@@ -1,0 +1,8 @@
+{
+  "generation": 0,
+  "eligible_run_id": 35518892463,
+  "source_eligibility_run_id": 33982556591,
+  "v1_v3_run_id": 34228430753,
+  "v2_v4_run_id": 34471480180,
+  "expected_eligible_universe_sha256": "d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cefc4aa33ad2d8b2e8d"
+}

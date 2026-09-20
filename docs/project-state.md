@@ -2043,3 +2043,24 @@ anchor **33972109927**, oracle **34765335793**, and fallback parent
 the replay calls only the existing fail-closed representative validation
 workflow; it carries no RPC or external-API client and avoids waiting for the
 stale queued Generation 14 workflow snapshot.
+
+Gen13's promoted eligible-universe artifact is already available and verified:
+**6,972** eligible Pons tokens (**5,161 V1**, **1,811 V2**), **0** unknown
+tokens, exact V1/V3 run **34228430753**, exact V2/V4 run **34471480180**, and
+universe SHA256
+`d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cefc4aa33ad2d8b2e8d`.
+Artifact ID **10607458167** is non-expired on Gen13.
+
+A second guarded artifact-only replay is staged for the final post-eligibility
+"ready" handoff. Its generation **0** freezes eligible run **35518892463**,
+source eligibility run **33982556591**, V1/V3 **34228430753**, V2/V4
+**34471480180**, and the exact eligible-universe SHA above. On launch it refuses
+to proceed unless it can discover a **successful**
+`phase1-pons-representative-validation-replay-one-shot` run that actually
+published `phase1-pons-representative-validation`. It then re-runs the same
+`validate_post_eligibility_evidence_bundle` contract, additionally requiring
+the representative manifest to carry the exact sample, transfer, market-path,
+priced-path, DEX, registry, curve, transition, quote-audit, anchor, oracle and
+fallback run IDs already frozen by the validation replay. It publishes the same
+`phase1-pons-post-eligibility-evidence-ready` handoff artifact without RPC,
+external APIs, or acquisition.

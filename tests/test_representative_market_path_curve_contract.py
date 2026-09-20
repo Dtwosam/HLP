@@ -335,3 +335,30 @@ def test_representative_validation_replay_is_artifact_only() -> None:
         "validation replay frozen inputs changed at launch"
         in workflow
     )
+
+
+def test_post_eligibility_ready_replay_is_artifact_only() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-post-eligibility-ready-replay.json"
+    ).read_text()
+
+    assert '"eligible_run_id": 35518892463' in config
+    assert (
+        '"expected_eligible_universe_sha256": '
+        '"d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cefc4aa33ad2d8b2e8d"'
+        in config
+    )
+    assert "phase1-pons-representative-validation-replay-one-shot.yml" in workflow
+    assert "phase1-pons-eligible-universe" in workflow
+    assert "phase1-pons-representative-validation" in workflow
+    assert "validate_post_eligibility_evidence_bundle" in workflow
+    assert "artifact_only_post_eligibility_ready" in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert "GeckoTerminalClient" not in workflow
+    assert "RpcClient" not in workflow
+    assert "ready replay generation must increment by one" in workflow
+    assert "ready replay frozen inputs changed at launch" in workflow
