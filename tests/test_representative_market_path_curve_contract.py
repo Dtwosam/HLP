@@ -119,3 +119,19 @@ def test_representative_v2_v4_downloads_nested_legacy_source() -> None:
     assert "legacy_gap_run_id=" in market_paths
     assert "path: v2v4-shards/legacy" in market_paths
     assert "steps.v2v4_sources.outputs.legacy_gap_run_id" in market_paths
+
+
+def test_representative_market_paths_repairs_paginated_shard_downloads() -> None:
+    market_paths = Path(
+        ".github/workflows/phase1-pons-representative-market-paths.yml"
+    ).read_text()
+
+    assert (
+        "Repair manifest-required shards omitted by artifact pagination"
+        in market_paths
+    )
+    assert "find_github_actions_run_artifact" in market_paths
+    assert "v1-v3-events-shard-" in market_paths
+    assert "phase1-pons-v1-v3-" in market_paths
+    assert "v4-events-gap-" in market_paths
+    assert "phase1-pons-v2-v4-gap-" in market_paths

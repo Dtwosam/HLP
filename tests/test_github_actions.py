@@ -9,6 +9,7 @@ from hlp.data.github_actions import (
     fetch_github_actions_artifact_zip,
     fetch_github_actions_job_log,
     fetch_github_actions_json,
+    find_github_actions_run_artifact,
     rescue_terminal_binding_sha256,
     select_equivalent_artifact_retry,
 )
@@ -324,6 +325,87 @@ def test_actions_metadata_attempts_must_be_positive():
             attempts=0,
         )
 
+
+
+def test_actions_run_artifact_lookup_paginates_beyond_300(monkeypatch):
+    api_url = (
+        "https://api.github.com/repos/Dtwosam/HLP/"
+        "actions/runs/123/artifacts"
+    )
+    seen = []
+
+    def fake_fetch(url, token, *, timeout, attempts):
+        seen.append(url)
+        page = int(
+            urllib.parse.parse_qs(
+                urllib.parse.urlparse(url).query
+            )["page"][0]
+        )
+        if page < 4:
+            return {
+                "artifacts": [
+                    {
+                        "id": page * 100 + index,
+                        "name": f"other-{page}-{index}",
+                        "expired": False,
+                    }
+                    for index in range(100)
+                ]
+            }
+        return {
+            "artifacts": [
+                {
+                    "id": 999,
+                    "name": "phase1-target",
+                    "expired": False,
+                },
+                {
+                    "id": 1000,
+                    "name": "other-final",
+                    "expired": False,
+                },
+            ]
+        }
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.fetch_github_actions_json",
+        fake_fetch,
+    )
+
+    artifact = find_github_actions_run_artifact(
+        api_url,
+        "secret-token",
+        artifact_name="phase1-target",
+    )
+
+    assert artifact["id"] == 999
+    assert len(seen) == 4
+    assert "per_page=100" in seen[-1]
+    assert "page=4" in seen[-1]
+
+
+def test_actions_run_artifact_lookup_fails_closed_on_duplicate(monkeypatch):
+    api_url = (
+        "https://api.github.com/repos/Dtwosam/HLP/"
+        "actions/runs/124/artifacts"
+    )
+
+    monkeypatch.setattr(
+        "hlp.data.github_actions.fetch_github_actions_json",
+        lambda url, token, *, timeout, attempts: {
+            "artifacts": [
+                {"id": 1, "name": "phase1-target", "expired": False},
+                {"id": 2, "name": "phase1-target", "expired": False},
+            ]
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="ambiguous or missing"):
+        find_github_actions_run_artifact(
+            api_url,
+            "secret-token",
+            artifact_name="phase1-target",
+        )
 
 def test_actions_artifact_redirect_does_not_forward_github_token(monkeypatch):
     api_url = (

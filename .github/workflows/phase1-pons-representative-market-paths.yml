@@ -575,6 +575,260 @@ jobs:
           merge-multiple: true
           run-id: ${{ steps.v2v4_sources.outputs.legacy_gap_run_id }}
           github-token: ${{ github.token }}
+      - name: Repair manifest-required shards omitted by artifact pagination
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              find_github_actions_run_artifact,
+          )
+
+          api = os.environ["GITHUB_API_URL"].rstrip("/")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def load_manifest(path):
+              return json.loads(Path(path).read_text())
+
+          def shard_matches(root, shard):
+              name = str(shard["file"])
+              expected_sha = str(shard["sha256"])
+              expected_records = int(shard["records"])
+              expected_lo = int(shard["from_block"])
+              expected_hi = int(shard["to_block"])
+              for path in Path(root).rglob(name):
+                  if not path.is_file():
+                      continue
+                  sidecar = path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  )
+                  if not sidecar.exists():
+                      continue
+                  try:
+                      manifest = json.loads(sidecar.read_text())
+                      provenance = manifest.get("provenance") or {}
+                      if (
+                          str(manifest.get("sha256") or "")
+                          == expected_sha
+                          and int(manifest.get("records", -1))
+                          == expected_records
+                          and int(provenance.get("from_block", -1))
+                          == expected_lo
+                          and int(provenance.get("to_block", -1))
+                          == expected_hi
+                      ):
+                          return True
+                  except (json.JSONDecodeError, TypeError, ValueError):
+                      continue
+              return False
+
+          def exact_artifact(run_id, artifact_name):
+              return find_github_actions_run_artifact(
+                  (
+                      f"{api}/repos/{repo}/actions/runs/"
+                      f"{int(run_id)}/artifacts"
+                  ),
+                  token,
+                  artifact_name=artifact_name,
+              )
+
+          def repair_shard(root, shard, *, run_id, artifact_name):
+              if shard_matches(root, shard):
+                  return False
+              artifact = exact_artifact(run_id, artifact_name)
+              payload = fetch_github_actions_artifact_zip(
+                  (
+                      f"{api}/repos/{repo}/actions/artifacts/"
+                      f"{int(artifact['id'])}/zip"
+                  ),
+                  token,
+              )
+              name = str(shard["file"])
+              sidecar_name = name + ".manifest.json"
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  data_names = [
+                      item
+                      for item in archive.namelist()
+                      if item.rsplit("/", 1)[-1] == name
+                  ]
+                  manifest_names = [
+                      item
+                      for item in archive.namelist()
+                      if item.rsplit("/", 1)[-1] == sidecar_name
+                  ]
+                  if len(data_names) != 1 or len(manifest_names) != 1:
+                      raise SystemExit(
+                          "paginated shard artifact contents are ambiguous: "
+                          f"{artifact_name}"
+                      )
+                  data = archive.read(data_names[0])
+                  manifest_bytes = archive.read(manifest_names[0])
+                  manifest = json.loads(manifest_bytes)
+              provenance = manifest.get("provenance") or {}
+              checks = {
+                  "sha256": (
+                      str(manifest.get("sha256") or "")
+                      == str(shard["sha256"])
+                  ),
+                  "records": (
+                      int(manifest.get("records", -1))
+                      == int(shard["records"])
+                  ),
+                  "from_block": (
+                      int(provenance.get("from_block", -1))
+                      == int(shard["from_block"])
+                  ),
+                  "to_block": (
+                      int(provenance.get("to_block", -1))
+                      == int(shard["to_block"])
+                  ),
+                  "actual_sha256": (
+                      hashlib.sha256(data).hexdigest()
+                      == str(shard["sha256"])
+                  ),
+                  "actual_records": (
+                      sum(1 for raw in data.splitlines() if raw.strip())
+                      == int(shard["records"])
+                  ),
+              }
+              failed = sorted(
+                  key for key, passed in checks.items() if not passed
+              )
+              if failed:
+                  raise SystemExit(
+                      "paginated shard identity changed for "
+                      f"{artifact_name}: {', '.join(failed)}"
+                  )
+              destination = (
+                  Path(root) / "paginated" / str(int(run_id))
+              )
+              destination.mkdir(parents=True, exist_ok=True)
+              (destination / name).write_bytes(data)
+              (destination / sidecar_name).write_bytes(manifest_bytes)
+              if not shard_matches(root, shard):
+                  raise SystemExit(
+                      f"paginated shard repair did not materialize {name}"
+                  )
+              return True
+
+          repaired = []
+
+          v1_root = Path("v1v3-shards")
+          v1_manifest = load_manifest(
+              "v1v3/pons-v1-v3-full.jsonl.manifest.json"
+          )
+          v1_provenance = v1_manifest.get("provenance") or {}
+          v1_sources = {
+              "partial": int(v1_provenance["partial_run_id"]),
+              "prior-gaps": int(v1_provenance["prior_gap_run_id"]),
+          }
+          for shard in v1_provenance.get("shards") or []:
+              if shard_matches(v1_root, shard):
+                  continue
+              source = str(shard.get("source") or "")
+              if source not in v1_sources:
+                  raise SystemExit(
+                      "unsupported V1/V3 shard source while repairing "
+                      f"artifact pagination: {source!r}"
+                  )
+              name = str(shard["file"])
+              match = re.fullmatch(
+                  r"v1-v3-events-shard-(\d{3})\.jsonl",
+                  name,
+              )
+              if match:
+                  artifact_name = (
+                      "phase1-pons-v1-v3-"
+                      f"{int(match.group(1))}"
+                  )
+              else:
+                  match = re.fullmatch(
+                      r"v1-v3-events-gap-(\d{3})\.jsonl",
+                      name,
+                  )
+                  if not match:
+                      raise SystemExit(
+                          f"unsupported V1/V3 shard filename: {name}"
+                      )
+                  artifact_name = (
+                      "phase1-pons-v1-v3-gap-"
+                      f"{match.group(1)}"
+                  )
+              run_id = v1_sources[source]
+              if repair_shard(
+                  v1_root,
+                  shard,
+                  run_id=run_id,
+                  artifact_name=artifact_name,
+              ):
+                  repaired.append(
+                      {
+                          "tape": "v1_v3",
+                          "run_id": run_id,
+                          "artifact": artifact_name,
+                          "file": name,
+                      }
+                  )
+
+          v2_root = Path("v2v4-shards")
+          v2_manifest = load_manifest(
+              "v2v4/pons-v2-v4-full.jsonl.manifest.json"
+          )
+          v2_provenance = v2_manifest.get("provenance") or {}
+          for shard in v2_provenance.get("shards") or []:
+              if shard_matches(v2_root, shard):
+                  continue
+              source = str(shard.get("source") or "")
+              if not source.isdigit():
+                  raise SystemExit(
+                      "unsupported V2/V4 shard source while repairing "
+                      f"artifact pagination: {source!r}"
+                  )
+              name = str(shard["file"])
+              match = re.fullmatch(
+                  r"v4-events-gap-(\d{3})\.jsonl",
+                  name,
+              )
+              if not match:
+                  raise SystemExit(
+                      f"unsupported V2/V4 shard filename: {name}"
+                  )
+              run_id = int(source)
+              artifact_name = (
+                  "phase1-pons-v2-v4-gap-"
+                  f"{match.group(1)}"
+              )
+              if repair_shard(
+                  v2_root,
+                  shard,
+                  run_id=run_id,
+                  artifact_name=artifact_name,
+              ):
+                  repaired.append(
+                      {
+                          "tape": "v2_v4",
+                          "run_id": run_id,
+                          "artifact": artifact_name,
+                          "file": name,
+                      }
+                  )
+
+          print(json.dumps({
+              "pagination_repair": "pass",
+              "repaired_shards": repaired,
+              "repaired_count": len(repaired),
+          }, sort_keys=True))
+          PY
       - name: Freeze representative launch and market-event paths
         run: |
           mkdir -p artifacts

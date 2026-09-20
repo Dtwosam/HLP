@@ -1615,6 +1615,26 @@ manifest and downloads it into a separate source directory, allowing
 No tape bytes are skipped for integrity validation, and no acceptance threshold,
 timeout, gate, cohort, or acquisition scope is changed.
 
+Generation **13** of recovered completion, run **35518892463**, passed the
+representative preflight and exact ten-token sample freeze, then reached the
+patched market-path reader. Job **106099822236** failed on the first canonical
+V1/V3 shard with
+`sharded tape file 'v1-v3-events-shard-000.jsonl' is missing under
+v1v3-shards`. The shard is not absent from immutable source run
+**33982556591**: artifact `phase1-pons-v1-v3-0` is still present. That source
+run has **314** artifacts, while the wildcard `actions/download-artifact`
+read surfaced only the newest **300**, omitting the oldest 14 V1/V3 artifacts
+(shards 0-13). The same deterministic ceiling also affects nested V2/V4 source
+run **34234471190**, which has **315** artifacts and supplies 312 canonical
+V2/V4 shards. Representative market-path setup now treats wildcard downloads
+as a fast path only: it walks the immutable aggregate manifests, identifies
+only manifest-required shards still absent locally, paginates the source run's
+artifact API by exact artifact name, downloads those missing ZIPs, and verifies
+their sidecar range, record count and SHA256 plus the actual JSONL record count
+and SHA256 before the existing full-tape reader runs. This repairs artifact
+transport only; it issues no chain RPC and changes no research threshold,
+timeout, acceptance gate, cohort, tape identity, or acquisition scope.
+
 Evidence handoffs are now guarded before any representative RPC at three
 layers. The reusable representative-evidence preflight now retries transient
 GitHub metadata reads up to three times without sleeps and retries both

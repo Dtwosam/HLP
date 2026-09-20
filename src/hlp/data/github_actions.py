@@ -220,6 +220,68 @@ def fetch_github_actions_json(
     raise RuntimeError("GitHub Actions metadata retry loop exhausted")
 
 
+def find_github_actions_run_artifact(
+    api_url: str,
+    token: str,
+    *,
+    artifact_name: str,
+    timeout: float = 60,
+    attempts: int = 3,
+    max_pages: int = 20,
+) -> dict:
+    """Find one exact unexpired run artifact across every paginated page."""
+    if not artifact_name:
+        raise ValueError("Actions artifact name is required")
+    page_limit = int(max_pages)
+    if page_limit <= 0:
+        raise ValueError("Actions artifact page limit must be positive")
+
+    parsed = urllib.parse.urlparse(api_url)
+    base_query = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+        )
+        if key not in {"per_page", "page"}
+    ]
+    matches = []
+    for page in range(1, page_limit + 1):
+        query = urllib.parse.urlencode(
+            base_query + [("per_page", "100"), ("page", str(page))]
+        )
+        page_url = urllib.parse.urlunparse(
+            parsed._replace(query=query)
+        )
+        payload = fetch_github_actions_json(
+            page_url,
+            token,
+            timeout=timeout,
+            attempts=attempts,
+        )
+        rows = list(payload.get("artifacts") or [])
+        matches.extend(
+            row
+            for row in rows
+            if not row.get("expired")
+            and str(row.get("name") or "") == artifact_name
+        )
+        if len(rows) < 100:
+            break
+    else:
+        raise RuntimeError(
+            "Actions artifact pagination exceeded "
+            f"{page_limit * 100} artifacts"
+        )
+
+    if len(matches) != 1:
+        raise RuntimeError(
+            "Actions artifact identity is ambiguous or missing: "
+            f"{artifact_name!r}; matches={len(matches)}"
+        )
+    return matches[0]
+
+
 def fetch_github_actions_artifact_zip(
     api_url: str,
     token: str,
