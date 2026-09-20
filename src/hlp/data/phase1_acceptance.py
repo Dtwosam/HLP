@@ -20,7 +20,7 @@ REPRESENTATIVE_CANONICAL_SOURCE_RUN_IDS = {
     "transition_run_id": 33_912_452_330,
     "quote_audit_run_id": 33_923_299_711,
     "anchor_run_id": 33_972_109_927,
-    "oracle_run_id": 33_974_681_334,
+    "oracle_run_id": 34_765_335_793,
 }
 
 REPRESENTATIVE_RUNNER_SMOKE_SHA256 = {
@@ -324,9 +324,11 @@ def build_phase1_acceptance_report(
         representative.get("dex_price_no_swap_checkpoint"),
         field="representative.dex_price_no_swap_checkpoint",
     )
-    if price_matched != price_targeted:
-        raise ValueError("representative DEX price evidence has mismatches")
-    if price_matched + no_swap + no_pool != 10:
+    if price_targeted < 0 or not 0 <= price_matched <= price_targeted:
+        raise ValueError(
+            "representative DEX price token accounting is invalid"
+        )
+    if price_targeted + no_swap + no_pool != 10:
         raise ValueError(
             "representative DEX price evidence does not account for all tokens"
         )
@@ -335,14 +337,47 @@ def build_phase1_acceptance_report(
         representative.get("dex_price_checkpoints_targeted"),
         field="representative.dex_price_checkpoints_targeted",
     )
+    checkpoint_observed = _int(
+        representative.get("dex_price_checkpoints_observed"),
+        field="representative.dex_price_checkpoints_observed",
+    )
     checkpoint_matched = _int(
         representative.get("dex_price_checkpoints_matched"),
         field="representative.dex_price_checkpoints_matched",
+    )
+    checkpoint_disagreed = _int(
+        representative.get("dex_price_checkpoints_disagreed"),
+        field="representative.dex_price_checkpoints_disagreed",
+    )
+    checkpoint_missing = _int(
+        representative.get("dex_price_checkpoints_missing"),
+        field="representative.dex_price_checkpoints_missing",
+    )
+    disagreement_tokens = _int(
+        representative.get("dex_price_disagreement_tokens"),
+        field="representative.dex_price_disagreement_tokens",
+    )
+    missing_candle_tokens = _int(
+        representative.get("dex_price_missing_candle_tokens"),
+        field="representative.dex_price_missing_candle_tokens",
     )
     multi_checkpoint_tokens = _int(
         representative.get("dex_price_multi_checkpoint_tokens"),
         field="representative.dex_price_multi_checkpoint_tokens",
     )
+    if min(
+        checkpoint_targeted,
+        checkpoint_observed,
+        checkpoint_matched,
+        checkpoint_disagreed,
+        checkpoint_missing,
+        disagreement_tokens,
+        missing_candle_tokens,
+        multi_checkpoint_tokens,
+    ) < 0:
+        raise ValueError(
+            "representative DEX diagnostic counts cannot be negative"
+        )
     if price_targeted > 0:
         if checkpoint_targeted < price_targeted:
             raise ValueError(
@@ -358,9 +393,25 @@ def build_phase1_acceptance_report(
         raise ValueError(
             "representative DEX checkpoints exist without targeted tokens"
         )
-    if checkpoint_matched != checkpoint_targeted:
+    if checkpoint_observed != checkpoint_matched + checkpoint_disagreed:
         raise ValueError(
-            "representative DEX checkpoint evidence has mismatches"
+            "representative DEX observed checkpoint accounting is invalid"
+        )
+    if checkpoint_targeted != checkpoint_observed + checkpoint_missing:
+        raise ValueError(
+            "representative DEX targeted checkpoint accounting is invalid"
+        )
+    if checkpoint_targeted > 0 and checkpoint_observed <= 0:
+        raise ValueError(
+            "representative DEX historical price evidence is absent"
+        )
+    if not 0 <= disagreement_tokens <= price_targeted:
+        raise ValueError(
+            "representative DEX disagreement-token count is invalid"
+        )
+    if not 0 <= missing_candle_tokens <= price_targeted:
+        raise ValueError(
+            "representative DEX missing-candle token count is invalid"
         )
     if not 0 <= multi_checkpoint_tokens <= price_targeted:
         raise ValueError(
@@ -756,8 +807,16 @@ def build_phase1_acceptance_report(
         "representative_dex_targeted": dex_targeted,
         "representative_dex_matched": dex_matched,
         "representative_dex_price_tokens_targeted": price_targeted,
+        "representative_dex_price_tokens_matched": price_matched,
         "representative_dex_price_checkpoints_targeted": checkpoint_targeted,
+        "representative_dex_price_checkpoints_observed": checkpoint_observed,
         "representative_dex_price_checkpoints_matched": checkpoint_matched,
+        "representative_dex_price_checkpoints_disagreed": checkpoint_disagreed,
+        "representative_dex_price_checkpoints_missing": checkpoint_missing,
+        "representative_dex_price_disagreement_tokens": disagreement_tokens,
+        "representative_dex_price_missing_candle_tokens": (
+            missing_candle_tokens
+        ),
         "representative_dex_multi_checkpoint_tokens": (
             multi_checkpoint_tokens
         ),

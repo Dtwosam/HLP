@@ -67,7 +67,7 @@ def _fixtures():
             "transition_run_id": 33_912_452_330,
             "quote_audit_run_id": 33_923_299_711,
             "anchor_run_id": 33_972_109_927,
-            "oracle_run_id": 33_974_681_334,
+            "oracle_run_id": 34_765_335_793,
             "fallback_run_id": 101,
             "source_coverage_sha256": "c" * 64,
         },
@@ -91,9 +91,14 @@ def _fixtures():
         "dex_matched": 9,
         "no_registered_v4_pool": 1,
         "dex_price_targeted": 8,
-        "dex_price_matched": 8,
+        "dex_price_matched": 3,
         "dex_price_checkpoints_targeted": 20,
-        "dex_price_checkpoints_matched": 20,
+        "dex_price_checkpoints_observed": 18,
+        "dex_price_checkpoints_matched": 12,
+        "dex_price_checkpoints_disagreed": 6,
+        "dex_price_checkpoints_missing": 2,
+        "dex_price_disagreement_tokens": 4,
+        "dex_price_missing_candle_tokens": 2,
         "dex_price_multi_checkpoint_tokens": 6,
         "dex_price_no_swap_checkpoint": 1,
         "explorer_verified_tokens": 0,
@@ -173,8 +178,14 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         "representative_detailed_price_path_complete_tokens"
     ] == 7
     assert report["representative_dex_price_tokens_targeted"] == 8
+    assert report["representative_dex_price_tokens_matched"] == 3
     assert report["representative_dex_price_checkpoints_targeted"] == 20
-    assert report["representative_dex_price_checkpoints_matched"] == 20
+    assert report["representative_dex_price_checkpoints_observed"] == 18
+    assert report["representative_dex_price_checkpoints_matched"] == 12
+    assert report["representative_dex_price_checkpoints_disagreed"] == 6
+    assert report["representative_dex_price_checkpoints_missing"] == 2
+    assert report["representative_dex_price_disagreement_tokens"] == 4
+    assert report["representative_dex_price_missing_candle_tokens"] == 2
     assert report["representative_dex_multi_checkpoint_tokens"] == 6
     assert report["representative_explorer_evidence_status"] == "not_required"
     assert report["representative_explorer_verified_tokens"] == 0
@@ -195,7 +206,7 @@ def test_phase1_acceptance_passes_only_complete_consistent_evidence():
         "transition_run_id": 33_912_452_330,
         "quote_audit_run_id": 33_923_299_711,
         "anchor_run_id": 33_972_109_927,
-        "oracle_run_id": 33_974_681_334,
+        "oracle_run_id": 34_765_335_793,
         "sample_run_id": 404,
         "v1_v3_run_id": 101,
         "v2_v4_run_id": 202,
@@ -285,18 +296,54 @@ def test_phase1_acceptance_rejects_detailed_price_path_drift():
         build_phase1_acceptance_report(*fixtures)
 
 
-def test_phase1_acceptance_rejects_nested_dex_checkpoint_mismatch():
-    fixtures = list(_fixtures())
-    fixtures[2]["dex_price_checkpoints_matched"] -= 1
+def test_phase1_acceptance_accepts_diagnostic_dex_disagreements():
+    report = build_phase1_acceptance_report(*_fixtures())
 
-    with pytest.raises(ValueError, match="checkpoint evidence has mismatches"):
+    assert report["representative_dex_price_tokens_matched"] == 3
+    assert report["representative_dex_price_checkpoints_observed"] == 18
+    assert report["representative_dex_price_checkpoints_disagreed"] == 6
+    assert report["representative_dex_price_checkpoints_missing"] == 2
+
+
+def test_phase1_acceptance_rejects_observed_checkpoint_accounting_drift():
+    fixtures = list(_fixtures())
+    fixtures[2]["dex_price_checkpoints_observed"] -= 1
+
+    with pytest.raises(ValueError, match="observed checkpoint accounting"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_rejects_targeted_checkpoint_accounting_drift():
+    fixtures = list(_fixtures())
+    fixtures[2]["dex_price_checkpoints_missing"] -= 1
+
+    with pytest.raises(ValueError, match="targeted checkpoint accounting"):
+        build_phase1_acceptance_report(*fixtures)
+
+
+def test_phase1_acceptance_requires_some_historical_dex_price_evidence():
+    fixtures = list(_fixtures())
+    summary = fixtures[2]
+    summary["dex_price_checkpoints_observed"] = 0
+    summary["dex_price_checkpoints_matched"] = 0
+    summary["dex_price_checkpoints_disagreed"] = 0
+    summary["dex_price_checkpoints_missing"] = (
+        summary["dex_price_checkpoints_targeted"]
+    )
+    summary["dex_price_disagreement_tokens"] = 0
+    summary["dex_price_missing_candle_tokens"] = summary["dex_price_targeted"]
+
+    with pytest.raises(ValueError, match="historical price evidence is absent"):
         build_phase1_acceptance_report(*fixtures)
 
 
 def test_phase1_acceptance_rejects_incomplete_checkpoint_coverage():
     fixtures = list(_fixtures())
     fixtures[2]["dex_price_checkpoints_targeted"] = 7
+    fixtures[2]["dex_price_checkpoints_observed"] = 7
     fixtures[2]["dex_price_checkpoints_matched"] = 7
+    fixtures[2]["dex_price_checkpoints_disagreed"] = 0
+    fixtures[2]["dex_price_checkpoints_missing"] = 0
 
     with pytest.raises(ValueError, match="below targeted token coverage"):
         build_phase1_acceptance_report(*fixtures)

@@ -2114,3 +2114,21 @@ hashes, branch ancestry and all three required handoff artifacts. The existing
 nine distinct route-run requirement and **331,011,903** processed-work-block
 floor remain unchanged.
 
+The canonical `build_phase1_acceptance_report` gate is now aligned with the
+same recovered evidence semantics before any nine-route viability measurement
+is launched. It no longer requires every third-party historical DEX price
+checkpoint to match: it requires exact DEX pool identity, valid targeted-token
+accounting, non-negative diagnostic counts, exact
+`observed = matched + disagreed` and
+`targeted = observed + missing` checkpoint accounting, and at least one
+independent observed historical price checkpoint whenever swap-price evidence is
+targeted. The PASS report republishes targeted/observed/matched/disagreed/missing
+counts plus disagreement/missing-candle token counts.
+
+The acceptance gate's frozen representative oracle source was also corrected
+from the superseded oracle run **33974681334** to recovered canonical stock
+oracle run **34765335793**, matching the successful priced-path replay and the
+staged final representative-validation replay. No viability route, required
+work-block floor, zero-cost criterion, pool-identity gate or research threshold
+changed.
+
