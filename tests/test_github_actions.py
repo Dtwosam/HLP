@@ -1,5 +1,6 @@
 import io
 import urllib.error
+import urllib.parse
 
 import pytest
 
