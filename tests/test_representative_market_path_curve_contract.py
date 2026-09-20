@@ -202,3 +202,21 @@ def test_representative_dex_replay_is_bounded() -> None:
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in replay
     assert "DEX replay generation must increment by one" in replay
     assert "DEX replay frozen inputs changed at launch" in replay
+
+
+def test_representative_dex_crosscheck_reports_failure_details() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-dex-crosscheck.yml"
+    ).read_text()
+
+    assert "representative_dex_price_failure_details" in workflow
+    assert '"outside_candle_bps"' in workflow
+    assert '"independent_candle_low_usd"' in workflow
+    assert '"independent_candle_high_usd"' in workflow
+    assert '"external_base_token"' in workflow
+    assert '"external_quote_token"' in workflow
+    assert (
+        "independent DEX swap-price reconciliation failed for "
+        in workflow
+    )

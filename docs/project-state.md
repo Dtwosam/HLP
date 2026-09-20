@@ -1881,3 +1881,17 @@ local caller obeys the nominal pace. The retry path now keeps the same normal
 the next attempt. No DEX tolerance, checkpoint selection, logical-request cap,
 workflow timeout, acceptance gate, or acquisition scope changes; the archive
 RPC credential remains absent from this cross-check path.
+
+Bounded DEX replay generation **2**, run **35526305662**, cleared the
+GeckoTerminal transport problem and completed all bounded external requests.
+Canonical pool identity reconciliation did not fail. The existing exact
+zero-tolerance historical swap-price cross-check then failed for **6** of the
+representative tokens. This is now a substantive evidence mismatch rather than
+an acquisition or transport failure. Before changing any tolerance, checkpoint
+selection, or acceptance rule, the DEX workflow now emits fail-closed diagnostic
+rows for every failed checkpoint: canonical block/timestamp and USD price,
+independent candle timestamp/low/high, outside-candle basis points, canonical and
+external token sides, pool identifier, phase/event, and checkpoint role. The
+workflow still exits failure on the same condition; no acceptance semantics,
+request budget, workflow timeout, acquisition scope, or archive-RPC behavior
+changes.

@@ -601,6 +601,67 @@ jobs:
                   f"{[row['token'] for row in mismatches]}"
               )
           if price_failures:
+              failure_details = []
+              for failed in price_failures:
+                  for checkpoint in failed.get("price_checkpoints") or []:
+                      if checkpoint.get("price_match") is True:
+                          continue
+                      failure_details.append({
+                          "token": failed["token"],
+                          "pons_version": failed["pons_version"],
+                          "pool_identifier": failed.get("pool_identifier"),
+                          "quote_token": failed.get("quote_token"),
+                          "external_base_token": failed.get(
+                              "external_base_token"
+                          ),
+                          "external_quote_token": failed.get(
+                              "external_quote_token"
+                          ),
+                          "checkpoint_roles": checkpoint.get(
+                              "checkpoint_roles"
+                          ),
+                          "canonical_price_phase": checkpoint.get(
+                              "canonical_price_phase"
+                          ),
+                          "canonical_event_type": checkpoint.get(
+                              "canonical_event_type"
+                          ),
+                          "canonical_block_number": checkpoint.get(
+                              "canonical_block_number"
+                          ),
+                          "canonical_transaction_index": checkpoint.get(
+                              "canonical_transaction_index"
+                          ),
+                          "canonical_log_index": checkpoint.get(
+                              "canonical_log_index"
+                          ),
+                          "canonical_timestamp": checkpoint.get(
+                              "canonical_timestamp"
+                          ),
+                          "canonical_price_usd": checkpoint.get(
+                              "canonical_price_usd"
+                          ),
+                          "independent_candle_timestamp": checkpoint.get(
+                              "independent_candle_timestamp"
+                          ),
+                          "independent_candle_low_usd": checkpoint.get(
+                              "independent_candle_low_usd"
+                          ),
+                          "independent_candle_high_usd": checkpoint.get(
+                              "independent_candle_high_usd"
+                          ),
+                          "outside_candle_bps": checkpoint.get(
+                              "outside_candle_bps"
+                          ),
+                          "price_crosscheck_status": checkpoint.get(
+                              "price_crosscheck_status"
+                          ),
+                      })
+              print(json.dumps({
+                  "representative_dex_price_failure_details": (
+                      failure_details
+                  ),
+              }, sort_keys=True))
               raise SystemExit(
                   "independent DEX swap-price reconciliation failed for "
                   f"{len(price_failures)} representative tokens: "
