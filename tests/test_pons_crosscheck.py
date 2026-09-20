@@ -20,7 +20,6 @@ def _registry():
             "pool": "0x" + "33" * 20,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
-            "quote_decimals": 18,
         },
         {
             "version": "v2",
@@ -29,7 +28,6 @@ def _registry():
             "pool": None,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
-            "quote_decimals": 18,
         },
         {
             "version": "v2",
@@ -38,7 +36,6 @@ def _registry():
             "pool": None,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
-            "quote_decimals": 18,
         },
     ]
 
