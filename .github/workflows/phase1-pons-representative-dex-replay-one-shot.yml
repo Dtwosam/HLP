@@ -25,6 +25,7 @@ jobs:
       v1_eligibility_run_id: ${{ steps.validate.outputs.v1_eligibility_run_id }}
       v2_eligibility_run_id: ${{ steps.validate.outputs.v2_eligibility_run_id }}
       priced_path_run_id: ${{ steps.validate.outputs.priced_path_run_id }}
+      quote_audit_run_id: ${{ steps.validate.outputs.quote_audit_run_id }}
       registry_run_id: ${{ steps.validate.outputs.registry_run_id }}
       transition_run_id: ${{ steps.validate.outputs.transition_run_id }}
     steps:
@@ -62,6 +63,7 @@ jobs:
               "v1_eligibility_run_id",
               "v2_eligibility_run_id",
               "priced_path_run_id",
+              "quote_audit_run_id",
               "registry_run_id",
               "transition_run_id",
           }
@@ -169,6 +171,7 @@ jobs:
               "v1_eligibility_run_id": 35_518_892_463,
               "v2_eligibility_run_id": 35_518_892_463,
               "priced_path_run_id": 35_523_404_472,
+              "quote_audit_run_id": 33_923_299_711,
               "registry_run_id": 33_911_022_718,
               "transition_run_id": 33_912_452_330,
           }
@@ -191,6 +194,10 @@ jobs:
               (
                   expected["priced_path_run_id"],
                   "phase1-pons-representative-priced-paths",
+              ),
+              (
+                  expected["quote_audit_run_id"],
+                  "phase1-pons-full-quote-audit-current",
               ),
               (
                   expected["registry_run_id"],
@@ -238,5 +245,6 @@ jobs:
       v1_eligibility_run_id: ${{ needs.preflight.outputs.v1_eligibility_run_id }}
       v2_eligibility_run_id: ${{ needs.preflight.outputs.v2_eligibility_run_id }}
       priced_path_run_id: ${{ needs.preflight.outputs.priced_path_run_id }}
+      quote_audit_run_id: ${{ needs.preflight.outputs.quote_audit_run_id }}
       registry_run_id: ${{ needs.preflight.outputs.registry_run_id }}
       transition_run_id: ${{ needs.preflight.outputs.transition_run_id }}
