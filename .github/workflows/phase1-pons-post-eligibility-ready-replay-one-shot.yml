@@ -362,7 +362,7 @@ jobs:
               ),
               "eligible_run_id": int(os.environ["ELIGIBLE_RUN_ID"]),
               "validation_run_id": validation_run_id,
-              "evidence_run_id": validation_run_id,
+              "evidence_run_id": int(os.environ["GITHUB_RUN_ID"]),
               "ready_replay_run_id": int(os.environ["GITHUB_RUN_ID"]),
               "eligible_universe_artifact": (
                   "phase1-pons-eligible-universe"
@@ -378,8 +378,80 @@ jobs:
           )
           print(json.dumps(report, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - id: upload_ready
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: phase1-pons-post-eligibility-evidence-ready
           path: artifacts/
           if-no-files-found: error
+      - id: retry_upload_ready
+        name: Retry recovered evidence-ready artifact upload
+        if: ${{ steps.upload_ready.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final recovered evidence-ready artifact upload retry
+        if: ${{ steps.retry_upload_ready.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+      - id: upload_eligible
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible/
+          if-no-files-found: error
+      - id: retry_upload_eligible
+        name: Retry normalized eligible-universe artifact upload
+        if: ${{ steps.upload_eligible.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final normalized eligible-universe artifact upload retry
+        if: ${{ steps.retry_upload_eligible.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible/
+          if-no-files-found: error
+          overwrite: true
+
+      - id: upload_representative
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative/
+          if-no-files-found: error
+      - id: retry_upload_representative
+        name: Retry normalized representative-validation artifact upload
+        if: ${{ steps.upload_representative.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final normalized representative-validation artifact upload retry
+        if: ${{ steps.retry_upload_representative.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative/
+          if-no-files-found: error
+          overwrite: true

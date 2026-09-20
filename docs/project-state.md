@@ -2082,22 +2082,21 @@ still fails closed if **all** canonical Swap checkpoints lack independent
 historical price observations. No acquisition, tolerance, request budget,
 cohort, pool-identity, pricing, holder, or source-coverage gate changed.
 
-The final Phase-1 checkpoint is now staged but deliberately **not armed**.
-`.github/phase1-pons-data-viability-acceptance.json` remains at generation
-**0** for checkpoint `hlp-v1-phase1-data-viability`. Its one-shot workflow is
-artifact-only and refuses to run until a successful post-eligibility ready
-replay exists. It then re-verifies the exact **6,972-token** eligible universe,
-the merged ten-token Transfer/holder reconstruction, final representative source
-coverage, **10/10** independent DEX pool identity, all **30** observed
-historical price checkpoints, and the frozen Generation-6 request accounting
-(**40** logical GeckoTerminal requests, **46** HTTP attempts within the frozen
-**120** cap, plus **4** public Robinhood block-header requests). It also freezes
-the already-proven zero-cost source architecture: official Robinhood public RPC
-for live/header verification, SolidRPC's zero-cost Robinhood archive route for
-historical acquisition, and GeckoTerminal as cross-check evidence only.
+The recovered evidence replay is now being normalized into the repository's
+pre-existing canonical Phase-1 acceptance path instead of adding a parallel PASS
+gate. The briefly staged
+`phase1-pons-data-viability-acceptance-one-shot` wrapper was removed before
+ever being armed because it did not include the already-frozen requirement for
+**nine distinct instrumented zero-cost acquisition-route measurements**.
 
-Only after all of those artifact checks succeed will the workflow publish
-`phase1-pons-data-viability-acceptance` with status `pass` and checkpoint
-`hlp-v1-phase1-data-viability`. Phase 2 remains locked; staging this workflow
-does not mark Phase 1 PASS.
+On success, `phase1-pons-post-eligibility-ready-replay-one-shot` now names its
+own GitHub run as `evidence_run_id` and republishes byte-equivalent
+`phase1-pons-eligible-universe` and
+`phase1-pons-representative-validation` artifacts alongside
+`phase1-pons-post-eligibility-evidence-ready`, with bounded artifact-upload
+retries. That gives recovered evidence the same single-run three-artifact
+handoff shape required by the canonical viability readiness ledger. The
+existing nine-route guarded measurement -> viability projection -> final
+acceptance chain remains the **only** path allowed to publish
+`hlp-v1-phase1-data-viability` PASS. Phase 2 remains locked.
 
