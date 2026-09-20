@@ -146,7 +146,7 @@ def test_representative_market_path_replay_is_artifact_only() -> None:
         ".github/phase1-pons-representative-market-path-replay.json"
     ).read_text()
 
-    assert '"generation": 0' in config
+    assert "market-path replay generation must increment by one" in replay
     assert '"sample_run_id": 35518892463' in config
     assert (
         "uses: ./.github/workflows/"
