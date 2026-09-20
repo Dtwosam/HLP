@@ -1838,16 +1838,27 @@ Phase 1 PASS and that merge are complete.
 - exact notification/dashboard surface;
 - any future automated execution.
 
-A guarded artifact-only representative market-path replay is staged for the
-Generation 13 frozen sample while its Transfer matrix continues independently.
-The replay config is inert at generation **0** and freezes sample run
-**35518892463** with registry **33911022718**, V1/V3 **34228430753**, V2 curve
-**33936232604**, transition **33912452330**, and V2/V4 **34471480180**. Its
-launcher permits only a direct single-parent, config-only generation increment,
-requires those frozen run IDs to remain unchanged, proves the sample artifact is
-still available, and then calls only the existing artifact-only
-representative-market-path workflow. It does not call the Transfer workflow,
-does not carry an archive RPC secret, and cannot issue chain acquisition. This
-allows the pagination/shard repair to be validated against the exact frozen
-sample without weakening the serialized acquisition path used by recovered
-completion.
+The guarded artifact-only representative market-path replay generation **1**,
+run **35522831005**, passed against the exact Generation 13 frozen sample. The
+pagination repair filled **69** manifest-required shards omitted by the wildcard
+artifact downloads: the oldest **14** V1/V3 shards from run **33982556591**,
+**14** V2/V4 shards from nested run **34234471190**, and **41** same-basename
+V2/V4 shards from run **34331335575**. Every repaired shard matched its aggregate
+manifest range, record count and SHA256, after which the existing full-tape
+reader validated all bytes and completed the representative freeze. The output
+contains **30,744** path rows for all **10** tokens: **25,958** V1/V3 events,
+**347** V2 curve events, **2** graduations, **2** V4 registrations and **4,425**
+V2/V4 events. Market-path SHA256 is
+`be9b78c9c25a8b293ff76a341104fb6fd069e617115409879202539a851126a9`;
+summary SHA256 is
+`c29dd49771ac959c32d8e78dc63677735efe0ddb38c97a1c1bb4ca6f79e0ec75`.
+The successful replay issued no chain RPC and changes no acquisition or
+acceptance semantics.
+
+A second guarded artifact-only replay is now staged for representative priced
+paths. Its inert generation **0** freezes sample run **35518892463**, successful
+market-path run **35522831005**, quote audit **33923299711**, WETH/USDG anchor
+**33972109927**, stock oracle **34765335793**, and repaired quote fallback from
+run **35518892463**. The launcher verifies those exact non-expired artifacts and
+then calls only the existing representative-priced-path workflow; it carries no
+archive RPC secret and does not invoke Transfer acquisition.

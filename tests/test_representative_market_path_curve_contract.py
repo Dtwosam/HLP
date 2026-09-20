@@ -159,3 +159,25 @@ def test_representative_market_path_replay_is_artifact_only() -> None:
         "market-path replay frozen inputs changed at launch"
         in replay
     )
+
+
+def test_representative_priced_path_replay_is_artifact_only() -> None:
+    replay = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-priced-path-replay-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-priced-path-replay.json"
+    ).read_text()
+
+    assert '"market_path_run_id": 35522831005' in config
+    assert '"fallback_run_id": 35518892463' in config
+    assert (
+        "uses: ./.github/workflows/"
+        "phase1-pons-representative-priced-paths.yml"
+    ) in replay
+    assert "phase1-pons-representative-transfers-full.yml" not in replay
+    assert "rpc-" not in replay
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in replay
+    assert "priced-path replay generation must increment by one" in replay
+    assert "priced-path replay frozen inputs changed at launch" in replay
