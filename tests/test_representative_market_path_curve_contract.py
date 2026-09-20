@@ -181,3 +181,24 @@ def test_representative_priced_path_replay_is_artifact_only() -> None:
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in replay
     assert "priced-path replay generation must increment by one" in replay
     assert "priced-path replay frozen inputs changed at launch" in replay
+
+
+def test_representative_dex_replay_is_bounded() -> None:
+    replay = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-dex-replay-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-dex-replay.json"
+    ).read_text()
+
+    assert '"sample_run_id": 35518892463' in config
+    assert '"priced_path_run_id": 35523404472' in config
+    assert (
+        "uses: ./.github/workflows/"
+        "phase1-pons-representative-dex-crosscheck.yml"
+    ) in replay
+    assert "phase1-pons-representative-transfers-full.yml" not in replay
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in replay
+    assert "DEX replay generation must increment by one" in replay
+    assert "DEX replay frozen inputs changed at launch" in replay

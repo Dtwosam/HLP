@@ -1855,10 +1855,23 @@ summary SHA256 is
 The successful replay issued no chain RPC and changes no acquisition or
 acceptance semantics.
 
-A second guarded artifact-only replay is now staged for representative priced
-paths. Its inert generation **0** freezes sample run **35518892463**, successful
-market-path run **35522831005**, quote audit **33923299711**, WETH/USDG anchor
-**33972109927**, stock oracle **34765335793**, and repaired quote fallback from
-run **35518892463**. The launcher verifies those exact non-expired artifacts and
-then calls only the existing representative-priced-path workflow; it carries no
-archive RPC secret and does not invoke Transfer acquisition.
+Representative priced-path replay generation **1**, run **35523404472**, also
+passed against that same sample and successful market-path replay. All
+**30,734** price points were priced, all **10** tokens were pricing-complete,
+and there were **0** unpriced points. The priced-path SHA256 is
+`ba815b137615cad3224d40d98991979bc2ef8197c804ecd66c2efa5e23c40496`
+and the summary SHA256 is
+`c136b9bf0424d8b3c9f75cc2e75c3c11da41e2217cfe5f2ab645a368e6d3bcc5`.
+The replay reused quote audit **33923299711**, WETH/USDG anchor **33972109927**,
+stock oracle **34765335793**, and repaired quote fallback from run
+**35518892463**; it issued no chain acquisition RPC.
+
+A guarded bounded DEX replay is now staged next. Its inert generation **0**
+freezes sample and V1/V2 lifecycle run **35518892463**, successful priced-path
+run **35523404472**, registry **33911022718**, and transition
+**33912452330**. The launcher verifies those exact non-expired artifacts and
+then calls only the existing representative DEX cross-check. That workflow uses
+the public Robinhood RPC only for checkpoint block timestamps and GeckoTerminal
+for independent pool/OHLCV evidence under the existing <=40 logical-request
+budget; it does not carry the archive-RPC secret and does not invoke Transfer
+acquisition.
