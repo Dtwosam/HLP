@@ -2082,3 +2082,22 @@ still fails closed if **all** canonical Swap checkpoints lack independent
 historical price observations. No acquisition, tolerance, request budget,
 cohort, pool-identity, pricing, holder, or source-coverage gate changed.
 
+The final Phase-1 checkpoint is now staged but deliberately **not armed**.
+`.github/phase1-pons-data-viability-acceptance.json` remains at generation
+**0** for checkpoint `hlp-v1-phase1-data-viability`. Its one-shot workflow is
+artifact-only and refuses to run until a successful post-eligibility ready
+replay exists. It then re-verifies the exact **6,972-token** eligible universe,
+the merged ten-token Transfer/holder reconstruction, final representative source
+coverage, **10/10** independent DEX pool identity, all **30** observed
+historical price checkpoints, and the frozen Generation-6 request accounting
+(**40** logical GeckoTerminal requests, **46** HTTP attempts within the frozen
+**120** cap, plus **4** public Robinhood block-header requests). It also freezes
+the already-proven zero-cost source architecture: official Robinhood public RPC
+for live/header verification, SolidRPC's zero-cost Robinhood archive route for
+historical acquisition, and GeckoTerminal as cross-check evidence only.
+
+Only after all of those artifact checks succeed will the workflow publish
+`phase1-pons-data-viability-acceptance` with status `pass` and checkpoint
+`hlp-v1-phase1-data-viability`. Phase 2 remains locked; staging this workflow
+does not mark Phase 1 PASS.
+

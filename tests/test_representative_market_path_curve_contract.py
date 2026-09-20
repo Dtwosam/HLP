@@ -362,3 +362,36 @@ def test_post_eligibility_ready_replay_is_artifact_only() -> None:
     assert "RpcClient" not in workflow
     assert "ready replay generation must increment by one" in workflow
     assert "ready replay frozen inputs changed at launch" in workflow
+
+
+def test_phase1_data_viability_acceptance_is_artifact_only() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-data-viability-acceptance-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-data-viability-acceptance.json"
+    ).read_text()
+
+    assert '"checkpoint": "hlp-v1-phase1-data-viability"' in config
+    assert '"eligible_run_id": 35518892463' in config
+    assert '"transfer_run_id": 35518892463' in config
+    assert '"dex_crosscheck_run_id": 35530539734' in config
+    assert "phase1-pons-post-eligibility-ready-replay-one-shot.yml" in workflow
+    assert "phase1-pons-post-eligibility-evidence-ready" in workflow
+    assert "phase1-pons-representative-validation" in workflow
+    assert "phase1-pons-representative-transfers-full" in workflow
+    assert "phase1-pons-representative-dex-crosscheck" in workflow
+    assert '"status": "pass"' in workflow
+    assert '"paid_source_required": False' in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert "GeckoTerminalClient" not in workflow
+    assert "RpcClient" not in workflow
+    assert (
+        "Phase 1 acceptance generation must increment by one"
+        in workflow
+    )
+    assert (
+        "Phase 1 acceptance frozen inputs changed at launch"
+        in workflow
+    )

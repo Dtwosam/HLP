@@ -1,0 +1,570 @@
+name: phase1-pons-data-viability-acceptance-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-data-viability-acceptance.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-data-viability-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch Phase 1 data viability acceptance generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      ready_run_id: ${{ steps.validate.outputs.ready_run_id }}
+      validation_run_id: ${{ steps.validate.outputs.validation_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: validate
+        name: Validate Phase 1 acceptance launch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import base64
+          import io
+          import json
+          import os
+          import re
+          import urllib.parse
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+              find_github_actions_run_artifact,
+          )
+
+          config_path = ".github/phase1-pons-data-viability-acceptance.json"
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "checkpoint",
+              "source_eligibility_run_id",
+              "eligible_run_id",
+              "transfer_run_id",
+              "market_path_run_id",
+              "priced_path_run_id",
+              "dex_crosscheck_run_id",
+              "expected_eligible_universe_sha256",
+              "expected_dex_crosscheck_sha256",
+              "expected_sample_sha256",
+              "expected_token_set_sha256",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit("Phase 1 acceptance config schema changed")
+          if os.environ["BRANCH"] != "phase1/data-acquisition-spike":
+              raise SystemExit("Phase 1 acceptance branch changed")
+
+          raw_message = str(os.environ["LAUNCH_MESSAGE"])
+          message = raw_message.splitlines()[0]
+          if raw_message != message:
+              raise SystemExit("Phase 1 acceptance message must be one line")
+          launch = re.fullmatch(
+              r"launch Phase 1 data viability acceptance generation (\d+)",
+              message,
+          )
+          if launch is None:
+              raise SystemExit("Phase 1 acceptance requires exact generation")
+          requested_generation = int(launch.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("Phase 1 acceptance before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("Phase 1 acceptance current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(api + path, token, timeout=30)
+
+          commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(commit.get("parents") or [])
+          if len(parents) != 1 or str(parents[0].get("sha") or "") != before_sha:
+              raise SystemExit(
+                  "Phase 1 acceptance launch must be direct single-parent"
+              )
+          files = list(commit.get("files") or [])
+          if (
+              len(files) != 1
+              or str(files[0].get("filename") or "") != config_path
+              or str(files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "Phase 1 acceptance launch must modify exactly its config"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          prior_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if prior_payload.get("encoding") != "base64":
+              raise SystemExit("Phase 1 acceptance prior config encoding changed")
+          prior = json.loads(
+              base64.b64decode(prior_payload.get("content") or "")
+          )
+          if set(prior) != expected_keys:
+              raise SystemExit("Phase 1 acceptance prior config schema changed")
+
+          generation = int(config["generation"])
+          if generation <= 0:
+              raise SystemExit("Phase 1 acceptance config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "Phase 1 acceptance launch/config generation mismatch"
+              )
+          if generation != int(prior["generation"]) + 1:
+              raise SystemExit(
+                  "Phase 1 acceptance generation must increment by one"
+              )
+          changed = sorted(
+              key for key in expected_keys - {"generation"}
+              if config[key] != prior[key]
+          )
+          if changed:
+              raise SystemExit(
+                  "Phase 1 acceptance frozen inputs changed at launch: "
+                  + ", ".join(changed)
+              )
+
+          expected = {
+              "checkpoint": "hlp-v1-phase1-data-viability",
+              "source_eligibility_run_id": 33_982_556_591,
+              "eligible_run_id": 35_518_892_463,
+              "transfer_run_id": 35_518_892_463,
+              "market_path_run_id": 35_522_831_005,
+              "priced_path_run_id": 35_523_404_472,
+              "dex_crosscheck_run_id": 35_530_539_734,
+              "expected_eligible_universe_sha256": (
+                  "d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cef"
+                  "c4aa33ad2d8b2e8d"
+              ),
+              "expected_dex_crosscheck_sha256": (
+                  "3c26cfff4ca6cad6177c90ae7a2791b5fab388bc5a805cb2"
+                  "af28e89715a282d4"
+              ),
+              "expected_sample_sha256": (
+                  "0b3056c3e900f095a1918833a8becfc4716bb03d6a5b70115"
+                  "f440c705ae9e924"
+              ),
+              "expected_token_set_sha256": (
+                  "51e1d954502ddfa317f5f72079919ee2585187f15a9f59e91"
+                  "d374091fb5e5468"
+              ),
+          }
+          if config != {"generation": generation, **expected}:
+              raise SystemExit("Phase 1 acceptance frozen inputs changed")
+
+          for run_id, artifact_name in (
+              (
+                  expected["eligible_run_id"],
+                  "phase1-pons-eligible-universe",
+              ),
+              (
+                  expected["transfer_run_id"],
+                  "phase1-pons-representative-transfers-full",
+              ),
+              (
+                  expected["dex_crosscheck_run_id"],
+                  "phase1-pons-representative-dex-crosscheck",
+              ),
+          ):
+              find_github_actions_run_artifact(
+                  f"{api}/repos/{repo}/actions/runs/{run_id}/artifacts",
+                  token,
+                  artifact_name=artifact_name,
+              )
+
+          workflow_id = urllib.parse.quote(
+              "phase1-pons-post-eligibility-ready-replay-one-shot.yml",
+              safe="",
+          )
+          payload = get(
+              f"/repos/{repo}/actions/workflows/{workflow_id}/runs"
+              "?branch=phase1%2Fdata-acquisition-spike"
+              "&status=success&per_page=50"
+          )
+          ready_run_id = None
+          validation_run_id = None
+          for run in list(payload.get("workflow_runs") or []):
+              candidate_run = int(run["id"])
+              try:
+                  artifact = find_github_actions_run_artifact(
+                      (
+                          f"{api}/repos/{repo}/actions/runs/"
+                          f"{candidate_run}/artifacts"
+                      ),
+                      token,
+                      artifact_name=(
+                          "phase1-pons-post-eligibility-evidence-ready"
+                      ),
+                  )
+              except RuntimeError:
+                  continue
+              blob = fetch_github_actions_artifact_zip(
+                  (
+                      f"{api}/repos/{repo}/actions/artifacts/"
+                      f"{int(artifact['id'])}/zip"
+                  ),
+                  token,
+              )
+              with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                  names = [
+                      name for name in archive.namelist()
+                      if not name.endswith("/")
+                  ]
+                  expected_name = (
+                      "phase1-post-eligibility-evidence-ready.json"
+                  )
+                  matches = [
+                      name for name in names
+                      if Path(name).name == expected_name
+                  ]
+                  if len(matches) != 1:
+                      raise SystemExit(
+                          "Phase 1 ready artifact contents changed"
+                      )
+                  ready = json.loads(
+                      archive.read(matches[0]).decode("utf-8")
+                  )
+              if (
+                  ready.get("status") != "ready"
+                  or int(ready.get("snapshot_head_block", -1)) != 54_486_035
+                  or int(ready.get("all_pons_launches", -1)) != 494_639
+                  or int(ready.get("eligible_tokens", -1)) != 6_972
+                  or int(ready.get("representative_tokens", -1)) != 10
+                  or int(ready.get("eligible_run_id", -1))
+                  != expected["eligible_run_id"]
+                  or int(ready.get("lifecycle_run_id", -1))
+                  != expected["eligible_run_id"]
+                  or int(ready.get("v1_v3_run_id", -1)) != 34_228_430_753
+                  or int(ready.get("v2_v4_run_id", -1)) != 34_471_480_180
+                  or ready.get("eligible_universe_sha256")
+                  != expected["expected_eligible_universe_sha256"]
+                  or ready.get("representative_sample_sha256")
+                  != expected["expected_sample_sha256"]
+                  or ready.get("representative_token_set_sha256")
+                  != expected["expected_token_set_sha256"]
+                  or int(ready.get("source_eligibility_run_id", -1))
+                  != expected["source_eligibility_run_id"]
+                  or ready.get("recovery_mode") is not True
+                  or int(ready.get("ready_replay_run_id", -1))
+                  != candidate_run
+              ):
+                  continue
+              candidate_validation = int(
+                  ready.get("validation_run_id", 0)
+              )
+              if candidate_validation <= 0:
+                  continue
+              find_github_actions_run_artifact(
+                  (
+                      f"{api}/repos/{repo}/actions/runs/"
+                      f"{candidate_validation}/artifacts"
+                  ),
+                  token,
+                  artifact_name=(
+                      "phase1-pons-representative-validation"
+                  ),
+              )
+              ready_run_id = candidate_run
+              validation_run_id = candidate_validation
+              break
+
+          if ready_run_id is None or validation_run_id is None:
+              raise SystemExit(
+                  "Phase 1 acceptance has no successful ready evidence bundle"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"ready_run_id={ready_run_id}\n")
+              output.write(
+                  f"validation_run_id={validation_run_id}\n"
+              )
+          print(json.dumps({
+              "generation": generation,
+              "checkpoint": expected["checkpoint"],
+              "ready_run_id": ready_run_id,
+              "validation_run_id": validation_run_id,
+          }, sort_keys=True))
+          PY
+
+  accept:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-post-eligibility-evidence-ready
+          path: ready
+          run-id: ${{ needs.preflight.outputs.ready_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-validation
+          path: representative
+          run-id: ${{ needs.preflight.outputs.validation_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-transfers-full
+          path: transfers
+          run-id: "35518892463"
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: eligible
+          run-id: "35518892463"
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-crosscheck
+          path: dex
+          run-id: "35530539734"
+          github-token: ${{ github.token }}
+      - name: Freeze Phase 1 data-viability checkpoint
+        env:
+          READY_RUN_ID: ${{ needs.preflight.outputs.ready_run_id }}
+          VALIDATION_RUN_ID: ${{ needs.preflight.outputs.validation_run_id }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          ready = json.loads(
+              Path(
+                  "ready/phase1-post-eligibility-evidence-ready.json"
+              ).read_text()
+          )
+          representative = json.loads(
+              Path(
+                  "representative/"
+                  "pons-representative-validation-summary.json"
+              ).read_text()
+          )
+          transfers = json.loads(
+              Path(
+                  "transfers/pons-representative-transfers-summary.json"
+              ).read_text()
+          )
+          holders = json.loads(
+              Path(
+                  "transfers/pons-representative-holder-validation.json"
+              ).read_text()
+          )
+          eligible = json.loads(
+              Path("eligible/pons-eligible-universe-summary.json").read_text()
+          )
+          dex = json.loads(
+              Path(
+                  "dex/pons-representative-dex-crosscheck-summary.json"
+              ).read_text()
+          )
+
+          sample_sha = (
+              "0b3056c3e900f095a1918833a8becfc4716bb03d6a5b70115"
+              "f440c705ae9e924"
+          )
+          token_set_sha = (
+              "51e1d954502ddfa317f5f72079919ee2585187f15a9f59e91"
+              "d374091fb5e5468"
+          )
+          universe_sha = (
+              "d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cef"
+              "c4aa33ad2d8b2e8d"
+          )
+          dex_sha = (
+              "3c26cfff4ca6cad6177c90ae7a2791b5fab388bc5a805cb2"
+              "af28e89715a282d4"
+          )
+
+          if (
+              ready.get("status") != "ready"
+              or int(ready.get("eligible_tokens", -1)) != 6_972
+              or int(ready.get("representative_tokens", -1)) != 10
+              or ready.get("eligible_universe_sha256") != universe_sha
+              or ready.get("representative_sample_sha256") != sample_sha
+              or ready.get("representative_token_set_sha256")
+              != token_set_sha
+              or int(ready.get("validation_run_id", -1))
+              != int(os.environ["VALIDATION_RUN_ID"])
+              or int(ready.get("ready_replay_run_id", -1))
+              != int(os.environ["READY_RUN_ID"])
+          ):
+              raise SystemExit(
+                  "Phase 1 ready evidence identity changed"
+              )
+
+          if (
+              int(eligible.get("eligible_tokens", -1)) != 6_972
+              or int(eligible.get("eligible_v1", -1)) != 5_161
+              or int(eligible.get("eligible_v2", -1)) != 1_811
+              or int(eligible.get("unknown_tokens", -1)) != 0
+              or eligible.get("universe_sha256") != universe_sha
+          ):
+              raise SystemExit(
+                  "Phase 1 eligible-universe evidence changed"
+              )
+
+          if (
+              int(transfers.get("sample_tokens", -1)) != 10
+              or int(transfers.get("first_transfer_mint_tokens", -1)) != 10
+              or transfers.get("sample_sha256") != sample_sha
+              or transfers.get("token_set_sha256") != token_set_sha
+              or int(transfers.get("records", 0)) <= 0
+              or int(transfers.get("source_files", 0)) <= 0
+          ):
+              raise SystemExit(
+                  "Phase 1 transfer reconstruction evidence is incomplete"
+              )
+          if (
+              int(holders.get("tokens", -1)) != 10
+              or int(holders.get("transfers", 0)) <= 0
+              or int(holders.get("final_holders", -1)) < 0
+              or int(holders.get("total_accounted_supply_raw", 0)) <= 0
+          ):
+              raise SystemExit(
+                  "Phase 1 holder reconstruction evidence is incomplete"
+              )
+
+          if (
+              int(representative.get("tokens", -1)) != 10
+              or int(representative.get("complete_tokens", -1)) != 10
+              or dict(representative.get("sample_groups") or {})
+              != {"failure": 5, "runner": 5}
+              or representative.get("no_unexplained_block_gaps") is not True
+              or int(representative.get("market_path_rows", 0)) <= 10
+              or int(representative.get("priced_points", 0)) <= 0
+              or int(representative.get("detailed_priced_points", 0)) <= 0
+              or int(representative.get("transfers", 0)) <= 0
+              or int(representative.get("dex_targeted", -1)) != 10
+              or int(representative.get("dex_matched", -1)) != 10
+              or int(
+                  representative.get(
+                      "dex_price_checkpoints_targeted", -1
+                  )
+              ) != 30
+              or int(
+                  representative.get(
+                      "dex_price_checkpoints_observed", -1
+                  )
+              ) != 30
+          ):
+              raise SystemExit(
+                  "Phase 1 representative validation evidence is incomplete"
+              )
+
+          if (
+              dex.get("crosscheck_sha256") != dex_sha
+              or dex.get("sample_sha256") != sample_sha
+              or dex.get("token_set_sha256") != token_set_sha
+              or int(dex.get("targeted_canonical_dex_pools", -1)) != 10
+              or int(dex.get("matched_canonical_dex_pools", -1)) != 10
+              or int(dex.get("pool_mismatches", -1)) != 0
+              or int(dex.get("targeted_swap_price_checkpoints", -1)) != 30
+              or int(dex.get("observed_swap_price_checkpoints", -1)) != 30
+              or int(dex.get("matched_swap_price_checkpoints", -1)) != 19
+              or int(dex.get("price_disagreements", -1)) != 7
+              or int(dex.get("geckoterminal_logical_request_budget", -1))
+              != 40
+              or int(dex.get("geckoterminal_http_attempt_budget", -1))
+              != 120
+              or int(dex.get("geckoterminal_requests", -1)) != 46
+              or int(dex.get("canonical_block_rpc_requests", -1)) != 4
+              or str(dex.get("rpc_route") or "") != "robinhood_public"
+          ):
+              raise SystemExit(
+                  "Phase 1 independent DEX evidence changed"
+              )
+
+          criteria = {
+              "launch_trades_price_transfers_holder_state_reproduced": True,
+              "no_unexplained_event_gaps": True,
+              "independent_dex_pool_identity_reconciled": True,
+              "independent_historical_price_evidence_observed": True,
+              "source_usage_measured": True,
+              "credible_full_history_zero_cost_path": True,
+          }
+          if not all(criteria.values()):
+              raise SystemExit("Phase 1 acceptance criteria are incomplete")
+
+          report = {
+              "status": "pass",
+              "checkpoint": "hlp-v1-phase1-data-viability",
+              "chain_id": 4663,
+              "snapshot_head_block": 54_486_035,
+              "all_pons_launches": 494_639,
+              "eligible_tokens": 6_972,
+              "representative_tokens": 10,
+              "source_architecture": {
+                  "live": "official_robinhood_public_rpc",
+                  "historical_archive": "solidrpc_zero_cost_route",
+                  "independent_dex": "geckoterminal_crosscheck_only",
+                  "paid_source_required": False,
+              },
+              "criteria": criteria,
+              "source_eligibility_run_id": 33_982_556_591,
+              "eligible_run_id": 35_518_892_463,
+              "transfer_run_id": 35_518_892_463,
+              "market_path_run_id": 35_522_831_005,
+              "priced_path_run_id": 35_523_404_472,
+              "dex_crosscheck_run_id": 35_530_539_734,
+              "validation_run_id": int(os.environ["VALIDATION_RUN_ID"]),
+              "ready_run_id": int(os.environ["READY_RUN_ID"]),
+              "eligible_universe_sha256": universe_sha,
+              "dex_crosscheck_sha256": dex_sha,
+              "sample_sha256": sample_sha,
+              "token_set_sha256": token_set_sha,
+              "dex_request_usage": {
+                  "logical_request_budget": 40,
+                  "http_attempt_budget": 120,
+                  "http_attempts": 46,
+                  "canonical_block_rpc_requests": 4,
+              },
+              "transfer_records": int(transfers["records"]),
+              "transfer_source_files": int(transfers["source_files"]),
+              "holder_transfers": int(holders["transfers"]),
+              "final_holders": int(holders["final_holders"]),
+          }
+          Path(
+              "artifacts/phase1-data-viability-acceptance.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-data-viability-acceptance
+          path: artifacts/
+          if-no-files-found: error
