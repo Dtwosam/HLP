@@ -1952,3 +1952,25 @@ and token decimals, then compares that ratio and the existing post-swap spot
 price against the already-frozen GeckoTerminal candle envelopes at **0 bps**.
 The diagnostic is artifact-only, performs **0 external requests**, cannot invoke
 Transfer acquisition or archive RPC, and changes no DEX acceptance rule.
+
+DEX execution-price diagnostic generation **1**, run **35529024864**, then
+compared the exact signed Swap-event amount ratio against those same frozen
+quote-token candles with **0 external requests**. The post-swap spot price
+matched **0/9** hourly envelopes, while the execution price matched **2/9**
+strictly. Four additional execution prices missed a candle boundary by only
+roughly **10^-11 to 10^-13 bps**, which is consistent with the finite decimal
+precision in the independent candle payload rather than an economic mismatch.
+Three checkpoints remain materially outside even under execution-price
+semantics: one V3 swap by about **1,850 bps**, and two V4 swaps by about
+**8,933 bps** and **27,301 bps**. The event amount ratios and post-swap spot
+prices are mutually close for those three, so the remaining disagreement is
+specific to GeckoTerminal's historical candle evidence rather than token
+ordering or the Uniswap sqrt-price transform.
+
+A bounded minute-candle diagnostic is staged at generation **0** using execution
+diagnostic run **35529024864**. It queries only the same nine pool/token/time
+checkpoints with GeckoTerminal 1-minute quote-token OHLCV at **0 bps**, capped
+at **27** HTTP attempts under the existing pacing. Its purpose is to distinguish
+hourly aggregation loss from absent/incomplete third-party historical trades.
+It cannot invoke Transfer acquisition or archive RPC and does not change the DEX
+acceptance gate.

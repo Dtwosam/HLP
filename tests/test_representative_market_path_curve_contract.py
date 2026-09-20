@@ -267,3 +267,25 @@ def test_representative_dex_execution_diagnostic_is_artifact_only() -> None:
         "DEX execution diagnostic generation must increment by one"
         in workflow
     )
+
+
+def test_representative_dex_minute_diagnostic_is_bounded() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-dex-minute-diagnostic-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-dex-minute-diagnostic.json"
+    ).read_text()
+
+    assert '"execution_diagnostic_run_id": 35529024864' in config
+    assert 'timeframe="minute"' in workflow
+    assert 'currency="token"' in workflow
+    assert "len(rows) * client.attempts" in workflow
+    assert '"tolerance_bps": "0"' in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert "phase1-pons-representative-transfers-full.yml" not in workflow
+    assert (
+        "DEX minute diagnostic generation must increment by one"
+        in workflow
+    )

@@ -1,0 +1,397 @@
+name: phase1-pons-representative-dex-minute-diagnostic-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-representative-dex-minute-diagnostic.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-dex-minute-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch representative DEX minute diagnostic generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      execution_diagnostic_run_id: ${{ steps.validate.outputs.execution_diagnostic_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: validate
+        name: Validate minute-candle diagnostic launch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+              find_github_actions_run_artifact,
+          )
+
+          config_path = (
+              ".github/"
+              "phase1-pons-representative-dex-minute-diagnostic.json"
+          )
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "execution_diagnostic_run_id",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit(
+                  "DEX minute diagnostic config schema changed: "
+                  f"{sorted(config)}"
+              )
+          if os.environ["BRANCH"] != "phase1/data-acquisition-spike":
+              raise SystemExit("DEX minute diagnostic branch changed")
+
+          raw_message = str(os.environ["LAUNCH_MESSAGE"])
+          message = raw_message.splitlines()[0]
+          if raw_message != message:
+              raise SystemExit(
+                  "DEX minute diagnostic message must be one line"
+              )
+          launch = re.fullmatch(
+              r"launch representative DEX minute diagnostic generation (\d+)",
+              message,
+          )
+          if launch is None:
+              raise SystemExit(
+                  "DEX minute diagnostic requires exact generation"
+              )
+          requested_generation = int(launch.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("DEX minute diagnostic before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("DEX minute diagnostic current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic launch must be direct single-parent"
+              )
+          files = list(commit.get("files") or [])
+          if (
+              len(files) != 1
+              or str(files[0].get("filename") or "") != config_path
+              or str(files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic launch must modify exactly its config"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          prior_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if prior_payload.get("encoding") != "base64":
+              raise SystemExit(
+                  "DEX minute diagnostic prior config encoding changed"
+              )
+          prior = json.loads(
+              base64.b64decode(prior_payload.get("content") or "")
+          )
+          if set(prior) != expected_keys:
+              raise SystemExit(
+                  "DEX minute diagnostic prior config schema changed"
+              )
+
+          generation = int(config["generation"])
+          prior_generation = int(prior["generation"])
+          if generation <= 0:
+              raise SystemExit("DEX minute diagnostic config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "DEX minute diagnostic launch/config generation mismatch"
+              )
+          if generation != prior_generation + 1:
+              raise SystemExit(
+                  "DEX minute diagnostic generation must increment by one"
+              )
+          if (
+              config["execution_diagnostic_run_id"]
+              != prior["execution_diagnostic_run_id"]
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic frozen input changed at launch"
+              )
+
+          expected_run = 35_529_024_864
+          if (
+              int(config["execution_diagnostic_run_id"]) != expected_run
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic frozen input changed"
+              )
+
+          source_run = get(
+              f"/repos/{repo}/actions/runs/{expected_run}"
+          )
+          if (
+              str(source_run.get("status") or "") != "completed"
+              or str(source_run.get("conclusion") or "") != "success"
+              or str(source_run.get("head_sha") or "")
+              != "04a1a816c342b890f21aca1871c676aab3e0d639"
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic execution source identity changed"
+              )
+
+          artifact = find_github_actions_run_artifact(
+              (
+                  f"{api}/repos/{repo}/actions/runs/"
+                  f"{expected_run}/artifacts"
+              ),
+              token,
+              artifact_name=(
+                  "phase1-pons-representative-dex-execution-diagnostic"
+              ),
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(
+                  f"execution_diagnostic_run_id={expected_run}\n"
+              )
+
+          print(json.dumps({
+              "generation": generation,
+              "execution_diagnostic_run_id": expected_run,
+              "execution_diagnostic_artifact_id": int(artifact["id"]),
+              "diagnostic": "minute_ohlcv_execution_price",
+          }, sort_keys=True))
+          PY
+
+  diagnose:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-execution-diagnostic
+          path: execution-diagnostic
+          run-id: ${{ needs.preflight.outputs.execution_diagnostic_run_id }}
+          github-token: ${{ github.token }}
+      - name: Compare execution prices with minute OHLCV
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          from hlp.data.geckoterminal import GeckoTerminalClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          manifest = json.loads(
+              Path(
+                  "execution-diagnostic/"
+                  "pons-representative-dex-execution-diagnostic.jsonl.manifest.json"
+              ).read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if (
+              int(manifest.get("records", -1)) != 9
+              or str(manifest.get("sha256") or "")
+              != "28e1c1af9a11f10260ae3783dd0fedc047299266b7b40c402870b394be8b17d4"
+              or int(provenance.get("external_requests", -1)) != 0
+              or str(provenance.get("tolerance_bps") or "") != "0"
+          ):
+              raise SystemExit(
+                  "DEX minute diagnostic execution artifact identity changed"
+              )
+          source_rows = read_jsonl(
+              "execution-diagnostic/"
+              "pons-representative-dex-execution-diagnostic.jsonl"
+          )
+          if len(source_rows) != 9:
+              raise SystemExit(
+                  "DEX minute diagnostic checkpoint count changed"
+              )
+
+          def compare(value, timestamp, candles):
+              canonical = Decimal(str(value))
+              start = timestamp - (timestamp % 60)
+              matched = [
+                  row for row in candles
+                  if int(row["timestamp"]) == start
+              ]
+              if len(matched) != 1:
+                  return {
+                      "minute_match": None,
+                      "minute_status": "missing_candle",
+                      "minute_candle_timestamp": None,
+                      "minute_low": None,
+                      "minute_high": None,
+                      "minute_outside_bps": None,
+                  }
+              candle = matched[0]
+              low = Decimal(str(candle["low"]))
+              high = Decimal(str(candle["high"]))
+              if low <= 0 or high <= 0 or high < low:
+                  raise SystemExit(
+                      "DEX minute diagnostic invalid candle envelope"
+                  )
+              if low <= canonical <= high:
+                  outside = Decimal(0)
+              elif canonical < low:
+                  outside = (low - canonical) / low * Decimal(10_000)
+              else:
+                  outside = (canonical - high) / high * Decimal(10_000)
+              return {
+                  "minute_match": outside == 0,
+                  "minute_status": (
+                      "matched" if outside == 0 else "outside_candle"
+                  ),
+                  "minute_candle_timestamp": int(candle["timestamp"]),
+                  "minute_low": str(low),
+                  "minute_high": str(high),
+                  "minute_outside_bps": str(outside),
+              }
+
+          client = GeckoTerminalClient()
+          rows = []
+          for source in source_rows:
+              timestamp = int(source["timestamp"])
+              candles = client.ohlcv(
+                  source["pool"],
+                  timeframe="minute",
+                  aggregate=1,
+                  before_timestamp=timestamp + 60,
+                  limit=3,
+                  currency="token",
+                  token=source["token"],
+              )
+              result = compare(
+                  source["execution_quote_per_token"],
+                  timestamp,
+                  candles,
+              )
+              rows.append({
+                  "token": source["token"],
+                  "pons_version": source["pons_version"],
+                  "pool": source["pool"],
+                  "block": int(source["block"]),
+                  "transaction_index": int(
+                      source["transaction_index"]
+                  ),
+                  "log_index": int(source["log_index"]),
+                  "timestamp": timestamp,
+                  "execution_quote_per_token": (
+                      source["execution_quote_per_token"]
+                  ),
+                  "hourly_execution_match": source["execution_match"],
+                  "hourly_execution_outside_bps": (
+                      source["execution_outside_quote_bps"]
+                  ),
+                  **result,
+              })
+
+          max_attempts = len(rows) * client.attempts
+          if client.requests_made > max_attempts:
+              raise SystemExit(
+                  "DEX minute diagnostic HTTP attempt budget exceeded"
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-dex-minute-diagnostic.jsonl"
+              ),
+              provenance={
+                  "source": "geckoterminal_public_api",
+                  "purpose": (
+                      "test minute-level historical coverage for frozen "
+                      "on-chain swap execution prices without changing "
+                      "representative acceptance"
+                  ),
+                  "execution_diagnostic_run_id": int(
+                      "${{ needs.preflight.outputs.execution_diagnostic_run_id }}"
+                  ),
+                  "currency": "token",
+                  "ohlcv_timeframe": "minute",
+                  "ohlcv_aggregate": 1,
+                  "tolerance_bps": "0",
+              },
+          )
+          summary = {
+              "checkpoints": len(rows),
+              "minute_matches": sum(
+                  row["minute_match"] is True for row in rows
+              ),
+              "minute_outside": sum(
+                  row["minute_match"] is False for row in rows
+              ),
+              "minute_missing": sum(
+                  row["minute_match"] is None for row in rows
+              ),
+              "geckoterminal_requests": client.requests_made,
+              "geckoterminal_http_attempt_budget": max_attempts,
+              "diagnostic_sha256": snapshot["sha256"],
+          }
+          Path(
+              "artifacts/"
+              "pons-representative-dex-minute-diagnostic-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          print(json.dumps({"rows": rows}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-minute-diagnostic
+          path: artifacts/
+          if-no-files-found: error
