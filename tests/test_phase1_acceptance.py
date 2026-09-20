@@ -305,6 +305,42 @@ def test_phase1_acceptance_accepts_diagnostic_dex_disagreements():
     assert report["representative_dex_price_checkpoints_missing"] == 2
 
 
+def test_phase1_acceptance_accepts_generation6_dex_evidence_shape():
+    fixtures = list(_fixtures())
+    summary = fixtures[2]
+    summary.update(
+        {
+            "dex_targeted": 10,
+            "dex_matched": 10,
+            "no_registered_v4_pool": 0,
+            "dex_price_targeted": 10,
+            "dex_price_matched": 3,
+            "dex_price_checkpoints_targeted": 30,
+            "dex_price_checkpoints_observed": 30,
+            "dex_price_checkpoints_matched": 19,
+            "dex_price_checkpoints_disagreed": 11,
+            "dex_price_checkpoints_missing": 0,
+            "dex_price_disagreement_tokens": 7,
+            "dex_price_missing_candle_tokens": 0,
+            "dex_price_multi_checkpoint_tokens": 10,
+            "dex_price_no_swap_checkpoint": 0,
+        }
+    )
+
+    report = build_phase1_acceptance_report(*fixtures)
+
+    assert report["representative_dex_targeted"] == 10
+    assert report["representative_dex_matched"] == 10
+    assert report["representative_dex_price_tokens_targeted"] == 10
+    assert report["representative_dex_price_tokens_matched"] == 3
+    assert report["representative_dex_price_checkpoints_targeted"] == 30
+    assert report["representative_dex_price_checkpoints_observed"] == 30
+    assert report["representative_dex_price_checkpoints_matched"] == 19
+    assert report["representative_dex_price_checkpoints_disagreed"] == 11
+    assert report["representative_dex_price_checkpoints_missing"] == 0
+    assert report["representative_dex_price_disagreement_tokens"] == 7
+
+
 def test_phase1_acceptance_rejects_observed_checkpoint_accounting_drift():
     fixtures = list(_fixtures())
     fixtures[2]["dex_price_checkpoints_observed"] -= 1
