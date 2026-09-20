@@ -1837,3 +1837,17 @@ Phase 1 PASS and that merge are complete.
 - exact production signal threshold;
 - exact notification/dashboard surface;
 - any future automated execution.
+
+A guarded artifact-only representative market-path replay is staged for the
+Generation 13 frozen sample while its Transfer matrix continues independently.
+The replay config is inert at generation **0** and freezes sample run
+**35518892463** with registry **33911022718**, V1/V3 **34228430753**, V2 curve
+**33936232604**, transition **33912452330**, and V2/V4 **34471480180**. Its
+launcher permits only a direct single-parent, config-only generation increment,
+requires those frozen run IDs to remain unchanged, proves the sample artifact is
+still available, and then calls only the existing artifact-only
+representative-market-path workflow. It does not call the Transfer workflow,
+does not carry an archive RPC secret, and cannot issue chain acquisition. This
+allows the pagination/shard repair to be validated against the exact frozen
+sample without weakening the serialized acquisition path used by recovered
+completion.

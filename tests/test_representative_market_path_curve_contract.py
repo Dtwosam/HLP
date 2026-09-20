@@ -135,3 +135,27 @@ def test_representative_market_paths_repairs_paginated_shard_downloads() -> None
     assert "phase1-pons-v1-v3-" in market_paths
     assert "v4-events-gap-" in market_paths
     assert "phase1-pons-v2-v4-gap-" in market_paths
+
+
+def test_representative_market_path_replay_is_artifact_only() -> None:
+    replay = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-market-path-replay-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-market-path-replay.json"
+    ).read_text()
+
+    assert '"generation": 0' in config
+    assert '"sample_run_id": 35518892463' in config
+    assert (
+        "uses: ./.github/workflows/"
+        "phase1-pons-representative-market-paths.yml"
+    ) in replay
+    assert "phase1-pons-representative-transfers-full.yml" not in replay
+    assert "rpc-" not in replay
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in replay
+    assert (
+        "market-path replay frozen inputs changed at launch"
+        in replay
+    )
