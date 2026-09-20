@@ -302,3 +302,36 @@ def test_representative_dex_minute_diagnostic_is_bounded() -> None:
         "DEX minute diagnostic generation must increment by one"
         in workflow
     )
+
+
+def test_representative_validation_replay_is_artifact_only() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-validation-replay-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-validation-replay.json"
+    ).read_text()
+
+    assert '"sample_run_id": 35518892463' in config
+    assert '"transfer_run_id": 35518892463' in config
+    assert '"market_path_run_id": 35522831005' in config
+    assert '"priced_path_run_id": 35523404472' in config
+    assert '"dex_crosscheck_run_id": 35530539734' in config
+    assert (
+        "uses: ./.github/workflows/"
+        "phase1-pons-representative-validation.yml"
+    ) in workflow
+    assert "phase1-pons-representative-transfers-full" in workflow
+    assert "artifact_only_representative_validation" in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert "GeckoTerminalClient" not in workflow
+    assert "RpcClient" not in workflow
+    assert (
+        "validation replay generation must increment by one"
+        in workflow
+    )
+    assert (
+        "validation replay frozen inputs changed at launch"
+        in workflow
+    )

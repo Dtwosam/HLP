@@ -2019,3 +2019,27 @@ all bound to the same quote-audit run. No quote decimals are inferred or
 hard-coded, and no acquisition, DEX evidence semantics, request budget,
 tolerance, cohort, or archive-RPC behavior changes.
 
+Representative DEX replay generation **6**, run **35530539734**, completed
+successfully under the corrected canonical-source semantics. Independent pool
+identity matched **10/10** representative DEX pools with **0** pool mismatches.
+All **30** selected canonical Swap checkpoints had independent historical price
+observations; **19/30** matched the exact 0-bps third-party candle envelope and
+the remaining disagreements were retained diagnostically. The resulting DEX
+cross-check SHA256 is
+`3c26cfff4ca6cad6177c90ae7a2791b5fab388bc5a805cb2af28e89715a282d4`.
+The run used **40** logical GeckoTerminal requests, **46** HTTP attempts within
+the existing **120**-attempt cap, and **4** bounded public Robinhood block-time
+requests. Quote-token decimals were bound to quote-audit run **33923299711**.
+
+A guarded artifact-only final representative-validation replay is now staged at
+generation **0**. It freezes Gen13 sample/lifecycle/transfer run
+**35518892463**, market-path replay **35522831005**, priced-path replay
+**35523404472**, successful DEX replay **35530539734**, V1/V3
+**34228430753**, V2/V4 **34471480180**, registry **33911022718**, V2 curve
+**33936232604**, transition **33912452330**, quote audit **33923299711**,
+anchor **33972109927**, oracle **34765335793**, and fallback parent
+**35518892463**. The launcher is deliberately blocked until
+`phase1-pons-representative-transfers-full` exists on Gen13. Once it exists,
+the replay calls only the existing fail-closed representative validation
+workflow; it carries no RPC or external-API client and avoids waiting for the
+stale queued Generation 14 workflow snapshot.
