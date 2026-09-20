@@ -127,7 +127,7 @@ class _FakeResponse:
         return self.raw
 
 
-def test_request_paces_retry_attempts_and_counts_all_http_calls(monkeypatch):
+def test_request_429_with_short_retry_after_waits_full_window(monkeypatch):
     now = [0.0]
     sleeps = []
     calls = []
@@ -167,8 +167,12 @@ def test_request_paces_retry_attempts_and_counts_all_http_calls(monkeypatch):
     assert client.requests_made == 2
     assert client.bytes_received > 0
     assert len(calls) == 2
-    assert calls[1][2] == pytest.approx(6.1)
-    assert sum(sleeps) == pytest.approx(6.1)
+    assert calls[1][2] == pytest.approx(
+        geckoterminal.DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS
+    )
+    assert sleeps == [
+        geckoterminal.DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS
+    ]
 
 
 def test_request_429_without_retry_after_waits_full_window(monkeypatch):

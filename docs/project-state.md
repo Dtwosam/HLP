@@ -1895,3 +1895,13 @@ external token sides, pool identifier, phase/event, and checkpoint role. The
 workflow still exits failure on the same condition; no acceptance semantics,
 request budget, workflow timeout, acquisition scope, or archive-RPC behavior
 changes.
+Bounded DEX replay generation **3**, run **35527135305**, again failed on
+GeckoTerminal HTTP **429** before reaching the newly added checkpoint-level
+price diagnostics. This exposed the remaining transport branch: a 429 carrying
+a short `Retry-After` could still retry inside the shared public-rate window.
+All HTTP 429 retries now wait for the maximum of the server `Retry-After`, the
+normal request interval, and the frozen **61-second** public-rate-limit
+cooldown. Non-429 retry semantics are unchanged. The client still uses exactly
+three attempts, the DEX workflow retains the same logical request budget and
+**30-minute** timeout, and no price tolerance, checkpoint selection, acceptance
+gate, acquisition scope, or archive-RPC behavior changes.

@@ -120,8 +120,9 @@ class GeckoTerminalClient:
                 if exc.code not in retryable_http or attempt == self.attempts:
                     break
                 retry_after = retry_after_seconds(exc)
-                if exc.code == 429 and retry_after is None:
+                if exc.code == 429:
                     retry_delay = max(
+                        retry_after or 0.0,
                         self.min_interval_seconds,
                         DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS,
                     )
