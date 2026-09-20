@@ -1931,3 +1931,24 @@ quote-per-token price to the independent quote-space candle at **0 bps**
 tolerance, with at most **27** HTTP attempts and the same GeckoTerminal pacing.
 This diagnostic cannot invoke Transfer acquisition or the archive RPC and does
 not alter the existing DEX gate.
+
+DEX quote-space diagnostic generation **1**, run **35528655862**, completed
+successfully and froze the independent hourly quote-token envelopes for the same
+nine failed checkpoints. **0/9** post-swap canonical quote-per-token spot prices
+fell inside those GeckoTerminal quote-space candles, with **0** missing candles.
+The misses range from about **0.73 bps** to **27,396 bps**. This rules out stale
+third-party USD conversion as the sole explanation, while still leaving a
+semantic mismatch between two different price notions: HLP's representative
+checkpoint uses each Uniswap Swap event's post-swap `sqrtPriceX96` spot price,
+whereas trade-derived OHLCV can reflect the swap's execution price from
+`amount0/amount1`.
+
+A new guarded execution-price diagnostic is staged at generation **0** to test
+that distinction without any new external calls. It freezes market-path run
+**35522831005**, priced-path run **35523404472**, successful quote diagnostic
+**35528655862**, and quote registry **33923299711**. It derives the exact
+human quote/token execution ratio from the immutable signed Swap event amounts
+and token decimals, then compares that ratio and the existing post-swap spot
+price against the already-frozen GeckoTerminal candle envelopes at **0 bps**.
+The diagnostic is artifact-only, performs **0 external requests**, cannot invoke
+Transfer acquisition or archive RPC, and changes no DEX acceptance rule.

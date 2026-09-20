@@ -231,7 +231,7 @@ def test_representative_dex_quote_diagnostic_is_bounded() -> None:
         ".github/phase1-pons-representative-dex-quote-diagnostic.json"
     ).read_text()
 
-    assert '"generation": 0' in config
+    assert "DEX quote diagnostic generation must increment by one" in workflow
     assert '"priced_path_run_id": 35523404472' in config
     assert '"failure_replay_run_id": 35527327945' in config
     assert 'currency="token"' in workflow
@@ -241,5 +241,29 @@ def test_representative_dex_quote_diagnostic_is_bounded() -> None:
     assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
     assert (
         "DEX quote diagnostic generation must increment by one"
+        in workflow
+    )
+
+
+def test_representative_dex_execution_diagnostic_is_artifact_only() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-dex-execution-diagnostic-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-dex-execution-diagnostic.json"
+    ).read_text()
+
+    assert '"market_path_run_id": 35522831005' in config
+    assert '"priced_path_run_id": 35523404472' in config
+    assert '"quote_diagnostic_run_id": 35528655862' in config
+    assert "execution_quote_per_token" in workflow
+    assert "post_swap_spot_quote_per_token" in workflow
+    assert '"external_requests": 0' in workflow
+    assert "GeckoTerminalClient" not in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert "phase1-pons-representative-transfers-full.yml" not in workflow
+    assert (
+        "DEX execution diagnostic generation must increment by one"
         in workflow
     )
