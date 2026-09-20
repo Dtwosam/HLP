@@ -569,7 +569,9 @@ def test_readiness_rejects_normalized_replay_without_recovery_mode():
         evidence_handoff=handoff,
     )
 
-    assert report["evidence_valid"] is False
+    assert report["phase1_ready"] is False
+    assert report["stage"] == "post_eligibility_evidence"
+    assert report["next_action"] == "recover_or_rerun_post_eligibility_evidence"
     assert (
         "recovered evidence handoff is not marked recovered"
         in report["evidence_handoff_errors"]
