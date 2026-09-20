@@ -131,6 +131,9 @@ def _fixtures():
                 "price_crosscheck_scope": "canonical_dex_swap",
                 "price_match": True,
                 "price_crosscheck_status": "matched",
+                "canonical_price_semantics": (
+                    "swap_execution_quote_per_token"
+                ),
                 "price_checkpoints": [
                     {
                         "checkpoint_roles": ["first"],
@@ -210,7 +213,12 @@ def test_representative_validation_joins_all_phase1_evidence():
     assert summary["dex_price_targeted"] == 10
     assert summary["dex_price_matched"] == 10
     assert summary["dex_price_checkpoints_targeted"] == 30
+    assert summary["dex_price_checkpoints_observed"] == 30
     assert summary["dex_price_checkpoints_matched"] == 30
+    assert summary["dex_price_checkpoints_disagreed"] == 0
+    assert summary["dex_price_checkpoints_missing"] == 0
+    assert summary["dex_price_disagreement_tokens"] == 0
+    assert summary["dex_price_missing_candle_tokens"] == 0
     assert summary["dex_price_multi_checkpoint_tokens"] == 10
     assert summary["dex_price_no_swap_checkpoint"] == 0
     assert summary["explorer_verified_transactions"] == 40
@@ -457,12 +465,44 @@ def test_representative_validation_rejects_registration_without_v4_events():
         )
 
 
-def test_representative_validation_rejects_dex_price_mismatch():
+def test_representative_validation_preserves_dex_price_disagreement():
+    sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
+    dex[0]["price_match"] = False
+    dex[0]["price_crosscheck_status"] = "outside_candle"
+    dex[0]["price_checkpoints"][1]["price_match"] = False
+    dex[0]["price_checkpoints"][1][
+        "price_crosscheck_status"
+    ] = "outside_candle"
+
+    rows = build_representative_validation_rows(
+        sample,
+        v1_lifecycle_rows=v1,
+        v2_lifecycle_rows=v2,
+        holder_summary_rows=holders,
+        dex_crosscheck_rows=dex,
+        explorer_summary_rows=explorer,
+        market_path_summary_rows=market_paths,
+        priced_path_summary_rows=priced_paths,
+    )
+    summary = summarize_representative_validation(rows)
+
+    assert summary["complete_tokens"] == 10
+    assert summary["dex_matched"] == 10
+    assert summary["dex_price_matched"] == 9
+    assert summary["dex_price_checkpoints_targeted"] == 30
+    assert summary["dex_price_checkpoints_observed"] == 30
+    assert summary["dex_price_checkpoints_matched"] == 29
+    assert summary["dex_price_checkpoints_disagreed"] == 1
+    assert summary["dex_price_checkpoints_missing"] == 0
+    assert summary["dex_price_disagreement_tokens"] == 1
+
+
+def test_representative_validation_rejects_dex_aggregate_state_drift():
     sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
     dex[0]["price_match"] = False
     dex[0]["price_crosscheck_status"] = "outside_candle"
 
-    with pytest.raises(ValueError, match="DEX price cross-check failed"):
+    with pytest.raises(ValueError, match="aggregate price match disagrees"):
         build_representative_validation_rows(
             sample,
             v1_lifecycle_rows=v1,
@@ -475,14 +515,68 @@ def test_representative_validation_rejects_dex_price_mismatch():
         )
 
 
-def test_representative_validation_rejects_nested_dex_checkpoint_mismatch():
+def test_representative_validation_preserves_missing_dex_candle():
     sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
-    dex[0]["price_checkpoints"][1]["price_match"] = False
-    dex[0]["price_checkpoints"][1][
+    dex[0]["price_match"] = False
+    dex[0]["price_crosscheck_status"] = "missing_candle"
+    dex[0]["price_checkpoints"][0]["price_match"] = None
+    dex[0]["price_checkpoints"][0][
         "price_crosscheck_status"
-    ] = "outside_candle"
+    ] = "missing_candle"
 
-    with pytest.raises(ValueError, match="DEX checkpoint mismatch"):
+    rows = build_representative_validation_rows(
+        sample,
+        v1_lifecycle_rows=v1,
+        v2_lifecycle_rows=v2,
+        holder_summary_rows=holders,
+        dex_crosscheck_rows=dex,
+        explorer_summary_rows=explorer,
+        market_path_summary_rows=market_paths,
+        priced_path_summary_rows=priced_paths,
+    )
+    summary = summarize_representative_validation(rows)
+
+    assert summary["complete_tokens"] == 10
+    assert summary["dex_price_checkpoints_targeted"] == 30
+    assert summary["dex_price_checkpoints_observed"] == 29
+    assert summary["dex_price_checkpoints_matched"] == 29
+    assert summary["dex_price_checkpoints_disagreed"] == 0
+    assert summary["dex_price_checkpoints_missing"] == 1
+    assert summary["dex_price_missing_candle_tokens"] == 1
+
+
+def test_representative_validation_rejects_invalid_dex_checkpoint_state():
+    sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
+    dex[0]["price_match"] = False
+    dex[0]["price_crosscheck_status"] = "outside_candle"
+    dex[0]["price_checkpoints"][0]["price_match"] = False
+    dex[0]["price_checkpoints"][0][
+        "price_crosscheck_status"
+    ] = "unexpected"
+
+    with pytest.raises(ValueError, match="checkpoint price state is inconsistent"):
+        build_representative_validation_rows(
+            sample,
+            v1_lifecycle_rows=v1,
+            v2_lifecycle_rows=v2,
+            holder_summary_rows=holders,
+            dex_crosscheck_rows=dex,
+            explorer_summary_rows=explorer,
+            market_path_summary_rows=market_paths,
+            priced_path_summary_rows=priced_paths,
+        )
+
+
+def test_representative_validation_requires_some_historical_dex_price_evidence():
+    sample, v1, v2, holders, dex, explorer, market_paths, priced_paths = _fixtures()
+    for row in dex:
+        row["price_match"] = False
+        row["price_crosscheck_status"] = "missing_candle"
+        for checkpoint in row["price_checkpoints"]:
+            checkpoint["price_match"] = None
+            checkpoint["price_crosscheck_status"] = "missing_candle"
+
+    with pytest.raises(ValueError, match="historical price evidence is absent"):
         build_representative_validation_rows(
             sample,
             v1_lifecycle_rows=v1,

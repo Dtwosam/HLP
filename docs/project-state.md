@@ -2064,3 +2064,21 @@ priced-path, DEX, registry, curve, transition, quote-audit, anchor, oracle and
 fallback run IDs already frozen by the validation replay. It publishes the same
 `phase1-pons-post-eligibility-evidence-ready` handoff artifact without RPC,
 external APIs, or acquisition.
+
+Final representative validation had one remaining semantic drift that would
+have rejected the now-canonical DEX evidence even after Generation 6 succeeded.
+`build_representative_validation_rows` still required every independent
+historical candle checkpoint to match exactly. That contradicted DEC-012 and the
+DEX workflow's accepted source precedence.
+
+The final join now keeps **pool/token identity fail-closed**, still requires the
+exact first/max/last canonical Swap checkpoint roles, requires the canonical
+price semantics to be `swap_execution_quote_per_token`, and validates each
+checkpoint as exactly one of `matched`, `outside_candle`, or
+`missing_candle` with internally consistent boolean/null state. Historical
+price disagreements and individual missing candles are preserved as diagnostic
+counts in the final summary instead of making a token incomplete. The cohort
+still fails closed if **all** canonical Swap checkpoints lack independent
+historical price observations. No acquisition, tolerance, request budget,
+cohort, pool-identity, pricing, holder, or source-coverage gate changed.
+

@@ -392,10 +392,26 @@ def build_representative_validation_rows(
                     f"mismatches={mismatches}"
                 )
             if price_scope == "canonical_dex_swap":
-                if price_match is not True or price_status != "matched":
+                if str(
+                    dex_row.get("canonical_price_semantics") or ""
+                ) != "swap_execution_quote_per_token":
                     raise ValueError(
-                        f"representative DEX price cross-check failed for "
-                        f"{token}: status={price_status}"
+                        "representative DEX canonical price semantics changed "
+                        f"for {token}"
+                    )
+                if not isinstance(price_match, bool):
+                    raise ValueError(
+                        "representative DEX aggregate price match must be "
+                        f"boolean for {token}"
+                    )
+                if price_status not in {
+                    "matched",
+                    "outside_candle",
+                    "missing_candle",
+                }:
+                    raise ValueError(
+                        "representative DEX aggregate price status is invalid "
+                        f"for {token}: {price_status}"
                     )
                 if not price_checkpoints:
                     raise ValueError(
@@ -411,6 +427,62 @@ def build_representative_validation_rows(
                         f"representative DEX checkpoint roles invalid for "
                         f"{token}: {dict(checkpoint_roles)}"
                     )
+
+                checkpoint_states = Counter()
+                for checkpoint in price_checkpoints:
+                    checkpoint_match = checkpoint.get("price_match")
+                    checkpoint_status = str(
+                        checkpoint.get("price_crosscheck_status")
+                    )
+                    if checkpoint_match is True:
+                        expected_status = "matched"
+                    elif checkpoint_match is False:
+                        expected_status = "outside_candle"
+                    elif checkpoint_match is None:
+                        expected_status = "missing_candle"
+                    else:
+                        raise ValueError(
+                            "representative DEX checkpoint price match is "
+                            f"invalid for {token}"
+                        )
+                    if checkpoint_status != expected_status:
+                        raise ValueError(
+                            "representative DEX checkpoint price state is "
+                            f"inconsistent for {token}: "
+                            f"match={checkpoint_match} "
+                            f"status={checkpoint_status}"
+                        )
+                    checkpoint_states[expected_status] += 1
+
+                all_matched = (
+                    checkpoint_states["matched"] == len(price_checkpoints)
+                )
+                if price_match != all_matched:
+                    raise ValueError(
+                        "representative DEX aggregate price match disagrees "
+                        f"with checkpoints for {token}"
+                    )
+                expected_price_status = (
+                    "matched"
+                    if all_matched
+                    else next(
+                        str(
+                            checkpoint.get(
+                                "price_crosscheck_status"
+                            )
+                        )
+                        for checkpoint in price_checkpoints
+                        if checkpoint.get("price_match") is not True
+                    )
+                )
+                if price_status != expected_price_status:
+                    raise ValueError(
+                        "representative DEX aggregate price status disagrees "
+                        f"with checkpoints for {token}: "
+                        f"expected={expected_price_status} "
+                        f"actual={price_status}"
+                    )
+
                 if explorer_row is not None:
                     if explorer_dex_transactions != len(price_checkpoints):
                         raise ValueError(
@@ -422,20 +494,6 @@ def build_representative_validation_rows(
                             f"representative explorer/DEX checkpoint roles "
                             f"mismatch for {token}"
                         )
-                bad_checkpoints = [
-                    checkpoint
-                    for checkpoint in price_checkpoints
-                    if (
-                        checkpoint.get("price_match") is not True
-                        or checkpoint.get("price_crosscheck_status")
-                        != "matched"
-                    )
-                ]
-                if bad_checkpoints:
-                    raise ValueError(
-                        f"representative DEX checkpoint mismatch for "
-                        f"{token}"
-                    )
             elif price_scope == "no_swap_checkpoint":
                 if price_match is not None or price_checkpoints:
                     raise ValueError(
@@ -513,9 +571,22 @@ def build_representative_validation_rows(
                 "external_match": external_match,
                 "dex_price_crosscheck_scope": price_scope,
                 "dex_price_match": price_match,
+                "dex_price_crosscheck_status": price_status,
                 "dex_price_checkpoint_count": len(price_checkpoints),
+                "dex_price_checkpoint_observed": sum(
+                    checkpoint.get("price_match") is not None
+                    for checkpoint in price_checkpoints
+                ),
                 "dex_price_checkpoint_matched": sum(
                     checkpoint.get("price_match") is True
+                    for checkpoint in price_checkpoints
+                ),
+                "dex_price_checkpoint_disagreed": sum(
+                    checkpoint.get("price_match") is False
+                    for checkpoint in price_checkpoints
+                ),
+                "dex_price_checkpoint_missing": sum(
+                    checkpoint.get("price_match") is None
                     for checkpoint in price_checkpoints
                 ),
                 "explorer_evidence_status": explorer_status,
@@ -528,6 +599,16 @@ def build_representative_validation_rows(
                 ),
                 "validation_status": "complete",
             }
+        )
+
+    observed_price_checkpoints = sum(
+        int(row["dex_price_checkpoint_observed"])
+        for row in output
+    )
+    if observed_price_checkpoints <= 0:
+        raise ValueError(
+            "representative DEX historical price evidence is absent for "
+            "all canonical swap checkpoints"
         )
 
     output.sort(
@@ -601,8 +682,25 @@ def summarize_representative_validation(rows: Iterable[dict]) -> dict:
         "dex_price_checkpoints_targeted": sum(
             int(row["dex_price_checkpoint_count"]) for row in values
         ),
+        "dex_price_checkpoints_observed": sum(
+            int(row["dex_price_checkpoint_observed"]) for row in values
+        ),
         "dex_price_checkpoints_matched": sum(
             int(row["dex_price_checkpoint_matched"]) for row in values
+        ),
+        "dex_price_checkpoints_disagreed": sum(
+            int(row["dex_price_checkpoint_disagreed"]) for row in values
+        ),
+        "dex_price_checkpoints_missing": sum(
+            int(row["dex_price_checkpoint_missing"]) for row in values
+        ),
+        "dex_price_disagreement_tokens": sum(
+            int(row["dex_price_checkpoint_disagreed"]) > 0
+            for row in values
+        ),
+        "dex_price_missing_candle_tokens": sum(
+            int(row["dex_price_checkpoint_missing"]) > 0
+            for row in values
         ),
         "dex_price_multi_checkpoint_tokens": sum(
             int(row["dex_price_checkpoint_count"]) > 1
