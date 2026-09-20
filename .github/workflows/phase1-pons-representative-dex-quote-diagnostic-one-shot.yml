@@ -1,0 +1,486 @@
+name: phase1-pons-representative-dex-quote-diagnostic-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-representative-dex-quote-diagnostic.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-dex-quote-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch representative DEX quote diagnostic generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      priced_path_run_id: ${{ steps.validate.outputs.priced_path_run_id }}
+      failure_replay_run_id: ${{ steps.validate.outputs.failure_replay_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: validate
+        name: Validate quote-space diagnostic launch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+              find_github_actions_run_artifact,
+          )
+
+          config_path = (
+              ".github/"
+              "phase1-pons-representative-dex-quote-diagnostic.json"
+          )
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "priced_path_run_id",
+              "failure_replay_run_id",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit(
+                  "DEX quote diagnostic config schema changed: "
+                  f"{sorted(config)}"
+              )
+          if os.environ["BRANCH"] != "phase1/data-acquisition-spike":
+              raise SystemExit("DEX quote diagnostic branch changed")
+
+          raw_message = str(os.environ["LAUNCH_MESSAGE"])
+          message = raw_message.splitlines()[0]
+          if raw_message != message:
+              raise SystemExit(
+                  "DEX quote diagnostic message must be one line"
+              )
+          launch = re.fullmatch(
+              r"launch representative DEX quote diagnostic generation (\d+)",
+              message,
+          )
+          if launch is None:
+              raise SystemExit(
+                  "DEX quote diagnostic requires exact generation"
+              )
+          requested_generation = int(launch.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("DEX quote diagnostic before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("DEX quote diagnostic current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "DEX quote diagnostic launch must be direct single-parent"
+              )
+          files = list(commit.get("files") or [])
+          if (
+              len(files) != 1
+              or str(files[0].get("filename") or "") != config_path
+              or str(files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "DEX quote diagnostic launch must modify exactly its config"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          prior_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if prior_payload.get("encoding") != "base64":
+              raise SystemExit(
+                  "DEX quote diagnostic prior config encoding changed"
+              )
+          prior = json.loads(
+              base64.b64decode(prior_payload.get("content") or "")
+          )
+          if set(prior) != expected_keys:
+              raise SystemExit(
+                  "DEX quote diagnostic prior config schema changed"
+              )
+
+          generation = int(config["generation"])
+          prior_generation = int(prior["generation"])
+          if generation <= 0:
+              raise SystemExit("DEX quote diagnostic config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "DEX quote diagnostic launch/config generation mismatch"
+              )
+          if generation != prior_generation + 1:
+              raise SystemExit(
+                  "DEX quote diagnostic generation must increment by one"
+              )
+          if any(
+              config[key] != prior[key]
+              for key in ("priced_path_run_id", "failure_replay_run_id")
+          ):
+              raise SystemExit(
+                  "DEX quote diagnostic frozen inputs changed at launch"
+              )
+
+          expected = {
+              "priced_path_run_id": 35_523_404_472,
+              "failure_replay_run_id": 35_527_327_945,
+          }
+          if config != {"generation": generation, **expected}:
+              raise SystemExit(
+                  "DEX quote diagnostic frozen inputs changed"
+              )
+
+          failure_run = get(
+              f"/repos/{repo}/actions/runs/"
+              f"{expected['failure_replay_run_id']}"
+          )
+          if (
+              str(failure_run.get("status") or "") != "completed"
+              or str(failure_run.get("conclusion") or "") != "failure"
+              or str(failure_run.get("head_sha") or "")
+              != "849231de7f38cad556c5f633086e8fff4bdd0182"
+          ):
+              raise SystemExit(
+                  "DEX quote diagnostic failure replay identity changed"
+              )
+
+          artifact = find_github_actions_run_artifact(
+              (
+                  f"{api}/repos/{repo}/actions/runs/"
+                  f"{expected['priced_path_run_id']}/artifacts"
+              ),
+              token,
+              artifact_name="phase1-pons-representative-priced-paths",
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key, value in expected.items():
+                  output.write(f"{key}={value}\n")
+
+          print(json.dumps({
+              "generation": generation,
+              "priced_path_artifact_id": int(artifact["id"]),
+              "diagnostic": "quote_space_zero_tolerance",
+              **expected,
+          }, sort_keys=True))
+          PY
+
+  diagnose:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ needs.preflight.outputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - name: Compare failed USD checkpoints in quote-token space
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          from hlp.data.geckoterminal import GeckoTerminalClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          specs = [
+              {
+                  "token": "0x74ac70dbf4fcc9cab02c25434252b9330cbf2e0f",
+                  "pool": "0xac5022fe8730582ae3f3887a456c43ed17311216",
+                  "block": 40_571_487,
+                  "transaction_index": 3,
+                  "log_index": 9,
+                  "timestamp": 1_787_143_787,
+              },
+              {
+                  "token": "0xd8df888d3052243ff06a4f6ab12236d2cbad40f0",
+                  "pool": "0xd8deab33e5243c4142fc15caf4db9152070f51fc5952828544fda88ceac6cee0",
+                  "block": 30_027_632,
+                  "transaction_index": 9,
+                  "log_index": 23,
+                  "timestamp": 1_786_087_303,
+              },
+              {
+                  "token": "0x2610fcce953ac6ea3c281e61cd08c4db3585d5f0",
+                  "pool": "0xa43ade58f40b63b4f4adb73c4558638adf508be4",
+                  "block": 30_086_314,
+                  "transaction_index": 4,
+                  "log_index": 27,
+                  "timestamp": 1_786_093_191,
+              },
+              {
+                  "token": "0x39363a7e018fa4df51ef68ba5b931db4cb2c3885",
+                  "pool": "0x21b4dcd2e2acca8ca46e88c3b92211afe481a05a55210c6a227e87ed13e6c5ce",
+                  "block": 53_507_886,
+                  "transaction_index": 7,
+                  "log_index": 66,
+                  "timestamp": 1_788_447_902,
+              },
+              {
+                  "token": "0x39363a7e018fa4df51ef68ba5b931db4cb2c3885",
+                  "pool": "0x21b4dcd2e2acca8ca46e88c3b92211afe481a05a55210c6a227e87ed13e6c5ce",
+                  "block": 53_508_102,
+                  "transaction_index": 35,
+                  "log_index": 140,
+                  "timestamp": 1_788_447_925,
+              },
+              {
+                  "token": "0x39363a7e018fa4df51ef68ba5b931db4cb2c3885",
+                  "pool": "0x21b4dcd2e2acca8ca46e88c3b92211afe481a05a55210c6a227e87ed13e6c5ce",
+                  "block": 54_380_937,
+                  "transaction_index": 18,
+                  "log_index": 125,
+                  "timestamp": 1_788_536_616,
+              },
+              {
+                  "token": "0xb666dd6fdb2eda6cb1f912adbc8c50cf936d66a7",
+                  "pool": "0xf1914b570497179ab3078b7af95a3e5b357e447d",
+                  "block": 18_370_814,
+                  "transaction_index": 5,
+                  "log_index": 19,
+                  "timestamp": 1_784_918_347,
+              },
+              {
+                  "token": "0xb666dd6fdb2eda6cb1f912adbc8c50cf936d66a7",
+                  "pool": "0xf1914b570497179ab3078b7af95a3e5b357e447d",
+                  "block": 18_785_105,
+                  "transaction_index": 1,
+                  "log_index": 2,
+                  "timestamp": 1_784_959_924,
+              },
+              {
+                  "token": "0x22c06d422868353b55928a41e9a13b9d631de3ed",
+                  "pool": "0x5217c58fb9fcd67d100fbd876c6ee8bdf7042088",
+                  "block": 15_999_707,
+                  "transaction_index": 9,
+                  "log_index": 25,
+                  "timestamp": 1_784_680_633,
+              },
+          ]
+
+          wanted = {
+              (
+                  row["token"],
+                  row["block"],
+                  row["transaction_index"],
+                  row["log_index"],
+              ): row
+              for row in specs
+          }
+          priced = {}
+          with Path(
+              "priced-paths/pons-representative-priced-paths.jsonl"
+          ).open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  key = (
+                      str(row["token"]).lower(),
+                      int(row["block_number"]),
+                      -1
+                      if row.get("transaction_index") is None
+                      else int(row["transaction_index"]),
+                      int(row["log_index"]),
+                  )
+                  if key in wanted:
+                      priced[key] = row
+          if set(priced) != set(wanted):
+              raise SystemExit(
+                  "DEX quote diagnostic priced checkpoint identity changed"
+              )
+
+          def reconcile_quote(*, value, timestamp, candles):
+              canonical = Decimal(str(value))
+              matched = None
+              for source in candles:
+                  start = int(source["timestamp"])
+                  if start <= timestamp < start + 3600:
+                      if matched is not None:
+                          raise SystemExit(
+                              "DEX quote diagnostic found multiple candles"
+                          )
+                      matched = source
+              if matched is None:
+                  return {
+                      "quote_match": None,
+                      "quote_status": "missing_candle",
+                      "outside_quote_bps": None,
+                      "independent_quote_low": None,
+                      "independent_quote_high": None,
+                      "independent_candle_timestamp": None,
+                  }
+              low = Decimal(str(matched["low"]))
+              high = Decimal(str(matched["high"]))
+              if low <= 0 or high <= 0 or high < low:
+                  raise SystemExit(
+                      "DEX quote diagnostic invalid candle envelope"
+                  )
+              if low <= canonical <= high:
+                  outside = Decimal(0)
+              elif canonical < low:
+                  outside = (low - canonical) / low * Decimal(10_000)
+              else:
+                  outside = (canonical - high) / high * Decimal(10_000)
+              return {
+                  "quote_match": outside == 0,
+                  "quote_status": (
+                      "matched" if outside == 0 else "outside_candle"
+                  ),
+                  "outside_quote_bps": str(outside),
+                  "independent_quote_low": str(low),
+                  "independent_quote_high": str(high),
+                  "independent_candle_timestamp": int(matched["timestamp"]),
+              }
+
+          client = GeckoTerminalClient()
+          rows = []
+          for spec in specs:
+              key = (
+                  spec["token"],
+                  spec["block"],
+                  spec["transaction_index"],
+                  spec["log_index"],
+              )
+              source = priced[key]
+              if source.get("event_type") not in {"v3_swap", "v4_swap"}:
+                  raise SystemExit(
+                      "DEX quote diagnostic checkpoint event type changed"
+                  )
+              quote_per_token = Decimal(str(source["quote_per_token"]))
+              if quote_per_token <= 0:
+                  raise SystemExit(
+                      "DEX quote diagnostic quote-per-token is not positive"
+                  )
+              candles = client.ohlcv(
+                  spec["pool"],
+                  timeframe="hour",
+                  aggregate=1,
+                  before_timestamp=spec["timestamp"] + 3600,
+                  limit=3,
+                  currency="token",
+                  token=spec["token"],
+              )
+              result = reconcile_quote(
+                  value=quote_per_token,
+                  timestamp=spec["timestamp"],
+                  candles=candles,
+              )
+              rows.append({
+                  **spec,
+                  "pons_version": source["pons_version"],
+                  "price_path_phase": source["price_path_phase"],
+                  "event_type": source["event_type"],
+                  "quote_token": source["quote_token"],
+                  "pricing_status": source["pricing_status"],
+                  "canonical_quote_per_token": str(quote_per_token),
+                  "canonical_quote_usd": source["quote_usd"],
+                  "canonical_token_price_usd": source["token_price_usd"],
+                  **result,
+              })
+
+          max_attempts = len(specs) * client.attempts
+          if client.requests_made > max_attempts:
+              raise SystemExit(
+                  "DEX quote diagnostic HTTP attempt budget exceeded"
+              )
+
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-dex-quote-diagnostic.jsonl"
+              ),
+              provenance={
+                  "source": "geckoterminal_public_api",
+                  "purpose": (
+                      "diagnose failed USD OHLCV cross-checks in "
+                      "quote-token space without changing acceptance"
+                  ),
+                  "failure_replay_run_id": int(
+                      "${{ needs.preflight.outputs.failure_replay_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ needs.preflight.outputs.priced_path_run_id }}"
+                  ),
+                  "currency": "token",
+                  "ohlcv_timeframe": "hour",
+                  "ohlcv_aggregate": 1,
+                  "tolerance_bps": "0",
+              },
+          )
+          summary = {
+              "checkpoints": len(rows),
+              "matched_quote_checkpoints": sum(
+                  row["quote_match"] is True for row in rows
+              ),
+              "outside_quote_checkpoints": sum(
+                  row["quote_match"] is False for row in rows
+              ),
+              "missing_quote_candles": sum(
+                  row["quote_match"] is None for row in rows
+              ),
+              "geckoterminal_requests": client.requests_made,
+              "geckoterminal_http_attempt_budget": max_attempts,
+              "diagnostic_sha256": snapshot["sha256"],
+          }
+          Path(
+              "artifacts/"
+              "pons-representative-dex-quote-diagnostic-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          print(json.dumps({"rows": rows}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-quote-diagnostic
+          path: artifacts/
+          if-no-files-found: error

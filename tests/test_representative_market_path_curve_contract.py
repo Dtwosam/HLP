@@ -220,3 +220,26 @@ def test_representative_dex_crosscheck_reports_failure_details() -> None:
         "independent DEX swap-price reconciliation failed for "
         in workflow
     )
+
+
+def test_representative_dex_quote_diagnostic_is_bounded() -> None:
+    workflow = Path(
+        ".github/workflows/"
+        "phase1-pons-representative-dex-quote-diagnostic-one-shot.yml"
+    ).read_text()
+    config = Path(
+        ".github/phase1-pons-representative-dex-quote-diagnostic.json"
+    ).read_text()
+
+    assert '"generation": 0' in config
+    assert '"priced_path_run_id": 35523404472' in config
+    assert '"failure_replay_run_id": 35527327945' in config
+    assert 'currency="token"' in workflow
+    assert '"tolerance_bps": "0"' in workflow
+    assert "len(specs) * client.attempts" in workflow
+    assert "phase1-pons-representative-transfers-full.yml" not in workflow
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" not in workflow
+    assert (
+        "DEX quote diagnostic generation must increment by one"
+        in workflow
+    )

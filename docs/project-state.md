@@ -1905,3 +1905,29 @@ cooldown. Non-429 retry semantics are unchanged. The client still uses exactly
 three attempts, the DEX workflow retains the same logical request budget and
 **30-minute** timeout, and no price tolerance, checkpoint selection, acceptance
 gate, acquisition scope, or archive-RPC behavior changes.
+
+Bounded DEX replay generation **4**, run **35527327945**, completed the
+strengthened transport path and reproduced the substantive result: canonical
+pool identity matched, but **9** hourly USD-price checkpoints across **6** tokens
+fell outside GeckoTerminal's zero-tolerance USD candles. The detailed failures
+range from about **4 bps** to **25,435 bps**. They are not token-side inversion:
+in every failed row the representative token is GeckoTerminal's external base
+token and the exact block timestamp lies inside the selected hour. Decomposing
+the immutable priced-path rows shows that several large USD misses imply
+implausible/stale third-party quote-USD states (for example roughly **$539**
+implied WETH versus the causal **$1,909** WETH/USDG anchor; one stock-token
+quote implies roughly **$65-$220** versus the causal **$411** fallback, while a
+later checkpoint for that same quote agrees within about **4 bps**). This is
+consistent with the frozen data-source audit: GeckoTerminal is independent
+cross-check/current-discovery evidence, not canonical history, while on-chain
+facts are canonical.
+
+Before changing the representative DEX acceptance workflow, a separate guarded
+diagnostic is staged at generation **0**. It freezes priced-path run
+**35523404472** and failed DEX replay **35527327945**, verifies the exact nine
+failed checkpoint identities, and requests only those nine GeckoTerminal hourly
+candles with `currency=token`. It compares the canonical on-chain
+quote-per-token price to the independent quote-space candle at **0 bps**
+tolerance, with at most **27** HTTP attempts and the same GeckoTerminal pacing.
+This diagnostic cannot invoke Transfer acquisition or the archive RPC and does
+not alter the existing DEX gate.
