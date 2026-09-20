@@ -15,7 +15,9 @@ from typing import Any
 DEFAULT_GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 GECKOTERMINAL_API_VERSION = "20230203"
 GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE = 10
+GECKOTERMINAL_PUBLIC_RATE_LIMIT_WINDOW_SECONDS = 60.0
 DEFAULT_GECKOTERMINAL_MIN_INTERVAL_SECONDS = 6.1
+DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS = 61.0
 ROBINHOOD_GECKOTERMINAL_NETWORK = "robinhood"
 
 
@@ -79,14 +81,16 @@ class GeckoTerminalClient:
             if wait > 0:
                 time.sleep(wait)
 
-        def retry_after_seconds(exc: urllib.error.HTTPError) -> float:
+        def retry_after_seconds(
+            exc: urllib.error.HTTPError,
+        ) -> float | None:
             value = exc.headers.get("Retry-After") if exc.headers else None
             if value is None:
-                return 0.0
+                return None
             try:
                 return max(float(value), 0.0)
             except ValueError:
-                return 0.0
+                return None
 
         retryable_http = {429, 500, 502, 503, 504}
         last_error: Exception | None = None
@@ -115,12 +119,18 @@ class GeckoTerminalClient:
                 last_error = exc
                 if exc.code not in retryable_http or attempt == self.attempts:
                     break
-                time.sleep(
-                    max(
-                        retry_after_seconds(exc),
+                retry_after = retry_after_seconds(exc)
+                if exc.code == 429 and retry_after is None:
+                    retry_delay = max(
+                        self.min_interval_seconds,
+                        DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS,
+                    )
+                else:
+                    retry_delay = max(
+                        retry_after or 0.0,
                         min(2.0 * attempt, 5.0),
                     )
-                )
+                time.sleep(retry_delay)
             except (
                 urllib.error.URLError,
                 TimeoutError,

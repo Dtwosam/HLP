@@ -1866,12 +1866,18 @@ The replay reused quote audit **33923299711**, WETH/USDG anchor **33972109927**,
 stock oracle **34765335793**, and repaired quote fallback from run
 **35518892463**; it issued no chain acquisition RPC.
 
-A guarded bounded DEX replay is now staged next. Its inert generation **0**
-freezes sample and V1/V2 lifecycle run **35518892463**, successful priced-path
-run **35523404472**, registry **33911022718**, and transition
-**33912452330**. The launcher verifies those exact non-expired artifacts and
-then calls only the existing representative DEX cross-check. That workflow uses
-the public Robinhood RPC only for checkpoint block timestamps and GeckoTerminal
-for independent pool/OHLCV evidence under the existing <=40 logical-request
-budget; it does not carry the archive-RPC secret and does not invoke Transfer
-acquisition.
+Bounded DEX replay generation **1**, run **35526064556**, passed its guarded
+artifact preflight and reached the existing independent DEX reconciliation, but
+failed on transport before any pool/price mismatch could be adjudicated:
+GeckoTerminal returned HTTP **429 Too Many Requests** from an OHLCV request
+after the client exhausted its three transient attempts. The normal client was
+already pacing at **6.1 seconds** per request, counting every attempt and
+honoring `Retry-After`. GeckoTerminal's current public documentation describes
+the limit as approximately **10 calls/minute** and notes that it can fluctuate
+with network traffic, so shared-runner throttling can still occur even when the
+local caller obeys the nominal pace. The retry path now keeps the same normal
+6.1-second pace and the same three-attempt bound, but when a 429 has no usable
+`Retry-After` it waits one full public-rate-limit window (**61 seconds**) before
+the next attempt. No DEX tolerance, checkpoint selection, logical-request cap,
+workflow timeout, acceptance gate, or acquisition scope changes; the archive
+RPC credential remains absent from this cross-check path.

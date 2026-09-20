@@ -171,6 +171,52 @@ def test_request_paces_retry_attempts_and_counts_all_http_calls(monkeypatch):
     assert sum(sleeps) == pytest.approx(6.1)
 
 
+def test_request_429_without_retry_after_waits_full_window(monkeypatch):
+    now = [0.0]
+    sleeps = []
+    calls = 0
+
+    def monotonic():
+        return now[0]
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    def urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                Message(),
+                None,
+            )
+        return _FakeResponse({"data": {}})
+
+    monkeypatch.setattr(geckoterminal.time, "monotonic", monotonic)
+    monkeypatch.setattr(geckoterminal.time, "sleep", sleep)
+    monkeypatch.setattr(geckoterminal.urllib.request, "urlopen", urlopen)
+
+    client = GeckoTerminalClient(
+        attempts=2,
+        min_interval_seconds=6.1,
+    )
+    client._request("/probe")
+
+    assert calls == 2
+    assert sleeps == [
+        geckoterminal.DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS
+    ]
+    assert (
+        sleeps[0]
+        > geckoterminal.GECKOTERMINAL_PUBLIC_RATE_LIMIT_WINDOW_SECONDS
+    )
+    assert client.requests_made == 2
+
+
 def test_request_honors_long_retry_after(monkeypatch):
     now = [0.0]
     sleeps = []
@@ -267,4 +313,8 @@ def test_public_rate_defaults_stay_within_frozen_api_contract():
     assert geckoterminal.GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE == 10
     assert client.min_interval_seconds >= (
         60 / geckoterminal.GECKOTERMINAL_PUBLIC_CALLS_PER_MINUTE
+    )
+    assert (
+        geckoterminal.DEFAULT_GECKOTERMINAL_429_COOLDOWN_SECONDS
+        > geckoterminal.GECKOTERMINAL_PUBLIC_RATE_LIMIT_WINDOW_SECONDS
     )
