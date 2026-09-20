@@ -2001,3 +2001,21 @@ behavior are unchanged. This implements DEC-006 and new DEC-012 and matches the
 data-source audit's existing rule that GeckoTerminal is cross-check evidence,
 not canonical historical truth.
 
+Representative DEX replay generation **5**, run **35530252709**, passed the
+guarded replay preflight and all frozen sample/lifecycle/priced-path downloads,
+then failed before external reconciliation with
+`KeyError: 'quote_decimals'`. This is an implementation/provenance wiring
+error, not new DEX evidence: the Pons launch registry intentionally does not
+carry quote-token decimals. Those decimals are already frozen in the canonical
+57-row quote registry from quote-audit run **33923299711**.
+
+The DEX workflow now takes that quote-audit run explicitly, downloads
+`phase1-pons-full-quote-audit-current`, and requires the exact quote-registry
+record count (**57**) and SHA256
+`c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc`
+on chain **4663** before deriving execution prices. The guarded replay, full
+representative evidence chain, DEX artifact provenance, and final validation are
+all bound to the same quote-audit run. No quote decimals are inferred or
+hard-coded, and no acquisition, DEX evidence semantics, request budget,
+tolerance, cohort, or archive-RPC behavior changes.
+

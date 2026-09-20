@@ -614,6 +614,12 @@ jobs:
               raise SystemExit(
                   "representative DEX priced-path run mismatch"
               )
+          if int(
+              dex.get("quote_audit_run_id", -1)
+          ) != quote_audit_run:
+              raise SystemExit(
+                  "representative DEX quote-audit run mismatch"
+              )
           for field, expected in (
               ("quote_audit_run_id", quote_audit_run),
               ("anchor_run_id", anchor_run),
