@@ -19,6 +19,11 @@ on:
         description: "Successful representative priced-path replay run"
         required: true
         type: string
+      quote_audit_run_id:
+        description: "Frozen full-Pons quote audit run"
+        required: true
+        default: "33923299711"
+        type: string
       registry_run_id:
         description: "Canonical full Pons registry run"
         required: true
@@ -42,6 +47,10 @@ on:
         type: string
       priced_path_run_id:
         required: true
+        type: string
+      quote_audit_run_id:
+        required: true
+        default: "33923299711"
         type: string
       registry_run_id:
         required: true
@@ -198,6 +207,38 @@ jobs:
           name: phase1-pons-representative-priced-paths
           path: priced-paths
           run-id: ${{ inputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - id: download_quotes
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote registry download before retry
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - id: retry_download_quotes
+        name: Retry quote registry artifact download
+        if: ${{ steps.download_quotes.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial quote registry download before final retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        run: rm -rf quotes
+      - name: Final quote registry artifact download retry
+        if: ${{ steps.retry_download_quotes.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ inputs.quote_audit_run_id }}
           github-token: ${{ github.token }}
       - id: download_registry
         continue-on-error: true
@@ -389,11 +430,44 @@ jobs:
                   "representative priced-path sample run mismatch"
               )
 
+          quote_manifest = json.loads(
+              Path(
+                  "quotes/pons-quote-registry.jsonl.manifest.json"
+              ).read_text()
+          )
+          quote_provenance = quote_manifest.get("provenance") or {}
+          if (
+              int(quote_manifest.get("records", -1)) != 57
+              or str(quote_manifest.get("sha256") or "")
+              != (
+                  "c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5"
+                  "be49dd346dc"
+              )
+              or int(quote_provenance.get("chain_id", -1)) != 4663
+          ):
+              raise SystemExit(
+                  "representative DEX quote registry identity changed"
+              )
+          quote_decimals = {
+              str(row["quote_token"]).lower(): int(row["quote_decimals"])
+              for row in read_jsonl("quotes/pons-quote-registry.jsonl")
+              if row.get("quote_decimals") is not None
+          }
+
           targets = build_representative_pool_targets(
               sample,
               registry,
               registrations,
           )
+          for target in targets:
+              quote = str(target["quote_token"]).lower()
+              decimals = quote_decimals.get(quote)
+              if decimals is None:
+                  raise SystemExit(
+                      "representative DEX quote decimals missing for "
+                      f"{quote}"
+                  )
+              target["quote_decimals"] = decimals
           priced_rows = read_jsonl(
               "priced-paths/pons-representative-priced-paths.jsonl"
           )
@@ -752,6 +826,9 @@ jobs:
                   "token_set_sha256": sample_identity["token_set_sha256"],
                   "priced_path_run_id": int(
                       "${{ inputs.priced_path_run_id }}"
+                  ),
+                  "quote_audit_run_id": int(
+                      "${{ inputs.quote_audit_run_id }}"
                   ),
                   "v1_eligibility_run_id": expected_v1_run,
                   "v2_eligibility_run_id": expected_v2_run,

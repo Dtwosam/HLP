@@ -194,6 +194,9 @@ def test_representative_dex_replay_is_bounded() -> None:
 
     assert '"sample_run_id": 35518892463' in config
     assert '"priced_path_run_id": 35523404472' in config
+    assert '"quote_audit_run_id": 33923299711' in config
+    assert "quote_audit_run_id" in replay
+    assert "phase1-pons-full-quote-audit-current" in replay
     assert (
         "uses: ./.github/workflows/"
         "phase1-pons-representative-dex-crosscheck.yml"
@@ -216,6 +219,8 @@ def test_representative_dex_crosscheck_uses_execution_quote_evidence() -> None:
     assert '"swap_execution_quote_per_token"' in workflow
     assert '"historical_price_result_semantics"' in workflow
     assert '"diagnostic_noncanonical"' in workflow
+    assert "phase1-pons-full-quote-audit-current" in workflow
+    assert '"quote_audit_run_id"' in workflow
     assert "representative_dex_price_disagreements" in workflow
     assert '"independent_candle_low_quote_per_token"' in workflow
     assert '"independent_candle_high_quote_per_token"' in workflow
