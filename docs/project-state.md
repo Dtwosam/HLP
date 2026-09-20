@@ -2100,3 +2100,17 @@ existing nine-route guarded measurement -> viability projection -> final
 acceptance chain remains the **only** path allowed to publish
 `hlp-v1-phase1-data-viability` PASS. Phase 2 remains locked.
 
+The canonical viability/acceptance workflows now explicitly allow the normalized
+recovered evidence workflow path
+`phase1-pons-post-eligibility-ready-replay-one-shot.yml` as an **evidence
+handoff only**. The allowlist was updated in the guarded route preflight, route
+ledger finalizer, final acceptance chain and acceptance gate. It was
+intentionally **not** added to the lifecycle/pricing source allowlist: recovered
+quote-fallback measurements must still trace `lifecycle_run_id` to the actual
+recovered-completion run that owns the frozen lifecycle/fallback artifacts.
+Normal evidence keeps its existing non-recovery routing rules; both recovered
+handoff paths must still carry `recovery_mode=true`, a valid source run, exact
+hashes, branch ancestry and all three required handoff artifacts. The existing
+nine distinct route-run requirement and **331,011,903** processed-work-block
+floor remain unchanged.
+

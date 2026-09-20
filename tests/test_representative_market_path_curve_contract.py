@@ -366,3 +366,31 @@ def test_post_eligibility_ready_replay_is_artifact_only() -> None:
     assert "RpcClient" not in workflow
     assert "ready replay generation must increment by one" in workflow
     assert "ready replay frozen inputs changed at launch" in workflow
+
+
+def test_recovered_ready_replay_is_canonical_viability_evidence() -> None:
+    evidence_path = (
+        "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
+    )
+    for path in (
+        ".github/workflows/phase1-pons-viability-guarded-route.yml",
+        ".github/workflows/"
+        "phase1-pons-viability-ledger-finalize-one-shot.yml",
+        ".github/workflows/phase1-pons-final-acceptance-chain.yml",
+        ".github/workflows/phase1-pons-acceptance-gate.yml",
+    ):
+        workflow = Path(path).read_text()
+        assert evidence_path in workflow
+
+    guarded = Path(
+        ".github/workflows/phase1-pons-viability-guarded-route.yml"
+    ).read_text()
+    assert (
+        "phase1-pons-full-eligibility-acquisition-one-shot.yml"
+        in guarded
+    )
+    assert (
+        "evidence lifecycle/pricing workflow path is not allowed"
+        in guarded
+    )
+

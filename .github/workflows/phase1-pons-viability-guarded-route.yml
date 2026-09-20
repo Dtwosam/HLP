@@ -110,6 +110,8 @@ jobs:
               "phase1-pons-post-eligibility-evidence-one-shot.yml",
               ".github/workflows/"
               "phase1-pons-recovered-completion-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-ready-replay-one-shot.yml",
           }
           evidence_path = str(run.get("path") or "").split("@", 1)[0]
           if evidence_path not in allowed_evidence_paths:
@@ -309,9 +311,14 @@ jobs:
               ".github/workflows/"
               "phase1-pons-recovered-completion-one-shot.yml"
           )
+          recovered_replay_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
+          )
           if evidence_path not in {
               normal_evidence_path,
               recovered_evidence_path,
+              recovered_replay_evidence_path,
           }:
               raise SystemExit(
                   "viability handoff evidence workflow path changed: "
