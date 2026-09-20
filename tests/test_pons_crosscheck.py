@@ -7,6 +7,7 @@ from hlp.data.pons_crosscheck import (
     build_representative_pool_targets,
     reconcile_external_pool,
     reconcile_price_against_ohlcv,
+    swap_execution_quote_per_token,
 )
 
 
@@ -19,6 +20,7 @@ def _registry():
             "pool": "0x" + "33" * 20,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
+            "quote_decimals": 18,
         },
         {
             "version": "v2",
@@ -27,6 +29,7 @@ def _registry():
             "pool": None,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
+            "quote_decimals": 18,
         },
         {
             "version": "v2",
@@ -35,6 +38,7 @@ def _registry():
             "pool": None,
             "supply_raw": 1_000_000 * 10**18,
             "token_decimals": 18,
+            "quote_decimals": 18,
         },
     ]
 
@@ -197,3 +201,35 @@ def test_canonical_v2_dex_price_checkpoint_marks_missing_swap_explicitly():
     assert checkpoint["price_crosscheck_scope"] == "no_swap_checkpoint"
     assert checkpoint["canonical_price_usd"] is None
 
+
+def test_swap_execution_quote_per_token_handles_token1_asset():
+    value = swap_execution_quote_per_token(
+        amount0_raw=10**18,
+        amount1_raw=-(2 * 10**18),
+        token_is_token0=False,
+        token_decimals=18,
+        quote_decimals=18,
+    )
+    assert value == Decimal("0.5")
+
+
+def test_swap_execution_quote_per_token_handles_token0_asset():
+    value = swap_execution_quote_per_token(
+        amount0_raw=-(2 * 10**18),
+        amount1_raw=10**18,
+        token_is_token0=True,
+        token_decimals=18,
+        quote_decimals=18,
+    )
+    assert value == Decimal("0.5")
+
+
+def test_swap_execution_quote_per_token_rejects_same_sign_deltas():
+    with pytest.raises(ValueError, match="opposite-signed"):
+        swap_execution_quote_per_token(
+            amount0_raw=10**18,
+            amount1_raw=2 * 10**18,
+            token_is_token0=True,
+            token_decimals=18,
+            quote_decimals=18,
+        )

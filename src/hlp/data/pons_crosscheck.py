@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Iterable
 
+from hlp.price import human_amount
+
 
 def build_representative_pool_targets(
     sample_rows: Iterable[dict],
@@ -70,6 +72,7 @@ def build_representative_pool_targets(
                     "quote_token": quote_token,
                     "supply_raw": int(launch["supply_raw"]),
                     "token_decimals": int(launch["token_decimals"]),
+                    "quote_decimals": int(launch["quote_decimals"]),
                     "pool_kind": "uniswap_v3",
                     "pool_identifier": str(pool).lower(),
                     "crosscheck_scope": "canonical_dex_pool",
@@ -90,6 +93,7 @@ def build_representative_pool_targets(
                     "quote_token": quote_token,
                     "supply_raw": int(launch["supply_raw"]),
                     "token_decimals": int(launch["token_decimals"]),
+                    "quote_decimals": int(launch["quote_decimals"]),
                     "pool_kind": None,
                     "pool_identifier": None,
                     "crosscheck_scope": "no_registered_v4_pool",
@@ -107,6 +111,7 @@ def build_representative_pool_targets(
                 "quote_token": quote_token,
                 "supply_raw": int(launch["supply_raw"]),
                 "token_decimals": int(launch["token_decimals"]),
+                    "quote_decimals": int(launch["quote_decimals"]),
                 "pool_kind": "uniswap_v4",
                 "pool_identifier": registration["pool_id"].lower(),
                 "crosscheck_scope": "canonical_dex_pool",
@@ -251,6 +256,33 @@ def reconcile_external_pool(target: dict, external_pool: dict) -> dict:
     )
     return result
 
+
+
+def swap_execution_quote_per_token(
+    *,
+    amount0_raw: int,
+    amount1_raw: int,
+    token_is_token0: bool,
+    token_decimals: int,
+    quote_decimals: int,
+) -> Decimal:
+    """Return the human quote/token execution ratio from one Swap event."""
+    amount0 = int(amount0_raw)
+    amount1 = int(amount1_raw)
+    if amount0 == 0 or amount1 == 0 or amount0 * amount1 >= 0:
+        raise ValueError(
+            "swap execution price requires non-zero opposite-signed deltas"
+        )
+    if token_decimals < 0 or quote_decimals < 0:
+        raise ValueError("swap execution decimals cannot be negative")
+
+    token_raw = abs(amount0 if token_is_token0 else amount1)
+    quote_raw = abs(amount1 if token_is_token0 else amount0)
+    token_amount = human_amount(token_raw, token_decimals)
+    quote_amount = human_amount(quote_raw, quote_decimals)
+    if token_amount <= 0 or quote_amount <= 0:
+        raise ValueError("swap execution amounts must be positive")
+    return quote_amount / token_amount
 
 def reconcile_price_against_ohlcv(
     *,

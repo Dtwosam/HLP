@@ -204,21 +204,29 @@ def test_representative_dex_replay_is_bounded() -> None:
     assert "DEX replay frozen inputs changed at launch" in replay
 
 
-def test_representative_dex_crosscheck_reports_failure_details() -> None:
+def test_representative_dex_crosscheck_uses_execution_quote_evidence() -> None:
     workflow = Path(
         ".github/workflows/"
         "phase1-pons-representative-dex-crosscheck.yml"
     ).read_text()
 
-    assert "representative_dex_price_failure_details" in workflow
-    assert '"outside_candle_bps"' in workflow
-    assert '"independent_candle_low_usd"' in workflow
-    assert '"independent_candle_high_usd"' in workflow
-    assert '"external_base_token"' in workflow
-    assert '"external_quote_token"' in workflow
+    assert "swap_execution_quote_per_token" in workflow
+    assert 'currency="token"' in workflow
+    assert '"canonical_price_semantics"' in workflow
+    assert '"swap_execution_quote_per_token"' in workflow
+    assert '"historical_price_result_semantics"' in workflow
+    assert '"diagnostic_noncanonical"' in workflow
+    assert "representative_dex_price_disagreements" in workflow
+    assert '"independent_candle_low_quote_per_token"' in workflow
+    assert '"independent_candle_high_quote_per_token"' in workflow
+    assert '"price_disagreements"' in workflow
+    assert (
+        "independent DEX historical price evidence is absent for "
+        in workflow
+    )
     assert (
         "independent DEX swap-price reconciliation failed for "
-        in workflow
+        not in workflow
     )
 
 

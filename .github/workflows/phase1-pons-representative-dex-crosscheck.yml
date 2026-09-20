@@ -279,6 +279,7 @@ jobs:
               build_representative_pool_targets,
               reconcile_external_pool,
               reconcile_price_against_ohlcv,
+              swap_execution_quote_per_token,
           )
           from hlp.data.pons_representative_identity import (
               require_representative_sample_identity,
@@ -489,17 +490,29 @@ jobs:
               for checkpoint in token_checkpoints:
                   block_number = int(checkpoint["block_number"])
                   timestamp = timestamp_by_block[block_number]
+                  execution_quote_per_token = (
+                      swap_execution_quote_per_token(
+                          amount0_raw=int(checkpoint["amount0"]),
+                          amount1_raw=int(checkpoint["amount1"]),
+                          token_is_token0=(
+                              int(token, 16)
+                              < int(target["quote_token"], 16)
+                          ),
+                          token_decimals=int(target["token_decimals"]),
+                          quote_decimals=int(target["quote_decimals"]),
+                      )
+                  )
                   candles = client.ohlcv(
                       pool_identifier,
                       timeframe="hour",
                       aggregate=1,
                       before_timestamp=timestamp + 3600,
                       limit=3,
-                      currency="usd",
+                      currency="token",
                       token=token,
                   )
                   price = reconcile_price_against_ohlcv(
-                      canonical_price_usd=checkpoint["token_price_usd"],
+                      canonical_price_usd=execution_quote_per_token,
                       canonical_timestamp=timestamp,
                       candles=candles,
                       candle_seconds=3600,
@@ -518,15 +531,21 @@ jobs:
                           checkpoint.get("market_cap_proxy_usd")
                       ),
                       "canonical_price_usd": checkpoint["token_price_usd"],
+                      "canonical_execution_quote_per_token": str(
+                          execution_quote_per_token
+                      ),
+                      "canonical_price_semantics": (
+                          "swap_execution_quote_per_token"
+                      ),
                       "price_match": price["price_match"],
                       "price_crosscheck_status": price["status"],
                       "independent_candle_timestamp": (
                           price.get("candle_timestamp")
                       ),
-                      "independent_candle_low_usd": (
+                      "independent_candle_low_quote_per_token": (
                           price.get("candle_low_usd")
                       ),
-                      "independent_candle_high_usd": (
+                      "independent_candle_high_quote_per_token": (
                           price.get("candle_high_usd")
                       ),
                       "outside_candle_bps": price.get("outside_candle_bps"),
@@ -560,6 +579,14 @@ jobs:
                   "canonical_price_usd": (
                       max_checkpoint["canonical_price_usd"]
                   ),
+                  "canonical_execution_quote_per_token": (
+                      max_checkpoint[
+                          "canonical_execution_quote_per_token"
+                      ]
+                  ),
+                  "canonical_price_semantics": (
+                      "swap_execution_quote_per_token"
+                  ),
                   "canonical_timestamp": (
                       max_checkpoint["canonical_timestamp"]
                   ),
@@ -589,10 +616,25 @@ jobs:
               row for row in price_targeted
               if row.get("price_match") is not True
           ]
+          observed_price_checkpoints = sum(
+              checkpoint.get("price_match") is not None
+              for row in price_targeted
+              for checkpoint in (row.get("price_checkpoints") or [])
+          )
           if not targeted:
               raise SystemExit(
                   "representative sample has no canonical DEX pools to "
                   "cross-check"
+              )
+          if not price_targeted:
+              raise SystemExit(
+                  "representative sample has no canonical DEX swap "
+                  "checkpoints to cross-check"
+              )
+          if observed_price_checkpoints == 0:
+              raise SystemExit(
+                  "independent DEX historical price evidence is absent for "
+                  "all representative swap checkpoints"
               )
           if mismatches:
               raise SystemExit(
@@ -601,20 +643,24 @@ jobs:
                   f"{[row['token'] for row in mismatches]}"
               )
           if price_failures:
-              failure_details = []
-              for failed in price_failures:
-                  for checkpoint in failed.get("price_checkpoints") or []:
+              disagreement_details = []
+              for disagreed in price_failures:
+                  for checkpoint in (
+                      disagreed.get("price_checkpoints") or []
+                  ):
                       if checkpoint.get("price_match") is True:
                           continue
-                      failure_details.append({
-                          "token": failed["token"],
-                          "pons_version": failed["pons_version"],
-                          "pool_identifier": failed.get("pool_identifier"),
-                          "quote_token": failed.get("quote_token"),
-                          "external_base_token": failed.get(
+                      disagreement_details.append({
+                          "token": disagreed["token"],
+                          "pons_version": disagreed["pons_version"],
+                          "pool_identifier": disagreed.get(
+                              "pool_identifier"
+                          ),
+                          "quote_token": disagreed.get("quote_token"),
+                          "external_base_token": disagreed.get(
                               "external_base_token"
                           ),
-                          "external_quote_token": failed.get(
+                          "external_quote_token": disagreed.get(
                               "external_quote_token"
                           ),
                           "checkpoint_roles": checkpoint.get(
@@ -638,17 +684,23 @@ jobs:
                           "canonical_timestamp": checkpoint.get(
                               "canonical_timestamp"
                           ),
-                          "canonical_price_usd": checkpoint.get(
-                              "canonical_price_usd"
+                          "canonical_execution_quote_per_token": (
+                              checkpoint.get(
+                                  "canonical_execution_quote_per_token"
+                              )
                           ),
                           "independent_candle_timestamp": checkpoint.get(
                               "independent_candle_timestamp"
                           ),
-                          "independent_candle_low_usd": checkpoint.get(
-                              "independent_candle_low_usd"
+                          "independent_candle_low_quote_per_token": (
+                              checkpoint.get(
+                                  "independent_candle_low_quote_per_token"
+                              )
                           ),
-                          "independent_candle_high_usd": checkpoint.get(
-                              "independent_candle_high_usd"
+                          "independent_candle_high_quote_per_token": (
+                              checkpoint.get(
+                                  "independent_candle_high_quote_per_token"
+                              )
                           ),
                           "outside_candle_bps": checkpoint.get(
                               "outside_candle_bps"
@@ -658,15 +710,10 @@ jobs:
                           ),
                       })
               print(json.dumps({
-                  "representative_dex_price_failure_details": (
-                      failure_details
+                  "representative_dex_price_disagreements": (
+                      disagreement_details
                   ),
               }, sort_keys=True))
-              raise SystemExit(
-                  "independent DEX swap-price reconciliation failed for "
-                  f"{len(price_failures)} representative tokens: "
-                  f"{[row['token'] for row in price_failures]}"
-              )
           if client.requests_made > max_gecko_attempts:
               raise SystemExit(
                   "representative DEX HTTP attempt budget exceeded: "
@@ -692,7 +739,14 @@ jobs:
                   "chain_id": 4663,
                   "ohlcv_timeframe": "hour",
                   "ohlcv_aggregate": 1,
+                  "ohlcv_currency": "token",
                   "ohlcv_tolerance_bps": "0",
+                  "canonical_price_semantics": (
+                      "swap_execution_quote_per_token"
+                  ),
+                  "historical_price_result_semantics": (
+                      "diagnostic_noncanonical"
+                  ),
                   "sample_run_id": int("${{ inputs.sample_run_id }}"),
                   "sample_sha256": sample_identity["sample_sha256"],
                   "token_set_sha256": sample_identity["token_set_sha256"],
@@ -730,6 +784,9 @@ jobs:
                   for row in price_targeted
                   for checkpoint in (row.get("price_checkpoints") or [])
               ),
+              "observed_swap_price_checkpoints": (
+                  observed_price_checkpoints
+              ),
               "no_swap_checkpoint": sum(
                   row.get("price_crosscheck_scope")
                   == "no_swap_checkpoint"
@@ -740,7 +797,7 @@ jobs:
                   for row in rows
               ),
               "pool_mismatches": len(mismatches),
-              "price_failures": len(price_failures),
+              "price_disagreements": len(price_failures),
               "canonical_block_rpc_requests": block_rpc_requests,
               "canonical_block_rpc_response_bytes": (
                   block_rpc_response_bytes

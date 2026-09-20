@@ -72,4 +72,12 @@ Fallback/complement:
 
 Phase 1 passes only if a reproducible complete-enough historical path can be operated at $0 and the representative sample reconciles against independent explorer/DEX evidence.
 
+For DEX evidence, exact independent pool/token identity remains fail-closed.
+Historical third-party price candles are compared to canonical on-chain Swap
+execution prices and retained as validation evidence, but they do not override
+reconstructable chain facts when retention is incomplete or the third-party
+history disagrees. This applies DEC-006/DEC-012 and the pre-existing data-source
+audit rule that GeckoTerminal/DEX Screener are cross-check sources rather than
+canonical history.
+
 If not, Phase 1 is BLOCKED and the ingestion architecture is redesigned before any feature/model work.

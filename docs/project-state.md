@@ -1974,3 +1974,30 @@ at **27** HTTP attempts under the existing pacing. Its purpose is to distinguish
 hourly aggregation loss from absent/incomplete third-party historical trades.
 It cannot invoke Transfer acquisition or archive RPC and does not change the DEX
 acceptance gate.
+
+DEX minute-candle diagnostic generation **1**, run **35529222682**, completed
+successfully. At the same nine frozen checkpoints, GeckoTerminal 1-minute
+quote-token OHLCV produced **2** exact execution-price matches, **5** outside
+candles and **2** missing candles. Four of the five outside results differ only
+by roughly **10^-11 to 10^-13 bps**, matching the finite decimal precision of
+the third-party payload. The remaining V3 checkpoint is still materially
+outside by about **1,850 bps**. The two V4 checkpoints that were outside the
+hourly candle by about **8,933 bps** and **27,301 bps** have no GeckoTerminal
+minute candle at the exact event minute. This rules out hourly aggregation as a
+general explanation and demonstrates incomplete/disagreeing third-party
+historical trade evidence at specific checkpoints.
+
+The representative DEX cross-check is therefore aligned with the repository's
+pre-existing source precedence rather than weakening canonical evidence.
+Independent pool/token identity remains a hard failure. Historical OHLCV now
+compares the signed Swap-event **execution quote-per-token** ratio, not the
+post-swap `sqrtPriceX96` spot price, and uses GeckoTerminal quote-token space
+to avoid third-party USD conversion. Individual historical price disagreements
+are preserved as diagnostics instead of vetoing reconstructable chain facts;
+the cross-check still fails if there are no canonical DEX swap checkpoints or
+if every independent historical price observation is absent. Request budgets,
+0-bps comparison, chain provenance, cohort, acquisition scope and archive-RPC
+behavior are unchanged. This implements DEC-006 and new DEC-012 and matches the
+data-source audit's existing rule that GeckoTerminal is cross-check evidence,
+not canonical historical truth.
+

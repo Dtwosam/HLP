@@ -85,3 +85,24 @@ Status: ACCEPTED
 Alchemy Free is not used as the sole historical log crawler because Robinhood eth_getLogs is capped to 10 blocks/query on that tier.
 
 Substreams/Firehose and existing protocol packages are the primary candidate, but full-history feasibility is an explicit Phase 1 acceptance gate because free processed-block/egress quotas are finite.
+
+## DEC-012 — independent DEX history validates but does not override chain truth
+Date: 2026-09-20
+Status: ACCEPTED
+
+Representative DEX reconciliation keeps exact external pool identity as a
+fail-closed gate. Historical third-party OHLCV is validation evidence, not
+canonical history, consistent with DEC-006 and the Phase-1 data-source audit.
+
+When a Swap event is compared with trade-derived OHLCV, HLP uses the signed
+on-chain Swap amounts to derive the execution quote-per-token price. The
+post-swap `sqrtPriceX96` spot price remains canonical market-path evidence but
+is not the same price concept as a trade execution candle.
+
+Third-party historical price disagreements or missing individual candles are
+retained in the cross-check artifact and summary; they do not replace or veto
+reconstructable on-chain facts. The cross-check still fails if canonical pool
+identity disagrees, no canonical DEX swap checkpoints exist, all independent
+historical price observations are absent, provenance changes, or request
+budgets are exceeded.
+
