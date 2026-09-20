@@ -6,6 +6,7 @@ from hlp.data.phase1_evidence import (
     RUNNER_SMOKE_UNIVERSE_SHA256,
 )
 from hlp.data.phase1_readiness import (
+    EVIDENCE_ALLOWED_WORKFLOW_PATHS,
     EVIDENCE_REQUIRED_ARTIFACTS,
     FINAL_ACCEPTANCE_ARTIFACT,
     FINALIZER_WORKFLOW_PATH,
@@ -64,6 +65,18 @@ def _evidence(run_id=400):
         path=(
             ".github/workflows/"
             "phase1-pons-post-eligibility-evidence-one-shot.yml"
+        ),
+        artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
+    )
+
+
+def _normalized_recovered_evidence(run_id=500):
+    return _run(
+        run_id,
+        name="phase1-pons-post-eligibility-ready-replay-one-shot",
+        path=(
+            ".github/workflows/"
+            "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
         ),
         artifacts=EVIDENCE_REQUIRED_ARTIFACTS,
     )
@@ -496,6 +509,71 @@ def test_readiness_advances_from_terminal_source_failure_with_recovered_evidence
     assert report["stage"] == "viability_measurements"
     assert report["next_action"] == "arm_viability_run_ledger"
     assert report["evidence_run_id"] == 500
+
+
+def test_readiness_accepts_normalized_recovered_evidence_handoff():
+    source = _source(
+        status="completed",
+        conclusion="failure",
+        artifacts=(),
+        job_counts={"success": 16, "cancelled": 1},
+    )
+    evidence = _normalized_recovered_evidence(500)
+    handoff = _handoff(500, recovered=True)
+    handoff.update(
+        {
+            "lifecycle_run_id": 35518892463,
+            "v1_v3_run_id": 34228430753,
+            "v2_v4_run_id": 34471480180,
+        }
+    )
+
+    report = _report(
+        source_run=source,
+        evidence_run=evidence,
+        evidence_run_id=500,
+        evidence_handoff=handoff,
+    )
+
+    assert (
+        ".github/workflows/"
+        "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
+        in EVIDENCE_ALLOWED_WORKFLOW_PATHS
+    )
+    assert report["stage"] == "viability_measurements"
+    assert report["next_action"] == "arm_viability_run_ledger"
+    assert report["evidence_run_id"] == 500
+
+
+def test_readiness_rejects_normalized_replay_without_recovery_mode():
+    source = _source(
+        status="completed",
+        conclusion="failure",
+        artifacts=(),
+        job_counts={"success": 16, "cancelled": 1},
+    )
+    evidence = _normalized_recovered_evidence(500)
+    handoff = _handoff(500, recovered=False)
+    handoff.update(
+        {
+            "lifecycle_run_id": 35518892463,
+            "v1_v3_run_id": 34228430753,
+            "v2_v4_run_id": 34471480180,
+        }
+    )
+
+    report = _report(
+        source_run=source,
+        evidence_run=evidence,
+        evidence_run_id=500,
+        evidence_handoff=handoff,
+    )
+
+    assert report["evidence_valid"] is False
+    assert (
+        "recovered evidence handoff is not marked recovered"
+        in report["evidence_handoff_errors"]
+    )
 
 
 def test_readiness_active_rescue_blocks_recovered_evidence_advance():

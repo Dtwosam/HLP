@@ -37,6 +37,7 @@ EVIDENCE_REQUIRED_ARTIFACTS = (
 EVIDENCE_ALLOWED_WORKFLOW_PATHS = (
     ".github/workflows/phase1-pons-post-eligibility-evidence-one-shot.yml",
     ".github/workflows/phase1-pons-recovered-completion-one-shot.yml",
+    ".github/workflows/phase1-pons-post-eligibility-ready-replay-one-shot.yml",
 )
 
 VIABILITY_ROUTE_WORKFLOW_PATHS = {
@@ -371,7 +372,7 @@ def _evidence_handoff_errors(
             or v2_v4_run_id != SOURCE_ELIGIBILITY_RUN_ID
         ):
             errors.append("normal evidence handoff routing changed")
-    elif evidence_path == EVIDENCE_ALLOWED_WORKFLOW_PATHS[1]:
+    elif evidence_path in EVIDENCE_ALLOWED_WORKFLOW_PATHS[1:]:
         if not recovery_mode:
             errors.append("recovered evidence handoff is not marked recovered")
 

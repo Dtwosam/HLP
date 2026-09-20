@@ -2132,3 +2132,11 @@ staged final representative-validation replay. No viability route, required
 work-block floor, zero-cost criterion, pool-identity gate or research threshold
 changed.
 
+The shared readiness helper is now aligned with the workflow-level recovered
+evidence allowlists as well. `EVIDENCE_ALLOWED_WORKFLOW_PATHS` includes the
+normalized ready replay, and both recovered evidence paths require
+`recovery_mode=true`; the normal evidence path still requires
+`recovery_mode=false` plus source-run routing. Tests cover acceptance of the
+normalized recovered handoff and rejection if that same workflow attempts to
+masquerade as normal evidence.
+
