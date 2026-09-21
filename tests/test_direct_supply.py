@@ -184,3 +184,30 @@ def test_supply_timeline_rejects_unknown_seed_order():
             seed_order="future",
         )
 
+
+def test_supply_timeline_can_seed_from_end_of_initializer_block():
+    deltas = build_direct_supply_delta_rows([
+        transfer(
+            from_address=ALICE,
+            to_address=ZERO,
+            value=100,
+            block=11,
+            txi=1,
+            logi=0,
+        ),
+    ])
+    timeline = DirectSupplyTimeline(
+        [{
+            "token": TOKEN,
+            "supply_raw": 1000,
+            "initializer_block": 10,
+            "initializer_transaction_index": 1,
+            "initializer_log_index": 0,
+        }],
+        deltas,
+        seed_order="initializer",
+    )
+
+    assert timeline.supply_at(TOKEN, (10, 1, 0)) == 1000
+    assert timeline.supply_at(TOKEN, (11, 1, 0)) == 900
+

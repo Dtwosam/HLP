@@ -95,13 +95,15 @@ class DirectSupplyTimeline:
         seed_order: str = "initialize",
     ):
         seed_order = str(seed_order).strip().lower()
-        if seed_order not in {"initialize", "launch"}:
+        if seed_order not in {"initialize", "initializer", "launch"}:
             raise ValueError(
                 f"unsupported direct supply seed order: {seed_order!r}"
             )
-        seed_label = (
-            "Initialize" if seed_order == "initialize" else "launch"
-        )
+        seed_label = {
+            "initialize": "Initialize",
+            "initializer": "Initializer",
+            "launch": "launch",
+        }[seed_order]
         deltas_by_token: dict[str, list[dict]] = {}
         for raw in supply_delta_rows:
             row = _row_dict(raw)

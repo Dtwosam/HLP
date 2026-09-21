@@ -246,9 +246,14 @@ Implemented foundation:
   shared launcher TokenCreated/TokenDistributed history, and builds one
   deterministic state-backed LBP registry with unique token/initializer/derived
   PoolId identities. TokenDistributed amount is retained separately while
-  initializer-block-end totalSupply becomes the supply seed. The handoff remains
-  `source_coverage_complete=false`; CCA and optional migrated-V4 histories
-  still have to be reconstructed and priced;
+  initializer-block-end totalSupply becomes the supply seed. CCA reconstruction
+  now has a source-specific bounded market-window command: it binds the frozen
+  independent CCA orientation evidence, samples WETH/USD or Chainlink only at
+  observed CCA event orders, and replays complete mint/burn supply deltas
+  causally from the initializer-block seed. Empty shards are explicit and do
+  not open RPC. The handoff remains `source_coverage_complete=false`; the
+  chain-wide CCA event backfill and optional migrated-V4 lifecycle merge still
+  have to be executed/built before LBP coverage can close;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`

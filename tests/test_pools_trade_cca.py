@@ -197,3 +197,39 @@ def test_cca_orientation_math_ignores_global_decimal_precision():
     assert str(high["direct_quote_per_token"]) == (
         "0.00010050000000000000000000001251110676486454358243005646755818816018290817737579346"
     )
+
+
+def test_cca_market_caps_replay_initializer_seed_supply_deltas():
+    raw = int(Q96)
+    registry_rows = [{
+        **registry()[0],
+        "initializer_block": 90,
+        "initializer_transaction_index": 1,
+        "initializer_log_index": 0,
+    }]
+    deltas = [{
+        "token": TOKEN,
+        "from_address": TOKEN,
+        "to_address": "0x" + "00" * 20,
+        "value_raw": 100_000_000 * 10**18,
+        "supply_delta_raw": -100_000_000 * 10**18,
+        "is_mint": False,
+        "is_burn": True,
+        "block_number": 95,
+        "transaction_hash": "0x" + "cc" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }]
+    rows = build_cca_market_cap_points(
+        registry_rows,
+        [event(raw, block=100)],
+        [],
+        orientation="quote_per_token",
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        supply_delta_rows=deltas,
+    )
+
+    assert rows[0]["supply_raw"] == 900_000_000 * 10**18
+    assert Decimal(rows[0]["market_cap_quote"]) == Decimal("900000000")
+

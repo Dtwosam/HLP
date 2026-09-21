@@ -156,6 +156,13 @@ from hlp.data.pools_fun_registry import (
     attach_pools_fun_initializations,
     build_pools_fun_registry,
 )
+from hlp.data.pools_trade_cca import (
+    build_cca_market_cap_points,
+    summarize_cca_market_caps,
+)
+from hlp.data.pools_trade_cca_orientation import (
+    validate_pools_trade_cca_orientation,
+)
 from hlp.data.pools_trade_registry import (
     attach_pools_trade_instant_initializations,
     attach_pools_trade_lbp_supply_states,
@@ -227,6 +234,7 @@ from hlp.data.trench_lifecycle import (
     build_trench_handoff_market_registries,
 )
 from hlp.data.types import (
+    CcaPriceEvent,
     FlapEvent,
     HoodFunEvent,
     PoolsTradeLbpInitializerCreated,
@@ -4729,6 +4737,308 @@ def cmd_rpc_pools_trade_registry_window(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def cmd_phase2_pools_trade_lbp_cca_market_window(
+    args: argparse.Namespace,
+) -> int:
+    """Price one bounded pools.trade LBP CCA window causally."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    if args.to_block < args.from_block:
+        raise SystemExit("to-block must be >= from-block")
+
+    registry = _load_jsonl(args.registry)
+    if not registry:
+        raise SystemExit("pools.trade LBP registry is empty")
+
+    by_initializer = {}
+    tokens = set()
+    quote_by_initializer = {}
+    for raw in registry:
+        row = dict(raw)
+        if str(row.get("launch_kind") or "") != "crowd_lbp":
+            raise SystemExit("pools.trade LBP registry launch kind changed")
+        initializer = normalize_address(str(row["initializer"]))
+        token = normalize_address(str(row["token"]))
+        quote = normalize_address(str(row["quote_token"]))
+        if initializer in by_initializer:
+            raise SystemExit(
+                f"pools.trade LBP registry repeats initializer: {initializer}"
+            )
+        if token in tokens:
+            raise SystemExit(
+                f"pools.trade LBP registry repeats token: {token}"
+            )
+        block = int(row["initializer_block"])
+        log_index = int(row["initializer_log_index"])
+        tx_index = row.get("initializer_transaction_index")
+        if block <= 0 or log_index < 0:
+            raise SystemExit(
+                f"pools.trade LBP initializer order is invalid: {initializer}"
+            )
+        row["initializer"] = initializer
+        row["token"] = token
+        row["quote_token"] = quote
+        by_initializer[initializer] = row
+        quote_by_initializer[initializer] = quote
+        tokens.add(token)
+
+    events = []
+    for raw in _iter_jsonl(args.events):
+        event = CcaPriceEvent(**raw)
+        initializer = normalize_address(event.auction)
+        launch = by_initializer.get(initializer)
+        if launch is None:
+            raise SystemExit(
+                "pools.trade LBP CCA tape contains unknown initializer: "
+                f"{initializer}"
+            )
+        if not args.from_block <= int(event.block_number) <= args.to_block:
+            raise SystemExit(
+                "pools.trade LBP CCA event outside requested window: "
+                f"{event.block_number}"
+            )
+        launch_order = (
+            int(launch["initializer_block"]),
+            -1
+            if launch.get("initializer_transaction_index") is None
+            else int(launch["initializer_transaction_index"]),
+            int(launch["initializer_log_index"]),
+        )
+        event_order_tuple = (
+            int(event.block_number),
+            -1
+            if event.transaction_index is None
+            else int(event.transaction_index),
+            int(event.log_index),
+        )
+        if event_order_tuple <= launch_order:
+            raise SystemExit(
+                "pools.trade LBP CCA event does not follow initializer: "
+                f"{initializer}"
+            )
+        events.append(event)
+    events.sort(
+        key=lambda row: (
+            int(row.block_number),
+            -1 if row.transaction_index is None
+            else int(row.transaction_index),
+            int(row.log_index),
+        )
+    )
+
+    supply_deltas = []
+    for raw in _iter_jsonl(args.supply_deltas):
+        row = dict(raw)
+        token = normalize_address(str(row["token"]))
+        if token not in tokens:
+            raise SystemExit(
+                "pools.trade LBP supply tape contains unknown token: "
+                f"{token}"
+            )
+        if int(row["block_number"]) <= args.to_block:
+            row["token"] = token
+            supply_deltas.append(row)
+    supply_deltas.sort(
+        key=lambda row: (event_order(row), row["token"])
+    )
+
+    orientation_descriptor = json.loads(
+        Path(args.orientation_evidence).read_text()
+    )
+    orientation = validate_pools_trade_cca_orientation(
+        orientation_descriptor
+    )["orientation"]
+
+    quote_decimals = _direct_quote_decimals(args.quote_decimals)
+    required_quotes = {
+        quote_by_initializer[
+            normalize_address(event.auction)
+        ]
+        for event in events
+    }
+    missing_decimals = sorted(required_quotes - set(quote_decimals))
+    if missing_decimals:
+        raise SystemExit(
+            "pools.trade LBP quote allowlist is missing: "
+            + ", ".join(missing_decimals)
+        )
+
+    point_provenance = {
+        "source": "phase2_pools_trade_lbp_cca_market_window",
+        "chain_id": 4663,
+        "source_id": "pools_trade_lbp",
+        "registry": Path(args.registry).name,
+        "registry_sha256": _sha256_file(args.registry),
+        "events": Path(args.events).name,
+        "events_sha256": _sha256_file(args.events),
+        "supply_deltas": Path(args.supply_deltas).name,
+        "supply_deltas_sha256": _sha256_file(args.supply_deltas),
+        "orientation_evidence": Path(args.orientation_evidence).name,
+        "orientation_evidence_sha256": _sha256_file(
+            args.orientation_evidence
+        ),
+        "orientation": orientation,
+        "quote_decimals": Path(args.quote_decimals).name,
+        "quote_decimals_sha256": _sha256_file(args.quote_decimals),
+        "quote_feeds": Path(args.quote_feeds).name,
+        "quote_feeds_sha256": _sha256_file(args.quote_feeds),
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "supply_semantics": (
+            "initializer-block-end seed plus complete causal mint/burn deltas"
+        ),
+        "market_cap_math": (
+            "CCA raw quote/token Q96 * causal supply_raw / "
+            "10**quote_decimals"
+        ),
+    }
+
+    if not events:
+        points_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance=point_provenance,
+        )
+        summary_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.summary_out),
+            provenance={
+                "source": (
+                    "phase2_pools_trade_lbp_cca_market_window_summary"
+                ),
+                "market_cap_points_sha256": points_manifest["sha256"],
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+            },
+        )
+        report = {
+            "version": "phase2-pools-trade-lbp-cca-market-window-v1",
+            "source_id": "pools_trade_lbp",
+            "phase": "cca",
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "cca_events": 0,
+            "market_cap_points": 0,
+            "priced_points": 0,
+            "unpriced_points": 0,
+            "tokens_with_price_points": 0,
+            "points_sha256": points_manifest["sha256"],
+            "summary_sha256": summary_manifest["sha256"],
+            "orientation": orientation,
+            "source_coverage_complete": False,
+            "empty_window": True,
+        }
+        Path(args.report_out).write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0
+
+    target_events = []
+    for event in events:
+        target_events.append({
+            "block_number": int(event.block_number),
+            "transaction_hash": event.transaction_hash,
+            "transaction_index": event.transaction_index,
+            "log_index": int(event.log_index),
+            "quote_token": quote_by_initializer[
+                normalize_address(event.auction)
+            ],
+        })
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd, anchors, anchor_window_size = (
+        _sparse_weth_usd_anchors(
+            rpc,
+            target_events,
+            pool=args.usd_anchor_pool,
+            chunk_size=args.chunk_size,
+            fallback_block=args.from_block - 1,
+        )
+    )
+    sparse_chainlink_points = _sparse_chainlink_launchpad_points(
+        rpc,
+        target_events,
+        feed_path=args.quote_feeds,
+        window_size=anchor_window_size,
+        label="pools.trade LBP",
+    )
+
+    points = build_cca_market_cap_points(
+        registry,
+        events,
+        anchors,
+        orientation=orientation,
+        initial_weth_usd=initial_weth_usd,
+        quote_decimals=quote_decimals,
+        initial_quote_usd={},
+        quote_usd_updates=iter(sparse_chainlink_points),
+        supply_delta_rows=supply_deltas,
+    )
+    points = [
+        {**row, "source_id": "pools_trade_lbp"}
+        for row in points
+    ]
+    points_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            **point_provenance,
+            "usd_anchor_pool": normalize_address(args.usd_anchor_pool),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
+            "sparse_chainlink_mode": "state_and_answer_updates",
+        },
+    )
+    summary = summarize_cca_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": (
+                "phase2_pools_trade_lbp_cca_market_window_summary"
+            ),
+            "market_cap_points_sha256": points_manifest["sha256"],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "eligibility_threshold_usd": "100000",
+        },
+    )
+    priced = sum(int(row["priced_points"]) for row in summary)
+    total = sum(int(row["price_points"]) for row in summary)
+    report = {
+        "version": "phase2-pools-trade-lbp-cca-market-window-v1",
+        "source_id": "pools_trade_lbp",
+        "phase": "cca",
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "cca_events": len(events),
+        "market_cap_points": len(points),
+        "priced_points": priced,
+        "unpriced_points": total - priced,
+        "tokens_with_price_points": len(summary),
+        "points_sha256": points_manifest["sha256"],
+        "summary_sha256": summary_manifest["sha256"],
+        "orientation": orientation,
+        "sparse_anchor_points": len(anchors),
+        "sparse_chainlink_points": len(sparse_chainlink_points),
+        "anchor_window_size": anchor_window_size,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_coverage_complete": False,
+        "empty_window": False,
+    }
+    Path(args.report_out).write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 
@@ -9398,6 +9708,50 @@ def build_parser() -> argparse.ArgumentParser:
     pools_trade_instant_market.add_argument("--report-out", required=True)
     pools_trade_instant_market.set_defaults(
         func=cmd_phase2_pools_trade_instant_market_window
+    )
+
+    pools_trade_lbp_cca_market = sub.add_parser(
+        "phase2-pools-trade-lbp-cca-market-window"
+    )
+    pools_trade_lbp_cca_market.add_argument("--registry", required=True)
+    pools_trade_lbp_cca_market.add_argument("--events", required=True)
+    pools_trade_lbp_cca_market.add_argument(
+        "--supply-deltas", required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--orientation-evidence", required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--from-block", type=int, required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--to-block", type=int, required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--quote-decimals", required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--quote-feeds", required=True
+    )
+    pools_trade_lbp_cca_market.add_argument("--out", required=True)
+    pools_trade_lbp_cca_market.add_argument(
+        "--summary-out", required=True
+    )
+    pools_trade_lbp_cca_market.add_argument(
+        "--report-out", required=True
+    )
+    pools_trade_lbp_cca_market.set_defaults(
+        func=cmd_phase2_pools_trade_lbp_cca_market_window
     )
 
     noxa_registry = sub.add_parser("rpc-noxa-registry-window")

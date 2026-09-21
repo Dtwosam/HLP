@@ -10,6 +10,7 @@ from __future__ import annotations
 from decimal import Decimal, getcontext, localcontext
 from typing import Iterable
 
+from hlp.data.direct_supply import DirectSupplyTimeline
 from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.types import CcaPriceEvent
 
@@ -145,6 +146,7 @@ def build_cca_market_cap_points(
     quote_decimals: dict[str, int],
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
+    supply_delta_rows: Iterable[dict] | None = None,
 ) -> list[dict]:
     """Build causal pools.trade CCA market-cap points.
 
@@ -186,6 +188,15 @@ def build_cca_market_cap_points(
         weth_anchor_points=weth_usd_anchor_points,
         initial_quote_usd=initial_quote_usd,
         oracle_updates=quote_usd_updates,
+    )
+    supply_timeline = (
+        None
+        if supply_delta_rows is None
+        else DirectSupplyTimeline(
+            registry.values(),
+            supply_delta_rows,
+            seed_order="initializer",
+        )
     )
 
     ordered = sorted(
@@ -231,13 +242,21 @@ def build_cca_market_cap_points(
                 f"invalid quote decimals for CCA quote {quote}: {decimals}"
             )
 
+        supply_raw = (
+            int(launch["supply_raw"])
+            if supply_timeline is None
+            else supply_timeline.supply_at(
+                token,
+                order,
+            )
+        )
         raw_quote_per_raw_token = cca_quote_per_token(
             event.clearing_price_x96,
             orientation=orientation,
         )
         market_cap_quote = (
             raw_quote_per_raw_token
-            * Decimal(int(launch["supply_raw"]))
+            * Decimal(supply_raw)
             / (Decimal(10) ** decimals)
         )
         quote_usd = timeline.price(quote)
@@ -256,7 +275,7 @@ def build_cca_market_cap_points(
             "initializer": initializer,
             "quote_token": quote,
             "quote_decimals": decimals,
-            "supply_raw": int(launch["supply_raw"]),
+            "supply_raw": supply_raw,
             "orientation": orientation,
             "checkpoint_block": int(event.checkpoint_block),
             "clearing_price_x96": int(event.clearing_price_x96),
