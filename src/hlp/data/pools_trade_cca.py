@@ -7,14 +7,15 @@ quote-per-token.
 
 from __future__ import annotations
 
-from decimal import Decimal, getcontext
+from decimal import Decimal, getcontext, localcontext
 from typing import Iterable
 
 from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.types import CcaPriceEvent
 
 
-getcontext().prec = max(getcontext().prec, 80)
+CCA_DECIMAL_PRECISION = 80
+getcontext().prec = max(getcontext().prec, CCA_DECIMAL_PRECISION)
 Q96 = Decimal(2) ** 96
 CCA_ORIENTATIONS = frozenset({"quote_per_token", "token_per_quote"})
 
@@ -25,10 +26,12 @@ def cca_price_candidates(clearing_price_x96: int) -> dict[str, Decimal]:
     if raw <= 0:
         raise ValueError("CCA clearing_price_x96 must be positive")
     value = Decimal(raw)
-    return {
-        "quote_per_token": value / Q96,
-        "token_per_quote": Q96 / value,
-    }
+    with localcontext() as context:
+        context.prec = CCA_DECIMAL_PRECISION
+        return {
+            "quote_per_token": value / Q96,
+            "token_per_quote": Q96 / value,
+        }
 
 
 def cca_quote_per_token(
@@ -57,8 +60,10 @@ def infer_cca_price_orientation(
     candidates = cca_price_candidates(clearing_price_x96)
     direct_quote = candidates["quote_per_token"]
     inverse_quote = candidates["token_per_quote"]
-    direct_error = abs(direct_quote / migrated - Decimal(1))
-    inverse_error = abs(inverse_quote / migrated - Decimal(1))
+    with localcontext() as context:
+        context.prec = CCA_DECIMAL_PRECISION
+        direct_error = abs(direct_quote / migrated - Decimal(1))
+        inverse_error = abs(inverse_quote / migrated - Decimal(1))
 
     if direct_error == inverse_error:
         raise ValueError("CCA price orientation is ambiguous")
