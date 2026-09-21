@@ -46,9 +46,10 @@ def build_phase2_source_inventory() -> list[dict]:
     """Return deterministic known launch/trading sources and readiness.
 
     phase1_proven means the source has same-snapshot lifecycle evidence from
-    the accepted Phase-1 Pons path. adapter_ready means launch and native
-    price-path adapters exist but chain-wide historical coverage is not yet
-    frozen. decoder_ready means identity/event decoding exists but registry
+    the accepted Phase-1 Pons path. adapter_ready means deterministic source
+    registry/discovery plus native price-path adapters exist, but chain-wide
+    historical coverage is not yet frozen. decoder_ready means identity/event
+    decoding exists but registry
     or lifecycle assembly remains. discovery_pending means the DEX is a
     material chain-wide trading venue whose direct-launch population still
     needs deterministic discovery.
@@ -208,9 +209,14 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": [],
             "trading_contracts": _addresses(UNISWAP_V3_FACTORY),
             "market_phases": ["uniswap_v3"],
-            "readiness": "discovery_pending",
-            "implementation_evidence": ["hlp.data.v3_launchpad"],
-            "blocking_gap": "deterministic direct-launch discovery rule",
+            "readiness": "adapter_ready",
+            "implementation_evidence": [
+                "hlp.data.direct_markets",
+                "hlp.data.v3_launchpad",
+            ],
+            "blocking_gap": (
+                "canonical multi-pool selection and launch-origin attribution"
+            ),
         },
         {
             "source_id": "direct_uniswap_v4",
@@ -219,9 +225,14 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": [],
             "trading_contracts": _addresses(UNISWAP_V4_POOL_MANAGER),
             "market_phases": ["uniswap_v4"],
-            "readiness": "discovery_pending",
-            "implementation_evidence": ["hlp.data.v4_launchpad"],
-            "blocking_gap": "deterministic direct-launch discovery rule",
+            "readiness": "adapter_ready",
+            "implementation_evidence": [
+                "hlp.data.direct_markets",
+                "hlp.data.v4_launchpad",
+            ],
+            "blocking_gap": (
+                "canonical multi-pool selection and launch-origin attribution"
+            ),
         },
         {
             "source_id": "direct_sushiswap_v3",
@@ -230,9 +241,14 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": [],
             "trading_contracts": _addresses(SUSHISWAP_V3_FACTORY),
             "market_phases": ["sushiswap_v3"],
-            "readiness": "discovery_pending",
-            "implementation_evidence": ["hlp.data.v3_launchpad"],
-            "blocking_gap": "deterministic direct-launch discovery rule",
+            "readiness": "adapter_ready",
+            "implementation_evidence": [
+                "hlp.data.direct_markets",
+                "hlp.data.v3_launchpad",
+            ],
+            "blocking_gap": (
+                "canonical multi-pool selection and launch-origin attribution"
+            ),
         },
     ]
     validate_phase2_source_inventory(rows)
