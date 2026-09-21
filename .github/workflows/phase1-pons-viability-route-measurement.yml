@@ -301,6 +301,9 @@ jobs:
               output.write(
                   f"evidence_artifact_id={evidence_artifact_id}\n"
               )
+              output.write(
+                  f"evidence_workflow_path={observed_path}\n"
+              )
 
           print(json.dumps({
               "source_eligibility_run_id": source_run_id,
@@ -348,6 +351,7 @@ jobs:
         env:
           EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
           SOURCE_ELIGIBILITY_RUN_ID: ${{ inputs.source_eligibility_run_id }}
+          EVIDENCE_WORKFLOW_PATH: ${{ steps.evidence.outputs.evidence_workflow_path }}
         run: |
           python - <<'PY'
           import json
@@ -362,6 +366,25 @@ jobs:
           )
           evidence_run_id = int(os.environ["EVIDENCE_RUN_ID"])
           source_run_id = int(os.environ["SOURCE_ELIGIBILITY_RUN_ID"])
+          observed_path = os.environ["EVIDENCE_WORKFLOW_PATH"]
+          normal_evidence_path = (
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_paths = {
+              ".github/workflows/"
+              "phase1-pons-recovered-completion-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-ready-replay-one-shot.yml",
+          }
+          if observed_path not in {
+              normal_evidence_path,
+              *recovered_evidence_paths,
+          }:
+              raise SystemExit(
+                  "viability measurement evidence workflow path changed "
+                  "between preflight steps"
+              )
 
           if report.get("status") != "ready":
               raise SystemExit(
