@@ -1448,10 +1448,21 @@ def _phase2_direct_market_cap_window(
     }
     supply_deltas = [
         row
-        for row in _load_jsonl(args.supply_deltas)
-        if normalize_address(str(row["token"])) in registry_tokens
-        and int(row["block_number"]) <= args.to_block
+        for row in _iter_filtered_event_tape(
+            file_path=args.supply_deltas,
+            shard_dir=args.supply_deltas_shard_dir,
+            aggregate_manifest=args.supply_deltas_manifest,
+            label="direct supply deltas",
+            field="token",
+            values=registry_tokens,
+        )
+        if int(row["block_number"]) <= args.to_block
     ]
+    supply_delta_sha256 = _event_tape_sha256(
+        file_path=args.supply_deltas,
+        aggregate_manifest=args.supply_deltas_manifest,
+        label="direct supply deltas",
+    )
 
     if version == "v3":
         market_field = "pool"
@@ -1501,8 +1512,11 @@ def _phase2_direct_market_cap_window(
         "registry_sha256": _sha256_file(args.registry),
         "initializes": Path(args.initializes).name,
         "initializes_sha256": _sha256_file(args.initializes),
-        "supply_deltas": Path(args.supply_deltas).name,
-        "supply_deltas_sha256": _sha256_file(args.supply_deltas),
+        "supply_deltas": _event_tape_source_name(
+            file_path=args.supply_deltas,
+            aggregate_manifest=args.supply_deltas_manifest,
+        ),
+        "supply_deltas_sha256": supply_delta_sha256,
         "supply_semantics": (
             "initialize-block-end totalSupply corrected to event order "
             "and advanced by complete mint/burn Transfer deltas"
@@ -6747,7 +6761,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     direct_v3_market.add_argument("--registry", required=True)
     direct_v3_market.add_argument("--initializes", required=True)
-    direct_v3_market.add_argument("--supply-deltas", required=True)
+    direct_v3_supply = direct_v3_market.add_mutually_exclusive_group(
+        required=True
+    )
+    direct_v3_supply.add_argument("--supply-deltas")
+    direct_v3_supply.add_argument("--supply-deltas-manifest")
+    direct_v3_market.add_argument("--supply-deltas-shard-dir")
     direct_v3_swaps = direct_v3_market.add_mutually_exclusive_group(
         required=True
     )
@@ -6777,7 +6796,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     direct_v4_market.add_argument("--registry", required=True)
     direct_v4_market.add_argument("--initializes", required=True)
-    direct_v4_market.add_argument("--supply-deltas", required=True)
+    direct_v4_supply = direct_v4_market.add_mutually_exclusive_group(
+        required=True
+    )
+    direct_v4_supply.add_argument("--supply-deltas")
+    direct_v4_supply.add_argument("--supply-deltas-manifest")
+    direct_v4_market.add_argument("--supply-deltas-shard-dir")
     direct_v4_swaps = direct_v4_market.add_mutually_exclusive_group(
         required=True
     )
