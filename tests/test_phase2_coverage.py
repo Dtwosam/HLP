@@ -116,3 +116,36 @@ def test_blocked_coverage_requires_reason():
             [complete("pons_v1"), blocked],
             snapshot_head_block=100,
         )
+
+
+
+def test_not_started_source_may_leave_required_start_unresolved():
+    pending = {
+        "source_id": "noxa",
+        "coverage_status": "not_started",
+        "required_start_block": None,
+        "first_block": None,
+        "last_block": None,
+        "continuous": None,
+        "missing_ranges": [],
+        "tokens_discovered": 0,
+        "price_points": 0,
+        "priced_points": 0,
+        "provenance_sha256": None,
+    }
+    report = validate_phase2_source_coverage(
+        INVENTORY,
+        [complete("pons_v1"), pending],
+        snapshot_head_block=100,
+    )
+    assert report["incomplete_source_ids"] == ["noxa"]
+
+
+def test_complete_source_cannot_leave_required_start_unresolved():
+    row = {**complete("pons_v1"), "required_start_block": None}
+    with pytest.raises(ValueError, match="no required start"):
+        validate_phase2_source_coverage(
+            INVENTORY,
+            [row],
+            snapshot_head_block=100,
+        )
