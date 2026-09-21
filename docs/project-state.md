@@ -231,9 +231,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   sparse quote-price sampling, or the free authenticated route rather than the
   older 2,000-block assumption;
 - complete pools.trade LBP historical CCA and migrated-V4 backfill;
-- complete historical backfills for both hood.fun generations; the previous
-  deployment's core TokenCreated/Trade surface is now proven compatible with
-  the shared hood.fun adapter;
+- complete historical backfills for both hood.fun generations. The current
+  generation now has a dispatch-only, fail-closed coverage proposal path with
+  source-specific validation, canonical ledger validation and exact promotion
+  handoff metadata. The previous deployment's core TokenCreated/Trade surface
+  is proven compatible with the shared adapter, but its reserve/supply pricing
+  semantics still require an explicit legacy proof before reusing current
+  generation market-cap reconstruction;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

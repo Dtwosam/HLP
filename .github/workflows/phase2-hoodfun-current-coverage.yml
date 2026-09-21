@@ -2,18 +2,6 @@ name: phase2-hoodfun-current-coverage
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase2-hoodfun-current-coverage.yml'
-      - '.github/phase2-hoodfun-deployments.json'
-      - 'src/hlp/protocols/hood_fun.py'
-      - 'src/hlp/data/hood_fun_registry.py'
-      - 'src/hlp/data/hood_fun_curve.py'
-      - 'src/hlp/data/hood_fun_generations.py'
-      - 'src/hlp/data/sparse_quote_usd.py'
-      - 'src/hlp/config.py'
 
 permissions:
   actions: read
@@ -425,10 +413,12 @@ jobs:
         with:
           name: phase2-hoodfun-current-events-merged
           path: inputs
-      - name: Sparse causal USD pricing and coverage freeze
+      - name: Sparse causal USD pricing and coverage proposal
+        id: coverage
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           from decimal import Decimal
@@ -442,10 +432,17 @@ jobs:
               SOLIDRPC_PUBLIC_RPC_URL,
               UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
           )
+          from hlp.data.hood_fun_coverage import (
+              validate_hood_fun_coverage_report,
+          )
           from hlp.data.hood_fun_curve import (
               build_hood_fun_curve_market_cap_points,
               summarize_hood_fun_curve_market_caps,
           )
+          from hlp.data.phase2_coverage import (
+              apply_phase2_source_coverage_report,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
           from hlp.data.rpc import RpcClient
           from hlp.data.snapshot import write_jsonl_snapshot
           from hlp.data.sparse_quote_usd import (
@@ -617,13 +614,86 @@ jobs:
               "rpc_route": rpc.route_label,
               "rpc_requests": rpc.requests_made,
           }
-          Path("artifacts/hood-current-coverage.json").write_text(
-              json.dumps(coverage, indent=2, sort_keys=True) + "\n"
+          validated = validate_hood_fun_coverage_report(
+              coverage,
+              generation="current",
+              required_start_block=start,
+              snapshot_head_block=head,
           )
-          print(json.dumps(coverage, sort_keys=True))
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          proposed, phase2_validation = (
+              apply_phase2_source_coverage_report(
+                  ledger,
+                  build_phase2_source_inventory(),
+                  validated,
+              )
+          )
+          if "hood_fun_current" not in phase2_validation[
+              "complete_source_ids"
+          ]:
+              raise SystemExit(
+                  "hood.fun current coverage did not validate as complete"
+              )
+          if phase2_validation["phase2_universe_coverage_complete"]:
+              raise SystemExit(
+                  "hood.fun current alone must not close Phase 2 coverage"
+              )
+
+          coverage_text = (
+              json.dumps(validated, indent=2, sort_keys=True) + "\n"
+          )
+          coverage_sha = hashlib.sha256(
+              coverage_text.encode("utf-8")
+          ).hexdigest()
+          Path("artifacts/hood-current-coverage.json").write_text(
+              coverage_text
+          )
+          Path(
+              "artifacts/hood-current-phase2-validation.json"
+          ).write_text(
+              json.dumps(
+                  phase2_validation,
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+          Path(
+              "artifacts/hood-current-proposed-ledger.json"
+          ).write_text(
+              json.dumps(proposed, indent=2) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={coverage_sha}\n")
+          print(json.dumps({
+              "coverage_report": validated,
+              "coverage_report_sha256": coverage_sha,
+              "phase2_validation": phase2_validation,
+          }, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Upload current hood.fun coverage evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: phase2-hoodfun-current-coverage
           path: artifacts/
           if-no-files-found: error
+      - name: Publish coverage-promotion inputs
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.coverage.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## hood.fun current coverage promotion"
+            echo
+            echo "- coverage_run_id: ${GITHUB_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-hoodfun-current-coverage"
+            echo "- expected_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: hood-current-coverage.json"
+            echo "- expected_report_sha256: ${REPORT_SHA256}"
+            echo "- expected_source_id: hood_fun_current"
+          } >> "${GITHUB_STEP_SUMMARY}"
