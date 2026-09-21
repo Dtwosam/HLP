@@ -121,7 +121,7 @@ jobs:
           if decimals_sha != quote_summary["decimals_sha256"]:
               raise SystemExit("direct quote decimals SHA drift")
           PY
-      - name: Build exact-state V3 candidate registry
+      - name: Build V3 candidate registry with block-end supply seeds
         env:
           FACTORY: ${{ steps.source.outputs.factory }}
           VENUE: ${{ steps.source.outputs.venue }}
@@ -160,6 +160,8 @@ jobs:
               "initialize_run_id": int(os.environ["INITIALIZE_RUN_ID"]),
               "registry_sha256": summary["registry_sha256"],
               "state_sha256": summary["state_sha256"],
+              "supply_seed_semantics": summary["supply_seed_semantics"],
+              "event_time_supply_complete": summary["event_time_supply_complete"],
               "source_coverage_complete": False,
           }
           Path(
@@ -229,7 +231,7 @@ jobs:
           if decimals_sha != quote_summary["decimals_sha256"]:
               raise SystemExit("direct quote decimals SHA drift")
           PY
-      - name: Build exact-state V4 candidate registry
+      - name: Build V4 candidate registry with block-end supply seeds
         run: |
           mkdir -p artifacts
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
@@ -260,6 +262,8 @@ jobs:
               "initialize_run_id": int(os.environ["INITIALIZE_RUN_ID"]),
               "registry_sha256": summary["registry_sha256"],
               "state_sha256": summary["state_sha256"],
+              "supply_seed_semantics": summary["supply_seed_semantics"],
+              "event_time_supply_complete": summary["event_time_supply_complete"],
               "source_coverage_complete": False,
           }
           Path(
