@@ -1,0 +1,652 @@
+name: phase2-pools-fun-source-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-pools-fun-registry-backfill run ID
+        required: true
+        type: string
+      v3_initialize_run_id:
+        description: Successful phase2-direct-v3-initialize-backfill run ID
+        required: true
+        type: string
+      v3_swap_run_id:
+        description: Successful phase2-direct-v3-swap-backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-pools-fun-source-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '33570152'
+  SHARED_V3_START_BLOCK: '8930'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-fun-registry-merged
+          path: inputs/registry
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v3-initialize-merged
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_initialize_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - name: Validate upstream identities
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          registry = Path("inputs/registry/pools-fun-registry.jsonl")
+          registry_summary = json.loads(
+              Path(
+                  "inputs/registry/pools-fun-registry-summary.json"
+              ).read_text()
+          )
+          if registry_summary["source_id"] != "pools_fun":
+              raise SystemExit("pools.fun registry source identity drift")
+          if registry_summary["required_start_block"] != int(
+              os.environ["REQUIRED_START_BLOCK"]
+          ):
+              raise SystemExit("pools.fun required start drift")
+          if registry_summary["snapshot_head_block"] != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("pools.fun registry snapshot drift")
+          if hashlib.sha256(registry.read_bytes()).hexdigest() != (
+              registry_summary["registry_sha256"]
+          ):
+              raise SystemExit("pools.fun registry SHA drift")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          for field, name in (
+              ("decimals_sha256", "direct-quote-decimals.json"),
+              ("feed_specs_sha256", "direct-quote-feeds.jsonl"),
+          ):
+              path = Path("inputs/quotes") / name
+              if hashlib.sha256(path.read_bytes()).hexdigest() != (
+                  quote_summary[field]
+              ):
+                  raise SystemExit(
+                      f"pools.fun quote artifact SHA drift: {field}"
+                  )
+
+          init = Path("inputs/initialize/direct-v3-initialize.jsonl")
+          init_manifest = json.loads(
+              init.with_suffix(init.suffix + ".manifest.json").read_text()
+          )
+          provenance = init_manifest.get("provenance") or {}
+          if int(provenance["required_start_block"]) != int(
+              os.environ["SHARED_V3_START_BLOCK"]
+          ):
+              raise SystemExit("shared V3 Initialize start drift")
+          if int(provenance["snapshot_head_block"]) != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("shared V3 Initialize snapshot drift")
+          if hashlib.sha256(init.read_bytes()).hexdigest() != (
+              init_manifest["sha256"]
+          ):
+              raise SystemExit("shared V3 Initialize SHA drift")
+          PY
+      - name: Filter exact pools.fun Initialize events
+        run: |
+          mkdir -p artifacts
+          hlp phase2-v3-registry-event-filter \
+            --registry inputs/registry/pools-fun-registry.jsonl \
+            --input inputs/initialize/direct-v3-initialize.jsonl \
+            --out artifacts/pools-fun-initializes.jsonl \
+            --summary-out artifacts/pools-fun-initializes-summary.json
+      - name: Build initialized pools.fun registry
+        run: |
+          hlp phase2-pools-fun-initialized-registry \
+            --registry inputs/registry/pools-fun-registry.jsonl \
+            --initializes artifacts/pools-fun-initializes.jsonl \
+            --out artifacts/pools-fun-initialized-registry.jsonl \
+            --summary-out artifacts/pools-fun-initialized-registry-summary.json
+      - name: Require every pools.fun quote to be canonically priceable
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          decimals = {
+              key.lower(): int(value)
+              for key, value in json.loads(
+                  Path(
+                      "inputs/quotes/direct-quote-decimals.json"
+                  ).read_text()
+              ).items()
+          }
+          registry = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/pools-fun-initialized-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          quotes = sorted({
+              row["quote_token"].lower()
+              for row in registry
+          })
+          missing = sorted(set(quotes) - set(decimals))
+          if missing:
+              raise SystemExit(
+                  "pools.fun has quote assets without canonical pricing: "
+                  + ", ".join(missing)
+              )
+          Path(
+              "artifacts/direct-quote-decimals.json"
+          ).write_text(
+              json.dumps(decimals, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/direct-quote-feeds.jsonl"
+          ).write_bytes(
+              Path(
+                  "inputs/quotes/direct-quote-feeds.jsonl"
+              ).read_bytes()
+          )
+          Path(
+              "artifacts/direct-quote-summary.json"
+          ).write_bytes(
+              Path(
+                  "inputs/quotes/direct-quote-summary.json"
+              ).read_bytes()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-source-coverage-setup
+          path: artifacts/
+          if-no-files-found: error
+
+  price:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-fun-source-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v3-swap-${{ matrix.shard }}
+          path: inputs/raw
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_swap_run_id }}
+      - id: raw
+        name: Validate shared V3 Swap shard
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          files = sorted(Path("inputs/raw").glob("direct-v3-swap-*.jsonl"))
+          if len(files) != 1:
+              raise SystemExit(
+                  f"expected one V3 Swap shard, found {len(files)}"
+              )
+          path = files[0]
+          manifest = json.loads(
+              path.with_suffix(path.suffix + ".manifest.json").read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("event") != "uniswap_v3_swap":
+              raise SystemExit("V3 Swap shard event identity drift")
+          if provenance.get("shared_direct_v3_surface") is not True:
+              raise SystemExit("V3 Swap shard surface identity drift")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != manifest["sha256"]:
+              raise SystemExit("V3 Swap shard SHA drift")
+          records = sum(
+              1 for line in path.open(encoding="utf-8")
+              if line.strip()
+          )
+          if records != int(manifest["records"]):
+              raise SystemExit("V3 Swap shard record count drift")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"path={path}\n")
+              handle.write(
+                  f"from_block={int(provenance['from_block'])}\n"
+              )
+              handle.write(
+                  f"to_block={int(provenance['to_block'])}\n"
+              )
+          PY
+      - name: Filter shard to pools.fun pools
+        env:
+          RAW_PATH: ${{ steps.raw.outputs.path }}
+        run: |
+          mkdir -p artifacts
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp phase2-v3-registry-event-filter \
+            --registry inputs/setup/pools-fun-initialized-registry.jsonl \
+            --input "$RAW_PATH" \
+            --out "artifacts/pools-fun-swaps-${SHARD}.jsonl" \
+            --summary-out "artifacts/pools-fun-swaps-${SHARD}-summary.json"
+      - name: Price pools.fun shard
+        env:
+          FROM_BLOCK: ${{ steps.raw.outputs.from_block }}
+          TO_BLOCK: ${{ steps.raw.outputs.to_block }}
+        run: |
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-pools-fun-market-window \
+            --registry inputs/setup/pools-fun-initialized-registry.jsonl \
+            --swaps "artifacts/pools-fun-swaps-${SHARD}.jsonl" \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --quote-decimals inputs/setup/direct-quote-decimals.json \
+            --quote-feeds inputs/setup/direct-quote-feeds.jsonl \
+            --out "artifacts/pools-fun-points-${SHARD}.jsonl" \
+            --summary-out "artifacts/pools-fun-summary-${SHARD}.jsonl" \
+            --report-out "artifacts/pools-fun-report-${SHARD}.json"
+      - name: Remove filtered raw swaps from published shard
+        run: |
+          rm -f artifacts/pools-fun-swaps-*.jsonl
+          rm -f artifacts/pools-fun-swaps-*.jsonl.manifest.json
+          rm -f artifacts/pools-fun-swaps-*-summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-price-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: price
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      V3_INITIALIZE_RUN_ID: ${{ inputs.v3_initialize_run_id }}
+      V3_SWAP_RUN_ID: ${{ inputs.v3_swap_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-fun-source-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-fun-price-*
+          path: inputs/price
+          merge-multiple: true
+      - name: Validate and merge pools.fun market-cap coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import (
+              apply_phase2_source_coverage_report,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.v3_launchpad import (
+              merge_v3_launchpad_market_cap_summaries,
+          )
+
+          root = Path("inputs/price")
+          count = int(os.environ["SHARD_COUNT"])
+          start = int(os.environ["SHARED_V3_START_BLOCK"])
+          required_start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+
+          point_files = sorted(root.glob("pools-fun-points-*.jsonl"))
+          report_files = sorted(root.glob("pools-fun-report-*.json"))
+          summary_files = sorted(root.glob("pools-fun-summary-*.jsonl"))
+          if not (
+              len(point_files) == len(report_files) == len(summary_files) == count
+          ):
+              raise SystemExit(
+                  "pools.fun price shard artifact count changed: "
+                  f"points={len(point_files)} reports={len(report_files)} "
+                  f"summaries={len(summary_files)} expected={count}"
+              )
+
+          aggregate = hashlib.sha256()
+          total_records = 0
+          total_priced = 0
+          point_shards = []
+          summary_rows = []
+          for point_path in point_files:
+              suffix = point_path.stem.rsplit("-", 1)[-1]
+              report_path = root / f"pools-fun-report-{suffix}.json"
+              summary_path = root / f"pools-fun-summary-{suffix}.jsonl"
+              point_manifest = json.loads(
+                  point_path.with_suffix(
+                      point_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              summary_manifest = json.loads(
+                  summary_path.with_suffix(
+                      summary_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              report = json.loads(report_path.read_text())
+              provenance = point_manifest.get("provenance") or {}
+              lo = int(provenance["from_block"])
+              hi = int(provenance["to_block"])
+              if (
+                  report["from_block"] != lo
+                  or report["to_block"] != hi
+              ):
+                  raise SystemExit(
+                      f"pools.fun shard range drift: {suffix}"
+                  )
+              if report["points_sha256"] != point_manifest["sha256"]:
+                  raise SystemExit(
+                      f"pools.fun point manifest drift: {suffix}"
+                  )
+              if (
+                  report["summary_sha256"]
+                  != summary_manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      f"pools.fun summary manifest drift: {suffix}"
+                  )
+              if report["source_coverage_complete"] is not False:
+                  raise SystemExit(
+                      f"pools.fun shard cannot close coverage: {suffix}"
+                  )
+              if int(report["unpriced_points"]) != 0:
+                  raise SystemExit(
+                      f"pools.fun shard has unpriced points: {suffix}"
+                  )
+
+              local = hashlib.sha256()
+              records = 0
+              with point_path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate.update(raw)
+                      local.update(raw)
+                      if raw.strip():
+                          records += 1
+              if records != int(point_manifest["records"]):
+                  raise SystemExit(
+                      f"pools.fun shard record count drift: {suffix}"
+                  )
+              if local.hexdigest() != point_manifest["sha256"]:
+                  raise SystemExit(
+                      f"pools.fun shard SHA drift: {suffix}"
+                  )
+              total_records += records
+              total_priced += int(report["priced_points"])
+              point_shards.append({
+                  "file": point_path.name,
+                  "records": records,
+                  "sha256": point_manifest["sha256"],
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+              summary_local = hashlib.sha256(
+                  summary_path.read_bytes()
+              ).hexdigest()
+              if summary_local != summary_manifest["sha256"]:
+                  raise SystemExit(
+                      f"pools.fun summary SHA drift: {suffix}"
+                  )
+              summary_rows.extend(
+                  json.loads(line)
+                  for line in summary_path.read_text().splitlines()
+                  if line.strip()
+              )
+
+          point_shards = validate_shard_block_coverage(
+              point_shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/pools-fun-points-sharded.manifest.json"
+              ),
+              path_name="pools-fun-points.jsonl",
+              records=total_records,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_pools_fun_v3_market_points",
+                  "chain_id": 4663,
+                  "from_block": start,
+                  "to_block": head,
+                  "required_start_block": required_start,
+                  "shards": point_shards,
+              },
+          )
+
+          merged_summary = merge_v3_launchpad_market_cap_summaries(
+              summary_rows
+          )
+          summary_manifest = write_jsonl_snapshot(
+              merged_summary,
+              output=Path(
+                  "artifacts/pools-fun-market-cap-summary.jsonl"
+              ),
+              provenance={
+                  "source": "phase2_pools_fun_market_cap_summary",
+                  "chain_id": 4663,
+                  "points_sha256": virtual["sha256"],
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+
+          registry_path = Path(
+              "inputs/setup/pools-fun-initialized-registry.jsonl"
+          )
+          registry_rows = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          if len(merged_summary) != len(registry_rows):
+              raise SystemExit(
+                  "pools.fun token summary does not cover every registry token"
+              )
+          if any(
+              int(row["price_points"]) <= 0
+              or int(row["priced_points"]) != int(row["price_points"])
+              for row in merged_summary
+          ):
+              raise SystemExit(
+                  "pools.fun merged summary contains missing/unpriced history"
+              )
+          merged_points = sum(
+              int(row["price_points"])
+              for row in merged_summary
+          )
+          merged_priced = sum(
+              int(row["priced_points"])
+              for row in merged_summary
+          )
+          if merged_points != total_records:
+              raise SystemExit(
+                  "pools.fun merged point accounting drift"
+              )
+          if merged_priced != total_priced:
+              raise SystemExit(
+                  "pools.fun merged priced-point accounting drift"
+              )
+
+          quote_summary = json.loads(
+              Path("inputs/setup/direct-quote-summary.json").read_text()
+          )
+          registry_summary = json.loads(
+              Path(
+                  "inputs/setup/"
+                  "pools-fun-initialized-registry-summary.json"
+              ).read_text()
+          )
+          provenance_payload = {
+              "version": "phase2-pools-fun-source-provenance-v1",
+              "chain_id": 4663,
+              "snapshot_head_block": head,
+              "required_start_block": required_start,
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "v3_initialize_run_id": int(
+                  os.environ["V3_INITIALIZE_RUN_ID"]
+              ),
+              "v3_swap_run_id": int(os.environ["V3_SWAP_RUN_ID"]),
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "initialized_registry_sha256": registry_summary[
+                  "initialized_registry_sha256"
+              ],
+              "quote_decimals_sha256": quote_summary[
+                  "decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "market_points_sha256": virtual["sha256"],
+              "token_summary_sha256": summary_manifest["sha256"],
+          }
+          provenance_bytes = (
+              json.dumps(
+                  provenance_payload,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ) + "\n"
+          ).encode()
+          provenance_sha = hashlib.sha256(
+              provenance_bytes
+          ).hexdigest()
+          Path(
+              "artifacts/pools-fun-source-provenance.json"
+          ).write_bytes(provenance_bytes)
+
+          report = {
+              "source_id": "pools_fun",
+              "source_readiness": "adapter_ready",
+              "coverage_status": "complete",
+              "required_start_block": required_start,
+              "first_block": required_start,
+              "last_block": head,
+              "continuous": True,
+              "missing_ranges": [],
+              "tokens_discovered": len(registry_rows),
+              "price_points": total_records,
+              "priced_points": total_priced,
+              "observed_volume_usd": None,
+              "provenance_sha256": provenance_sha,
+              "blocking_reason": None,
+              "snapshot_head_block": head,
+              "registry_sha256": registry_summary[
+                  "initialized_registry_sha256"
+              ],
+              "market_points_sha256": virtual["sha256"],
+              "token_summary_sha256": summary_manifest["sha256"],
+              "tokens_crossed_100k": sum(
+                  bool(row["crossed_100k"])
+                  for row in merged_summary
+              ),
+          }
+
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          updated, validation = apply_phase2_source_coverage_report(
+              ledger,
+              build_phase2_source_inventory(),
+              report,
+          )
+          if "pools_fun" not in validation["complete_source_ids"]:
+              raise SystemExit(
+                  "pools.fun coverage report did not validate as complete"
+              )
+          if validation["phase2_universe_coverage_complete"]:
+              raise SystemExit(
+                  "pools.fun alone must not close Phase-2 source coverage"
+              )
+          Path(
+              "artifacts/pools-fun-source-coverage-report.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/pools-fun-source-coverage-validation.json"
+          ).write_text(
+              json.dumps(validation, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              "coverage_report": report,
+              "validation": validation,
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-source-coverage
+          path: artifacts/
+          if-no-files-found: error
