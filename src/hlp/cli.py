@@ -54,7 +54,9 @@ from hlp.protocols.uniswap import (
 )
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.direct_markets import (
+    build_v3_direct_market_registry,
     build_v4_direct_market_registry,
+    select_v3_direct_market_candidates,
     select_v4_direct_market_candidates,
     summarize_direct_market_registry,
 )
@@ -177,6 +179,8 @@ from hlp.data.types import (
     PoolsTradeTokenDistributed,
     PoolsTradeTokenLaunched,
     TrenchEvent,
+    V3PoolCreated,
+    V3PoolInitialized,
     V4PoolInitialized,
 )
 from hlp.data.v3_launchpad import (
@@ -741,6 +745,49 @@ def cmd_rpc_v3_pool_created_window(
     return 0
 
 
+def cmd_rpc_v3_initialize_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire one shared V3 Initialize topic tape across all pool addresses."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = [
+        decode_v3_pool_initialized(log)
+        for log in rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            topics=[V3_INITIALIZE_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "uniswap_v3_initialize",
+            "address_filter": None,
+            "shared_direct_v3_surface": True,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V3_INITIALIZE_TOPIC,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "pools_initialized": manifest["records"],
+        "shared_direct_v3_surface": True,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v4_initialize_window(
     args: argparse.Namespace,
 ) -> int:
@@ -813,6 +860,148 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+
+def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
+    """Build a fail-closed direct-V3 candidate registry with exact state."""
+    pool_created_rows = [
+        V3PoolCreated(**row)
+        for row in _load_jsonl(args.pool_created)
+    ]
+    if not pool_created_rows:
+        raise SystemExit("direct V3 PoolCreated tape is empty")
+    initialize_rows = [
+        V3PoolInitialized(**row)
+        for row in _load_jsonl(args.initialize)
+    ]
+
+    quote_decimals = _direct_quote_decimals(args.quote_decimals)
+    candidates = select_v3_direct_market_candidates(
+        pool_created_rows,
+        factory=args.factory,
+        quote_decimals=quote_decimals,
+    )
+    candidate_by_pool = {
+        row["pool"]: row
+        for row in candidates
+    }
+
+    matched_initializes: dict[str, V3PoolInitialized] = {}
+    for init in initialize_rows:
+        pool = normalize_address(init.pool)
+        if pool not in candidate_by_pool:
+            continue
+        if pool in matched_initializes:
+            raise SystemExit(
+                f"multiple V3 Initialize events for candidate pool {pool}"
+            )
+        matched_initializes[pool] = init
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    states = []
+    seen_state_reads: set[tuple[str, int]] = set()
+    for pool in sorted(matched_initializes):
+        candidate = candidate_by_pool[pool]
+        init = matched_initializes[pool]
+        key = (candidate["token"], int(init.block_number))
+        if key in seen_state_reads:
+            continue
+        seen_state_reads.add(key)
+        states.append(
+            read_erc20_static(
+                rpc,
+                candidate["token"],
+                block=int(init.block_number),
+            )
+        )
+
+    created_sha256 = _sha256_file(args.pool_created)
+    initialize_sha256 = _sha256_file(args.initialize)
+    quote_sha256 = _sha256_file(args.quote_decimals)
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "direct_v3_exact_initialize_block_erc20_state",
+            "chain_id": 4663,
+            "source_id": args.source_id,
+            "factory": normalize_address(args.factory),
+            "pool_created_input": Path(args.pool_created).name,
+            "pool_created_input_sha256": created_sha256,
+            "initialize_input": Path(args.initialize).name,
+            "initialize_input_sha256": initialize_sha256,
+            "quote_decimals_input": Path(args.quote_decimals).name,
+            "quote_decimals_sha256": quote_sha256,
+            "state_semantics": "exact_initialize_block",
+            "rpc_route": rpc.route_label,
+        },
+    )
+
+    registry = build_v3_direct_market_registry(
+        pool_created_rows,
+        initialize_rows,
+        states,
+        source_id=args.source_id,
+        venue=args.venue,
+        factory=args.factory,
+        quote_decimals=quote_decimals,
+    )
+    registry_manifest = write_jsonl_snapshot(
+        registry,
+        output=Path(args.registry_out),
+        provenance={
+            "source": "phase2_direct_v3_candidate_registry",
+            "chain_id": 4663,
+            "source_id": args.source_id,
+            "venue": args.venue,
+            "factory": normalize_address(args.factory),
+            "pool_created_input_sha256": created_sha256,
+            "initialize_input_sha256": initialize_sha256,
+            "quote_decimals_sha256": quote_sha256,
+            "erc20_state_sha256": state_manifest["sha256"],
+            "supported_quote_rule": "exactly_one_side_in_explicit_allowlist",
+            "state_semantics": "exact_initialize_block",
+        },
+    )
+
+    report = {
+        "version": "phase2-direct-v3-registry-v1",
+        "source_id": args.source_id,
+        "venue": args.venue,
+        "factory": normalize_address(args.factory),
+        "pool_created_rows": len(pool_created_rows),
+        "shared_initialize_rows": len(initialize_rows),
+        "supported_quote_candidate_markets": len(candidates),
+        "matched_initialized_candidate_markets": len(matched_initializes),
+        "exact_state_reads": len(states),
+        "pool_created_input_sha256": created_sha256,
+        "initialize_input_sha256": initialize_sha256,
+        "quote_decimals_sha256": quote_sha256,
+        "state_sha256": state_manifest["sha256"],
+        "registry_sha256": registry_manifest["sha256"],
+        "registry": summarize_direct_market_registry(registry),
+        "rpc_route": rpc.route_label,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_coverage_complete": False,
+        "remaining_steps": [
+            "market event reconstruction",
+            "empirical multi-pool selector freeze",
+            "complete launch-origin attribution",
+        ],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
 
 
 def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
@@ -5783,6 +5972,22 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_rpc_v3_pool_created_window
     )
 
+    v3_initialize = sub.add_parser(
+        "rpc-v3-initialize-window"
+    )
+    v3_initialize.add_argument("--from-block", type=int, required=True)
+    v3_initialize.add_argument("--to-block", type=int, required=True)
+    v3_initialize.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    v3_initialize.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    v3_initialize.add_argument("--out", required=True)
+    v3_initialize.set_defaults(
+        func=cmd_rpc_v3_initialize_window
+    )
+
     v4_initialize = sub.add_parser(
         "rpc-v4-initialize-window"
     )
@@ -5801,6 +6006,22 @@ def build_parser() -> argparse.ArgumentParser:
     v4_initialize.add_argument("--out", required=True)
     v4_initialize.set_defaults(
         func=cmd_rpc_v4_initialize_window
+    )
+
+    direct_v3_registry = sub.add_parser(
+        "phase2-direct-v3-registry"
+    )
+    direct_v3_registry.add_argument("--pool-created", required=True)
+    direct_v3_registry.add_argument("--initialize", required=True)
+    direct_v3_registry.add_argument("--quote-decimals", required=True)
+    direct_v3_registry.add_argument("--source-id", required=True)
+    direct_v3_registry.add_argument("--venue", required=True)
+    direct_v3_registry.add_argument("--factory", required=True)
+    direct_v3_registry.add_argument("--state-out", required=True)
+    direct_v3_registry.add_argument("--registry-out", required=True)
+    direct_v3_registry.add_argument("--summary-out", required=True)
+    direct_v3_registry.set_defaults(
+        func=cmd_phase2_direct_v3_registry
     )
 
     direct_v4_registry = sub.add_parser(
