@@ -420,3 +420,116 @@ def apply_phase2_source_coverage_report(
         inventory_rows,
     )
     return updated, validation
+
+
+
+PHASE2_BOUNDARY_REPORT_VERSION = (
+    "phase2-source-deployment-boundaries-v1"
+)
+
+
+def apply_phase2_source_boundaries(
+    ledger: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    boundary_report: Mapping[str, object],
+) -> tuple[dict, dict]:
+    """Apply conservative source start boundaries without claiming coverage."""
+    inventory_rows = [dict(row) for row in source_inventory]
+    current = validate_phase2_coverage_ledger(
+        ledger,
+        inventory_rows,
+    )
+    snapshot = int(current["snapshot_head_block"])
+
+    version = str(boundary_report.get("version") or "")
+    if version != PHASE2_BOUNDARY_REPORT_VERSION:
+        raise ValueError(
+            "Phase-2 boundary report version changed: "
+            f"{version!r}"
+        )
+    report_snapshot = int(
+        boundary_report.get("snapshot_head_block", -1)
+    )
+    if report_snapshot != snapshot:
+        raise ValueError(
+            "Phase-2 boundary report snapshot drift: "
+            f"{report_snapshot} != {snapshot}"
+        )
+    raw_sources = boundary_report.get("sources")
+    if not isinstance(raw_sources, list):
+        raise ValueError(
+            "Phase-2 boundary report sources must be a list"
+        )
+
+    inventory_by_id = {
+        str(row["source_id"]): row
+        for row in inventory_rows
+    }
+    boundaries: dict[str, int] = {}
+    for raw in raw_sources:
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                "Phase-2 boundary report contains non-object row"
+            )
+        source_id = str(raw.get("source_id") or "")
+        if source_id not in inventory_by_id:
+            raise ValueError(
+                f"boundary report references unknown source: {source_id!r}"
+            )
+        if source_id in boundaries:
+            raise ValueError(
+                f"boundary report repeats source: {source_id}"
+            )
+        reported_readiness = str(
+            raw.get("source_readiness") or ""
+        )
+        expected_readiness = str(
+            inventory_by_id[source_id].get("readiness") or ""
+        )
+        if reported_readiness != expected_readiness:
+            raise ValueError(
+                "boundary report readiness drift: "
+                f"{source_id} {reported_readiness!r} "
+                f"!= {expected_readiness!r}"
+            )
+        start = int(raw.get("required_start_block", -1))
+        if start < 0 or start > snapshot:
+            raise ValueError(
+                f"invalid boundary for {source_id}: {start}"
+            )
+        boundaries[source_id] = start
+
+    updated_rows = []
+    for raw in ledger["sources"]:
+        row = dict(raw)
+        source_id = str(row["source_id"])
+        if source_id not in boundaries:
+            updated_rows.append(row)
+            continue
+
+        start = boundaries[source_id]
+        current_start = row.get("required_start_block")
+        status = str(row.get("coverage_status") or "")
+        if current_start is not None:
+            current_start = int(current_start)
+            if current_start != start:
+                raise ValueError(
+                    "boundary report disagrees with existing start: "
+                    f"{source_id} {start} != {current_start}"
+                )
+        elif status == "complete":
+            raise ValueError(
+                f"cannot backfill boundary onto complete source: {source_id}"
+            )
+        row["required_start_block"] = start
+        updated_rows.append(row)
+
+    updated = {
+        **dict(ledger),
+        "sources": updated_rows,
+    }
+    validation = validate_phase2_coverage_ledger(
+        updated,
+        inventory_rows,
+    )
+    return updated, validation
