@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from hlp.data.phase2_coverage import (
@@ -5,6 +8,7 @@ from hlp.data.phase2_coverage import (
     validate_phase2_coverage_ledger,
     validate_phase2_source_coverage,
 )
+from hlp.data.phase2_sources import build_phase2_source_inventory
 
 
 SHA = "ab" * 32
@@ -193,3 +197,21 @@ def test_coverage_ledger_rejects_missing_source_row():
             },
             INVENTORY,
         )
+
+
+
+def test_repository_phase2_coverage_ledger_matches_source_inventory():
+    ledger = json.loads(
+        Path(".github/phase2-source-coverage.json").read_text()
+    )
+    report = validate_phase2_coverage_ledger(
+        ledger,
+        build_phase2_source_inventory(),
+    )
+
+    assert report["version"] == PHASE2_COVERAGE_LEDGER_VERSION
+    assert report["snapshot_head_block"] == 54_486_035
+    assert report["inventory_sources"] == 14
+    assert report["reported_sources"] == 14
+    assert report["all_sources_reported"] is True
+    assert report["phase2_universe_coverage_complete"] is False
