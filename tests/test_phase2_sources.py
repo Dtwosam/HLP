@@ -73,20 +73,22 @@ def test_inventory_tracks_partial_lifecycle_adapters_without_claiming_phase1_pro
 
 
 
-def test_pools_trade_lbp_price_surface_is_decoded_before_reconstruction():
+def test_pools_trade_lbp_adapter_is_ready_after_orientation_freeze():
     rows = {row["source_id"]: row for row in build_phase2_source_inventory()}
     lbp = rows["pools_trade_lbp"]
 
-    assert lbp["readiness"] == "decoder_ready"
+    assert lbp["readiness"] == "adapter_ready"
     assert "hlp.data.pools_trade_registry" in lbp["implementation_evidence"]
     assert "hlp.data.types.CcaPriceEvent" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_cca" in lbp["implementation_evidence"]
+    assert "hlp.data.pools_trade_cca_orientation" in lbp["implementation_evidence"]
+    assert "hlp.data.pools_trade_lbp" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_lbp_evidence" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_lbp_search" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_lbp_success" in lbp["implementation_evidence"]
-    assert "successful-auction" in lbp["blocking_gap"]
-    assert "orientation freeze" in lbp["blocking_gap"]
-    assert "V4 handoff evidence" in lbp["blocking_gap"]
+    assert "hlp.data.pools_trade_v4" in lbp["implementation_evidence"]
+    assert "historical CCA" in lbp["blocking_gap"]
+    assert "migrated V4 backfill" in lbp["blocking_gap"]
 
 
 
