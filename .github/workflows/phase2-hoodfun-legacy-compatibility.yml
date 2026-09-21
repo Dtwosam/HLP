@@ -1,0 +1,144 @@
+name: phase2-hoodfun-legacy-compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-hoodfun-legacy-compatibility.yml'
+      - 'src/hlp/protocols/hood_fun.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-hoodfun-legacy-compatibility-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  PROBE_SPAN: '1000000'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Probe previous hood.fun core event compatibility
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import (
+              HOOD_FUN_PREVIOUS,
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.hood_fun import (
+              HOOD_FUN_CURVE_TOPICS,
+              TOKEN_CREATED_TOPIC,
+              TRADE_TOPIC,
+              decode_hood_fun_event,
+          )
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          span = int(os.environ["PROBE_SPAN"])
+          first = rpc.find_first_code_block(
+              HOOD_FUN_PREVIOUS,
+              low=0,
+              high=head,
+          )
+          end = min(head, first + span - 1)
+          chunk = 50_000 if key else 2_000
+
+          counts = Counter()
+          first_samples = {}
+          decoded = 0
+          for raw in rpc.iter_logs_chunked(
+              first,
+              end,
+              address=HOOD_FUN_PREVIOUS,
+              topics=[list(HOOD_FUN_CURVE_TOPICS)],
+              chunk_size=chunk,
+              min_chunk_size=25,
+          ):
+              row = decode_hood_fun_event(
+                  raw,
+                  contract=HOOD_FUN_PREVIOUS,
+              )
+              counts[row.event_type] += 1
+              decoded += 1
+              first_samples.setdefault(
+                  row.event_type,
+                  {
+                      "block_number": row.block_number,
+                      "transaction_hash": row.transaction_hash,
+                      "transaction_index": row.transaction_index,
+                      "log_index": row.log_index,
+                      "token": row.token,
+                  },
+              )
+
+          created = counts["token_created"]
+          trades = counts["trade"]
+          compatible = created > 0 and trades > 0
+          report = {
+              "chain_id": 4663,
+              "generation": "previous",
+              "contract": HOOD_FUN_PREVIOUS.lower(),
+              "first_code_block": first,
+              "probe_to_block": end,
+              "probe_blocks": end - first + 1,
+              "known_topics": {
+                  "token_created": TOKEN_CREATED_TOPIC,
+                  "trade": TRADE_TOPIC,
+              },
+              "decoded_events": decoded,
+              "event_counts": dict(counts),
+              "first_samples": first_samples,
+              "current_surface_compatible": compatible,
+              "compatibility_semantics": (
+                  "both known core event types observed and every matching "
+                  "log decoded with the shared hood.fun layout"
+              ),
+              "requests_made": rpc.requests_made,
+          }
+          Path(
+              "artifacts/hoodfun-legacy-compatibility.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-hoodfun-legacy-compatibility
+          path: artifacts/
+          if-no-files-found: error
