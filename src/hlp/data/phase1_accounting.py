@@ -119,21 +119,25 @@ def _nonnegative_float(value: object, *, field: str) -> float:
 
 def _reported_block_ranges(records: Iterable[dict]) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, Mapping):
+            if "from_block" in value and "to_block" in value:
+                lo = _nonnegative_int(value["from_block"], field="from_block")
+                hi = _nonnegative_int(value["to_block"], field="to_block")
+                if hi < lo:
+                    raise ValueError(
+                        f"reported block range is reversed: {lo}..{hi}"
+                    )
+                ranges.append((lo, hi))
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                visit(nested)
+
     for record in records:
-        candidates = [record]
-        provenance = record.get("provenance")
-        if isinstance(provenance, Mapping):
-            candidates.append(provenance)
-        for candidate in candidates:
-            if "from_block" not in candidate or "to_block" not in candidate:
-                continue
-            lo = _nonnegative_int(candidate["from_block"], field="from_block")
-            hi = _nonnegative_int(candidate["to_block"], field="to_block")
-            if hi < lo:
-                raise ValueError(
-                    f"reported block range is reversed: {lo}..{hi}"
-                )
-            ranges.append((lo, hi))
+        visit(record)
 
     if not ranges:
         return []
