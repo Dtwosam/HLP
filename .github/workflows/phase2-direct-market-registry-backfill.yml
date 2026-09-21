@@ -1,0 +1,275 @@
+name: phase2-direct-market-registry-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+      v3_pool_created_run_id:
+        description: Successful phase2-direct-v3-pool-created-backfill run ID
+        required: true
+        type: string
+      v3_initialize_run_id:
+        description: Successful phase2-direct-v3-initialize-backfill run ID
+        required: true
+        type: string
+      v4_initialize_run_id:
+        description: Successful phase2-direct-uniswap-v4-initialize-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-direct-market-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  v3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        source:
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+    env:
+      SOURCE_ID: ${{ matrix.source }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+      POOL_CREATED_RUN_ID: ${{ inputs.v3_pool_created_run_id }}
+      INITIALIZE_RUN_ID: ${{ inputs.v3_initialize_run_id }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-${{ matrix.source }}-pool-created-merged
+          path: inputs/pools
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_pool_created_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v3-initialize-merged
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_initialize_run_id }}
+      - id: source
+        name: Resolve V3 source identity
+        run: |
+          case "$SOURCE_ID" in
+            direct_uniswap_v3)
+              echo "factory=0x1f7d7550b1b028f7571e69a784071f0205fd2efa" >> "$GITHUB_OUTPUT"
+              echo "venue=uniswap_v3" >> "$GITHUB_OUTPUT"
+              ;;
+            direct_sushiswap_v3)
+              echo "factory=0xe51960f1b45f1c9fb6d166e6a884f866fc70433b" >> "$GITHUB_OUTPUT"
+              echo "venue=sushiswap_v3" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unknown direct V3 source: $SOURCE_ID" >&2
+              exit 1
+              ;;
+          esac
+      - name: Validate downloaded inputs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          source = os.environ["SOURCE_ID"]
+          files = [
+              Path("inputs/quotes/direct-quote-decimals.json"),
+              Path(f"inputs/pools/{source}-pool-created.jsonl"),
+              Path("inputs/initialize/direct-v3-initialize.jsonl"),
+          ]
+          for path in files:
+              if not path.exists():
+                  raise SystemExit(f"missing direct registry input: {path}")
+
+          for path in files[1:]:
+              sidecar = path.with_suffix(path.suffix + ".manifest.json")
+              manifest = json.loads(sidecar.read_text())
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != manifest["sha256"]:
+                  raise SystemExit(f"input SHA drift: {path}")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          decimals_sha = hashlib.sha256(files[0].read_bytes()).hexdigest()
+          if decimals_sha != quote_summary["decimals_sha256"]:
+              raise SystemExit("direct quote decimals SHA drift")
+          PY
+      - name: Build exact-state V3 candidate registry
+        env:
+          FACTORY: ${{ steps.source.outputs.factory }}
+          VENUE: ${{ steps.source.outputs.venue }}
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-direct-v3-registry \
+            --pool-created "inputs/pools/${SOURCE_ID}-pool-created.jsonl" \
+            --initialize inputs/initialize/direct-v3-initialize.jsonl \
+            --quote-decimals inputs/quotes/direct-quote-decimals.json \
+            --source-id "$SOURCE_ID" \
+            --venue "$VENUE" \
+            --factory "$FACTORY" \
+            --state-out "artifacts/${SOURCE_ID}-state.jsonl" \
+            --registry-out "artifacts/${SOURCE_ID}-registry.jsonl" \
+            --summary-out "artifacts/${SOURCE_ID}-registry-summary.json"
+      - name: Bind registry handoff provenance
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = os.environ["SOURCE_ID"]
+          summary_path = Path(
+              f"artifacts/{source}-registry-summary.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          if summary["source_coverage_complete"] is not False:
+              raise SystemExit("direct V3 registry cannot close source coverage")
+          handoff = {
+              "version": "phase2-direct-market-registry-handoff-v1",
+              "source_id": source,
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "pool_created_run_id": int(os.environ["POOL_CREATED_RUN_ID"]),
+              "initialize_run_id": int(os.environ["INITIALIZE_RUN_ID"]),
+              "registry_sha256": summary["registry_sha256"],
+              "state_sha256": summary["state_sha256"],
+              "source_coverage_complete": False,
+          }
+          Path(
+              f"artifacts/{source}-registry-handoff.json"
+          ).write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-${{ matrix.source }}-market-registry
+          path: artifacts/
+          if-no-files-found: error
+
+  v4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SOURCE_ID: direct_uniswap_v4
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+      INITIALIZE_RUN_ID: ${{ inputs.v4_initialize_run_id }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v4-initialize-merged
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v4_initialize_run_id }}
+      - name: Validate downloaded inputs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          decimals = Path("inputs/quotes/direct-quote-decimals.json")
+          initialize = Path("inputs/initialize/direct-v4-initialize.jsonl")
+          for path in (decimals, initialize):
+              if not path.exists():
+                  raise SystemExit(f"missing direct V4 registry input: {path}")
+
+          sidecar = initialize.with_suffix(
+              initialize.suffix + ".manifest.json"
+          )
+          manifest = json.loads(sidecar.read_text())
+          if hashlib.sha256(initialize.read_bytes()).hexdigest() != manifest["sha256"]:
+              raise SystemExit("direct V4 Initialize SHA drift")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          decimals_sha = hashlib.sha256(decimals.read_bytes()).hexdigest()
+          if decimals_sha != quote_summary["decimals_sha256"]:
+              raise SystemExit("direct quote decimals SHA drift")
+          PY
+      - name: Build exact-state V4 candidate registry
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-direct-v4-registry \
+            --initialize inputs/initialize/direct-v4-initialize.jsonl \
+            --quote-decimals inputs/quotes/direct-quote-decimals.json \
+            --state-out artifacts/direct_uniswap_v4-state.jsonl \
+            --registry-out artifacts/direct_uniswap_v4-registry.jsonl \
+            --summary-out artifacts/direct_uniswap_v4-registry-summary.json
+      - name: Bind registry handoff provenance
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(
+              Path(
+                  "artifacts/direct_uniswap_v4-registry-summary.json"
+              ).read_text()
+          )
+          if summary["source_coverage_complete"] is not False:
+              raise SystemExit("direct V4 registry cannot close source coverage")
+          handoff = {
+              "version": "phase2-direct-market-registry-handoff-v1",
+              "source_id": "direct_uniswap_v4",
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "initialize_run_id": int(os.environ["INITIALIZE_RUN_ID"]),
+              "registry_sha256": summary["registry_sha256"],
+              "state_sha256": summary["state_sha256"],
+              "source_coverage_complete": False,
+          }
+          Path(
+              "artifacts/direct_uniswap_v4-registry-handoff.json"
+          ).write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-registry
+          path: artifacts/
+          if-no-files-found: error
