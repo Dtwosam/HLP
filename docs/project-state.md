@@ -99,6 +99,13 @@ Implemented foundation:
   exact accepted lifecycle artifacts and validated **268,688 V1 + 225,951 V2
   launches** with **63,560,072 + 24,319,652 fully priced points**, zero unknown
   tokens and zero unpriced points through the frozen snapshot.
+- legacy hood.fun discovery is closed: run **35614752750** sampled
+  **100,000 blocks** across the previous deployment lifetime and decoded
+  **1 TokenCreated + 21 Trade events** with the shared hood.fun event layout.
+  The immutable evidence artifact is **10646067112** with SHA-256
+  `c6129b4156b739934a94e5bb16f54e36e638876263f29365e4e551167f4c8cfc`.
+  `hood_fun_previous` is therefore `adapter_ready`; historical coverage is
+  still not complete and remains fail-closed in the coverage ledger.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
@@ -107,7 +114,9 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   sparse quote-price sampling, or the free authenticated route rather than the
   older 2,000-block assumption;
 - pools.trade LBP price-path reconstruction and migration lifecycle;
-- legacy hood.fun contract discovery/adapter for the previous deployment;
+- complete historical backfills for both hood.fun generations; the previous
+  deployment's core TokenCreated/Trade surface is now proven compatible with
+  the shared hood.fun adapter;
 - deterministic canonical multi-pool market selection for tokens with several
   priceable V3/V4/Sushi markets;
 - complete historical backfills and coverage manifests for every material
