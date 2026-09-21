@@ -2,13 +2,6 @@ name: phase2-pools-trade-cca-migration-surface
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase2-pools-trade-cca-migration-surface.yml'
-      - 'src/hlp/protocols/pools_trade_lbp.py'
-      - 'src/hlp/protocols/pools_trade.py'
 
 permissions:
   contents: read
