@@ -3201,13 +3201,6 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
                     row["window_from_block"]
                     for row in anchor_points
                 }),
-                "sparse_chainlink_points": len(
-                    sparse_chainlink_points
-                ),
-                "sparse_chainlink_windows": len({
-                    (row["quote_token"], row["window_from_block"])
-                    for row in sparse_chainlink_points
-                }),
                 "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
@@ -3602,6 +3595,13 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
                 "sparse_anchor_windows": len({
                     row["window_from_block"]
                     for row in anchor_points
+                }),
+                "sparse_chainlink_points": len(
+                    sparse_chainlink_points
+                ),
+                "sparse_chainlink_windows": len({
+                    (row["quote_token"], row["window_from_block"])
+                    for row in sparse_chainlink_points
                 }),
                 "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
