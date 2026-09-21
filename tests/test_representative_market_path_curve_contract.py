@@ -394,3 +394,29 @@ def test_recovered_ready_replay_is_canonical_viability_evidence() -> None:
         in guarded
     )
 
+
+def test_exact_artifact_id_downloads_flatten_single_artifact_layout() -> None:
+    workflows = (
+        ".github/workflows/phase1-pons-readiness-audit.yml",
+        ".github/workflows/phase1-pons-viability-guarded-route.yml",
+        ".github/workflows/phase1-pons-viability-route-measurement.yml",
+        ".github/workflows/phase1-pons-final-acceptance-chain.yml",
+        ".github/workflows/phase1-pons-acceptance-gate.yml",
+        ".github/workflows/"
+        "phase1-pons-acquisition-viability-projection.yml",
+    )
+
+    for path in workflows:
+        lines = Path(path).read_text().splitlines()
+        artifact_id_lines = [
+            index
+            for index, line in enumerate(lines)
+            if "artifact-ids:" in line
+        ]
+        assert artifact_id_lines, path
+        for index in artifact_id_lines:
+            assert index + 1 < len(lines), path
+            assert (
+                lines[index + 1].strip() == "merge-multiple: true"
+            ), (path, lines[index : index + 3])
+
