@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
+from hlp.data.quote_usd import QuoteUsdTimeline
 
 
 def _order(
@@ -211,3 +213,336 @@ def summarize_flap_graduation_market_handoffs(
         "all_graduations_resolved": not unmatched,
         "v4_pool_id_inference_used": False,
     }
+
+
+
+def build_flap_v3_graduation_registry(
+    flap_registry: Iterable[Mapping[str, object]],
+    handoffs: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Freeze exact address-based V3 markets for every Flap graduation."""
+    flap_by_token = {
+        normalize_address(str(row["token"])): dict(row)
+        for row in flap_registry
+        if row.get("graduation_block") is not None
+    }
+    handoff_by_token: dict[str, dict] = {}
+    for raw in handoffs:
+        row = dict(raw)
+        token = normalize_address(str(row["token"]))
+        if token in handoff_by_token:
+            raise ValueError(f"duplicate Flap graduation handoff: {token}")
+        handoff_by_token[token] = row
+
+    if set(handoff_by_token) != set(flap_by_token):
+        missing = sorted(set(flap_by_token) - set(handoff_by_token))
+        extra = sorted(set(handoff_by_token) - set(flap_by_token))
+        raise ValueError(
+            "Flap graduation handoff population mismatch: "
+            f"missing={missing[:10]} extra={extra[:10]}"
+        )
+
+    output = []
+    seen_pools: set[str] = set()
+    supported_sources = {
+        "direct_uniswap_v3",
+        "direct_sushiswap_v3",
+    }
+    for token in sorted(flap_by_token):
+        launch = flap_by_token[token]
+        handoff = handoff_by_token[token]
+        if handoff.get("market_handoff_complete") is not True:
+            raise ValueError(
+                f"Flap graduation has no exact address market: {token}"
+            )
+        if handoff.get("market_available_at_graduation") is not True:
+            raise ValueError(
+                f"Flap V3 market was not available at graduation: {token}"
+            )
+        market_source = str(handoff.get("market_source_id") or "")
+        if market_source not in supported_sources:
+            raise ValueError(
+                f"Flap graduation is not an address-based V3 market: {token}"
+            )
+
+        pool = normalize_address(str(handoff["graduation_pool"]))
+        if pool in seen_pools:
+            raise ValueError(f"duplicate Flap graduation pool: {pool}")
+        seen_pools.add(pool)
+        quote = normalize_address(
+            str(handoff["graduation_quote_token"])
+        )
+        graduation_order = _order(
+            handoff["graduation_block"],
+            handoff.get("graduation_transaction_index"),
+            handoff["graduation_log_index"],
+        )
+        initialize_order = _order(
+            handoff["market_initialize_block"],
+            handoff.get("market_initialize_transaction_index"),
+            handoff["market_initialize_log_index"],
+        )
+        if initialize_order > graduation_order:
+            raise ValueError(
+                f"Flap V3 Initialize follows graduation: {token}"
+            )
+
+        supply_raw = int(launch["supply_raw"])
+        token_decimals = int(launch["token_decimals"])
+        if supply_raw <= 0 or token_decimals < 0:
+            raise ValueError(
+                f"Flap graduation has invalid supply metadata: {token}"
+            )
+
+        output.append({
+            "source_id": "flap",
+            "venue": "flap",
+            "launch_kind": "curve_to_v3",
+            "token": token,
+            "pool": pool,
+            "quote_token": quote,
+            "quote_decimals": int(handoff["market_quote_decimals"]),
+            "token_decimals": token_decimals,
+            "supply_raw": supply_raw,
+            "market_source_id": market_source,
+            "market_venue": str(handoff["market_venue"]),
+            "launch_block": int(launch["launch_block"]),
+            "launch_transaction_hash": str(
+                launch["launch_transaction_hash"]
+            ).lower(),
+            "launch_transaction_index": launch.get(
+                "launch_transaction_index"
+            ),
+            "launch_log_index": int(launch["launch_log_index"]),
+            "lifecycle_block": graduation_order[0],
+            "lifecycle_transaction_hash": str(
+                handoff["graduation_transaction_hash"]
+            ).lower(),
+            "lifecycle_transaction_index": (
+                None
+                if graduation_order[1] < 0
+                else graduation_order[1]
+            ),
+            "lifecycle_log_index": graduation_order[2],
+            "initialize_block": initialize_order[0],
+            "initialize_transaction_index": (
+                None if initialize_order[1] < 0 else initialize_order[1]
+            ),
+            "initialize_log_index": initialize_order[2],
+            "initial_sqrt_price_x96": int(
+                handoff["market_initial_sqrt_price_x96"]
+            ),
+            "initial_tick": int(handoff["market_initial_tick"]),
+        })
+
+    output.sort(
+        key=lambda row: (
+            row["lifecycle_block"],
+            -1
+            if row["lifecycle_transaction_index"] is None
+            else row["lifecycle_transaction_index"],
+            row["lifecycle_log_index"],
+            row["token"],
+        )
+    )
+    return output
+
+
+def build_flap_graduation_snapshot_points(
+    graduation_registry: Iterable[Mapping[str, object]],
+    pool_quote_points: Iterable[Mapping[str, object]],
+    weth_usd_anchor_points: Iterable[dict],
+    *,
+    initial_weth_usd: Decimal,
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
+) -> list[dict]:
+    """Price each Flap graduation at its exact causal V3 pool state."""
+    registry = [dict(row) for row in graduation_registry]
+    quote_points: dict[tuple[str, tuple[int, int, int]], dict] = {}
+    for raw in pool_quote_points:
+        row = dict(raw)
+        pool = normalize_address(str(row["pool"]))
+        order = _order(
+            row["block_number"],
+            row.get("transaction_index"),
+            row["log_index"],
+        )
+        key = (pool, order)
+        if key in quote_points:
+            raise ValueError(
+                f"duplicate Flap graduation price point: {pool} {order}"
+            )
+        quote_points[key] = row
+
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
+
+    output = []
+    for row in sorted(
+        registry,
+        key=lambda item: (
+            int(item["lifecycle_block"]),
+            -1
+            if item.get("lifecycle_transaction_index") is None
+            else int(item["lifecycle_transaction_index"]),
+            int(item["lifecycle_log_index"]),
+            str(item["token"]),
+        ),
+    ):
+        order = _order(
+            row["lifecycle_block"],
+            row.get("lifecycle_transaction_index"),
+            row["lifecycle_log_index"],
+        )
+        timeline.advance_to(order)
+        pool = normalize_address(str(row["pool"]))
+        price_row = quote_points.get((pool, order))
+        if price_row is None:
+            raise ValueError(
+                f"missing causal Flap graduation pool price: {pool}"
+            )
+        if normalize_address(str(price_row["token"])) != normalize_address(
+            str(row["token"])
+        ):
+            raise ValueError(
+                f"Flap graduation price token mismatch: {pool}"
+            )
+        if normalize_address(
+            str(price_row["quote_token"])
+        ) != normalize_address(str(row["quote_token"])):
+            raise ValueError(
+                f"Flap graduation price quote mismatch: {pool}"
+            )
+
+        quote_per_token = Decimal(str(price_row["quote_per_token"]))
+        if quote_per_token <= 0:
+            raise ValueError(
+                f"Flap graduation quote-per-token is non-positive: {pool}"
+            )
+        supply = Decimal(int(row["supply_raw"])) / (
+            Decimal(10) ** int(row["token_decimals"])
+        )
+        market_cap_quote = quote_per_token * supply
+        quote = normalize_address(str(row["quote_token"]))
+        quote_usd = timeline.price(quote)
+        pricing_status = timeline.pricing_status(quote)
+        market_cap_usd = (
+            None if quote_usd is None else market_cap_quote * quote_usd
+        )
+        output.append({
+            "source_id": "flap",
+            "venue": "flap",
+            "phase": "v3",
+            "event_type": "v3_graduation_snapshot",
+            "token": normalize_address(str(row["token"])),
+            "pool": pool,
+            "market_id": pool,
+            "market_source_id": row["market_source_id"],
+            "market_venue": row["market_venue"],
+            "quote_token": quote,
+            "quote_decimals": int(row["quote_decimals"]),
+            "supply_raw": int(row["supply_raw"]),
+            "block_number": order[0],
+            "transaction_hash": str(
+                row["lifecycle_transaction_hash"]
+            ).lower(),
+            "transaction_index": (
+                None if order[1] < 0 else order[1]
+            ),
+            "log_index": order[2],
+            "quote_per_token": str(quote_per_token),
+            "market_cap_quote": str(market_cap_quote),
+            "pricing_status": pricing_status,
+            "quote_usd": (
+                None if quote_usd is None else str(quote_usd)
+            ),
+            "market_cap_proxy_usd": (
+                None
+                if market_cap_usd is None
+                else str(market_cap_usd)
+            ),
+            "pool_price_source": str(
+                price_row.get("pricing_source")
+                or "sparse_v3_state_and_swaps"
+            ),
+        })
+    return output
+
+
+def merge_flap_lifecycle_market_cap_summaries(
+    flap_registry: Iterable[Mapping[str, object]],
+    curve_rows: Iterable[Mapping[str, object]],
+    v3_rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Merge curve and post-graduation summaries for every launched token."""
+    merged: dict[str, dict] = {}
+    for raw in flap_registry:
+        row = dict(raw)
+        token = normalize_address(str(row["token"]))
+        if token in merged:
+            raise ValueError(f"duplicate Flap registry token: {token}")
+        merged[token] = {
+            "token": token,
+            "venue": "flap",
+            "graduated": row.get("graduation_block") is not None,
+            "curve_price_points": 0,
+            "v3_price_points": 0,
+            "price_points": 0,
+            "priced_points": 0,
+            "max_market_cap_proxy_usd": None,
+            "max_market_cap_block": None,
+            "crossed_100k": False,
+        }
+
+    for phase, rows in (("curve", curve_rows), ("v3", v3_rows)):
+        for raw in rows:
+            row = dict(raw)
+            token = normalize_address(str(row["token"]))
+            current = merged.get(token)
+            if current is None:
+                raise ValueError(
+                    f"Flap {phase} summary has unknown token: {token}"
+                )
+            points = int(row["price_points"])
+            priced = int(row["priced_points"])
+            if points < 0 or priced < 0 or priced > points:
+                raise ValueError(
+                    f"Flap {phase} summary has invalid counts: {token}"
+                )
+            current[f"{phase}_price_points"] += points
+            current["price_points"] += points
+            current["priced_points"] += priced
+            current["crossed_100k"] = (
+                bool(current["crossed_100k"])
+                or bool(row["crossed_100k"])
+            )
+
+            raw_max = row.get("max_market_cap_proxy_usd")
+            if raw_max is None:
+                continue
+            value = Decimal(str(raw_max))
+            block = int(row["max_market_cap_block"])
+            prior = current["max_market_cap_proxy_usd"]
+            prior_block = current["max_market_cap_block"]
+            if (
+                prior is None
+                or value > Decimal(str(prior))
+                or (
+                    value == Decimal(str(prior))
+                    and (
+                        prior_block is None
+                        or block < int(prior_block)
+                    )
+                )
+            ):
+                current["max_market_cap_proxy_usd"] = str(value)
+                current["max_market_cap_block"] = block
+
+    output = list(merged.values())
+    output.sort(key=lambda row: row["token"])
+    return output

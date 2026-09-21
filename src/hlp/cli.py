@@ -98,6 +98,9 @@ from hlp.data.flap_curve import (
 from hlp.data.flap_registry import build_flap_launch_registry
 from hlp.data.flap_lifecycle import (
     build_flap_graduation_market_handoffs,
+    build_flap_graduation_snapshot_points,
+    build_flap_v3_graduation_registry,
+    merge_flap_lifecycle_market_cap_summaries,
     summarize_flap_graduation_market_handoffs,
 )
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
@@ -1224,6 +1227,259 @@ def cmd_phase2_flap_graduation_markets(
     print(json.dumps(summary, sort_keys=True))
     return 0
 
+
+
+def cmd_phase2_flap_v3_graduation_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Freeze exact V3 markets used after Flap LaunchedToDEX."""
+    flap_registry = _load_jsonl(args.registry)
+    handoffs = _load_jsonl(args.handoffs)
+    rows = build_flap_v3_graduation_registry(
+        flap_registry,
+        handoffs,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_flap_v3_graduation_registry",
+            "chain_id": 4663,
+            "flap_registry_sha256": _sha256_file(args.registry),
+            "handoffs_sha256": _sha256_file(args.handoffs),
+            "exact_address_market_required": True,
+            "market_available_at_graduation_required": True,
+        },
+    )
+    report = {
+        "version": "phase2-flap-v3-graduation-registry-v1",
+        "source_id": "flap",
+        "graduated_tokens": len(rows),
+        "pools": len({row["pool"] for row in rows}),
+        "market_source_ids": sorted({
+            row["market_source_id"] for row in rows
+        }),
+        "quote_tokens": sorted({
+            row["quote_token"] for row in rows
+        }),
+        "registry_sha256": manifest["sha256"],
+        "source_coverage_complete": False,
+    }
+    path = Path(args.summary_out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_flap_v3_market_window(args: argparse.Namespace) -> int:
+    """Price Flap graduation snapshots and post-graduation V3 swaps."""
+    registry = _load_jsonl(args.registry)
+    swaps = _load_jsonl(args.swaps)
+    quote_decimals = {
+        normalize_address(key): int(value)
+        for key, value in json.loads(
+            Path(args.quote_decimals).read_text()
+        ).items()
+    }
+    from_block = int(args.from_block)
+    to_block = int(args.to_block)
+    if to_block < from_block:
+        raise SystemExit("Flap V3 market window is reversed")
+
+    in_window = [
+        row for row in registry
+        if from_block <= int(row["lifecycle_block"]) <= to_block
+    ]
+    pool_rows = {
+        normalize_address(str(row["pool"])): row
+        for row in registry
+    }
+    market_targets = []
+    for row in in_window:
+        market_targets.append({
+            "block_number": int(row["lifecycle_block"]),
+            "transaction_index": row.get(
+                "lifecycle_transaction_index"
+            ),
+            "log_index": int(row["lifecycle_log_index"]),
+            "quote_token": normalize_address(
+                str(row["quote_token"])
+            ),
+        })
+    for swap in swaps:
+        pool = normalize_address(str(swap["pool"]))
+        launch = pool_rows.get(pool)
+        if launch is None:
+            raise SystemExit(
+                f"Flap V3 swap has unknown graduation pool: {pool}"
+            )
+        market_targets.append({
+            **swap,
+            "quote_token": normalize_address(
+                str(launch["quote_token"])
+            ),
+        })
+    market_targets.sort(key=event_order)
+
+    if not market_targets:
+        point_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance={
+                "source": "phase2_flap_post_graduation_v3",
+                "chain_id": 4663,
+                "from_block": from_block,
+                "to_block": to_block,
+                "registry_sha256": _sha256_file(args.registry),
+                "swaps_sha256": _sha256_file(args.swaps),
+            },
+        )
+        summary_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.summary_out),
+            provenance={
+                "source": "phase2_flap_post_graduation_v3_summary",
+                "market_cap_points_sha256": point_manifest["sha256"],
+            },
+        )
+        report = {
+            "version": "phase2-flap-v3-market-window-v1",
+            "from_block": from_block,
+            "to_block": to_block,
+            "graduation_snapshots": 0,
+            "swap_events": 0,
+            "market_cap_points": 0,
+            "priced_points": 0,
+            "unpriced_points": 0,
+            "points_sha256": point_manifest["sha256"],
+            "summary_sha256": summary_manifest["sha256"],
+            "source_coverage_complete": False,
+        }
+        Path(args.report_out).write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    initial_weth_usd, anchor_points, anchor_window_size = (
+        _sparse_weth_usd_anchors(
+            rpc,
+            market_targets,
+            pool=args.usd_anchor_pool,
+            chunk_size=args.chunk_size,
+            fallback_block=from_block - 1,
+        )
+    )
+    sparse_chainlink_points = _sparse_chainlink_launchpad_points(
+        rpc,
+        market_targets,
+        feed_path=args.quote_feeds,
+        window_size=anchor_window_size,
+        label="Flap V3",
+    )
+
+    graduation_pool_points = []
+    for row in in_window:
+        target = {
+            "block_number": int(row["lifecycle_block"]),
+            "transaction_index": row.get(
+                "lifecycle_transaction_index"
+            ),
+            "log_index": int(row["lifecycle_log_index"]),
+        }
+        graduation_pool_points.extend(
+            build_sparse_v3_quote_points(
+                rpc,
+                [target],
+                token=row["token"],
+                quote_token=row["quote_token"],
+                pool=row["pool"],
+                window_size=anchor_window_size,
+            )
+        )
+
+    snapshot_points = build_flap_graduation_snapshot_points(
+        in_window,
+        graduation_pool_points,
+        anchor_points,
+        initial_weth_usd=initial_weth_usd,
+        quote_usd_updates=sparse_chainlink_points,
+    )
+    swap_points = build_v3_launchpad_market_cap_points(
+        registry,
+        [],
+        swaps,
+        anchor_points,
+        initial_weth_usd=initial_weth_usd,
+        quote_decimals=quote_decimals,
+        quote_usd_updates=sparse_chainlink_points,
+        allow_registry_initialization=True,
+    )
+    points = snapshot_points + [
+        {**row, "source_id": "flap"}
+        for row in swap_points
+    ]
+    points.sort(key=event_order)
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_flap_post_graduation_v3",
+            "chain_id": 4663,
+            "from_block": from_block,
+            "to_block": to_block,
+            "registry_sha256": _sha256_file(args.registry),
+            "swaps_sha256": _sha256_file(args.swaps),
+            "quote_decimals_sha256": _sha256_file(
+                args.quote_decimals
+            ),
+            "quote_feeds_sha256": _sha256_file(args.quote_feeds),
+            "graduation_price_semantics": (
+                "sparse pool state plus same-block swaps no later than "
+                "LaunchedToDEX"
+            ),
+        },
+    )
+    summary = summarize_v3_launchpad_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "phase2_flap_post_graduation_v3_summary",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "eligibility_threshold_usd": "100000",
+        },
+    )
+    priced = sum(
+        row["market_cap_proxy_usd"] is not None
+        for row in points
+    )
+    report = {
+        "version": "phase2-flap-v3-market-window-v1",
+        "from_block": from_block,
+        "to_block": to_block,
+        "graduation_snapshots": len(snapshot_points),
+        "swap_events": len(swaps),
+        "market_cap_points": len(points),
+        "priced_points": priced,
+        "unpriced_points": len(points) - priced,
+        "sparse_anchor_points": len(anchor_points),
+        "sparse_chainlink_points": len(sparse_chainlink_points),
+        "graduation_pool_points": len(graduation_pool_points),
+        "points_sha256": point_manifest["sha256"],
+        "summary_sha256": summary_manifest["sha256"],
+        "rpc_route": rpc.route_label,
+        "rpc_requests": rpc.requests_made,
+        "source_coverage_complete": False,
+    }
+    Path(args.report_out).write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
+    return 0
 
 def cmd_rpc_pools_fun_registry_window(args: argparse.Namespace) -> int:
     """Build pools.fun launch registry from PartyFactory events."""
@@ -8604,6 +8860,45 @@ def build_parser() -> argparse.ArgumentParser:
     flap_mcap.add_argument("--out", required=True)
     flap_mcap.add_argument("--summary-out", required=True)
     flap_mcap.set_defaults(func=cmd_rpc_flap_curve_market_cap_window)
+
+    flap_v3_registry = sub.add_parser(
+        "phase2-flap-v3-graduation-registry"
+    )
+    flap_v3_registry.add_argument("--registry", required=True)
+    flap_v3_registry.add_argument("--handoffs", required=True)
+    flap_v3_registry.add_argument("--out", required=True)
+    flap_v3_registry.add_argument("--summary-out", required=True)
+    flap_v3_registry.set_defaults(
+        func=cmd_phase2_flap_v3_graduation_registry
+    )
+
+    flap_v3_market = sub.add_parser(
+        "phase2-flap-v3-market-window"
+    )
+    flap_v3_market.add_argument("--registry", required=True)
+    flap_v3_market.add_argument("--swaps", required=True)
+    flap_v3_market.add_argument("--from-block", type=int, required=True)
+    flap_v3_market.add_argument("--to-block", type=int, required=True)
+    flap_v3_market.add_argument(
+        "--quote-decimals", required=True
+    )
+    flap_v3_market.add_argument("--quote-feeds", required=True)
+    flap_v3_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    flap_v3_market.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    flap_v3_market.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    flap_v3_market.add_argument("--out", required=True)
+    flap_v3_market.add_argument("--summary-out", required=True)
+    flap_v3_market.add_argument("--report-out", required=True)
+    flap_v3_market.set_defaults(
+        func=cmd_phase2_flap_v3_market_window
+    )
 
     dex_census = sub.add_parser("rpc-dex-pool-window")
     dex_census.add_argument("--from-block", type=int, required=True)

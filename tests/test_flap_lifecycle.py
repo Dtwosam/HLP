@@ -1,7 +1,12 @@
 import pytest
 
+from decimal import Decimal
+
 from hlp.data.flap_lifecycle import (
     build_flap_graduation_market_handoffs,
+    build_flap_graduation_snapshot_points,
+    build_flap_v3_graduation_registry,
+    merge_flap_lifecycle_market_cap_summaries,
     summarize_flap_graduation_market_handoffs,
 )
 
@@ -109,3 +114,120 @@ def test_flap_graduation_handoff_rejects_duplicate_market_pool():
             [flap_row()],
             [market_row(), market_row()],
         )
+
+
+def full_flap_row():
+    return {
+        **flap_row(),
+        "launch_block": 10,
+        "launch_transaction_hash": "0x" + "bb" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 1,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "token_decimals": 18,
+    }
+
+
+def test_build_flap_v3_graduation_registry_freezes_exact_handoff():
+    handoffs = build_flap_graduation_market_handoffs(
+        [full_flap_row()],
+        [market_row()],
+    )
+    rows = build_flap_v3_graduation_registry(
+        [full_flap_row()],
+        handoffs,
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_id"] == "flap"
+    assert row["market_source_id"] == "direct_uniswap_v3"
+    assert row["pool"] == POOL
+    assert row["lifecycle_block"] == 20
+    assert row["lifecycle_transaction_index"] == 2
+    assert row["lifecycle_log_index"] == 5
+    assert row["initialize_log_index"] == 3
+
+
+def test_flap_v3_graduation_registry_rejects_unresolved_market():
+    handoffs = build_flap_graduation_market_handoffs(
+        [full_flap_row()],
+        [],
+    )
+    with pytest.raises(ValueError, match="no exact address market"):
+        build_flap_v3_graduation_registry(
+            [full_flap_row()],
+            handoffs,
+        )
+
+
+def test_flap_graduation_snapshot_prices_exact_handoff():
+    handoffs = build_flap_graduation_market_handoffs(
+        [full_flap_row()],
+        [market_row()],
+    )
+    registry = build_flap_v3_graduation_registry(
+        [full_flap_row()],
+        handoffs,
+    )
+    quote_points = [{
+        "pool": POOL,
+        "token": TOKEN,
+        "quote_token": QUOTE,
+        "block_number": 20,
+        "transaction_index": 2,
+        "log_index": 5,
+        "quote_per_token": "0.001",
+        "pricing_source": "sparse_v3_state_and_swaps",
+    }]
+    rows = build_flap_graduation_snapshot_points(
+        registry,
+        quote_points,
+        [],
+        initial_weth_usd=Decimal("2000"),
+        initial_quote_usd={QUOTE: Decimal("2")},
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "v3_graduation_snapshot"
+    assert rows[0]["market_cap_quote"] == "1000000.000"
+    assert rows[0]["market_cap_proxy_usd"] == "2000000.000"
+
+
+def test_merge_flap_lifecycle_summaries_preserves_full_population():
+    registry = [
+        full_flap_row(),
+        {
+            **full_flap_row(),
+            "token": "0x" + "55" * 20,
+            "graduation_block": None,
+        },
+    ]
+    curve = [{
+        "token": TOKEN,
+        "price_points": 2,
+        "priced_points": 2,
+        "max_market_cap_proxy_usd": "90000",
+        "max_market_cap_block": 15,
+        "crossed_100k": False,
+    }]
+    v3 = [{
+        "token": TOKEN,
+        "price_points": 3,
+        "priced_points": 3,
+        "max_market_cap_proxy_usd": "150000",
+        "max_market_cap_block": 25,
+        "crossed_100k": True,
+    }]
+    rows = merge_flap_lifecycle_market_cap_summaries(
+        registry,
+        curve,
+        v3,
+    )
+    by_token = {row["token"]: row for row in rows}
+    assert len(rows) == 2
+    assert by_token[TOKEN]["price_points"] == 5
+    assert by_token[TOKEN]["crossed_100k"] is True
+    assert by_token[TOKEN]["max_market_cap_proxy_usd"] == "150000"
+    assert by_token["0x" + "55" * 20]["price_points"] == 0
+

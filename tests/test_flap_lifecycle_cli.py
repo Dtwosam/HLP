@@ -1,6 +1,10 @@
 import json
 
-from hlp.cli import build_parser, cmd_phase2_flap_graduation_markets
+from hlp.cli import (
+    build_parser,
+    cmd_phase2_flap_graduation_markets,
+    cmd_phase2_flap_v3_graduation_registry,
+)
 
 
 def _write_jsonl(path, rows):
@@ -68,3 +72,82 @@ def test_flap_graduation_market_cli_is_evidence_only(tmp_path):
     assert report["matched_address_markets"] == 1
     assert report["all_graduations_resolved"] is True
     assert report["source_coverage_complete"] is False
+
+
+def test_flap_v3_graduation_registry_parser():
+    args = build_parser().parse_args([
+        "phase2-flap-v3-graduation-registry",
+        "--registry", "flap.jsonl",
+        "--handoffs", "handoffs.jsonl",
+        "--out", "v3.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.handoffs == "handoffs.jsonl"
+
+    market = build_parser().parse_args([
+        "phase2-flap-v3-market-window",
+        "--registry", "v3.jsonl",
+        "--swaps", "swaps.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--quote-decimals", "quotes.json",
+        "--quote-feeds", "feeds.jsonl",
+        "--out", "points.jsonl",
+        "--summary-out", "summary.jsonl",
+        "--report-out", "report.json",
+    ])
+    assert market.quote_feeds == "feeds.jsonl"
+
+
+def test_flap_v3_graduation_registry_cli(tmp_path):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    pool = "0x" + "33" * 20
+    flap = tmp_path / "flap.jsonl"
+    handoffs = tmp_path / "handoffs.jsonl"
+    out = tmp_path / "v3.jsonl"
+    summary = tmp_path / "summary.json"
+    _write_jsonl(flap, [{
+        "token": token,
+        "launch_block": 10,
+        "launch_transaction_hash": "0x" + "bb" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "token_decimals": 18,
+        "graduation_block": 20,
+    }])
+    _write_jsonl(handoffs, [{
+        "token": token,
+        "graduation_pool": pool,
+        "graduation_quote_token": quote,
+        "graduation_block": 20,
+        "graduation_transaction_hash": "0x" + "aa" * 32,
+        "graduation_transaction_index": 2,
+        "graduation_log_index": 5,
+        "market_handoff_complete": True,
+        "market_available_at_graduation": True,
+        "market_source_id": "direct_uniswap_v3",
+        "market_venue": "uniswap_v3",
+        "market_quote_decimals": 18,
+        "market_initialize_block": 20,
+        "market_initialize_transaction_index": 2,
+        "market_initialize_log_index": 3,
+        "market_initial_sqrt_price_x96": 2**96,
+        "market_initial_tick": 0,
+    }])
+
+    args = build_parser().parse_args([
+        "phase2-flap-v3-graduation-registry",
+        "--registry", str(flap),
+        "--handoffs", str(handoffs),
+        "--out", str(out),
+        "--summary-out", str(summary),
+    ])
+    assert cmd_phase2_flap_v3_graduation_registry(args) == 0
+    row = json.loads(out.read_text().strip())
+    assert row["lifecycle_log_index"] == 5
+    report = json.loads(summary.read_text())
+    assert report["graduated_tokens"] == 1
+    assert report["source_coverage_complete"] is False
+

@@ -269,7 +269,12 @@ Implemented foundation:
   allowlist, requires every bonding-curve price point to be priced, merges one
   deterministic curve summary, and emits a SHA-bound next-stage handoff. It
   remains non-final by construction until every LaunchedToDEX lifecycle is
-  joined and priced after graduation;
+  joined and priced after graduation. The Flap lifecycle module now also
+  freezes exact address-based V3 graduation registries, rejects unresolved or
+  not-yet-available markets, reconstructs the pool price causally at the exact
+  LaunchedToDEX order, and merges curve plus post-graduation summaries across
+  the full launch population. A dedicated market-window CLI prices that
+  graduation snapshot plus only later V3 swaps;
 - NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
   unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
   mint/burn surface. The registry is read from exact launch-block state, every
