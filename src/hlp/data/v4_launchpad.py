@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal, getcontext
 from typing import Iterable
 
+from hlp.data.direct_supply import DirectSupplyTimeline
 from hlp.data.market_quality import active_quote_liquidity_usd
 from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.reconstruct import event_order
@@ -37,6 +38,7 @@ def build_v4_launchpad_market_cap_points(
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
     allow_registry_initialization: bool = False,
+    supply_delta_rows: Iterable[dict] | None = None,
 ) -> list[dict]:
     getcontext().prec = max(getcontext().prec, 80)
     registry = {
@@ -48,6 +50,14 @@ def build_v4_launchpad_market_cap_points(
         weth_anchor_points=weth_usd_anchor_points,
         initial_quote_usd=initial_quote_usd,
         oracle_updates=quote_usd_updates,
+    )
+    supply_timeline = (
+        None
+        if supply_delta_rows is None
+        else DirectSupplyTimeline(
+            registry.values(),
+            supply_delta_rows,
+        )
     )
     events = []
     for row in initialize_rows:
@@ -68,7 +78,14 @@ def build_v4_launchpad_market_cap_points(
         launch = registry[pool_id]
         token = launch["token"].lower()
         quote = launch["quote_token"].lower()
-        supply_raw = int(launch["supply_raw"])
+        supply_raw = (
+            int(launch["supply_raw"])
+            if supply_timeline is None
+            else supply_timeline.supply_at(
+                token,
+                event_order(event),
+            )
+        )
         decimals = quote_decimals.get(quote)
         if decimals is None:
             raise KeyError(f"missing quote decimals for V4 quote {quote}")
