@@ -18,6 +18,9 @@ from hlp.data.types import (
     V4PoolInitialized,
     V4Swap,
 )
+from eth_utils import keccak
+
+from hlp.config import normalize_address
 from hlp.protocols.evm import (
     data_words,
     event_topic,
@@ -179,3 +182,46 @@ def decode_pons_v2_pool_registered(log: RawLog) -> PonsV2PoolRegistration:
         transaction_index=log.transaction_index,
         log_index=log.log_index,
     )
+
+
+
+def v4_pool_id(
+    *,
+    currency0: str,
+    currency1: str,
+    fee: int,
+    tick_spacing: int,
+    hooks: str,
+) -> str:
+    """Derive PoolId from the canonical ABI-encoded V4 PoolKey."""
+    c0 = normalize_address(currency0)
+    c1 = normalize_address(currency1)
+    hook = normalize_address(hooks)
+    if c0 == c1:
+        raise ValueError("V4 PoolKey currencies must differ")
+    if int(c0, 16) >= int(c1, 16):
+        raise ValueError(
+            "V4 PoolKey currencies are not canonically ordered"
+        )
+    fee = int(fee)
+    tick_spacing = int(tick_spacing)
+    if fee < 0 or fee >= 1 << 24:
+        raise ValueError("V4 PoolKey fee must fit uint24")
+    if tick_spacing < -(1 << 23) or tick_spacing >= 1 << 23:
+        raise ValueError("V4 PoolKey tick spacing must fit int24")
+
+    signed_tick = (
+        tick_spacing
+        if tick_spacing >= 0
+        else (1 << 256) + tick_spacing
+    )
+    payload = b"".join(
+        (
+            int(c0, 16).to_bytes(32, "big"),
+            int(c1, 16).to_bytes(32, "big"),
+            fee.to_bytes(32, "big"),
+            signed_tick.to_bytes(32, "big"),
+            int(hook, 16).to_bytes(32, "big"),
+        )
+    )
+    return "0x" + keccak(payload).hex()
