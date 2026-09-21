@@ -1,10 +1,10 @@
 # HLP Project State
 
-Updated: 2026-09-09
+Updated: 2026-09-21
 Repository: Dtwosam/HLP
-Current phase: Phase 1 — Historical/Live Data Acquisition Spike
+Current phase: Phase 2 — Chain-Wide Universe & Outcome Dataset
 Status: ACTIVE
-Next phase: Phase 2 — Pons Universe & Outcome Dataset (LOCKED until Phase 1 PASS)
+Next phase: Phase 3 — Point-in-Time Feature Store (LOCKED until Phase 2 PASS)
 
 ## Frozen user requirements
 
@@ -29,7 +29,31 @@ Source-of-truth PR #2 was merged to main at:
 
 The master spec, build order, anti-leakage standard and $0 rules are frozen.
 
-## Phase 1 — verified foundation
+## Phase 1 — PASS
+
+Checkpoint **`hlp-v1-phase1-data-viability`** passed canonically on 2026-09-21 in
+finalizer run **35601191874** at commit
+`05b0966ce0bf967649422ff3153f189921250c3d`. The fail-closed acceptance
+artifact `phase1-pons-acceptance-gate` (artifact **10639187021**, SHA-256
+`82cf0d8a61c9f2bf82651050f7a905076a2ff5cda11af1acb96586e93f9e1706`)
+reported `phase1_acceptance_status=pass`.
+
+The accepted same-snapshot evidence contains **494,639** Pons launches and
+**6,972** eligible tokens (**5,161 V1**, **1,811 V2**). All **10/10**
+representative tokens passed end-to-end validation with **30,734** canonical
+price points and no unexplained block gaps. The nine distinct viability routes
+all passed their exact **50,000-block** measurement contracts.
+
+Canonical acquisition accounting measured **500,000** route work blocks,
+**4,887** network requests and **1.130 GiB** of response data with zero missing
+executed-job logs or invalid runtimes. The conservative full-history projection
+covers **331,011,903** required work blocks and estimates **3,266,838** requests,
+**327** free-quota days, **806.45 GiB** of response data and **39.23 GiB** of
+artifacts. Every observed measurement route was the approved
+`solidrpc_keyless_public` free/public route, so
+`zero_cost_route_evidence=true`.
+
+**Phase 2 is unlocked.**
 
 ### Live/current chain access
 - [x] official Robinhood public RPC reports chain ID 4663
@@ -2098,7 +2122,7 @@ retries. That gives recovered evidence the same single-run three-artifact
 handoff shape required by the canonical viability readiness ledger. The
 existing nine-route guarded measurement -> viability projection -> final
 acceptance chain remains the **only** path allowed to publish
-`hlp-v1-phase1-data-viability` PASS. Phase 2 remains locked.
+`hlp-v1-phase1-data-viability` PASS. Phase 2 is now unlocked by the canonical Phase 1 PASS.
 
 The canonical viability/acceptance workflows now explicitly allow the normalized
 recovered evidence workflow path
