@@ -215,3 +215,120 @@ def validate_pools_trade_lbp_success_sample(
         "matches": normalized,
         "search_rpc_requests": requests,
     }
+
+
+
+POOLS_TRADE_LBP_SUCCESS_SUMMARY_VERSION = (
+    "phase2-pools-trade-lbp-success-summary-v1"
+)
+
+
+def _artifact_digest(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if not text.startswith("sha256:") or len(text) != 71:
+        raise ValueError(f"{label} digest is invalid")
+    _bytes32("0x" + text.removeprefix("sha256:"), label=label)
+    return text
+
+
+def validate_pools_trade_lbp_success_summary(
+    report: Mapping[str, object],
+) -> dict:
+    """Validate the compact artifact-bound LBP success population summary."""
+    version = str(report.get("version") or "")
+    if version != POOLS_TRADE_LBP_SUCCESS_SUMMARY_VERSION:
+        raise ValueError(
+            f"LBP success summary version changed: {version!r}"
+        )
+    if int(report.get("chain_id", -1)) != ROBINHOOD_CHAIN_ID:
+        raise ValueError("LBP success summary chain changed")
+
+    run_id = int(report.get("evidence_run_id", 0))
+    artifact_id = int(report.get("artifact_id", 0))
+    candidate_artifact_id = int(
+        report.get("candidate_artifact_id", 0)
+    )
+    if run_id <= 0 or artifact_id <= 0 or candidate_artifact_id <= 0:
+        raise ValueError("LBP success summary evidence IDs invalid")
+    artifact_digest = _artifact_digest(
+        report.get("artifact_digest"),
+        label="LBP success sample artifact",
+    )
+    candidate_digest = _artifact_digest(
+        report.get("candidate_artifact_digest"),
+        label="LBP candidate artifact",
+    )
+
+    discovery_from = int(report.get("discovery_from_block", -1))
+    discovery_to = int(report.get("discovery_to_block", -1))
+    search_from = int(report.get("search_from_block", -1))
+    search_to = int(report.get("search_to_block", -1))
+    if (
+        discovery_from < 0
+        or discovery_to < discovery_from
+        or search_from > discovery_from
+        or search_to < discovery_to
+    ):
+        raise ValueError("LBP success summary range contract changed")
+    if report.get("continuous_search") is not True:
+        raise ValueError("LBP success summary search is not continuous")
+    missing = report.get("missing_ranges")
+    if not isinstance(missing, list) or missing:
+        raise ValueError("LBP success summary has missing ranges")
+
+    candidates = int(report.get("candidates", -1))
+    successful = int(report.get("successful_candidates", -1))
+    requests = int(report.get("search_rpc_requests", 0))
+    if candidates <= 0 or successful <= 0 or successful > candidates:
+        raise ValueError("LBP success summary candidate counts invalid")
+    if requests <= 0:
+        raise ValueError("LBP success summary request count invalid")
+
+    gap = report.get("migration_initialize_gap_blocks")
+    if not isinstance(gap, Mapping):
+        raise ValueError("LBP success summary migration gap missing")
+    gap_min = int(gap.get("minimum", -1))
+    gap_median = int(gap.get("median", -1))
+    gap_max = int(gap.get("maximum", -1))
+    if not (0 <= gap_min <= gap_median <= gap_max):
+        raise ValueError("LBP success summary migration gap invalid")
+
+    native = int(report.get("successful_native_quote_candidates", -1))
+    zero_hook = int(report.get("successful_zero_hook_candidates", -1))
+    if (
+        native < 0
+        or zero_hook < 0
+        or native > successful
+        or zero_hook > successful
+    ):
+        raise ValueError("LBP success summary cohort counts invalid")
+
+    return {
+        "version": version,
+        "chain_id": ROBINHOOD_CHAIN_ID,
+        "evidence_run_id": run_id,
+        "artifact_id": artifact_id,
+        "artifact_name": str(report.get("artifact_name") or ""),
+        "artifact_digest": artifact_digest,
+        "candidate_artifact_id": candidate_artifact_id,
+        "candidate_artifact_name": str(
+            report.get("candidate_artifact_name") or ""
+        ),
+        "candidate_artifact_digest": candidate_digest,
+        "discovery_from_block": discovery_from,
+        "discovery_to_block": discovery_to,
+        "search_from_block": search_from,
+        "search_to_block": search_to,
+        "continuous_search": True,
+        "missing_ranges": [],
+        "candidates": candidates,
+        "successful_candidates": successful,
+        "search_rpc_requests": requests,
+        "migration_initialize_gap_blocks": {
+            "minimum": gap_min,
+            "median": gap_median,
+            "maximum": gap_max,
+        },
+        "successful_native_quote_candidates": native,
+        "successful_zero_hook_candidates": zero_hook,
+    }
