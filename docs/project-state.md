@@ -159,7 +159,15 @@ Implemented foundation:
   and can freeze only `active-quote-liquidity-causal-v1` with stable market-id
   tie-breaking and selected-pool-only volume. The resulting descriptor keeps
   `source_coverage_complete=false`, so selector policy cannot substitute for
-  the still-required direct DEX historical backfills;
+  the still-required direct DEX historical backfills. A subsequent
+  dispatch-only direct-source population handoff is now prepared behind both
+  gates: it requires the exact conclusive direct-launch artifact and exact
+  selector-freeze descriptor, verifies their internal SHAs/snapshot agreement,
+  and emits separate Uniswap V3, Sushi V3 and Uniswap V4 direct-launch
+  registries. Every row binds the frozen selector contract but remains
+  `canonical_market_selected=false` and
+  `source_coverage_complete=false`; the registries are inputs to historical
+  replay, not a shortcut around it;
 - direct-market launch-origin attribution is now progressive and fail-closed.
   Exact address matches can immediately mark a market as originating from a
   known launch source, but unmatched markets remain `unattributed` until every
