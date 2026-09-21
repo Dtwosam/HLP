@@ -230,6 +230,8 @@ jobs:
               "consumers": [
                   "direct_uniswap_v3",
                   "direct_sushiswap_v3",
+                  "pools_fun",
+                  "noxa",
               ],
               "remaining_steps": [
                   "join V3 PoolCreated candidates",

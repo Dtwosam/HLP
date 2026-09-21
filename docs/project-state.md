@@ -249,7 +249,19 @@ Implemented foundation:
   addresses against exact address-based direct-DEX registries, verifies token
   and quote identity, records Initialize-vs-graduation order, and leaves
   unmatched pools unresolved. PoolId-only V4 rows are never inferred from the
-  address-valued graduation field.
+  address-valued graduation field;
+- NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
+  unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
+  mint/burn surface. The registry is read from exact launch-block state, every
+  pool must join to one causal V3 Initialize, quote assets must be present in
+  the canonical direct-quote allowlist, and market-cap reconstruction replays
+  total supply from the end-of-launch-block seed instead of assuming NOXA
+  supply is immutable. The full coverage workflow filters the shared supply
+  tape to NOXA tokens once, prices all 128 V3 shards with sparse causal USD
+  anchors, validates a proposed `complete` row in memory, and publishes the
+  exact promotion handoff without mutating the canonical ledger. This is
+  prepared execution logic; NOXA remains incomplete until the backfills run
+  and the resulting evidence is accepted.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 

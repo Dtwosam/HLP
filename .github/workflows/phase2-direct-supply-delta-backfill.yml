@@ -224,6 +224,7 @@ jobs:
                   "direct_uniswap_v3",
                   "direct_sushiswap_v3",
                   "direct_uniswap_v4",
+                  "noxa",
               ],
               "remaining_steps": [
                   "filter deltas to direct candidate tokens",
