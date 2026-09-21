@@ -2,10 +2,12 @@ import pytest
 
 from hlp.data.direct_markets import (
     attribute_direct_market_origins,
+    build_direct_market_competition_cohort,
     build_v3_direct_market_registry,
     build_v4_direct_market_registry,
     select_v3_direct_market_candidates,
     select_v4_direct_market_candidates,
+    summarize_direct_market_competition_cohort,
     summarize_direct_market_registry,
 )
 from hlp.data.types import V3PoolCreated, V3PoolInitialized, V4PoolInitialized
@@ -225,6 +227,62 @@ def test_v4_duplicate_initialize_fails_closed():
             pool_manager=MANAGER,
             quote_decimals={QUOTE: 18},
         )
+
+
+
+def test_direct_market_competition_cohort_groups_cross_venue_markets():
+    v3 = build_v3_direct_market_registry(
+        [v3_created()],
+        [v3_init()],
+        [state()],
+        source_id="direct_uniswap_v3",
+        venue="uniswap_v3",
+        factory=FACTORY,
+        quote_decimals={QUOTE: 18},
+    )[0]
+    v4 = build_v4_direct_market_registry(
+        [v4_init()],
+        [state()],
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18},
+    )[0]
+
+    rows = build_direct_market_competition_cohort([v3, v4])
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["token"] == TOKEN
+    assert row["market_count"] == 2
+    assert row["source_ids"] == [
+        "direct_uniswap_v3",
+        "direct_uniswap_v4",
+    ]
+    assert {item["market_id"] for item in row["markets"]} == {
+        POOL,
+        POOL_ID,
+    }
+    assert row["canonical_market_selection_complete"] is False
+
+    summary = summarize_direct_market_competition_cohort(rows)
+    assert summary["tokens"] == 1
+    assert summary["markets"] == 2
+    assert summary["max_markets_per_token"] == 2
+    assert summary["canonical_market_selection_complete"] is False
+
+
+def test_direct_market_competition_cohort_excludes_single_market_tokens():
+    v3 = build_v3_direct_market_registry(
+        [v3_created()],
+        [v3_init()],
+        [state()],
+        source_id="direct_uniswap_v3",
+        venue="uniswap_v3",
+        factory=FACTORY,
+        quote_decimals={QUOTE: 18},
+    )
+    assert build_direct_market_competition_cohort(v3) == []
+
 
 
 def test_discovery_summary_keeps_canonical_selection_open():
