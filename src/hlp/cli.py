@@ -35,6 +35,7 @@ from hlp.config import (
     HOOD_FUN_CURRENT,
     TRENCH_MANAGER,
     UNISWAP_V4_POOL_MANAGER,
+    normalize_address,
 )
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
@@ -1063,14 +1064,15 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
 
 
 def cmd_rpc_hood_fun_tape(args: argparse.Namespace) -> int:
-    """Acquire one shared current-generation hood.fun launch/curve tape."""
+    """Acquire one shared hood.fun launch/curve tape."""
+    contract = normalize_address(args.contract)
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
     raw = rpc.iter_logs_chunked(
         args.from_block,
         args.to_block,
-        address=HOOD_FUN_CURRENT,
+        address=contract,
         topics=[list(HOOD_FUN_CURVE_TOPICS)],
         chunk_size=args.chunk_size,
         min_chunk_size=args.min_chunk_size,
@@ -1079,7 +1081,7 @@ def cmd_rpc_hood_fun_tape(args: argparse.Namespace) -> int:
 
     def decoded():
         for log in raw:
-            row = decode_hood_fun_event(log)
+            row = decode_hood_fun_event(log, contract=contract)
             counters[row.event_type] = counters.get(row.event_type, 0) + 1
             yield row
 
@@ -1089,8 +1091,9 @@ def cmd_rpc_hood_fun_tape(args: argparse.Namespace) -> int:
         provenance={
             "source": "evm_json_rpc",
             "chain_id": 4663,
-            "protocol": "hood_fun_current_curve_tape",
-            "contract": HOOD_FUN_CURRENT.lower(),
+            "protocol": "hood_fun_curve_tape",
+            "generation": str(args.generation),
+            "contract": contract,
             "event_topic0_or": list(HOOD_FUN_CURVE_TOPICS),
             "from_block": args.from_block,
             "to_block": args.to_block,
@@ -1115,16 +1118,21 @@ def cmd_rpc_hood_fun_tape(args: argparse.Namespace) -> int:
 
 
 def cmd_hood_fun_registry(args: argparse.Namespace) -> int:
-    """Build a persistent current-generation hood.fun launch registry."""
+    """Build a persistent hood.fun launch registry."""
+    contract = normalize_address(args.contract)
     events = [HoodFunEvent(**row) for row in _load_jsonl(args.events)]
-    rows = build_hood_fun_launch_registry(events)
+    rows = build_hood_fun_launch_registry(
+        events,
+        generation=args.generation,
+    )
     manifest = write_jsonl_snapshot(
         rows,
         output=Path(args.out),
         provenance={
             "source": "derived_hood_fun_token_created",
             "chain_id": 4663,
-            "contract": HOOD_FUN_CURRENT.lower(),
+            "generation": str(args.generation),
+            "contract": contract,
             "events": Path(args.events).name,
             "supply_semantics": (
                 "TokenCreated curve inventory is 80% of chosen total supply; "
@@ -1148,6 +1156,7 @@ def cmd_hood_fun_registry(args: argparse.Namespace) -> int:
 
 def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
     """Price hood.fun virtual reserves and emit $100k eligibility."""
+    contract = normalize_address(args.contract)
     if args.from_block <= 0:
         raise SystemExit("from-block must be > 0")
     events = [HoodFunEvent(**row) for row in _load_jsonl(args.events)]
@@ -1187,7 +1196,8 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
         provenance={
             "source": "derived_hood_fun_virtual_reserves",
             "chain_id": 4663,
-            "contract": HOOD_FUN_CURRENT.lower(),
+            "generation": str(args.generation),
+            "contract": contract,
             "events": Path(args.events).name,
             "registry": Path(args.registry).name,
             "from_block": args.from_block,
@@ -1204,6 +1214,8 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
         output=Path(args.summary_out),
         provenance={
             "source": "derived_hood_fun_curve_market_cap_points",
+            "generation": str(args.generation),
+            "contract": contract,
             "market_cap_points_sha256": point_manifest["sha256"],
             "eligibility_threshold_usd": "100000",
             "threshold_semantics": "reached at least once on hood.fun bonding curve",
@@ -5185,6 +5197,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     hood_tape = sub.add_parser("rpc-hood-fun-tape")
+    hood_tape.add_argument("--contract", default=HOOD_FUN_CURRENT)
+    hood_tape.add_argument("--generation", default="current")
     hood_tape.add_argument("--from-block", type=int, required=True)
     hood_tape.add_argument("--to-block", type=int, required=True)
     hood_tape.add_argument("--chunk-size", type=int, default=100_000)
@@ -5193,11 +5207,15 @@ def build_parser() -> argparse.ArgumentParser:
     hood_tape.set_defaults(func=cmd_rpc_hood_fun_tape)
 
     hood_registry = sub.add_parser("hood-fun-registry")
+    hood_registry.add_argument("--contract", default=HOOD_FUN_CURRENT)
+    hood_registry.add_argument("--generation", default="current")
     hood_registry.add_argument("--events", required=True)
     hood_registry.add_argument("--out", required=True)
     hood_registry.set_defaults(func=cmd_hood_fun_registry)
 
     hood_mcap = sub.add_parser("rpc-hood-fun-curve-market-cap-window")
+    hood_mcap.add_argument("--contract", default=HOOD_FUN_CURRENT)
+    hood_mcap.add_argument("--generation", default="current")
     hood_mcap.add_argument("--events", required=True)
     hood_mcap.add_argument("--registry", required=True)
     hood_mcap.add_argument("--from-block", type=int, required=True)
