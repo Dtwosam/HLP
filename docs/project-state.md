@@ -319,6 +319,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   to run without those exact proof identities and binds the proof SHA into the
   market-cap provenance. Neither the semantic proof nor previous-generation
   full backfill has been executed/frozen yet;
+- trench.today's Phase-2 path no longer relies on the earlier smoke-test
+  assumption of fixed 1B/18-decimal token economics. A launch-registry command
+  now reads ERC-20 totalSupply/decimals at the exact TokenCreate block, the
+  registry freezes LimitReach order, and curve market-cap math uses raw reserve
+  ratios with canonical quote decimals so token decimals cancel correctly.
+  This hardening is prerequisite to the chain-wide trench backfill; no trench
+  coverage is claimed yet;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

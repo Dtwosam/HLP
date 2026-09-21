@@ -9,9 +9,6 @@ from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.types import TrenchEvent
 
 
-TRENCH_FIXED_SUPPLY = Decimal("1000000000")
-
-
 def _order(row: TrenchEvent) -> tuple[int, int, int]:
     return (
         row.block_number,
@@ -28,12 +25,13 @@ def build_trench_curve_market_cap_points(
     initial_weth_usd: Decimal,
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
+    quote_decimals: dict[str, int] | None = None,
 ) -> Iterator[dict]:
     """Price each authoritative trench Sync snapshot without look-ahead.
 
-    Sync carries post-trade virtual quote/token reserves. Both assets use
-    18-decimal raw units in the validated Robinhood regime, so the raw reserve
-    ratio directly yields quote-token-per-token.
+    Sync carries post-trade virtual quote/token reserves. Market cap is
+    computed in raw units so token decimals cancel:
+    raw_quote/raw_token * total_supply_raw / 10**quote_decimals.
     """
     registry = {
         row["token"].lower(): row
@@ -81,8 +79,45 @@ def build_trench_curve_market_cap_points(
             raise ValueError(f"trench.today Sync has non-positive virtual reserves: {token}")
 
         quote_token = launch["quote_token"].lower()
+        supply_raw = launch.get("supply_raw")
+        token_decimals = launch.get("token_decimals")
+        if supply_raw is None or token_decimals is None:
+            raise ValueError(
+                f"trench.today registry lacks launch supply state: {token}"
+            )
+        supply_raw = int(supply_raw)
+        token_decimals = int(token_decimals)
+        decimals = (
+            None
+            if quote_decimals is None
+            else quote_decimals.get(quote_token)
+        )
+        if decimals is None:
+            raw_decimals = launch.get("quote_decimals")
+            if raw_decimals is None:
+                raise KeyError(
+                    f"missing trench.today quote decimals: {quote_token}"
+                )
+            decimals = int(raw_decimals)
+        decimals = int(decimals)
+        if decimals < 0 or decimals > 255:
+            raise ValueError(
+                f"invalid trench.today quote decimals: {quote_token}"
+            )
+
+        raw_quote_per_raw_token = (
+            Decimal(event.virtual_quote_raw)
+            / Decimal(event.virtual_token_raw)
+        )
         quote_per_token = (
-            Decimal(event.virtual_quote_raw) / Decimal(event.virtual_token_raw)
+            raw_quote_per_raw_token
+            * (Decimal(10) ** token_decimals)
+            / (Decimal(10) ** decimals)
+        )
+        market_cap_quote = (
+            raw_quote_per_raw_token
+            * Decimal(supply_raw)
+            / (Decimal(10) ** decimals)
         )
         quote_usd = timeline.price(quote_token)
         pricing_status = timeline.pricing_status(quote_token)
@@ -91,8 +126,8 @@ def build_trench_curve_market_cap_points(
         )
         market_cap = (
             None
-            if token_price_usd is None
-            else token_price_usd * TRENCH_FIXED_SUPPLY
+            if quote_usd is None
+            else market_cap_quote * quote_usd
         )
 
         yield {
@@ -110,7 +145,12 @@ def build_trench_curve_market_cap_points(
             "real_token_reserves_raw": event.real_token_reserves_raw,
             "virtual_quote_raw": event.virtual_quote_raw,
             "virtual_token_raw": event.virtual_token_raw,
+            "supply_raw": supply_raw,
+            "token_decimals": token_decimals,
+            "quote_decimals": decimals,
+            "raw_quote_per_raw_token": str(raw_quote_per_raw_token),
             "quote_per_token": str(quote_per_token),
+            "market_cap_quote": str(market_cap_quote),
             "pricing_status": pricing_status,
             "quote_usd": None if quote_usd is None else str(quote_usd),
             "token_price_usd": (

@@ -49,6 +49,9 @@ REGISTRY = [
         "launch_block": 9,
         "launch_transaction_index": 1,
         "launch_log_index": 0,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "token_decimals": 18,
+        "quote_decimals": 18,
     }
 ]
 
@@ -97,4 +100,43 @@ def test_trench_sync_rejects_snapshot_before_recorded_launch():
                 initial_weth_usd=Decimal("2000"),
             )
         )
+
+
+
+
+def test_trench_market_cap_uses_registry_supply_not_fixed_constant():
+    registry = [{
+        **REGISTRY[0],
+        "supply_raw": 500_000_000 * 10**18,
+    }]
+    rows = list(
+        build_trench_curve_market_cap_points(
+            [sync()],
+            registry,
+            [],
+            initial_weth_usd=Decimal("2000"),
+        )
+    )
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("1000")
+
+
+def test_trench_market_cap_respects_non18_decimals():
+    registry = [{
+        **REGISTRY[0],
+        "supply_raw": 2_000_000 * 10**9,
+        "token_decimals": 9,
+        "quote_decimals": 6,
+    }]
+    event = sync(vq=2_000_000, vt=1_000_000_000)
+    rows = list(
+        build_trench_curve_market_cap_points(
+            [event],
+            registry,
+            [],
+            initial_weth_usd=Decimal("2000"),
+            initial_quote_usd={ZERO: Decimal("1")},
+        )
+    )
+    assert Decimal(rows[0]["quote_per_token"]) == Decimal("2")
+    assert Decimal(rows[0]["market_cap_quote"]) == Decimal("4000000")
 

@@ -212,7 +212,10 @@ from hlp.data.trench_curve import (
     build_trench_curve_market_cap_points,
     summarize_trench_curve_market_caps,
 )
-from hlp.data.trench_registry import build_trench_launch_registry
+from hlp.data.trench_registry import (
+    attach_trench_launch_static_states,
+    build_trench_launch_registry,
+)
 from hlp.data.types import (
     FlapEvent,
     HoodFunEvent,
@@ -4101,6 +4104,64 @@ def cmd_rpc_trench_tape(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_trench_registry_window(args: argparse.Namespace) -> int:
+    """Acquire trench.today launches plus exact launch-block ERC-20 state."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=TRENCH_MANAGER,
+        topics=[list(TRENCH_CURVE_TOPICS)],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    events = [decode_trench_event(row) for row in raw]
+    base = build_trench_launch_registry(events)
+    states = [
+        read_erc20_static(
+            rpc,
+            row["token"],
+            block=int(row["launch_block"]),
+        )
+        for row in base
+    ]
+    registry = attach_trench_launch_static_states(base, states)
+    manifest = write_jsonl_snapshot(
+        registry,
+        output=Path(args.out),
+        provenance={
+            "source": "trench_today_events_and_launch_block_erc20_state",
+            "chain_id": 4663,
+            "manager": TRENCH_MANAGER.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "state_semantics": "ERC20 decimals/totalSupply at launch block",
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "launches": len(registry),
+        "limit_reaches": sum(
+            row["limit_reach_block"] is not None
+            for row in registry
+        ),
+        "quote_tokens": sorted({
+            row["quote_token"] for row in registry
+        }),
+        "supply_shapes": sorted({
+            (int(row["token_decimals"]), int(row["supply_raw"]))
+            for row in registry
+        }),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_trench_registry(args: argparse.Namespace) -> int:
     """Build a persistent trench.today launch registry from a raw tape."""
     events = [TrenchEvent(**row) for row in _load_jsonl(args.events)]
@@ -4136,6 +4197,16 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
         raise SystemExit("from-block must be > 0")
     events = [TrenchEvent(**row) for row in _load_jsonl(args.events)]
     registry = _load_jsonl(args.registry)
+    quote_decimals = (
+        None
+        if not getattr(args, "quote_decimals", None)
+        else {
+            normalize_address(key): int(value)
+            for key, value in json.loads(
+                Path(args.quote_decimals).read_text()
+            ).items()
+        }
+    )
     if getattr(args, "quote_feeds", None) and any(
         getattr(args, field, None)
         for field in ("oracle_state", "oracle_events")
@@ -4195,6 +4266,7 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
             initial_weth_usd=initial_weth_usd,
             initial_quote_usd=initial_quote_usd,
             quote_usd_updates=quote_usd_updates,
+            quote_decimals=quote_decimals,
         )
     )
     point_manifest = write_jsonl_snapshot(
@@ -4222,7 +4294,12 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
                 else None
             ),
             "price_semantics": "virtualQuote / virtualToken from authoritative post-trade Sync",
-            "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
+            "supply_semantics": "exact launch-block ERC20 totalSupply/decimals from persistent registry",
+            "quote_decimals": (
+                Path(args.quote_decimals).name
+                if getattr(args, "quote_decimals", None)
+                else "registry_fallback"
+            ),
         },
     )
     summary = summarize_trench_curve_market_caps(points)
@@ -8806,6 +8883,26 @@ def build_parser() -> argparse.ArgumentParser:
     trench_tape.add_argument("--out", required=True)
     trench_tape.set_defaults(func=cmd_rpc_trench_tape)
 
+    trench_registry_window = sub.add_parser(
+        "rpc-trench-registry-window"
+    )
+    trench_registry_window.add_argument(
+        "--from-block", type=int, required=True
+    )
+    trench_registry_window.add_argument(
+        "--to-block", type=int, required=True
+    )
+    trench_registry_window.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    trench_registry_window.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    trench_registry_window.add_argument("--out", required=True)
+    trench_registry_window.set_defaults(
+        func=cmd_rpc_trench_registry_window
+    )
+
     trench_registry = sub.add_parser("trench-registry")
     trench_registry.add_argument("--events", required=True)
     trench_registry.add_argument("--out", required=True)
@@ -8822,6 +8919,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--usd-anchor-pool",
         default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
     )
+    trench_mcap.add_argument("--quote-decimals")
     trench_mcap.add_argument("--oracle-state")
     trench_mcap.add_argument("--oracle-events")
     trench_mcap.add_argument(
