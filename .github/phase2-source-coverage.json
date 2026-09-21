@@ -15,7 +15,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "phase1_proven"
     },
     {
       "source_id": "pons_v2",
@@ -30,7 +31,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "phase1_proven"
     },
     {
       "source_id": "pools_fun",
@@ -45,7 +47,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "pools_trade_instant",
@@ -60,7 +63,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "pools_trade_lbp",
@@ -75,7 +79,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "registry_ready"
     },
     {
       "source_id": "doppler",
@@ -90,7 +95,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "flap",
@@ -105,7 +111,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "trench_today",
@@ -120,7 +127,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "hood_fun_current",
@@ -135,7 +143,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "hood_fun_previous",
@@ -150,7 +159,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "discovery_pending"
     },
     {
       "source_id": "noxa",
@@ -165,7 +175,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "direct_uniswap_v3",
@@ -180,7 +191,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "direct_uniswap_v4",
@@ -195,7 +207,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "direct_sushiswap_v3",
@@ -210,7 +223,8 @@
       "priced_points": 0,
       "observed_volume_usd": null,
       "provenance_sha256": null,
-      "blocking_reason": null
+      "blocking_reason": null,
+      "source_readiness": "adapter_ready"
     }
   ]
 }
