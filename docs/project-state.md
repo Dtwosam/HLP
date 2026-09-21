@@ -2183,3 +2183,16 @@ now publishes the validated path as a step output, passes it through
 set before applying recovery-mode routing rules. No route measurement RPC was
 issued by the failed run and the `pons_registry` ledger slot remains zero.
 
+Second guarded `pons_registry` run **35578141192** passed both recovered
+evidence preflight layers. Its primary measurement job then failed before RPC in
+`Validate bounded measurement contract` with
+`FileExistsError: [Errno 17] File exists: 'artifacts'`: the contract heredoc
+used non-idempotent `Path("artifacts").mkdir()`, while runner setup had already
+materialized that directory. The V2 secondary registry lane had independently
+passed its bounded-range contract and entered its measurement.
+
+The primary contract now uses
+`Path("artifacts").mkdir(parents=True, exist_ok=True)`, matching the existing
+idempotent shell setup used by the secondary lane. This changes no measurement
+geometry, route inputs, evidence binding, RPC scope or acceptance threshold.
+

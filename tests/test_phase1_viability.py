@@ -295,4 +295,6 @@ def test_viability_measurement_accepts_normalized_recovered_evidence_path():
     assert "evidence_workflow_path={observed_path}" in workflow
     assert "EVIDENCE_WORKFLOW_PATH:" in workflow
     assert 'observed_path = os.environ["EVIDENCE_WORKFLOW_PATH"]' in workflow
+    assert 'Path("artifacts").mkdir(parents=True, exist_ok=True)' in workflow
+    assert 'Path("artifacts").mkdir()' not in workflow
 

@@ -585,7 +585,7 @@ jobs:
               raise SystemExit(
                   "viability measurement evidence run ID cannot be negative"
               )
-          Path("artifacts").mkdir()
+          Path("artifacts").mkdir(parents=True, exist_ok=True)
           Path("artifacts/phase1-route-measurement.json").write_text(
               json.dumps(
                   {
