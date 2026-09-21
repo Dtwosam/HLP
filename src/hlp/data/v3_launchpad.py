@@ -224,3 +224,70 @@ def summarize_v3_launchpad_market_caps(rows: Iterable[dict]) -> list[dict]:
         output.append(item)
     output.sort(key=lambda row: row["token"])
     return output
+
+
+
+def merge_v3_launchpad_market_cap_summaries(
+    rows: Iterable[dict],
+) -> list[dict]:
+    """Merge deterministic per-window V3 token summaries."""
+    merged: dict[str, dict] = {}
+    for raw in rows:
+        row = dict(raw)
+        token = str(row["token"]).lower()
+        current = merged.get(token)
+        identity = (
+            str(row["venue"]),
+            str(row["pool"]).lower(),
+            str(row["quote_token"]).lower(),
+        )
+        if current is None:
+            current = {
+                "token": token,
+                "venue": identity[0],
+                "pool": identity[1],
+                "quote_token": identity[2],
+                "price_points": 0,
+                "priced_points": 0,
+                "max_market_cap_proxy_usd": None,
+                "max_market_cap_block": None,
+                "crossed_100k": False,
+            }
+            merged[token] = current
+        elif (
+            current["venue"],
+            current["pool"],
+            current["quote_token"],
+        ) != identity:
+            raise ValueError(
+                f"V3 summary identity drift for token {token}"
+            )
+
+        current["price_points"] += int(row["price_points"])
+        current["priced_points"] += int(row["priced_points"])
+        current["crossed_100k"] = (
+            bool(current["crossed_100k"])
+            or bool(row["crossed_100k"])
+        )
+
+        raw_max = row.get("max_market_cap_proxy_usd")
+        if raw_max is None:
+            continue
+        value = Decimal(str(raw_max))
+        block = int(row["max_market_cap_block"])
+        prior_raw = current["max_market_cap_proxy_usd"]
+        prior_block = current["max_market_cap_block"]
+        if (
+            prior_raw is None
+            or value > Decimal(str(prior_raw))
+            or (
+                value == Decimal(str(prior_raw))
+                and (prior_block is None or block < int(prior_block))
+            )
+        ):
+            current["max_market_cap_proxy_usd"] = str(value)
+            current["max_market_cap_block"] = block
+
+    output = list(merged.values())
+    output.sort(key=lambda row: row["token"])
+    return output
