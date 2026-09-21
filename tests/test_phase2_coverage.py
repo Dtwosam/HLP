@@ -501,3 +501,45 @@ def test_repository_source_boundaries_match_coverage_ledger():
     assert rows["hood_fun_current"]["required_start_block"] == 5_611_265
     assert rows["direct_uniswap_v3"]["required_start_block"] == 8_930
     assert rows["direct_uniswap_v4"]["required_start_block"] == 9_070
+
+
+
+def test_source_boundaries_survive_readiness_promotion():
+    inventory = [
+        {"source_id": "x", "readiness": "adapter_ready"},
+    ]
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [{
+            "source_id": "x",
+            "source_readiness": "adapter_ready",
+            "coverage_status": "not_started",
+            "required_start_block": 20,
+            "first_block": None,
+            "last_block": None,
+            "continuous": None,
+            "missing_ranges": [],
+            "tokens_discovered": 0,
+            "price_points": 0,
+            "priced_points": 0,
+            "observed_volume_usd": None,
+            "provenance_sha256": None,
+            "blocking_reason": None,
+        }],
+    }
+    updated, validation = apply_phase2_source_boundaries(
+        ledger,
+        inventory,
+        {
+            "version": PHASE2_BOUNDARY_REPORT_VERSION,
+            "snapshot_head_block": 100,
+            "sources": [{
+                "source_id": "x",
+                "source_readiness": "decoder_ready",
+                "required_start_block": 20,
+            }],
+        },
+    )
+    assert updated == ledger
+    assert validation["complete_source_ids"] == []
