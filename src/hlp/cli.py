@@ -240,6 +240,7 @@ from hlp.data.v3_launchpad import (
 )
 from hlp.data.v4_launchpad import (
     build_v4_launchpad_market_cap_points,
+    summarize_v4_launchpad_market_caps,
 )
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
@@ -926,6 +927,286 @@ def cmd_rpc_doppler_launch_window(args: argparse.Namespace) -> int:
         "rpc_route": rpc.route_label,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_doppler_market_window(
+    args: argparse.Namespace,
+) -> int:
+    """Reconstruct one bounded Doppler V4 market-cap window."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    if args.to_block < args.from_block:
+        raise SystemExit("to-block must be >= from-block")
+
+    registry = _load_jsonl(args.registry)
+    if not registry:
+        raise SystemExit("Doppler registry is empty")
+    if {
+        str(row.get("source_id") or "")
+        for row in registry
+    } != {"doppler"}:
+        raise SystemExit("Doppler registry source identity changed")
+
+    by_pool = {}
+    tokens = set()
+    for row in registry:
+        pool_id = str(row["pool_id"]).lower()
+        token = normalize_address(str(row["token"]))
+        if pool_id in by_pool:
+            raise SystemExit(f"Doppler registry repeats pool: {pool_id}")
+        if token in tokens:
+            raise SystemExit(f"Doppler registry repeats token: {token}")
+        by_pool[pool_id] = row
+        tokens.add(token)
+
+    initializes = []
+    for row in registry:
+        block = int(row["initialize_block"])
+        if not args.from_block <= block <= args.to_block:
+            continue
+        initializes.append({
+            "pool_id": str(row["pool_id"]).lower(),
+            "currency0": normalize_address(str(row["currency0"])),
+            "currency1": normalize_address(str(row["currency1"])),
+            "fee": int(row["fee"]),
+            "tick_spacing": int(row["tick_spacing"]),
+            "hooks": normalize_address(str(row["hooks"])),
+            "sqrt_price_x96": int(row["initial_sqrt_price_x96"]),
+            "tick": int(row["initial_tick"]),
+            "block_number": block,
+            "transaction_hash": str(
+                row["initialize_transaction_hash"]
+            ).lower(),
+            "transaction_index": row.get(
+                "initialize_transaction_index"
+            ),
+            "log_index": int(row["initialize_log_index"]),
+        })
+
+    swaps = []
+    for raw in _iter_jsonl(args.swaps):
+        row = dict(raw)
+        pool_id = str(row.get("pool_id") or "").lower()
+        if pool_id not in by_pool:
+            continue
+        block = int(row["block_number"])
+        if not args.from_block <= block <= args.to_block:
+            raise SystemExit(
+                f"Doppler swap outside requested window: {block}"
+            )
+        swaps.append(row)
+    swaps.sort(key=event_order)
+
+    supply_deltas = []
+    for raw in _iter_jsonl(args.supply_deltas):
+        row = dict(raw)
+        token = normalize_address(str(row["token"]))
+        if token not in tokens:
+            raise SystemExit(
+                f"Doppler supply tape contains unknown token: {token}"
+            )
+        if int(row["block_number"]) <= args.to_block:
+            supply_deltas.append(row)
+    supply_deltas.sort(
+        key=lambda row: (event_order(row), row["token"].lower())
+    )
+
+    target_events = [*initializes, *swaps]
+    target_events.sort(key=event_order)
+    quote_decimals = _direct_quote_decimals(args.quote_decimals)
+    quote_by_pool = {
+        pool_id: normalize_address(str(row["quote_token"]))
+        for pool_id, row in by_pool.items()
+    }
+    required_quotes = {
+        quote_by_pool[str(row["pool_id"]).lower()]
+        for row in target_events
+    }
+    missing_decimals = sorted(required_quotes - set(quote_decimals))
+    if missing_decimals:
+        raise SystemExit(
+            "Doppler quote allowlist is missing: "
+            + ", ".join(missing_decimals)
+        )
+
+    point_provenance = {
+        "source": "phase2_doppler_v4_market_window",
+        "chain_id": 4663,
+        "source_id": "doppler",
+        "registry": Path(args.registry).name,
+        "registry_sha256": _sha256_file(args.registry),
+        "swaps": Path(args.swaps).name,
+        "swaps_sha256": _sha256_file(args.swaps),
+        "supply_deltas": Path(args.supply_deltas).name,
+        "supply_deltas_sha256": _sha256_file(args.supply_deltas),
+        "quote_decimals": Path(args.quote_decimals).name,
+        "quote_decimals_sha256": _sha256_file(args.quote_decimals),
+        "quote_feeds": Path(args.quote_feeds).name,
+        "quote_feeds_sha256": _sha256_file(args.quote_feeds),
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "supply_semantics": (
+            "initialize-block-end seed plus complete causal mint/burn deltas"
+        ),
+        "market_cap_math": (
+            "raw_quote_per_raw_token * supply_raw / 10**quote_decimals"
+        ),
+    }
+
+    if not target_events:
+        points_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance=point_provenance,
+        )
+        summary_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.summary_out),
+            provenance={
+                "source": "phase2_doppler_v4_market_window_summary",
+                "market_cap_points_sha256": points_manifest["sha256"],
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+            },
+        )
+        report = {
+            "version": "phase2-doppler-market-window-v1",
+            "source_id": "doppler",
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initialize_events": 0,
+            "swap_events": 0,
+            "market_cap_points": 0,
+            "priced_points": 0,
+            "unpriced_points": 0,
+            "tokens_with_price_points": 0,
+            "points_sha256": points_manifest["sha256"],
+            "summary_sha256": summary_manifest["sha256"],
+            "source_coverage_complete": False,
+            "empty_window": True,
+        }
+        Path(args.report_out).write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd, anchors, anchor_window_size = (
+        _sparse_weth_usd_anchors(
+            rpc,
+            target_events,
+            pool=args.usd_anchor_pool,
+            chunk_size=args.chunk_size,
+            fallback_block=args.from_block - 1,
+        )
+    )
+    feed_specs = _load_jsonl(args.quote_feeds)
+    feed_tokens = {
+        normalize_address(str(row["quote_token"]))
+        for row in feed_specs
+    }
+    built_in_quotes = {
+        "0x" + "00" * 20,
+        ROBINHOOD_WETH.lower(),
+        ROBINHOOD_USDG.lower(),
+    }
+    sparse_targets = []
+    required_feed_quotes = set()
+    for event in target_events:
+        quote = quote_by_pool[str(event["pool_id"]).lower()]
+        if quote in built_in_quotes:
+            continue
+        required_feed_quotes.add(quote)
+        sparse_targets.append({
+            **event,
+            "quote_token": quote,
+        })
+    missing_feeds = sorted(required_feed_quotes - feed_tokens)
+    if missing_feeds:
+        raise SystemExit(
+            "Doppler quote feed registry is missing: "
+            + ", ".join(missing_feeds)
+        )
+    sparse_chainlink_points = build_sparse_chainlink_usd_points(
+        rpc,
+        sparse_targets,
+        feed_specs=feed_specs,
+        window_size=anchor_window_size,
+    )
+
+    points = build_v4_launchpad_market_cap_points(
+        registry,
+        initializes,
+        swaps,
+        anchors,
+        initial_weth_usd=initial_weth_usd,
+        quote_decimals=quote_decimals,
+        initial_quote_usd={},
+        quote_usd_updates=iter(sparse_chainlink_points),
+        allow_registry_initialization=True,
+        supply_delta_rows=supply_deltas,
+    )
+    points = [
+        {**row, "source_id": "doppler"}
+        for row in points
+    ]
+    points_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            **point_provenance,
+            "usd_anchor_pool": normalize_address(args.usd_anchor_pool),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
+            "sparse_chainlink_mode": "state_and_answer_updates",
+        },
+    )
+    summary = summarize_v4_launchpad_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "phase2_doppler_v4_market_window_summary",
+            "market_cap_points_sha256": points_manifest["sha256"],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "eligibility_threshold_usd": "100000",
+        },
+    )
+    priced = sum(int(row["priced_points"]) for row in summary)
+    total = sum(int(row["price_points"]) for row in summary)
+    report = {
+        "version": "phase2-doppler-market-window-v1",
+        "source_id": "doppler",
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "initialize_events": len(initializes),
+        "swap_events": len(swaps),
+        "supply_delta_events": len(supply_deltas),
+        "market_cap_points": len(points),
+        "priced_points": priced,
+        "unpriced_points": total - priced,
+        "tokens_with_price_points": len(summary),
+        "points_sha256": points_manifest["sha256"],
+        "summary_sha256": summary_manifest["sha256"],
+        "sparse_anchor_points": len(anchors),
+        "sparse_chainlink_points": len(sparse_chainlink_points),
+        "anchor_window_size": anchor_window_size,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_coverage_complete": False,
+        "empty_window": False,
+    }
+    Path(args.report_out).write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 
@@ -8382,6 +8663,37 @@ def build_parser() -> argparse.ArgumentParser:
     doppler_launch.add_argument("--out", required=True)
     doppler_launch.add_argument("--state-out", required=True)
     doppler_launch.set_defaults(func=cmd_rpc_doppler_launch_window)
+
+    doppler_market = sub.add_parser(
+        "phase2-doppler-market-window"
+    )
+    doppler_market.add_argument("--registry", required=True)
+    doppler_market.add_argument("--swaps", required=True)
+    doppler_market.add_argument("--supply-deltas", required=True)
+    doppler_market.add_argument(
+        "--from-block", type=int, required=True
+    )
+    doppler_market.add_argument(
+        "--to-block", type=int, required=True
+    )
+    doppler_market.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    doppler_market.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    doppler_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    doppler_market.add_argument("--quote-decimals", required=True)
+    doppler_market.add_argument("--quote-feeds", required=True)
+    doppler_market.add_argument("--out", required=True)
+    doppler_market.add_argument("--summary-out", required=True)
+    doppler_market.add_argument("--report-out", required=True)
+    doppler_market.set_defaults(
+        func=cmd_phase2_doppler_market_window
+    )
 
     noxa_registry = sub.add_parser("rpc-noxa-registry-window")
     noxa_registry.add_argument("--from-block", type=int, required=True)
