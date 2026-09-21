@@ -14,6 +14,9 @@ from hlp.config import (
 
 
 HOOD_FUN_DEPLOYMENTS_VERSION = "phase2-hoodfun-deployments-v1"
+HOOD_FUN_LEGACY_COMPATIBILITY_VERSION = (
+    "phase2-hoodfun-legacy-compatibility-v1"
+)
 
 
 def _sha256(value: object, *, label: str) -> str:
@@ -136,4 +139,119 @@ def validate_hood_fun_deployments(
             "previous": previous,
             "current": current,
         },
+    }
+
+
+
+def validate_hood_fun_legacy_compatibility(
+    descriptor: Mapping[str, object],
+) -> dict:
+    """Validate frozen evidence that legacy hood.fun shares the core ABI."""
+    version = str(descriptor.get("version") or "")
+    if version != HOOD_FUN_LEGACY_COMPATIBILITY_VERSION:
+        raise ValueError(
+            f"hood.fun legacy compatibility version changed: {version!r}"
+        )
+    if int(descriptor.get("chain_id", -1)) != ROBINHOOD_CHAIN_ID:
+        raise ValueError("hood.fun legacy compatibility chain changed")
+    if str(descriptor.get("generation") or "") != "previous":
+        raise ValueError("hood.fun legacy compatibility generation changed")
+
+    contract = normalize_address(str(descriptor.get("contract") or ""))
+    if contract != normalize_address(HOOD_FUN_PREVIOUS):
+        raise ValueError("hood.fun legacy compatibility contract changed")
+
+    evidence_run_id = int(descriptor.get("evidence_run_id", 0))
+    artifact_id = int(descriptor.get("artifact_id", 0))
+    if evidence_run_id <= 0 or artifact_id <= 0:
+        raise ValueError("hood.fun legacy compatibility evidence IDs invalid")
+
+    artifact_digest = str(
+        descriptor.get("artifact_digest") or ""
+    ).lower()
+    if (
+        not artifact_digest.startswith("sha256:")
+        or len(artifact_digest) != 71
+    ):
+        raise ValueError(
+            "hood.fun legacy compatibility artifact digest invalid"
+        )
+    _sha256(
+        artifact_digest.removeprefix("sha256:"),
+        label="hood.fun legacy compatibility artifact",
+    )
+
+    first = int(descriptor.get("first_code_block", 0))
+    limit = int(descriptor.get("probe_limit_block", 0))
+    blocks = int(descriptor.get("probe_blocks_scanned", 0))
+    chunks = int(descriptor.get("chunks_scanned", 0))
+    requests = int(descriptor.get("requests_made", 0))
+    if first <= 0 or limit < first:
+        raise ValueError("hood.fun legacy compatibility block range invalid")
+    if blocks <= 0 or chunks <= 0 or requests <= 0:
+        raise ValueError(
+            "hood.fun legacy compatibility probe accounting invalid"
+        )
+
+    counts = descriptor.get("event_counts")
+    if not isinstance(counts, Mapping):
+        raise ValueError("hood.fun legacy compatibility event counts missing")
+    created = int(counts.get("token_created", 0))
+    trades = int(counts.get("trade", 0))
+    if created <= 0 or trades <= 0:
+        raise ValueError(
+            "hood.fun legacy compatibility lacks both core event types"
+        )
+
+    if descriptor.get("current_surface_compatible") is not True:
+        raise ValueError("hood.fun legacy core event surface not compatible")
+    if descriptor.get("stopped_on_compatibility") is not True:
+        raise ValueError("hood.fun legacy probe did not stop on compatibility")
+
+    topics = descriptor.get("known_topics")
+    if not isinstance(topics, Mapping):
+        raise ValueError("hood.fun legacy known topics missing")
+    from hlp.protocols.hood_fun import TOKEN_CREATED_TOPIC, TRADE_TOPIC
+
+    if str(topics.get("token_created") or "").lower() != TOKEN_CREATED_TOPIC:
+        raise ValueError("hood.fun legacy TokenCreated topic changed")
+    if str(topics.get("trade") or "").lower() != TRADE_TOPIC:
+        raise ValueError("hood.fun legacy Trade topic changed")
+
+    samples = descriptor.get("first_samples")
+    if not isinstance(samples, Mapping):
+        raise ValueError("hood.fun legacy first samples missing")
+    for event_type in ("token_created", "trade"):
+        raw = samples.get(event_type)
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                f"hood.fun legacy {event_type} sample missing"
+            )
+        block = int(raw.get("block_number", 0))
+        if block < first or block > limit:
+            raise ValueError(
+                f"hood.fun legacy {event_type} sample out of range"
+            )
+        normalize_address(str(raw.get("token") or ""))
+
+    return {
+        "version": version,
+        "chain_id": ROBINHOOD_CHAIN_ID,
+        "generation": "previous",
+        "contract": contract,
+        "evidence_run_id": evidence_run_id,
+        "artifact_id": artifact_id,
+        "artifact_name": str(descriptor.get("artifact_name") or ""),
+        "artifact_digest": artifact_digest,
+        "first_code_block": first,
+        "probe_limit_block": limit,
+        "probe_blocks_scanned": blocks,
+        "chunks_scanned": chunks,
+        "requests_made": requests,
+        "event_counts": {
+            "token_created": created,
+            "trade": trades,
+        },
+        "current_surface_compatible": True,
+        "stopped_on_compatibility": True,
     }
