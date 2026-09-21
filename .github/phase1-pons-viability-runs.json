@@ -4,7 +4,7 @@
   "routes": {
     "pons_registry": 35578541325,
     "pons_v1_v3": 35585634488,
-    "pons_v2_curve": 0,
+    "pons_v2_curve": 35586223955,
     "pons_v2_transition": 0,
     "pons_v2_v4": 0,
     "weth_usdg_anchor": 0,
