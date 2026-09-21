@@ -193,13 +193,13 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": _addresses(NOXA_LAUNCH_FACTORY),
             "trading_contracts": _addresses(UNISWAP_V3_FACTORY),
             "market_phases": ["uniswap_v3"],
-            "readiness": "decoder_ready",
+            "readiness": "adapter_ready",
             "implementation_evidence": [
                 "hlp.protocols.noxa",
                 "hlp.protocols.noxa_state",
+                "hlp.data.noxa_registry",
                 "hlp.data.v3_launchpad",
             ],
-            "blocking_gap": "persistent historical launch registry assembly",
         },
         {
             "source_id": "direct_uniswap_v3",
