@@ -243,6 +243,9 @@ def test_trench_uses_sparse_chainlink_launch_quote(
         "launch_block": 9,
         "launch_transaction_index": 1,
         "launch_log_index": 0,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "token_decimals": 18,
+        "quote_decimals": 18,
     }])
     _write_jsonl(feeds, [{
         "quote_token": quote,
