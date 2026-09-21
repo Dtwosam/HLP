@@ -10,6 +10,7 @@ from hlp.data.types import (
     PoolsTradeTokenDistributed,
     PoolsTradeTokenLaunched,
 )
+from hlp.protocols.uniswap import v4_pool_id
 
 
 ZERO_ADDRESS = "0x" + "00" * 20
@@ -177,6 +178,17 @@ def build_pools_trade_lbp_registry(
                 f"pools.trade LBP distribution precedes token creation: {token}"
             )
 
+        currency0, currency1 = sorted(
+            (token, init.currency.lower()),
+            key=lambda value: int(value, 16),
+        )
+        pool_id = v4_pool_id(
+            currency0=currency0,
+            currency1=currency1,
+            fee=int(init.pool_fee),
+            tick_spacing=int(init.pool_tick_spacing),
+            hooks=init.pool_hook.lower(),
+        )
         output.append(
             {
                 "venue": "pools.trade",
@@ -184,6 +196,9 @@ def build_pools_trade_lbp_registry(
                 "token": token,
                 "quote_token": init.currency.lower(),
                 "supply_raw": supply_raw,
+                "pool_id": pool_id,
+                "currency0": currency0,
+                "currency1": currency1,
                 "launcher": creation.launcher.lower(),
                 "strategy": init.strategy.lower(),
                 "initializer": init.initializer.lower(),
