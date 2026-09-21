@@ -2156,3 +2156,20 @@ This is a provenance-only repair before any viability route measurement; route
 geometry, request scope, concurrency, work-block floors and acceptance criteria
 are unchanged.
 
+Viability readiness audit run **35577074500** exposed a GitHub
+`actions/download-artifact@v4` extraction-layout mismatch before any route
+RPC: exact `artifact-ids` downloads were extracted beneath
+`<path>/<artifact-name>/...`, while the readiness/acceptance code reads the
+selected artifact directly beneath the requested path. The evidence ZIP itself
+was correct and contained
+`phase1-post-eligibility-evidence-ready.json` at its root; the audit therefore
+reported only `evidence handoff payload is missing`.
+
+All exact-ID downloads in the canonical remaining acceptance graph now set
+`merge-multiple: true` so a single selected artifact is flattened into the
+requested directory. This covers readiness, the guarded route, the reusable
+route measurement, final-acceptance evidence handoff, acceptance-gate
+eligible/representative/viability inputs, and accounting-to-viability
+projection. Exact artifact-ID selection, retry cleanup and duplicate-equivalence
+checks are unchanged; only extraction layout changed.
+
