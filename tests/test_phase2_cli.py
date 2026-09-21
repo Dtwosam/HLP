@@ -4,11 +4,13 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_direct_v4_registry,
     cmd_phase2_market_quality_audit,
     cmd_pools_trade_instant_registry,
     cmd_pools_trade_lbp_registry,
 )
 from hlp.data.phase2_coverage import PHASE2_COVERAGE_LEDGER_VERSION
+from hlp.protocols.erc20 import Erc20StaticState
 
 
 def complete(source_id):
@@ -295,6 +297,167 @@ def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
     assert row["pool_id"].startswith("0x")
     assert len(row["pool_id"]) == 66
 
+
+
+
+def test_phase2_direct_v4_registry_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-v4-registry",
+        "--initialize", "initialize.jsonl",
+        "--quote-decimals", "quotes.json",
+        "--state-out", "state.jsonl",
+        "--registry-out", "registry.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.source_id == "direct_uniswap_v4"
+    assert args.venue == "uniswap_v4"
+    assert args.initialize == "initialize.jsonl"
+    assert args.quote_decimals == "quotes.json"
+
+
+def test_phase2_direct_v4_registry_reads_state_at_initialize_block(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    manager = "0x" + "66" * 20
+    initialize = tmp_path / "initialize.jsonl"
+    quotes = tmp_path / "quotes.json"
+    state_out = tmp_path / "state.jsonl"
+    registry_out = tmp_path / "registry.jsonl"
+    summary_out = tmp_path / "summary.json"
+
+    _write_jsonl(initialize, [{
+        "pool_manager": manager,
+        "pool_id": "0x" + "aa" * 32,
+        "currency0": token,
+        "currency1": quote,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "hooks": "0x" + "00" * 20,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 123,
+        "transaction_hash": "0x" + "03" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }])
+    quotes.write_text(json.dumps({quote: 18}))
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 2
+        response_bytes_received = 128
+
+        def assert_robinhood(self):
+            return None
+
+    reads = []
+    monkeypatch.setattr(
+        "hlp.cli._archive_rpc",
+        lambda args: FakeRpc(),
+    )
+
+    def fake_read_erc20_static(rpc, address, *, block):
+        reads.append((address, block))
+        return Erc20StaticState(
+            token=address,
+            block_number=block,
+            decimals=18,
+            total_supply=1_000_000 * 10**18,
+        )
+
+    monkeypatch.setattr(
+        "hlp.cli.read_erc20_static",
+        fake_read_erc20_static,
+    )
+
+    args = SimpleNamespace(
+        initialize=str(initialize),
+        quote_decimals=str(quotes),
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=manager,
+        state_out=str(state_out),
+        registry_out=str(registry_out),
+        summary_out=str(summary_out),
+    )
+    assert cmd_phase2_direct_v4_registry(args) == 0
+    assert reads == [(token, 123)]
+
+    registry = json.loads(registry_out.read_text().strip())
+    assert registry["token"] == token
+    assert registry["quote_token"] == quote
+    assert registry["state_block"] == 123
+    assert registry["initialize_block"] == 123
+
+    summary = json.loads(summary_out.read_text())
+    assert summary["supported_quote_candidate_markets"] == 1
+    assert summary["exact_state_reads"] == 1
+    assert summary["source_coverage_complete"] is False
+    assert summary["registry"]["canonical_market_selection_complete"] is False
+
+
+def test_phase2_direct_v4_registry_does_not_read_quote_quote_state(
+    monkeypatch,
+    tmp_path,
+):
+    quote0 = "0x" + "22" * 20
+    quote1 = "0x" + "33" * 20
+    manager = "0x" + "66" * 20
+    initialize = tmp_path / "initialize.jsonl"
+    quotes = tmp_path / "quotes.json"
+
+    _write_jsonl(initialize, [{
+        "pool_manager": manager,
+        "pool_id": "0x" + "bb" * 32,
+        "currency0": quote0,
+        "currency1": quote1,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "hooks": "0x" + "00" * 20,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 124,
+        "transaction_hash": "0x" + "04" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }])
+    quotes.write_text(json.dumps({quote0: 18, quote1: 6}))
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 0
+        response_bytes_received = 0
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+    monkeypatch.setattr(
+        "hlp.cli.read_erc20_static",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("quote/quote market must not trigger token state")
+        ),
+    )
+
+    args = SimpleNamespace(
+        initialize=str(initialize),
+        quote_decimals=str(quotes),
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=manager,
+        state_out=str(tmp_path / "state.jsonl"),
+        registry_out=str(tmp_path / "registry.jsonl"),
+        summary_out=str(tmp_path / "summary.json"),
+    )
+    assert cmd_phase2_direct_v4_registry(args) == 0
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["supported_quote_candidate_markets"] == 0
+    assert summary["exact_state_reads"] == 0
+    assert summary["registry"]["markets"] == 0
 
 
 def test_phase2_market_quality_audit_parser():
