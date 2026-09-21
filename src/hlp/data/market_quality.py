@@ -142,3 +142,119 @@ def summarize_market_competition(
         "multi_market_counts": dict(sorted(multi.items())),
         "selection_rule_frozen": False,
     }
+
+
+
+def _market_event_order(
+    row: Mapping[str, object],
+) -> tuple[int, int, int, str]:
+    block = int(row["block_number"])
+    tx_raw = row.get("transaction_index")
+    tx = -1 if tx_raw is None else int(tx_raw)
+    log_index = int(row["log_index"])
+    market_id = str(row.get("market_id") or "").lower()
+    if block < 0 or tx < -1 or log_index < 0 or not market_id:
+        raise ValueError("invalid market-quality event order")
+    return block, tx, log_index, market_id
+
+
+def build_causal_market_quality_trace(
+    rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Build event-time multi-market comparison snapshots without look-ahead.
+
+    A market enters the comparison only after a row has both a priced market
+    cap and an active quote-liquidity metric. At each subsequent event, the
+    latest already-observed state of every market for that token is compared.
+    The deepest market is retained as a research candidate only; this function
+    does not freeze the production canonical selector.
+    """
+    ordered = [dict(row) for row in rows]
+    ordered.sort(key=_market_event_order)
+
+    latest: dict[str, dict[str, dict]] = {}
+    seen_events: set[tuple[str, tuple[int, int, int, str]]] = set()
+    output: list[dict] = []
+
+    for row in ordered:
+        token = str(row.get("token") or "").lower()
+        market_id = str(row.get("market_id") or "").lower()
+        if not token or not market_id:
+            raise ValueError("market-quality event lacks token/market_id")
+        order = _market_event_order(row)
+        event_key = (token, order)
+        if event_key in seen_events:
+            raise ValueError(
+                f"duplicate market-quality event: {token} {order}"
+            )
+        seen_events.add(event_key)
+
+        raw_depth = row.get("active_quote_liquidity_usd")
+        raw_mcap = row.get("market_cap_proxy_usd")
+        if raw_depth is not None and raw_mcap is not None:
+            depth = Decimal(str(raw_depth))
+            mcap = Decimal(str(raw_mcap))
+            if depth < 0:
+                raise ValueError(
+                    f"negative active quote liquidity: {market_id}"
+                )
+            if mcap < 0:
+                raise ValueError(
+                    f"negative market cap proxy: {market_id}"
+                )
+            state = dict(row)
+            state["token"] = token
+            state["market_id"] = market_id
+            state["active_quote_liquidity_usd"] = str(depth)
+            state["market_cap_proxy_usd"] = str(mcap)
+            latest.setdefault(token, {})[market_id] = state
+
+        current = list(latest.get(token, {}).values())
+        if not current:
+            continue
+        ranked = rank_market_quality_snapshot(current)
+        candidate = ranked[0]
+        caps = [
+            Decimal(item["market_cap_proxy_usd"])
+            for item in ranked
+        ]
+        min_cap = min(caps)
+        max_cap = max(caps)
+        dispersion_multiple = (
+            None
+            if min_cap <= 0
+            else max_cap / min_cap
+        )
+
+        output.append(
+            {
+                "token": token,
+                "event_market_id": market_id,
+                "block_number": order[0],
+                "transaction_index": (
+                    None if order[1] == -1 else order[1]
+                ),
+                "log_index": order[2],
+                "observed_markets": len(ranked),
+                "candidate_market_id": candidate["market_id"],
+                "candidate_market_cap_proxy_usd": (
+                    candidate["market_cap_proxy_usd"]
+                ),
+                "candidate_active_quote_liquidity_usd": (
+                    candidate["active_quote_liquidity_usd"]
+                ),
+                "min_observed_market_cap_proxy_usd": str(min_cap),
+                "max_observed_market_cap_proxy_usd": str(max_cap),
+                "market_cap_dispersion_multiple": (
+                    None
+                    if dispersion_multiple is None
+                    else str(dispersion_multiple)
+                ),
+                "ranked_market_ids": [
+                    item["market_id"] for item in ranked
+                ],
+                "selection_rule_frozen": False,
+            }
+        )
+
+    return output
