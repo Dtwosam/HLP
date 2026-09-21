@@ -10,6 +10,7 @@ from hlp.cli import (
     build_parser,
     cmd_rpc_pons_transfer_tape,
     cmd_rpc_pools_fun_market_cap_window,
+    cmd_rpc_supply_delta_window,
     cmd_rpc_v3_pool_created_window,
     cmd_rpc_v3_swap_window,
     cmd_rpc_v4_initialize_window,
@@ -989,6 +990,108 @@ class _FakeDiscoveryRpc:
             "min_chunk_size": min_chunk_size,
         })
         return [object()]
+
+
+
+def test_shared_supply_delta_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-supply-delta-window",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "supply.jsonl",
+    ])
+    assert args.from_block == 10
+    assert args.to_block == 20
+    assert args.out == "supply.jsonl"
+
+
+def test_shared_supply_delta_window_scans_mints_and_burns(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    zero = "0x" + "00" * 20
+    alice = "0x" + "22" * 20
+    zero_topic = "0x" + "00" * 32
+
+    class FakeLog:
+        def __init__(self, suffix):
+            self.address = token
+            self.transaction_hash = "0x" + suffix * 64
+            self.log_index = 0
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 2
+        response_bytes_received = 100
+
+        def __init__(self):
+            self.calls = []
+
+        def assert_robinhood(self):
+            return None
+
+        def iter_logs_chunked(
+            self,
+            from_block,
+            to_block,
+            *,
+            topics,
+            chunk_size,
+            min_chunk_size,
+        ):
+            self.calls.append(topics)
+            return [FakeLog("1" if topics[1] == zero_topic else "2")]
+
+    rpc = FakeRpc()
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: rpc)
+
+    def fake_decode(log):
+        if log.transaction_hash.endswith("1" * 64):
+            return {
+                "token": token,
+                "from_address": zero,
+                "to_address": alice,
+                "value_raw": 100,
+                "block_number": 10,
+                "transaction_hash": log.transaction_hash,
+                "transaction_index": 1,
+                "log_index": 0,
+            }
+        return {
+            "token": token,
+            "from_address": alice,
+            "to_address": zero,
+            "value_raw": 25,
+            "block_number": 11,
+            "transaction_hash": log.transaction_hash,
+            "transaction_index": 1,
+            "log_index": 0,
+        }
+
+    monkeypatch.setattr("hlp.cli.decode_erc20_transfer", fake_decode)
+    out = tmp_path / "supply.jsonl"
+    parsed = SimpleNamespace(
+        from_block=10,
+        to_block=20,
+        chunk_size=200,
+        min_chunk_size=25,
+        out=str(out),
+    )
+    assert cmd_rpc_supply_delta_window(parsed) == 0
+
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    assert [row["supply_delta_raw"] for row in rows] == [100, -25]
+    assert rpc.calls == [
+        [TRANSFER_TOPIC, zero_topic],
+        [TRANSFER_TOPIC, None, zero_topic],
+    ]
+
 
 
 def test_generic_v3_pool_created_window_is_factory_scoped(
