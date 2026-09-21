@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_direct_v3_registry,
     cmd_phase2_direct_v4_registry,
     cmd_phase2_market_quality_audit,
     cmd_pools_trade_instant_registry,
@@ -298,6 +299,198 @@ def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
     assert len(row["pool_id"]) == 66
 
 
+
+
+
+def test_phase2_direct_v3_registry_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-v3-registry",
+        "--pool-created", "created.jsonl",
+        "--initialize", "initialize.jsonl",
+        "--quote-decimals", "quotes.json",
+        "--source-id", "direct_uniswap_v3",
+        "--venue", "uniswap_v3",
+        "--factory", "0x" + "44" * 20,
+        "--state-out", "state.jsonl",
+        "--registry-out", "registry.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.source_id == "direct_uniswap_v3"
+    assert args.pool_created == "created.jsonl"
+    assert args.initialize == "initialize.jsonl"
+
+
+def test_shared_v3_initialize_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-v3-initialize-window",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "initialize.jsonl",
+    ])
+    assert args.from_block == 10
+    assert args.to_block == 20
+    assert args.out == "initialize.jsonl"
+
+
+def test_phase2_direct_v3_registry_reads_state_at_matched_initialize_block(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    factory = "0x" + "44" * 20
+    pool = "0x" + "55" * 20
+    created = tmp_path / "created.jsonl"
+    initialize = tmp_path / "initialize.jsonl"
+    quotes = tmp_path / "quotes.json"
+
+    _write_jsonl(created, [{
+        "factory": factory,
+        "token0": token,
+        "token1": quote,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "pool": pool,
+        "block_number": 100,
+        "transaction_hash": "0x" + "01" * 32,
+        "transaction_index": 1,
+        "log_index": 2,
+    }])
+    _write_jsonl(initialize, [{
+        "pool": pool,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 123,
+        "transaction_hash": "0x" + "02" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }])
+    quotes.write_text(json.dumps({quote: 18}))
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 2
+        response_bytes_received = 128
+
+        def assert_robinhood(self):
+            return None
+
+    reads = []
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+
+    def fake_read_erc20_static(rpc, address, *, block):
+        reads.append((address, block))
+        return Erc20StaticState(
+            token=address,
+            block_number=block,
+            decimals=18,
+            total_supply=1_000_000 * 10**18,
+        )
+
+    monkeypatch.setattr(
+        "hlp.cli.read_erc20_static",
+        fake_read_erc20_static,
+    )
+
+    registry_out = tmp_path / "registry.jsonl"
+    summary_out = tmp_path / "summary.json"
+    args = SimpleNamespace(
+        pool_created=str(created),
+        initialize=str(initialize),
+        quote_decimals=str(quotes),
+        source_id="direct_uniswap_v3",
+        venue="uniswap_v3",
+        factory=factory,
+        state_out=str(tmp_path / "state.jsonl"),
+        registry_out=str(registry_out),
+        summary_out=str(summary_out),
+    )
+    assert cmd_phase2_direct_v3_registry(args) == 0
+    assert reads == [(token, 123)]
+
+    registry = json.loads(registry_out.read_text().strip())
+    assert registry["token"] == token
+    assert registry["pool"] == pool
+    assert registry["state_block"] == 123
+    assert registry["initialize_block"] == 123
+
+    summary = json.loads(summary_out.read_text())
+    assert summary["supported_quote_candidate_markets"] == 1
+    assert summary["matched_initialized_candidate_markets"] == 1
+    assert summary["exact_state_reads"] == 1
+    assert summary["source_coverage_complete"] is False
+
+
+def test_phase2_direct_v3_registry_skips_unmatched_initialize_state_reads(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    factory = "0x" + "44" * 20
+    pool = "0x" + "55" * 20
+    created = tmp_path / "created.jsonl"
+    initialize = tmp_path / "initialize.jsonl"
+    quotes = tmp_path / "quotes.json"
+
+    _write_jsonl(created, [{
+        "factory": factory,
+        "token0": token,
+        "token1": quote,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "pool": pool,
+        "block_number": 100,
+        "transaction_hash": "0x" + "01" * 32,
+        "transaction_index": 1,
+        "log_index": 2,
+    }])
+    _write_jsonl(initialize, [{
+        "pool": "0x" + "77" * 20,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 123,
+        "transaction_hash": "0x" + "02" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }])
+    quotes.write_text(json.dumps({quote: 18}))
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 0
+        response_bytes_received = 0
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+    monkeypatch.setattr(
+        "hlp.cli.read_erc20_static",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unmatched pool must not trigger token state")
+        ),
+    )
+
+    args = SimpleNamespace(
+        pool_created=str(created),
+        initialize=str(initialize),
+        quote_decimals=str(quotes),
+        source_id="direct_uniswap_v3",
+        venue="uniswap_v3",
+        factory=factory,
+        state_out=str(tmp_path / "state.jsonl"),
+        registry_out=str(tmp_path / "registry.jsonl"),
+        summary_out=str(tmp_path / "summary.json"),
+    )
+    assert cmd_phase2_direct_v3_registry(args) == 0
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["supported_quote_candidate_markets"] == 1
+    assert summary["matched_initialized_candidate_markets"] == 0
+    assert summary["exact_state_reads"] == 0
+    assert summary["registry"]["markets"] == 0
 
 
 def test_phase2_direct_v4_registry_parser():
