@@ -474,3 +474,30 @@ def test_apply_source_boundaries_rejects_existing_start_drift():
                 }],
             },
         )
+
+
+
+def test_repository_source_boundaries_match_coverage_ledger():
+    ledger = json.loads(
+        Path(".github/phase2-source-coverage.json").read_text()
+    )
+    boundary_report = json.loads(
+        Path(
+            ".github/phase2-source-deployment-boundaries.json"
+        ).read_text()
+    )
+    updated, validation = apply_phase2_source_boundaries(
+        ledger,
+        build_phase2_source_inventory(),
+        boundary_report,
+    )
+
+    assert updated == ledger
+    assert validation["coverage_status_counts"]["complete"] == 2
+    rows = {row["source_id"]: row for row in ledger["sources"]}
+    assert rows["noxa"]["required_start_block"] == 61_688
+    assert rows["pools_fun"]["required_start_block"] == 33_570_152
+    assert rows["hood_fun_previous"]["required_start_block"] == 1_676_992
+    assert rows["hood_fun_current"]["required_start_block"] == 5_611_265
+    assert rows["direct_uniswap_v3"]["required_start_block"] == 8_930
+    assert rows["direct_uniswap_v4"]["required_start_block"] == 9_070
