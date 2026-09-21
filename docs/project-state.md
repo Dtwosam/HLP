@@ -232,9 +232,13 @@ Implemented foundation:
   mint/burn replay. A source-specific bounded market-window command now
   synthesizes each frozen Initialize, filters shared V4 swaps, replays the
   complete mint/burn tape causally, and samples WETH/USD or Chainlink only at
-  target event orders. Each shard remains
-  `source_coverage_complete=false` until the full population is merged and
-  validated;
+  target event orders. A dispatch-only **128-shard** source-coverage workflow
+  is now prepared against exact registry, shared V4 Swap, shared supply-delta
+  and canonical quote runs. It requires one Initialize point per Instant token,
+  full token-summary coverage and `priced_points == price_points`, validates a
+  proposed `pools_trade_instant=complete` row in memory, and publishes exact
+  promotion metadata without mutating the canonical ledger. This remains
+  prepared execution logic, not completed evidence;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
