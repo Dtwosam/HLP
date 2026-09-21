@@ -80,8 +80,10 @@ Implemented foundation:
   treated as proof of a direct launch;
 - a persistent pools.trade Crowd Launch/LBP registry reconciling token creation,
   strategy distribution, supply, reserved LP allocation and initializer state.
-  This source is `registry_ready`, not adapter-ready, because its auction/LBP
-  price path is not yet decoded;
+  CCA price events are decoded and deterministic orientation-gated market-cap
+  reconstruction is implemented. The source remains `decoder_ready` until
+  clearing-price orientation and the post-auction V4 handoff are frozen from
+  chain evidence;
 - a fail-closed Phase-2 historical coverage contract, CI-proven in run
   **35605506698**, that requires every source to report continuous
   reconstruction through the frozen snapshot with SHA-256 provenance before
@@ -106,6 +108,16 @@ Implemented foundation:
   `c6129b4156b739934a94e5bb16f54e36e638876263f29365e4e551167f4c8cfc`.
   `hood_fun_previous` is therefore `adapter_ready`; historical coverage is
   still not complete and remains fail-closed in the coverage ledger.
+- conservative historical start boundaries are now frozen for all **12
+  non-Pons sources**. Run **35623186049** proved first-code boundaries with
+  archive state reads; artifact **10649564971** has SHA-256
+  `6664a2e450c5bad4bbb2a43424a06d3d21fe7e12996e38a9ea1ce8aef0b3d876`.
+  The canonical coverage ledger now has a concrete `required_start_block` for
+  all **14/14** source populations while preserving only Pons V1/V2 as
+  `complete`.
+- launchpad USD conversion no longer requires continuous WETH/USD scans:
+  pools.fun, Flap, trench.today and hood.fun now share sparse causal V3 anchor
+  sampling bounded to the observed keyless **200-block** filtered-log cap.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
@@ -113,7 +125,8 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   2026-09-21), so Phase-2 backfills must use more aggressive source sharing,
   sparse quote-price sampling, or the free authenticated route rather than the
   older 2,000-block assumption;
-- pools.trade LBP price-path reconstruction and migration lifecycle;
+- pools.trade LBP clearing-price orientation freeze and post-auction V4
+  handoff evidence;
 - complete historical backfills for both hood.fun generations; the previous
   deployment's core TokenCreated/Trade surface is now proven compatible with
   the shared hood.fun adapter;
