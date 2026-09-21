@@ -130,6 +130,15 @@ Implemented foundation:
   `35b9aab31f5b258540dcb7b018c07181838a4c9a742d9bd996b2786a0b8fd26d`.
   That sample is therefore not valid migration-price evidence for freezing the
   CCA Q96 orientation; successful-LBP discovery is being studied separately.
+- population-level pools.trade LBP handoff evidence is also frozen. Run
+  **35626412874** discovered **437** LBP candidates in blocks
+  **30,000,000..31,000,000** and searched their exact derived PoolIds
+  continuously through block **31,500,000**. **149** candidates have a matching
+  V4 Initialize, with **7,807** keyless requests and no missing ranges. The
+  merged artifact is **10653894082**, SHA-256
+  `d23486f7792d595b18850f07a095e11ae2795f478f23e246356704ea088b798b`;
+  migration-to-initialize gaps range from **3** to **1,545** blocks (median
+  **57**).
 - pools.trade LBP CCA orientation is closed by successful-auction evidence.
   Run **35627264268** observed the final CCA checkpoint and exact derived-PoolId
   V4 Initialize in the **same transaction** at block **30,493,816**. The direct
