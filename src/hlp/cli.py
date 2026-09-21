@@ -1026,23 +1026,18 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    initial_weth_usd = v3_quote_price_at_block(
-        rpc,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        block=args.from_block - 1,
-    )
-    anchor_points = list(
-        reconstruct_v3_price_points(
+    target_events = [*initializes, *swaps]
+    if not target_events:
+        raise SystemExit(
+            "pools.trade has no V4 Initialize/Swap events to price"
+        )
+    initial_weth_usd, anchor_points, anchor_window_size = (
+        _sparse_weth_usd_anchors(
             rpc,
-            token=ROBINHOOD_WETH,
-            quote_token=ROBINHOOD_USDG,
+            target_events,
             pool=args.usd_anchor_pool,
-            from_block=args.from_block,
-            to_block=args.to_block,
             chunk_size=args.chunk_size,
-            min_chunk_size=args.min_chunk_size,
+            fallback_block=args.from_block - 1,
         )
     )
 
@@ -1078,6 +1073,8 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
             "market_cap_math": "raw_quote_per_raw_token * supply_raw / 10**quote_decimals",
         },
     )
@@ -1105,6 +1102,12 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
                 ),
                 "quote_decimals": quote_decimals,
                 "initial_weth_usd": str(initial_weth_usd),
+                "sparse_anchor_points": len(anchor_points),
+                "sparse_anchor_windows": len({
+                    row["window_from_block"]
+                    for row in anchor_points
+                }),
+                "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
