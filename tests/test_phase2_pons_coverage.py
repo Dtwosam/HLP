@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -131,3 +132,38 @@ def test_lifecycle_artifact_rejects_unknown_or_unpriced(tmp_path):
             snapshot_head_block=100,
             directory=tmp_path,
         )
+
+
+
+def test_repository_pons_source_coverage_descriptor_is_frozen():
+    descriptor = validate_pons_source_coverage_descriptor(
+        json.loads(
+            Path(".github/phase2-pons-source-coverage.json").read_text()
+        )
+    )
+    assert descriptor["snapshot_head_block"] == 54_486_035
+    rows = {row["source_id"]: row for row in descriptor["sources"]}
+
+    v1 = rows["pons_v1"]
+    assert v1["artifact_run_id"] == 35_518_892_463
+    assert v1["artifact_id"] == 10_607_208_490
+    assert v1["records"] == 268_688
+    assert v1["eligible_tokens"] == 5_161
+    assert v1["required_start_block"] == 8_621_658
+    assert v1["price_points"] == 63_560_072
+    assert v1["lifecycle_sha256"] == (
+        "74a43a5401d88d299070b21414e7d2ef"
+        "aaa90c8469596d2207ef41a9456ede31"
+    )
+
+    v2 = rows["pons_v2"]
+    assert v2["artifact_run_id"] == 35_518_892_463
+    assert v2["artifact_id"] == 10_607_362_928
+    assert v2["records"] == 225_951
+    assert v2["eligible_tokens"] == 1_811
+    assert v2["required_start_block"] == 27_027_321
+    assert v2["price_points"] == 24_319_652
+    assert v2["lifecycle_sha256"] == (
+        "2e880af79350530d4c30cda8d10778f"
+        "ee8156c284ccb523cae226f1a886cc566"
+    )
