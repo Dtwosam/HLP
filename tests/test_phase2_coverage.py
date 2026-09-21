@@ -1,6 +1,10 @@
 import pytest
 
-from hlp.data.phase2_coverage import validate_phase2_source_coverage
+from hlp.data.phase2_coverage import (
+    PHASE2_COVERAGE_LEDGER_VERSION,
+    validate_phase2_coverage_ledger,
+    validate_phase2_source_coverage,
+)
 
 
 SHA = "ab" * 32
@@ -148,4 +152,44 @@ def test_complete_source_cannot_leave_required_start_unresolved():
             INVENTORY,
             [row],
             snapshot_head_block=100,
+        )
+
+
+
+def test_versioned_coverage_ledger_requires_every_inventory_source_row():
+    pending = {
+        "source_id": "noxa",
+        "coverage_status": "not_started",
+        "required_start_block": None,
+        "first_block": None,
+        "last_block": None,
+        "continuous": None,
+        "missing_ranges": [],
+        "tokens_discovered": 0,
+        "price_points": 0,
+        "priced_points": 0,
+        "provenance_sha256": None,
+    }
+    report = validate_phase2_coverage_ledger(
+        {
+            "version": PHASE2_COVERAGE_LEDGER_VERSION,
+            "snapshot_head_block": 100,
+            "sources": [complete("pons_v1"), pending],
+        },
+        INVENTORY,
+    )
+    assert report["version"] == PHASE2_COVERAGE_LEDGER_VERSION
+    assert report["all_sources_reported"] is True
+    assert report["phase2_universe_coverage_complete"] is False
+
+
+def test_coverage_ledger_rejects_missing_source_row():
+    with pytest.raises(ValueError, match="source contract mismatch"):
+        validate_phase2_coverage_ledger(
+            {
+                "version": PHASE2_COVERAGE_LEDGER_VERSION,
+                "snapshot_head_block": 100,
+                "sources": [complete("pons_v1")],
+            },
+            INVENTORY,
         )
