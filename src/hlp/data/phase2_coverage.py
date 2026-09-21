@@ -308,6 +308,20 @@ def validate_phase2_coverage_ledger(
             f"missing={missing} extra={extra}"
         )
 
+    readiness_by_source = {
+        str(row["source_id"]): str(row.get("readiness") or "")
+        for row in inventory_rows
+    }
+    for raw in raw_sources:
+        source_id = str(raw["source_id"])
+        reported = str(raw.get("source_readiness") or "")
+        expected = readiness_by_source[source_id]
+        if reported != expected:
+            raise ValueError(
+                "Phase-2 coverage ledger readiness drift: "
+                f"{source_id} {reported!r} != {expected!r}"
+            )
+
     report = validate_phase2_source_coverage(
         inventory_rows,
         raw_sources,
