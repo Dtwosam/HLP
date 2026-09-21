@@ -199,7 +199,7 @@ def build_v3_direct_market_registry(
     factory: str,
     quote_decimals: Mapping[str, int],
 ) -> list[dict]:
-    """Build priceable V3 candidate markets with supply pinned to initialization."""
+    """Build priceable V3 candidates with an Initialize-block-end supply seed."""
     expected_factory = normalize_address(factory)
     supported_quotes = _quote_map(quote_decimals)
     states = _state_index(erc20_states)
@@ -239,7 +239,7 @@ def build_v3_direct_market_registry(
         state = states.get((token, int(init.block_number)))
         if state is None:
             raise KeyError(
-                f"missing exact-block ERC20 state for V3 candidate "
+                f"missing Initialize-block-end ERC20 state for V3 candidate "
                 f"{token} @ {init.block_number}"
             )
 
@@ -254,6 +254,7 @@ def build_v3_direct_market_registry(
                 "quote_decimals": supported_quotes[quote],
                 "token_decimals": int(state.decimals),
                 "supply_raw": int(state.total_supply),
+                "supply_seed_semantics": "initialize_block_end_total_supply",
                 "pool": pool,
                 "factory": expected_factory,
                 "token0": normalize_address(creation.token0),
@@ -293,7 +294,7 @@ def build_v4_direct_market_registry(
     pool_manager: str,
     quote_decimals: Mapping[str, int],
 ) -> list[dict]:
-    """Build priceable V4 candidate markets with exact initialization supply."""
+    """Build priceable V4 candidates with an Initialize-block-end supply seed."""
     expected_manager = normalize_address(pool_manager)
     supported_quotes = _quote_map(quote_decimals)
     states = _state_index(erc20_states)
@@ -319,7 +320,7 @@ def build_v4_direct_market_registry(
         state = states.get((token, int(init.block_number)))
         if state is None:
             raise KeyError(
-                f"missing exact-block ERC20 state for V4 candidate "
+                f"missing Initialize-block-end ERC20 state for V4 candidate "
                 f"{token} @ {init.block_number}"
             )
 
@@ -334,6 +335,7 @@ def build_v4_direct_market_registry(
                 "quote_decimals": supported_quotes[quote],
                 "token_decimals": int(state.decimals),
                 "supply_raw": int(state.total_supply),
+                "supply_seed_semantics": "initialize_block_end_total_supply",
                 "pool_id": pool_id,
                 "pool_manager": expected_manager,
                 "currency0": normalize_address(init.currency0),
