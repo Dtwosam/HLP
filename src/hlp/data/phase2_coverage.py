@@ -333,3 +333,90 @@ def validate_phase2_coverage_ledger(
     )
     report["version"] = version
     return report
+
+
+
+_COVERAGE_LEDGER_ROW_FIELDS = (
+    "source_id",
+    "source_readiness",
+    "coverage_status",
+    "required_start_block",
+    "first_block",
+    "last_block",
+    "continuous",
+    "missing_ranges",
+    "tokens_discovered",
+    "price_points",
+    "priced_points",
+    "observed_volume_usd",
+    "provenance_sha256",
+    "blocking_reason",
+)
+
+
+def apply_phase2_source_coverage_report(
+    ledger: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    report: Mapping[str, object],
+) -> tuple[dict, dict]:
+    """Apply one immutable source report to the canonical coverage ledger.
+
+    The report may contain extra source-specific audit fields, but only the
+    canonical ledger fields are promoted. Snapshot/readiness drift fails before
+    the replacement is accepted, then the complete ledger is revalidated.
+    """
+    inventory_rows = [dict(row) for row in source_inventory]
+    current = validate_phase2_coverage_ledger(ledger, inventory_rows)
+    snapshot = int(current["snapshot_head_block"])
+
+    source_id = str(report.get("source_id") or "")
+    inventory_by_id = {
+        str(row["source_id"]): row
+        for row in inventory_rows
+    }
+    if source_id not in inventory_by_id:
+        raise ValueError(
+            f"coverage report references unknown source: {source_id!r}"
+        )
+    report_snapshot = int(report.get("snapshot_head_block", -1))
+    if report_snapshot != snapshot:
+        raise ValueError(
+            "coverage report snapshot drift: "
+            f"{report_snapshot} != {snapshot}"
+        )
+
+    expected_readiness = str(
+        inventory_by_id[source_id].get("readiness") or ""
+    )
+    reported_readiness = str(
+        report.get("source_readiness") or ""
+    )
+    if reported_readiness != expected_readiness:
+        raise ValueError(
+            "coverage report readiness drift: "
+            f"{source_id} {reported_readiness!r} "
+            f"!= {expected_readiness!r}"
+        )
+
+    replacement = {}
+    for field in _COVERAGE_LEDGER_ROW_FIELDS:
+        if field not in report:
+            raise ValueError(
+                f"coverage report missing canonical field: {field}"
+            )
+        replacement[field] = report[field]
+
+    updated = {
+        **dict(ledger),
+        "sources": [
+            replacement
+            if str(row.get("source_id") or "") == source_id
+            else dict(row)
+            for row in ledger["sources"]
+        ],
+    }
+    validation = validate_phase2_coverage_ledger(
+        updated,
+        inventory_rows,
+    )
+    return updated, validation
