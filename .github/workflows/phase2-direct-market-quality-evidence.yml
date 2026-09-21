@@ -623,6 +623,7 @@ jobs:
             --candidate-out artifacts/direct-market-candidate-series.jsonl \
             --report-out artifacts/direct-market-quality-report.json
       - name: Bind pilot evidence provenance
+        id: bind
         env:
           QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
           REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
@@ -690,8 +691,29 @@ jobs:
                       f"direct market source emitted threshold labels: {source}"
                   )
 
+          evidence_files = {
+              "trace_sha256": Path(
+                  "artifacts/direct-market-quality-trace.jsonl"
+              ),
+              "candidate_series_sha256": Path(
+                  "artifacts/direct-market-candidate-series.jsonl"
+              ),
+              "market_quality_report_sha256": Path(
+                  "artifacts/direct-market-quality-report.json"
+              ),
+          }
+          evidence_sha256 = {}
+          for field, path in evidence_files.items():
+              if not path.exists():
+                  raise SystemExit(
+                      f"missing final selector evidence file: {path}"
+                  )
+              evidence_sha256[field] = hashlib.sha256(
+                  path.read_bytes()
+              ).hexdigest()
+
           handoff = {
-              "version": "phase2-direct-market-quality-evidence-v1",
+              "version": "phase2-direct-market-quality-evidence-v2",
               "chain_id": 4663,
               "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
               "sample_tokens": plan["tokens"],
@@ -717,6 +739,13 @@ jobs:
                   "quote_feed_specs_sha256"
               ],
               "point_sha256": dict(sorted(point_sha256.items())),
+              "trace_sha256": evidence_sha256["trace_sha256"],
+              "candidate_series_sha256": evidence_sha256[
+                  "candidate_series_sha256"
+              ],
+              "market_quality_report_sha256": evidence_sha256[
+                  "market_quality_report_sha256"
+              ],
               "market_quality_report": report,
               "selector_freeze_ready": False,
               "source_coverage_complete": False,
@@ -727,15 +756,65 @@ jobs:
                   "complete direct source historical coverage",
               ],
           }
-          Path(
+          handoff_path = Path(
               "artifacts/direct-market-quality-evidence-handoff.json"
-          ).write_text(
+          )
+          handoff_path.write_text(
               json.dumps(handoff, indent=2, sort_keys=True) + "\n"
           )
-          print(json.dumps(handoff, sort_keys=True))
+          handoff_sha256 = hashlib.sha256(
+              handoff_path.read_bytes()
+          ).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"trace_sha256={evidence_sha256['trace_sha256']}\n"
+              )
+              handle.write(
+                  "candidate_series_sha256="
+                  f"{evidence_sha256['candidate_series_sha256']}\n"
+              )
+              handle.write(
+                  "market_quality_report_sha256="
+                  f"{evidence_sha256['market_quality_report_sha256']}\n"
+              )
+              handle.write(f"handoff_sha256={handoff_sha256}\n")
+          print(json.dumps({
+              **handoff,
+              "handoff_sha256": handoff_sha256,
+          }, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Upload selector evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: phase2-direct-market-quality-evidence
           path: artifacts/
           if-no-files-found: error
+          retention-days: 30
+      - name: Publish exact selector-evidence identities
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          TRACE_SHA256: ${{ steps.bind.outputs.trace_sha256 }}
+          CANDIDATE_SHA256: ${{ steps.bind.outputs.candidate_series_sha256 }}
+          REPORT_SHA256: ${{ steps.bind.outputs.market_quality_report_sha256 }}
+          HANDOFF_SHA256: ${{ steps.bind.outputs.handoff_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${TRACE_SHA256}"
+          test -n "${CANDIDATE_SHA256}"
+          test -n "${REPORT_SHA256}"
+          test -n "${HANDOFF_SHA256}"
+          {
+            echo "## Direct market selector evidence"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-direct-market-quality-evidence"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- trace_sha256: ${TRACE_SHA256}"
+            echo "- candidate_series_sha256: ${CANDIDATE_SHA256}"
+            echo "- market_quality_report_sha256: ${REPORT_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- selector_freeze_ready: false"
+            echo "- source_coverage_complete: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

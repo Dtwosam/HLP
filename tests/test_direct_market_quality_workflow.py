@@ -49,6 +49,9 @@ def test_direct_market_quality_evidence_binds_exact_artifact_hashes():
         "quote_feed_specs_sha256",
         "plan_sha256",
         "point_sha256",
+        "trace_sha256",
+        "candidate_series_sha256",
+        "market_quality_report_sha256",
     ):
         assert field in text
 
@@ -58,3 +61,19 @@ def test_direct_market_quality_evidence_binds_exact_artifact_hashes():
     assert "direct-quote-feeds.jsonl" in text
     assert "direct market point SHA drift" in text
     assert "final evidence plan SHA drift" in text
+
+
+def test_direct_market_quality_evidence_self_hashes_final_outputs():
+    text = WORKFLOW.read_text()
+
+    assert '"version": "phase2-direct-market-quality-evidence-v2"' in text
+    assert "id: bind" in text
+    assert "direct-market-quality-trace.jsonl" in text
+    assert "direct-market-candidate-series.jsonl" in text
+    assert "direct-market-quality-report.json" in text
+    assert "missing final selector evidence file" in text
+    assert "handoff_sha256=" in text
+    assert "id: upload" in text
+    assert "steps.upload.outputs.artifact-digest" in text
+    assert "Publish exact selector-evidence identities" in text
+

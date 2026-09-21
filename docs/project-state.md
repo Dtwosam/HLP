@@ -146,8 +146,12 @@ Implemented foundation:
   existing `phase2-market-quality-audit`. The pilot is intentionally
   research-only: `selector_freeze_ready=false`,
   `source_coverage_complete=false`, and no threshold/universe labels are
-  emitted. It has not yet produced empirical evidence because the required
-  upstream direct-market backfill artifacts still need to be executed;
+  emitted. The final evidence artifact now self-binds the exact causal trace,
+  candidate canonical series, market-quality report and handoff SHA-256 values
+  in addition to all upstream run/plan/quote/point identities, so any later
+  selector-freeze decision can be tied to the exact evidence that was reviewed.
+  It has not yet produced empirical evidence because the required upstream
+  direct-market backfill artifacts still need to be executed;
 - direct-market launch-origin attribution is now progressive and fail-closed.
   Exact address matches can immediately mark a market as originating from a
   known launch source, but unmatched markets remain `unattributed` until every
