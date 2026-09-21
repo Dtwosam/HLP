@@ -292,4 +292,7 @@ def test_viability_measurement_accepts_normalized_recovered_evidence_path():
         "viability measurement normal evidence routing changed"
         in workflow
     )
+    assert "evidence_workflow_path={observed_path}" in workflow
+    assert "EVIDENCE_WORKFLOW_PATH:" in workflow
+    assert 'observed_path = os.environ["EVIDENCE_WORKFLOW_PATH"]' in workflow
 
