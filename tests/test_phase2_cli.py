@@ -586,7 +586,9 @@ def test_phase2_direct_v3_registry_reads_state_at_matched_initialize_block(
     summary = json.loads(summary_out.read_text())
     assert summary["supported_quote_candidate_markets"] == 1
     assert summary["matched_initialized_candidate_markets"] == 1
-    assert summary["exact_state_reads"] == 1
+    assert summary["initialize_block_end_state_reads"] == 1
+    assert summary["supply_seed_semantics"] == "initialize_block_end_total_supply"
+    assert summary["event_time_supply_complete"] is False
     assert summary["source_coverage_complete"] is False
 
 
@@ -656,7 +658,7 @@ def test_phase2_direct_v3_registry_skips_unmatched_initialize_state_reads(
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["supported_quote_candidate_markets"] == 1
     assert summary["matched_initialized_candidate_markets"] == 0
-    assert summary["exact_state_reads"] == 0
+    assert summary["initialize_block_end_state_reads"] == 0
     assert summary["registry"]["markets"] == 0
 
 
@@ -755,7 +757,9 @@ def test_phase2_direct_v4_registry_reads_state_at_initialize_block(
 
     summary = json.loads(summary_out.read_text())
     assert summary["supported_quote_candidate_markets"] == 1
-    assert summary["exact_state_reads"] == 1
+    assert summary["initialize_block_end_state_reads"] == 1
+    assert summary["supply_seed_semantics"] == "initialize_block_end_total_supply"
+    assert summary["event_time_supply_complete"] is False
     assert summary["source_coverage_complete"] is False
     assert summary["registry"]["canonical_market_selection_complete"] is False
 
@@ -816,7 +820,7 @@ def test_phase2_direct_v4_registry_does_not_read_quote_quote_state(
     assert cmd_phase2_direct_v4_registry(args) == 0
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["supported_quote_candidate_markets"] == 0
-    assert summary["exact_state_reads"] == 0
+    assert summary["initialize_block_end_state_reads"] == 0
     assert summary["registry"]["markets"] == 0
 
 
