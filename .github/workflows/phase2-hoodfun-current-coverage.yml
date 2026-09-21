@@ -1,0 +1,449 @@
+name: phase2-hoodfun-current-coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-hoodfun-current-coverage.yml'
+      - 'src/hlp/protocols/hood_fun.py'
+      - 'src/hlp/data/hood_fun_registry.py'
+      - 'src/hlp/data/hood_fun_curve.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-hoodfun-current-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  HOOD_CONTRACT: '0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c'
+  WETH: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'
+  USDG: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
+  ANCHOR_POOL: '0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca'
+  SHARD_COUNT: '128'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      first_block: ${{ steps.first.outputs.first_block }}
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: first
+        name: Resolve current hood.fun deployment block
+        run: |
+          python - <<'PY'
+          import os
+          from hlp.config import (
+              HOOD_FUN_CURRENT,
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          first = rpc.find_first_code_block(
+              HOOD_FUN_CURRENT,
+              low=0,
+              high=int(os.environ["SNAPSHOT_HEAD"]),
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"first_block={first}\n")
+          print({"first_block": first, "requests_made": rpc.requests_made})
+          PY
+
+  shard:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      FIRST_BLOCK: ${{ needs.discover.outputs.first_block }}
+      SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact shared shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["FIRST_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          i = int(os.environ["SHARD_INDEX"])
+          n = int(os.environ["SHARD_COUNT"])
+          span = head - start + 1
+          lo = start + (span * i) // n
+          hi = start + (span * (i + 1)) // n - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty hood.fun shard {i}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": i, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire hood.fun and shared WETH/USD evidence
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=2000
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-hood-fun-tape \
+            --contract "$HOOD_CONTRACT" \
+            --generation current \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/hood-current-shard-${SHARD}.jsonl"
+
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v1-price-path \
+            --token "$WETH" \
+            --quote-token "$USDG" \
+            --pool "$ANCHOR_POOL" \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/anchor-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-hoodfun-current-shard-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: [discover, shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      FIRST_BLOCK: ${{ needs.discover.outputs.first_block }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-hoodfun-current-shard-*
+          path: downloads
+          merge-multiple: true
+      - name: Merge, price and freeze current hood.fun coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              ROBINHOOD_USDG,
+              ROBINHOOD_WETH,
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+          )
+          from hlp.data.hood_fun_curve import (
+              build_hood_fun_curve_market_cap_points,
+              summarize_hood_fun_curve_market_caps,
+          )
+          from hlp.data.hood_fun_registry import (
+              build_hood_fun_launch_registry,
+          )
+          from hlp.data.reconstruct import (
+              event_order,
+              v3_quote_price_at_block,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.types import HoodFunEvent
+
+          root = Path("downloads")
+          start = int(os.environ["FIRST_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = int(os.environ["SHARD_COUNT"])
+
+          def freeze_virtual(prefix, logical_name):
+              files = sorted(root.glob(f"{prefix}-shard-*.jsonl"))
+              if len(files) != shard_count:
+                  raise SystemExit(
+                      f"{prefix}: expected {shard_count} shards, "
+                      f"found {len(files)}"
+                  )
+              digest = hashlib.sha256()
+              total = 0
+              shards = []
+              previous_hi = None
+              for path in files:
+                  manifest_path = path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  )
+                  manifest = json.loads(manifest_path.read_text())
+                  provenance = manifest["provenance"]
+                  lo = int(provenance["from_block"])
+                  hi = int(provenance["to_block"])
+                  if previous_hi is None:
+                      if lo != start:
+                          raise SystemExit(
+                              f"{prefix} starts at {lo}, expected {start}"
+                          )
+                  elif lo != previous_hi + 1:
+                      raise SystemExit(
+                          f"{prefix} gap: {previous_hi} -> {lo}"
+                      )
+                  previous_hi = hi
+
+                  local = hashlib.sha256()
+                  records = 0
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          digest.update(raw)
+                          local.update(raw)
+                          if raw.strip():
+                              records += 1
+                  if records != int(manifest["records"]):
+                      raise SystemExit(
+                          f"{path.name}: record count changed"
+                      )
+                  if local.hexdigest() != manifest["sha256"]:
+                      raise SystemExit(
+                          f"{path.name}: SHA changed"
+                      )
+                  total += records
+                  shards.append({
+                      "file": path.name,
+                      "records": records,
+                      "sha256": manifest["sha256"],
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+              if previous_hi != head:
+                  raise SystemExit(
+                      f"{prefix} ends at {previous_hi}, expected {head}"
+                  )
+              path = Path("artifacts") / f"{logical_name}.manifest.json"
+              return write_virtual_jsonl_manifest(
+                  manifest_path=path,
+                  path_name=logical_name,
+                  records=total,
+                  sha256=digest.hexdigest(),
+                  provenance={
+                      "storage_mode": "sharded_artifacts",
+                      "chain_id": 4663,
+                      "from_block": start,
+                      "to_block": head,
+                      "shards": shards,
+                  },
+              ), path
+
+          hood_manifest, hood_manifest_path = freeze_virtual(
+              "hood-current",
+              "hood-current-events.jsonl",
+          )
+          anchor_manifest, anchor_manifest_path = freeze_virtual(
+              "anchor",
+              "hood-current-weth-usdg-anchor.jsonl",
+          )
+
+          events = [
+              HoodFunEvent(**row)
+              for row in iter_sharded_jsonl(
+                  root,
+                  hood_manifest_path,
+              )
+          ]
+          events.sort(
+              key=lambda row: (
+                  row.block_number,
+                  -1 if row.transaction_index is None
+                  else row.transaction_index,
+                  row.log_index,
+              )
+          )
+          registry = build_hood_fun_launch_registry(
+              events,
+              generation="current",
+          )
+          registry_manifest = write_jsonl_snapshot(
+              registry,
+              output=Path(
+                  "artifacts/hood-current-launch-registry.jsonl"
+              ),
+              provenance={
+                  "source": "derived_hood_fun_token_created",
+                  "chain_id": 4663,
+                  "generation": "current",
+                  "event_tape_sha256": hood_manifest["sha256"],
+                  "from_block": start,
+                  "to_block": head,
+              },
+          )
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = (
+                  SOLIDRPC_AUTH_RPC_URL
+                  if key else SOLIDRPC_PUBLIC_RPC_URL
+              )
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          initial_weth_usd = v3_quote_price_at_block(
+              rpc,
+              token=ROBINHOOD_WETH,
+              quote_token=ROBINHOOD_USDG,
+              pool=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              block=start - 1,
+          )
+          if initial_weth_usd <= 0:
+              raise SystemExit("hood.fun initial WETH/USD is non-positive")
+
+          anchor_rows = iter_sharded_jsonl(
+              root,
+              anchor_manifest_path,
+          )
+          points = build_hood_fun_curve_market_cap_points(
+              events,
+              registry,
+              anchor_rows,
+              initial_weth_usd=initial_weth_usd,
+          )
+          if len(points) != len(events):
+              raise SystemExit(
+                  f"hood.fun price points {len(points)} "
+                  f"!= decoded events {len(events)}"
+              )
+          priced = sum(
+              row["market_cap_proxy_usd"] is not None
+              for row in points
+          )
+          if priced != len(points):
+              raise SystemExit(
+                  f"hood.fun has {len(points) - priced} unpriced points"
+              )
+
+          points_manifest = write_jsonl_snapshot(
+              points,
+              output=Path(
+                  "artifacts/hood-current-market-cap-points.jsonl"
+              ),
+              provenance={
+                  "source": "derived_hood_fun_virtual_reserves",
+                  "chain_id": 4663,
+                  "generation": "current",
+                  "event_tape_sha256": hood_manifest["sha256"],
+                  "anchor_tape_sha256": anchor_manifest["sha256"],
+                  "registry_sha256": registry_manifest["sha256"],
+                  "from_block": start,
+                  "to_block": head,
+                  "initial_weth_usd": str(initial_weth_usd),
+                  "initial_weth_usd_state_block": start - 1,
+              },
+          )
+          summary = summarize_hood_fun_curve_market_caps(points)
+          summary_manifest = write_jsonl_snapshot(
+              summary,
+              output=Path(
+                  "artifacts/hood-current-token-summary.jsonl"
+              ),
+              provenance={
+                  "source": "derived_hood_fun_curve_market_cap_points",
+                  "generation": "current",
+                  "market_cap_points_sha256": points_manifest["sha256"],
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+
+          coverage = {
+              "source_id": "hood_fun_current",
+              "source_readiness": "adapter_ready",
+              "coverage_status": "complete",
+              "required_start_block": start,
+              "first_block": start,
+              "last_block": head,
+              "continuous": True,
+              "missing_ranges": [],
+              "tokens_discovered": len(registry),
+              "price_points": len(points),
+              "priced_points": priced,
+              "observed_volume_usd": None,
+              "provenance_sha256": points_manifest["sha256"],
+              "blocking_reason": None,
+              "event_tape_sha256": hood_manifest["sha256"],
+              "anchor_tape_sha256": anchor_manifest["sha256"],
+              "registry_sha256": registry_manifest["sha256"],
+              "summary_sha256": summary_manifest["sha256"],
+              "eligible_tokens": sum(
+                  bool(row["crossed_100k"])
+                  for row in summary
+              ),
+              "initial_weth_usd": str(initial_weth_usd),
+              "initial_weth_usd_state_block": start - 1,
+              "state_rpc_requests": rpc.requests_made,
+          }
+          Path("artifacts/hood-current-coverage.json").write_text(
+              json.dumps(coverage, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(coverage, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-hoodfun-current-coverage
+          path: artifacts/
+          if-no-files-found: error
