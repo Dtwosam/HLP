@@ -8,6 +8,7 @@ from hlp.cli import (
     _load_initial_quote_usd,
     build_parser,
     cmd_rpc_pons_transfer_tape,
+    cmd_rpc_pools_fun_market_cap_window,
     cmd_rpc_v2_v4_tape,
 )
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
@@ -641,3 +642,162 @@ def test_transfer_tape_manifest_binds_exact_sample_identity(
     assert provenance["sample_sha256"] == expected_sample_sha
     assert provenance["token_set_sha256"] == expected_token_set_sha
     assert provenance["token_count"] == 2
+
+
+
+def test_pools_fun_market_cap_uses_sparse_keyless_anchor_windows(
+    monkeypatch,
+    tmp_path,
+):
+    from hlp.config import ROBINHOOD_WETH
+
+    pool = "0x" + "22" * 20
+    token = "0x" + "11" * 20
+    registry = [{
+        "venue": "pools.fun",
+        "token": token,
+        "pool": pool,
+        "quote_token": ROBINHOOD_WETH.lower(),
+        "supply_raw": 1_000_000_000 * 10**18,
+    }]
+    initializes = [{
+        "pool": pool,
+        "block_number": 100,
+        "transaction_hash": "0x" + "aa" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+        "sqrt_price_x96": 2**96,
+    }]
+    swaps = [{
+        "pool": pool,
+        "block_number": 101,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 1,
+        "log_index": 1,
+        "sqrt_price_x96": 2**96,
+        "liquidity": 1,
+    }]
+
+    class FakeRpc:
+        requests_made = 7
+        response_bytes_received = 123
+        route_label = "solidrpc_keyless_public"
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr(
+        "hlp.cli._archive_rpc",
+        lambda args: FakeRpc(),
+    )
+
+    def fake_load(path):
+        return {
+            "registry.jsonl": registry,
+            "initializes.jsonl": initializes,
+            "swaps.jsonl": swaps,
+        }[Path(path).name]
+
+    monkeypatch.setattr("hlp.cli._load_jsonl", fake_load)
+    monkeypatch.setattr(
+        "hlp.cli._load_quote_oracle_inputs",
+        lambda args: ({}, iter(())),
+    )
+
+    sparse_call = {}
+
+    def fake_sparse(
+        rpc,
+        targets,
+        *,
+        token,
+        quote_token,
+        pool,
+        window_size,
+    ):
+        target_rows = list(targets)
+        sparse_call["targets"] = target_rows
+        sparse_call["window_size"] = window_size
+        return [
+            {
+                "block_number": row["block_number"],
+                "transaction_index": row["transaction_index"],
+                "log_index": row["log_index"],
+                "quote_per_token": "2000",
+                "window_from_block": 0,
+            }
+            for row in target_rows
+        ]
+
+    monkeypatch.setattr(
+        "hlp.cli.build_sparse_v3_quote_points",
+        fake_sparse,
+    )
+
+    market_call = {}
+
+    def fake_market_caps(
+        registry_rows,
+        initialize_rows,
+        swap_rows,
+        anchors,
+        **kwargs,
+    ):
+        market_call["anchors"] = list(anchors)
+        market_call["initial_weth_usd"] = kwargs[
+            "initial_weth_usd"
+        ]
+        return [{
+            "token": token,
+            "market_cap_proxy_usd": "150000",
+            "block_number": 101,
+        }]
+
+    monkeypatch.setattr(
+        "hlp.cli.build_v3_launchpad_market_cap_points",
+        fake_market_caps,
+    )
+    monkeypatch.setattr(
+        "hlp.cli.summarize_v3_launchpad_market_caps",
+        lambda rows: [{
+            "token": token,
+            "priced_points": 1,
+            "crossed_100k": True,
+        }],
+    )
+
+    provenances = []
+
+    def fake_snapshot(rows, *, output, provenance):
+        provenances.append(provenance)
+        return {"sha256": "ab" * 32, "records": len(list(rows))}
+
+    monkeypatch.setattr(
+        "hlp.cli.write_jsonl_snapshot",
+        fake_snapshot,
+    )
+
+    parsed = SimpleNamespace(
+        registry="registry.jsonl",
+        initializes="initializes.jsonl",
+        swaps="swaps.jsonl",
+        from_block=100,
+        to_block=200,
+        chunk_size=100_000,
+        min_chunk_size=25,
+        usd_anchor_pool="0x" + "33" * 20,
+        oracle_state=None,
+        oracle_events=None,
+        out=str(tmp_path / "points.jsonl"),
+        summary_out=str(tmp_path / "summary.jsonl"),
+    )
+
+    assert cmd_rpc_pools_fun_market_cap_window(parsed) == 0
+    assert sparse_call["targets"] == initializes + swaps
+    assert sparse_call["window_size"] == 200
+    assert market_call["anchors"][0]["quote_per_token"] == "2000"
+    assert str(market_call["initial_weth_usd"]) == "2000"
+    assert provenances[0]["usd_anchor_mode"] == (
+        "sparse_v3_state_and_swaps"
+    )
+    assert provenances[0]["usd_anchor_window_size"] == 200
