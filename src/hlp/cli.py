@@ -1118,6 +1118,51 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_v4_swap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire one shared V4 PoolManager Swap tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = [
+        decode_v4_swap(log)
+        for log in rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=args.pool_manager,
+            topics=[V4_SWAP_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "uniswap_v4_swap",
+            "pool_manager": normalize_address(args.pool_manager),
+            "shared_v4_surface": True,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_SWAP_TOPIC,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "swaps": manifest["records"],
+        "pool_manager": normalize_address(args.pool_manager),
+        "shared_v4_surface": True,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_pools_fun_v3_tape(args: argparse.Namespace) -> int:
     """Acquire shared V3 Initialize/Swap tape for pools.fun pools."""
     registry = _load_jsonl(args.registry)
@@ -6006,6 +6051,26 @@ def build_parser() -> argparse.ArgumentParser:
     v4_initialize.add_argument("--out", required=True)
     v4_initialize.set_defaults(
         func=cmd_rpc_v4_initialize_window
+    )
+
+    v4_swap = sub.add_parser(
+        "rpc-v4-swap-window"
+    )
+    v4_swap.add_argument(
+        "--pool-manager",
+        default=UNISWAP_V4_POOL_MANAGER,
+    )
+    v4_swap.add_argument("--from-block", type=int, required=True)
+    v4_swap.add_argument("--to-block", type=int, required=True)
+    v4_swap.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    v4_swap.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    v4_swap.add_argument("--out", required=True)
+    v4_swap.set_defaults(
+        func=cmd_rpc_v4_swap_window
     )
 
     direct_v3_registry = sub.add_parser(
