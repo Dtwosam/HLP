@@ -338,7 +338,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   deterministic sharded point manifest plus global eligibility summary. The
   segment remains explicitly non-final with
   `post_limit_dex_lifecycle_unresolved` whenever any token reaches its curve
-  limit; no trench source coverage is claimed yet;
+  limit. An evidence-only LimitReach-to-market workflow is also prepared: it
+  binds the exact trench registry plus all three direct DEX registries,
+  canonicalizes native ETH to WETH only for DEX quote matching, retains every
+  exact token/quote V3/V4 candidate, and records before/same-block/same-
+  transaction/after timing without choosing a canonical handoff. It emits
+  SHA-bound candidate evidence with `handoff_rule_frozen=false` and
+  `source_coverage_complete=false`; no trench source coverage is claimed yet;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
