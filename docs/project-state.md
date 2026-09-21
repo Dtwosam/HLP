@@ -55,6 +55,49 @@ artifacts. Every observed measurement route was the approved
 
 **Phase 2 is unlocked.**
 
+## Phase 2 — active implementation state
+
+Phase 2 is **ACTIVE** and has not passed its acceptance gate. The current code
+separates adapter capability from historical coverage so implementation progress
+cannot be mistaken for a complete chain-wide universe.
+
+Implemented foundation:
+
+- a frozen **14-source** launch/trading inventory with explicit readiness states
+  (`phase1_proven`, `adapter_ready`, `registry_ready`, `decoder_ready`,
+  `discovery_pending`);
+- deterministic address-only exclusions for WETH, USDG, Robinhood canonical
+  Stock Token/ETF assets, plus explicitly verified LP/system/bridge assets;
+- a source-agnostic universe merger preserving `eligible`, `unknown`,
+  `ineligible` and `excluded` semantics plus per-source provenance;
+- a persistent NOXA launch registry joined fail-closed to exact launch-block
+  state, moving NOXA to `adapter_ready`;
+- deterministic Uniswap V3, Uniswap V4 and Sushi V3 candidate-market discovery
+  requiring exactly one supported quote side and exact-initialization-block
+  ERC-20 supply; these sources are `adapter_ready` for candidate market paths;
+- exact-address launch-origin attribution for discovered DEX markets. Unmatched
+  markets remain `unattributed`; absence from known launch registries is never
+  treated as proof of a direct launch;
+- a persistent pools.trade Crowd Launch/LBP registry reconciling token creation,
+  strategy distribution, supply, reserved LP allocation and initializer state.
+  This source is `registry_ready`, not adapter-ready, because its auction/LBP
+  price path is not yet decoded;
+- a fail-closed Phase-2 historical coverage contract that requires every source
+  to report continuous reconstruction through the frozen snapshot with SHA-256
+  provenance before `phase2_universe_coverage_complete` can become true.
+
+Current blockers before a chain-wide Phase-2 universe can be frozen:
+
+- pools.trade LBP price-path reconstruction and migration lifecycle;
+- legacy hood.fun contract discovery/adapter for the previous deployment;
+- deterministic canonical multi-pool market selection for tokens with several
+  priceable V3/V4/Sushi markets;
+- complete historical backfills and coverage manifests for every material
+  source population;
+- only after those are complete: empirical first-major-dump research, detector
+  freeze, and continuous comeback outcome labels.
+
+
 ### Live/current chain access
 - [x] official Robinhood public RPC reports chain ID 4663
 - [x] current block/header access
