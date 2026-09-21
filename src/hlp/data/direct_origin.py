@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
+from hlp.config import normalize_address
 from hlp.data.direct_markets import attribute_direct_market_origins
 from hlp.data.phase2_coverage import validate_phase2_coverage_ledger
 
