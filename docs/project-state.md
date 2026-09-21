@@ -90,7 +90,15 @@ Implemented foundation:
   retain market identity, raw active liquidity and point-in-time active
   quote-USD depth. This is research evidence for multi-pool selection only;
   **no canonical selector is frozen yet**. The integrated V3/V4 annotation suite
-  passed in run **35605822567**.
+  passed in run **35605822567**;
+- the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
+  handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
+  **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;
+- the first actual Phase-2 source coverage is frozen: **Pons V1 and Pons V2 are
+  complete (2/14 source populations)**. Run **35609734112** re-downloaded the
+  exact accepted lifecycle artifacts and validated **268,688 V1 + 225,951 V2
+  launches** with **63,560,072 + 24,319,652 fully priced points**, zero unknown
+  tokens and zero unpriced points through the frozen snapshot.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
