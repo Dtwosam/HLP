@@ -46,6 +46,24 @@ def build_doppler_v4_registry(
                 f"{asset}, found {len(candidates)}"
             )
         init = candidates[0]
+        launch_order = (
+            int(launch.block_number),
+            -1
+            if launch.transaction_index is None
+            else int(launch.transaction_index),
+            int(launch.log_index),
+        )
+        initialize_order = (
+            int(init["block_number"]),
+            -1
+            if init.get("transaction_index") is None
+            else int(init["transaction_index"]),
+            int(init["log_index"]),
+        )
+        if initialize_order <= launch_order:
+            raise ValueError(
+                f"Doppler V4 Initialize does not follow Airlock Create: {asset}"
+            )
         pool_id = init["pool_id"].lower()
         if pool_id in seen_pools:
             raise ValueError(f"duplicate Doppler pool id: {pool_id}")
@@ -55,11 +73,17 @@ def build_doppler_v4_registry(
         seen_assets.add(asset)
         seen_pools.add(pool_id)
         output.append({
+            "source_id": "doppler",
             "venue": "doppler",
+            "source_kind": "launchpad",
             "launch_kind": "airlock_v4",
             "token": asset,
             "quote_token": quote,
             "supply_raw": int(supply),
+            "supply_seed_semantics": (
+                "launch_block_end_total_supply_same_block_as_initialize"
+            ),
+            "state_block": int(launch.block_number),
             "pool_id": pool_id,
             "currency0": init["currency0"].lower(),
             "currency1": init["currency1"].lower(),
@@ -76,6 +100,8 @@ def build_doppler_v4_registry(
             "initialize_transaction_hash": init["transaction_hash"],
             "initialize_transaction_index": init.get("transaction_index"),
             "initialize_log_index": int(init["log_index"]),
+            "initial_sqrt_price_x96": int(init["sqrt_price_x96"]),
+            "initial_tick": int(init["tick"]),
         })
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
     return output
