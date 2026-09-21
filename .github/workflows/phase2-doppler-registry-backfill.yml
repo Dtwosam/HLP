@@ -1,0 +1,495 @@
+name: phase2-doppler-registry-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      v4_initialize_run_id:
+        description: Successful phase2-direct-uniswap-v4-initialize-backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-doppler-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '646829'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.build.outputs.shards }}
+    steps:
+      - id: build
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "shards="
+                  + json.dumps(list(range(int(os.environ["SHARD_COUNT"]))))
+                  + "\n"
+              )
+          PY
+
+  shard:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.matrix.outputs.shards) }}
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact Doppler shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty Doppler shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\n")
+              handle.write(f"hi={hi}\n")
+          PY
+      - name: Acquire Doppler Airlock launches and launch state
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-doppler-launch-window \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/doppler-launches-${SHARD}.jsonl" \
+            --state-out "artifacts/doppler-launch-state-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-doppler-launch-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      V4_INITIALIZE_RUN_ID: ${{ inputs.v4_initialize_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-doppler-launch-*
+          path: inputs/shards
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v4-initialize-merged
+          path: inputs/v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v4_initialize_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - name: Validate and build global Doppler V4 registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import normalize_address
+          from hlp.data.doppler_registry import build_doppler_v4_registry
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.types import DopplerLaunch
+
+          root = Path("inputs/shards")
+          count = int(os.environ["SHARD_COUNT"])
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          launch_files = sorted(root.glob("doppler-launches-*.jsonl"))
+          state_files = sorted(root.glob("doppler-launch-state-*.jsonl"))
+          if len(launch_files) != count or len(state_files) != count:
+              raise SystemExit(
+                  "Doppler shard artifact count changed: "
+                  f"launches={len(launch_files)} "
+                  f"states={len(state_files)} expected={count}"
+              )
+
+          launch_digest = hashlib.sha256()
+          state_digest = hashlib.sha256()
+          launch_rows = []
+          states = {}
+          shards = []
+          previous_order = None
+          for launch_path in launch_files:
+              suffix = launch_path.stem.rsplit("-", 1)[-1]
+              state_path = root / f"doppler-launch-state-{suffix}.jsonl"
+              launch_manifest = json.loads(
+                  launch_path.with_suffix(
+                      launch_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              state_manifest = json.loads(
+                  state_path.with_suffix(
+                      state_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              provenance = launch_manifest.get("provenance") or {}
+              if provenance.get("protocol") != "doppler_airlock_create":
+                  raise SystemExit(
+                      f"Doppler launch protocol drift: {suffix}"
+                  )
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit(f"Doppler launch chain drift: {suffix}")
+              if (
+                  state_manifest.get("provenance", {}).get("launches_sha256")
+                  != launch_manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      f"Doppler state/launch SHA binding drift: {suffix}"
+                  )
+
+              launch_bytes = launch_path.read_bytes()
+              state_bytes = state_path.read_bytes()
+              local_launch = hashlib.sha256(launch_bytes).hexdigest()
+              local_state = hashlib.sha256(state_bytes).hexdigest()
+              if local_launch != launch_manifest["sha256"]:
+                  raise SystemExit(
+                      f"Doppler launch shard SHA drift: {suffix}"
+                  )
+              if local_state != state_manifest["sha256"]:
+                  raise SystemExit(
+                      f"Doppler state shard SHA drift: {suffix}"
+                  )
+              launch_digest.update(launch_bytes)
+              state_digest.update(state_bytes)
+
+              local_launch_rows = [
+                  json.loads(line)
+                  for line in launch_path.read_text().splitlines()
+                  if line.strip()
+              ]
+              local_state_rows = [
+                  json.loads(line)
+                  for line in state_path.read_text().splitlines()
+                  if line.strip()
+              ]
+              if len(local_launch_rows) != int(launch_manifest["records"]):
+                  raise SystemExit(
+                      f"Doppler launch record drift: {suffix}"
+                  )
+              if len(local_state_rows) != len(local_launch_rows):
+                  raise SystemExit(
+                      f"Doppler launch/state count drift: {suffix}"
+                  )
+              for row in local_launch_rows:
+                  order = (
+                      int(row["block_number"]),
+                      -1
+                      if row.get("transaction_index") is None
+                      else int(row["transaction_index"]),
+                      int(row["log_index"]),
+                      normalize_address(row["asset"]),
+                  )
+                  if previous_order is not None and order < previous_order:
+                      raise SystemExit(
+                          "Doppler launch shards are not chronological"
+                      )
+                  previous_order = order
+                  launch_rows.append(row)
+              for row in local_state_rows:
+                  token = normalize_address(row["token"])
+                  if token in states:
+                      raise SystemExit(
+                          f"duplicate Doppler launch state: {token}"
+                      )
+                  states[token] = row
+
+              shards.append({
+                  "file": launch_path.name,
+                  "records": int(launch_manifest["records"]),
+                  "sha256": launch_manifest["sha256"],
+                  "from_block": int(provenance["from_block"]),
+                  "to_block": int(provenance["to_block"]),
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          if len(states) != len(launch_rows):
+              raise SystemExit(
+                  "Doppler global launch/state population drift"
+              )
+
+          seen_assets = set()
+          for row in launch_rows:
+              token = normalize_address(row["asset"])
+              if token in seen_assets:
+                  raise SystemExit(
+                      f"duplicate Doppler Airlock asset: {token}"
+                  )
+              seen_assets.add(token)
+              state = states.get(token)
+              if state is None:
+                  raise SystemExit(
+                      f"missing Doppler launch state: {token}"
+                  )
+              if int(state["state_block"]) != int(row["block_number"]):
+                  raise SystemExit(
+                      f"Doppler launch state block drift: {token}"
+                  )
+              if int(state["supply_raw"]) <= 0:
+                  raise SystemExit(
+                      f"Doppler launch supply is non-positive: {token}"
+                  )
+
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/doppler-launches-sharded.manifest.json"
+              ),
+              path_name="doppler-launches.jsonl",
+              records=len(launch_rows),
+              sha256=launch_digest.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_doppler_airlock_create",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shards": shards,
+              },
+          )
+          merged_launches = write_jsonl_snapshot(
+              [DopplerLaunch(**row) for row in launch_rows],
+              output=Path("artifacts/doppler-launches.jsonl"),
+              provenance={
+                  "source": "merged_doppler_airlock_launches",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "sharded_sha256": virtual["sha256"],
+              },
+          )
+          if merged_launches["sha256"] != virtual["sha256"]:
+              raise SystemExit("Doppler merged launch bytes changed")
+
+          state_rows = [
+              states[token]
+              for token in sorted(
+                  states,
+                  key=lambda token: (
+                      int(states[token]["state_block"]),
+                      token,
+                  ),
+              )
+          ]
+          merged_state = write_jsonl_snapshot(
+              state_rows,
+              output=Path("artifacts/doppler-launch-state.jsonl"),
+              provenance={
+                  "source": "merged_doppler_launch_block_erc20_state",
+                  "chain_id": 4663,
+                  "launches_sha256": merged_launches["sha256"],
+                  "state_semantics": (
+                      "ERC20 decimals/totalSupply at exact Airlock Create block"
+                  ),
+              },
+          )
+          if merged_state["sha256"] != state_digest.hexdigest():
+              raise SystemExit("Doppler merged state bytes changed")
+
+          v4_path = Path("inputs/v4/direct-v4-initialize.jsonl")
+          v4_summary = json.loads(
+              Path("inputs/v4/direct-v4-initialize-summary.json").read_text()
+          )
+          if v4_summary["version"] != (
+              "phase2-direct-v4-initialize-discovery-v1"
+          ):
+              raise SystemExit("shared V4 Initialize version drift")
+          if v4_summary["snapshot_head_block"] != head:
+              raise SystemExit("shared V4 Initialize snapshot drift")
+          if v4_summary["continuous_event_scan"] is not True:
+              raise SystemExit(
+                  "shared V4 Initialize scan is not continuous"
+              )
+          if v4_summary["missing_ranges"]:
+              raise SystemExit(
+                  "shared V4 Initialize scan has missing ranges"
+              )
+          v4_sha = hashlib.sha256(v4_path.read_bytes()).hexdigest()
+          if v4_sha != v4_summary["initialize_sha256"]:
+              raise SystemExit("shared V4 Initialize SHA drift")
+          v4_rows = [
+              json.loads(line)
+              for line in v4_path.read_text().splitlines()
+              if line.strip()
+          ]
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          decimals_path = Path("inputs/quotes/direct-quote-decimals.json")
+          decimals_sha = hashlib.sha256(
+              decimals_path.read_bytes()
+          ).hexdigest()
+          if decimals_sha != quote_summary["decimals_sha256"]:
+              raise SystemExit("direct quote decimals SHA drift")
+          quote_decimals = {
+              normalize_address(key): int(value)
+              for key, value in json.loads(
+                  decimals_path.read_text()
+              ).items()
+          }
+          numeraires = {
+              normalize_address(row["numeraire"])
+              for row in launch_rows
+          }
+          missing_quotes = sorted(numeraires - set(quote_decimals))
+          if missing_quotes:
+              raise SystemExit(
+                  "Doppler numeraires lack canonical quote ownership: "
+                  + ", ".join(missing_quotes)
+              )
+
+          supply_by_asset = {
+              token: int(row["supply_raw"])
+              for token, row in states.items()
+          }
+          registry = build_doppler_v4_registry(
+              [DopplerLaunch(**row) for row in launch_rows],
+              v4_rows,
+              supply_raw_by_asset=supply_by_asset,
+          )
+          if len(registry) != len(launch_rows):
+              raise SystemExit(
+                  "Doppler V4 registry does not cover every Airlock launch"
+              )
+          if any(
+              int(row["initialize_block"]) != int(row["launch_block"])
+              or str(row["initialize_transaction_hash"]).lower()
+              != str(row["launch_transaction_hash"]).lower()
+              for row in registry
+          ):
+              raise SystemExit(
+                  "Doppler launch/V4 Initialize same-tx invariant failed"
+              )
+
+          registry_manifest = write_jsonl_snapshot(
+              registry,
+              output=Path("artifacts/doppler-registry.jsonl"),
+              provenance={
+                  "source": "phase2_doppler_airlock_v4_registry",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "launches_sha256": merged_launches["sha256"],
+                  "launch_state_sha256": merged_state["sha256"],
+                  "v4_initialize_sha256": v4_sha,
+                  "v4_initialize_run_id": int(
+                      os.environ["V4_INITIALIZE_RUN_ID"]
+                  ),
+                  "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+                  "quote_decimals_sha256": decimals_sha,
+              },
+          )
+          summary = {
+              "version": "phase2-doppler-registry-v1",
+              "source_id": "doppler",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_launch_scan": True,
+              "missing_ranges": [],
+              "shards": count,
+              "launches": len(launch_rows),
+              "tokens_discovered": len(registry),
+              "pools": len({row["pool_id"] for row in registry}),
+              "quote_tokens": sorted({
+                  row["quote_token"] for row in registry
+              }),
+              "launches_sha256": merged_launches["sha256"],
+              "launch_state_sha256": merged_state["sha256"],
+              "v4_initialize_sha256": v4_sha,
+              "quote_decimals_sha256": decimals_sha,
+              "registry_sha256": registry_manifest["sha256"],
+              "same_transaction_initialize_complete": True,
+              "supply_seed_semantics": (
+                  "launch-block-end totalSupply; Airlock Create and "
+                  "V4 Initialize are same block/transaction"
+              ),
+              "source_coverage_complete": False,
+          }
+          Path("artifacts/doppler-registry-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-doppler-registry-merged
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
