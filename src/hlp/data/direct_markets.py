@@ -74,6 +74,121 @@ def _classify_pair(
     return (right, left) if left_quote else (left, right)
 
 
+def select_v3_direct_market_candidates(
+    pool_created_rows: Iterable[V3PoolCreated],
+    *,
+    factory: str,
+    quote_decimals: Mapping[str, int],
+) -> list[dict]:
+    """Filter V3 PoolCreated rows to exactly-one-supported-quote candidates."""
+    expected_factory = normalize_address(factory)
+    supported_quotes = _quote_map(quote_decimals)
+
+    output: list[dict] = []
+    seen_pools: set[str] = set()
+    for row in pool_created_rows:
+        if normalize_address(row.factory) != expected_factory:
+            continue
+        pool = normalize_address(row.pool)
+        if pool in seen_pools:
+            raise ValueError(f"duplicate V3 PoolCreated for {pool}")
+        seen_pools.add(pool)
+
+        pair = _classify_pair(
+            row.token0,
+            row.token1,
+            supported_quotes=supported_quotes,
+        )
+        if pair is None:
+            continue
+        token, quote = pair
+        output.append(
+            {
+                "token": token,
+                "quote_token": quote,
+                "quote_decimals": supported_quotes[quote],
+                "pool": pool,
+                "factory": expected_factory,
+                "token0": normalize_address(row.token0),
+                "token1": normalize_address(row.token1),
+                "fee": int(row.fee),
+                "tick_spacing": int(row.tick_spacing),
+                "pool_created_block": int(row.block_number),
+                "pool_created_transaction_hash": row.transaction_hash.lower(),
+                "pool_created_transaction_index": row.transaction_index,
+                "pool_created_log_index": int(row.log_index),
+            }
+        )
+
+    output.sort(
+        key=lambda row: (
+            row["pool_created_block"],
+            row["token"],
+            row["pool"],
+        )
+    )
+    return output
+
+
+def select_v4_direct_market_candidates(
+    initialize_rows: Iterable[V4PoolInitialized],
+    *,
+    pool_manager: str,
+    quote_decimals: Mapping[str, int],
+) -> list[dict]:
+    """Filter V4 Initialize rows to exactly-one-supported-quote candidates."""
+    expected_manager = normalize_address(pool_manager)
+    supported_quotes = _quote_map(quote_decimals)
+
+    output: list[dict] = []
+    seen_pools: set[str] = set()
+    for init in initialize_rows:
+        if normalize_address(init.pool_manager) != expected_manager:
+            continue
+        pool_id = init.pool_id.lower()
+        if pool_id in seen_pools:
+            raise ValueError(f"multiple V4 Initialize events for {pool_id}")
+        seen_pools.add(pool_id)
+
+        pair = _classify_pair(
+            init.currency0,
+            init.currency1,
+            supported_quotes=supported_quotes,
+        )
+        if pair is None:
+            continue
+        token, quote = pair
+        output.append(
+            {
+                "token": token,
+                "quote_token": quote,
+                "quote_decimals": supported_quotes[quote],
+                "pool_id": pool_id,
+                "pool_manager": expected_manager,
+                "currency0": normalize_address(init.currency0),
+                "currency1": normalize_address(init.currency1),
+                "fee": int(init.fee),
+                "tick_spacing": int(init.tick_spacing),
+                "hooks": normalize_address(init.hooks),
+                "initialize_block": int(init.block_number),
+                "initialize_transaction_hash": init.transaction_hash.lower(),
+                "initialize_transaction_index": init.transaction_index,
+                "initialize_log_index": int(init.log_index),
+                "initial_sqrt_price_x96": int(init.sqrt_price_x96),
+                "initial_tick": int(init.tick),
+            }
+        )
+
+    output.sort(
+        key=lambda row: (
+            row["initialize_block"],
+            row["token"],
+            row["pool_id"],
+        )
+    )
+    return output
+
+
 def build_v3_direct_market_registry(
     pool_created_rows: Iterable[V3PoolCreated],
     initialize_rows: Iterable[V3PoolInitialized],
