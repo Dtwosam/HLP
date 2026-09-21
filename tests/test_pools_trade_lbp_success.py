@@ -1,8 +1,13 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from hlp.data.pools_trade_lbp_success import (
     POOLS_TRADE_LBP_SUCCESS_SAMPLE_VERSION,
+    POOLS_TRADE_LBP_SUCCESS_SUMMARY_VERSION,
     validate_pools_trade_lbp_success_sample,
+    validate_pools_trade_lbp_success_summary,
 )
 from hlp.protocols.uniswap import v4_pool_id
 
@@ -98,3 +103,37 @@ def test_validate_lbp_success_sample_rejects_incomplete_search():
     data["missing_ranges"] = [[201, 210]]
     with pytest.raises(ValueError, match="missing ranges"):
         validate(data)
+
+
+
+def test_repository_lbp_success_population_is_frozen():
+    row = validate_pools_trade_lbp_success_summary(
+        json.loads(
+            Path(
+                ".github/phase2-pools-trade-lbp-success-summary.json"
+            ).read_text()
+        )
+    )
+    assert row["version"] == POOLS_TRADE_LBP_SUCCESS_SUMMARY_VERSION
+    assert row["evidence_run_id"] == 35_626_412_874
+    assert row["artifact_id"] == 10_653_894_082
+    assert row["candidate_artifact_id"] == 10_652_709_527
+    assert row["candidates"] == 437
+    assert row["successful_candidates"] == 149
+    assert row["search_rpc_requests"] == 7_807
+    assert row["migration_initialize_gap_blocks"] == {
+        "minimum": 3,
+        "median": 57,
+        "maximum": 1545,
+    }
+
+
+def test_lbp_success_population_rejects_missing_search_range():
+    data = json.loads(
+        Path(
+            ".github/phase2-pools-trade-lbp-success-summary.json"
+        ).read_text()
+    )
+    data["missing_ranges"] = [[30_100_000, 30_100_200]]
+    with pytest.raises(ValueError, match="missing ranges"):
+        validate_pools_trade_lbp_success_summary(data)
