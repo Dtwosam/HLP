@@ -167,6 +167,20 @@ Implemented foundation:
   It validates the proposed `complete` row against the canonical coverage
   contract in memory but **does not mutate the coverage ledger**. This is
   prepared execution logic, not completed historical evidence;
+- Doppler now has a prepared chain-wide Phase-2 path without a second V4 crawl.
+  A **256-shard** Airlock Create backfill records every launch plus exact
+  launch-block ERC-20 supply/decimals, then joins each asset/numeraire to
+  exactly one PoolManager Initialize in the same transaction using the shared
+  V4 Initialize surface. The registry freezes the initial sqrt price/tick and
+  block-end supply seed. A Doppler-specific V4 market-window command then
+  synthesizes that launch Initialize, filters the shared V4 Swap surface by
+  PoolId, replays the complete filtered mint/burn supply history causally, and
+  samples WETH/USD or Chainlink quote/USD only at required event orders. The
+  dispatch-only **128-shard** source-coverage workflow requires exactly one
+  Initialize point per Airlock launch, price history for every token, and
+  `priced_points == price_points`; it validates a proposed `doppler=complete`
+  row in memory and publishes exact promotion metadata without mutating the
+  canonical ledger. This is prepared execution logic, not completed evidence;
 - source coverage promotion now has a generic fail-closed handoff. A
   dispatch-only workflow accepts only an exact upstream run/artifact plus
   GitHub artifact digest, exact report SHA-256 and expected source ID. It
