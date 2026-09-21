@@ -115,6 +115,20 @@ Implemented foundation:
   The canonical coverage ledger now has a concrete `required_start_block` for
   all **14/14** source populations while preserving only Pons V1/V2 as
   `complete`.
+- under the re-verified **200-block** keyless filtered-log cap, those 12
+  non-Pons source boundaries imply a **2,932,208-window minimum** for source
+  enumeration alone. This is explicitly a lower bound: downstream pool/trade
+  tapes, retries, quote/USD reconstruction, state calls and any address-filter
+  splitting are excluded.
+- pools.trade LBP migration probing is now fail-closed. Run **35625298189**
+  searched the exact derived PoolId
+  `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
+  continuously across blocks **30,001,146..30,395,704** in **16** shards
+  (**2,061** keyless requests) and found **no V4 Initialize**. Artifact
+  **10652380939** has SHA-256
+  `35b9aab31f5b258540dcb7b018c07181838a4c9a742d9bd996b2786a0b8fd26d`.
+  That sample is therefore not valid migration-price evidence for freezing the
+  CCA Q96 orientation; successful-LBP discovery is being studied separately.
 - launchpad USD conversion no longer requires continuous WETH/USD scans:
   pools.fun, Flap, trench.today and hood.fun now share sparse causal V3 anchor
   sampling bounded to the observed keyless **200-block** filtered-log cap.
