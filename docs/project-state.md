@@ -223,6 +223,11 @@ Implemented foundation:
 - launchpad USD conversion no longer requires continuous WETH/USD scans:
   pools.fun, Flap, trench.today and hood.fun now share sparse causal V3 anchor
   sampling bounded to the observed keyless **200-block** filtered-log cap.
+  Flap replay is additionally hardened against registry look-ahead: final
+  quote-token configuration is activated only when its recorded TokenQuoteSet
+  order is already before the replay window, while in-window quote changes
+  remain event-driven. trench.today Sync pricing now also fails if a snapshot
+  is not strictly after its recorded launch order.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 

@@ -40,6 +40,9 @@ def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
                 "launch_transaction_index": event.transaction_index,
                 "launch_log_index": event.log_index,
                 "quote_token": None,
+                "quote_set_block": None,
+                "quote_set_transaction_index": None,
+                "quote_set_log_index": None,
                 "curve_kind": None,
                 "curve_address": None,
                 "curve_parameter": None,
@@ -66,6 +69,9 @@ def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
             if event.actor is None:
                 raise ValueError(f"Flap quote_set missing quote token: {token}")
             state["quote_token"] = event.actor.lower()
+            state["quote_set_block"] = event.block_number
+            state["quote_set_transaction_index"] = event.transaction_index
+            state["quote_set_log_index"] = event.log_index
         elif event.event_type == "curve_set":
             state["curve_kind"] = "legacy"
             state["curve_address"] = event.actor

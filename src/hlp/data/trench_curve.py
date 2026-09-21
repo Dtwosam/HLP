@@ -57,6 +57,24 @@ def build_trench_curve_market_cap_points(
             raise ValueError(
                 f"trench.today Sync token absent from persistent registry: {token}"
             )
+        if (
+            launch.get("launch_block") is None
+            or launch.get("launch_log_index") is None
+        ):
+            raise ValueError(
+                f"trench.today registry missing launch order: {token}"
+            )
+        launch_order = (
+            int(launch["launch_block"]),
+            -1
+            if launch.get("launch_transaction_index") is None
+            else int(launch["launch_transaction_index"]),
+            int(launch["launch_log_index"]),
+        )
+        if order <= launch_order:
+            raise ValueError(
+                f"trench.today Sync precedes recorded launch: {token}"
+            )
         if event.virtual_quote_raw is None or event.virtual_token_raw is None:
             raise ValueError(f"trench.today Sync missing virtual reserves: {token}")
         if event.virtual_quote_raw <= 0 or event.virtual_token_raw <= 0:

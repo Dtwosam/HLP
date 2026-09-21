@@ -44,6 +44,9 @@ def test_build_flap_registry_from_creation_config_events():
     row = rows[0]
     assert row["token"] == TOKEN
     assert row["quote_token"] == ZERO
+    assert row["quote_set_block"] == 10
+    assert row["quote_set_transaction_index"] == 1
+    assert row["quote_set_log_index"] == 3
     assert row["r"] == 1 and row["h"] == 2 and row["k"] == 3
     assert row["dex_supply_thresh_raw"] == 800
     assert row["migrator_type"] == 1

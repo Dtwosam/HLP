@@ -46,6 +46,9 @@ REGISTRY = [
         "token": TOKEN,
         "curve": "0x" + "22" * 20,
         "quote_token": ZERO,
+        "launch_block": 9,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
     }
 ]
 
@@ -76,3 +79,22 @@ def test_trench_sync_fails_for_unregistered_carry_in():
                 initial_weth_usd=Decimal("2000"),
             )
         )
+
+
+def test_trench_sync_rejects_snapshot_before_recorded_launch():
+    future_registry = [{
+        **REGISTRY[0],
+        "launch_block": 10,
+        "launch_transaction_index": 2,
+        "launch_log_index": 1,
+    }]
+    with pytest.raises(ValueError, match="precedes recorded launch"):
+        list(
+            build_trench_curve_market_cap_points(
+                [sync()],
+                future_registry,
+                [],
+                initial_weth_usd=Decimal("2000"),
+            )
+        )
+

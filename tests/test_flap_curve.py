@@ -76,3 +76,62 @@ def test_flap_curve_does_not_guess_quote_before_quote_set():
     )
     assert rows[0]["pricing_status"] == "missing_quote_event"
     assert rows[0]["market_cap_proxy_usd"] is None
+
+
+def test_flap_curve_does_not_preload_future_registry_quote():
+    quote = "0x" + "33" * 20
+    events = [
+        event("token_created", txi=1, logi=0),
+        event("token_bought", txi=1, logi=1, price=10**10),
+        event("quote_set", txi=2, logi=0, actor=quote),
+    ]
+    registry = [{
+        "token": TOKEN,
+        "quote_token": quote,
+        "launch_block": 10,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "quote_set_block": 10,
+        "quote_set_transaction_index": 2,
+        "quote_set_log_index": 0,
+    }]
+    rows = list(
+        build_flap_curve_market_cap_points(
+            events,
+            [],
+            initial_weth_usd=Decimal("2000"),
+            initial_quote_usd={quote: Decimal("2")},
+            launch_registry=registry,
+        )
+    )
+    assert len(rows) == 1
+    assert rows[0]["pricing_status"] == "missing_quote_event"
+    assert rows[0]["market_cap_proxy_usd"] is None
+
+
+def test_flap_curve_bootstraps_only_pre_window_registry_state():
+    quote = "0x" + "33" * 20
+    trade = event("token_bought", txi=2, logi=0, price=10**18)
+    registry = [{
+        "token": TOKEN,
+        "quote_token": quote,
+        "launch_block": 9,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "quote_set_block": 9,
+        "quote_set_transaction_index": 1,
+        "quote_set_log_index": 1,
+    }]
+    rows = list(
+        build_flap_curve_market_cap_points(
+            [trade],
+            [],
+            initial_weth_usd=Decimal("2000"),
+            initial_quote_usd={quote: Decimal("2")},
+            launch_registry=registry,
+        )
+    )
+    assert len(rows) == 1
+    assert rows[0]["quote_token"] == quote
+    assert rows[0]["market_cap_proxy_usd"] == "2000000000"
+

@@ -46,17 +46,49 @@ def build_flap_curve_market_cap_points(
         oracle_updates=quote_usd_updates,
     )
     registry_rows = list(launch_registry)
-    quote_by_token: dict[str, str] = {
-        row["token"].lower(): row["quote_token"].lower()
-        for row in registry_rows
-        if row.get("quote_token")
-    }
-    seen_launches: set[str] = {
-        row["token"].lower()
-        for row in registry_rows
-    }
-
     rows = sorted(list(events), key=_order)
+    first_order = _order(rows[0]) if rows else None
+
+    # A persistent registry may be used to bootstrap a later replay window,
+    # but only state that is provably older than the first supplied event can
+    # be activated. In particular, never preload a token's final quote asset
+    # from a registry row when its TokenQuoteSet occurs inside or after the
+    # replay window.
+    quote_by_token: dict[str, str] = {}
+    seen_launches: set[str] = set()
+    if first_order is not None:
+        for row in registry_rows:
+            token = row["token"].lower()
+            launch_block = row.get("launch_block")
+            launch_log = row.get("launch_log_index")
+            if launch_block is not None and launch_log is not None:
+                launch_order = (
+                    int(launch_block),
+                    -1
+                    if row.get("launch_transaction_index") is None
+                    else int(row["launch_transaction_index"]),
+                    int(launch_log),
+                )
+                if launch_order < first_order:
+                    seen_launches.add(token)
+
+            quote_token = row.get("quote_token")
+            quote_block = row.get("quote_set_block")
+            quote_log = row.get("quote_set_log_index")
+            if (
+                quote_token
+                and quote_block is not None
+                and quote_log is not None
+            ):
+                quote_order = (
+                    int(quote_block),
+                    -1
+                    if row.get("quote_set_transaction_index") is None
+                    else int(row["quote_set_transaction_index"]),
+                    int(quote_log),
+                )
+                if quote_order < first_order:
+                    quote_by_token[token] = quote_token.lower()
     for event in rows:
         order = _order(event)
         timeline.advance_to(order)
