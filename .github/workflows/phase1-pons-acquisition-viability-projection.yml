@@ -121,6 +121,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
+          merge-multiple: true
           path: accounting
           run-id: ${{ inputs.accounting_run_id }}
           github-token: ${{ github.token }}
@@ -134,6 +135,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
+          merge-multiple: true
           path: accounting
           run-id: ${{ inputs.accounting_run_id }}
           github-token: ${{ github.token }}
@@ -145,6 +147,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.accounting_artifact.outputs.artifact_id }}
+          merge-multiple: true
           path: accounting
           run-id: ${{ inputs.accounting_run_id }}
           github-token: ${{ github.token }}
