@@ -114,3 +114,70 @@ def build_noxa_launch_registry(
 
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
     return output
+
+
+def attach_noxa_initializations(
+    registry_rows: Iterable[dict],
+    initialize_rows: Iterable[dict],
+) -> list[dict]:
+    """Join every NOXA launch pool to its exact V3 Initialize event."""
+    registry = [dict(row) for row in registry_rows]
+    by_pool: dict[str, dict] = {}
+    for row in registry:
+        pool = normalize_address(str(row["pool"]))
+        if pool in by_pool:
+            raise ValueError(f"duplicate NOXA registry pool: {pool}")
+        by_pool[pool] = row
+
+    initializes: dict[str, dict] = {}
+    for raw in initialize_rows:
+        row = dict(raw)
+        pool = normalize_address(str(row["pool"]))
+        if pool not in by_pool:
+            continue
+        if pool in initializes:
+            raise ValueError(
+                f"multiple V3 Initialize events for NOXA pool: {pool}"
+            )
+        initializes[pool] = row
+
+    missing = sorted(set(by_pool) - set(initializes))
+    if missing:
+        raise ValueError(
+            "NOXA registry pools missing V3 Initialize: "
+            + ", ".join(missing[:10])
+        )
+
+    output = []
+    for row in registry:
+        pool = normalize_address(str(row["pool"]))
+        init = initializes[pool]
+        launch_block = int(row["launch_block"])
+        initialize_block = int(init["block_number"])
+        if initialize_block < launch_block:
+            raise ValueError(
+                f"NOXA Initialize predates launch block: {pool}"
+            )
+        item = dict(row)
+        item.update({
+            "initialize_block": initialize_block,
+            "initialize_transaction_hash": str(
+                init["transaction_hash"]
+            ).lower(),
+            "initialize_transaction_index": init.get(
+                "transaction_index"
+            ),
+            "initialize_log_index": int(init["log_index"]),
+            "initial_sqrt_price_x96": int(init["sqrt_price_x96"]),
+            "initial_tick": int(init["tick"]),
+        })
+        output.append(item)
+
+    output.sort(
+        key=lambda row: (
+            int(row["launch_block"]),
+            row["token"],
+        )
+    )
+    return output
+

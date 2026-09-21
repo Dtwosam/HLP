@@ -71,7 +71,11 @@ Implemented foundation:
 - a source-agnostic universe merger preserving `eligible`, `unknown`,
   `ineligible` and `excluded` semantics plus per-source provenance;
 - a persistent NOXA launch registry joined fail-closed to exact launch-block
-  state, moving NOXA to `adapter_ready`;
+  state, moving NOXA to `adapter_ready`. Phase-2 acquisition now also has a
+  sharding-safe NOXA registry-window command that reads `getLaunchedToken` at
+  each exact launch block, plus an exact pool-address join to the shared V3
+  Initialize tape. The initialized registry remains coverage-incomplete until
+  the shared V3 Swap history is filtered/priced through the snapshot;
 - deterministic Uniswap V3, Uniswap V4 and Sushi V3 candidate-market discovery
   requiring exactly one supported quote side and exact-initialization-block
   ERC-20 supply; these sources are `adapter_ready` for candidate market paths;

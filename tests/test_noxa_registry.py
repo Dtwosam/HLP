@@ -1,6 +1,6 @@
 import pytest
 
-from hlp.data.noxa_registry import build_noxa_launch_registry
+from hlp.data.noxa_registry import (\n    attach_noxa_initializations,\n    build_noxa_launch_registry,\n)
 from hlp.data.types import InstantV3Launch, NoxaLaunchedToken
 
 
@@ -95,3 +95,37 @@ def test_noxa_registry_rejects_unmatched_state_rows():
     other = state(token="0x" + "88" * 20)
     with pytest.raises(ValueError, match="absent from launch tape"):
         build_noxa_launch_registry([], [other])
+
+
+def test_attach_noxa_initializations_requires_exact_pool():
+    rows = build_noxa_launch_registry(
+        [launch()],
+        [state()],
+    )
+    initialized = attach_noxa_initializations(
+        rows,
+        [{
+            "pool": POOL,
+            "sqrt_price_x96": 2**96,
+            "tick": 0,
+            "block_number": 20,
+            "transaction_hash": "0x" + "03" * 32,
+            "transaction_index": 2,
+            "log_index": 4,
+        }],
+    )
+    assert len(initialized) == 1
+    assert initialized[0]["initialize_block"] == 20
+    assert initialized[0]["initial_sqrt_price_x96"] == 2**96
+
+
+def test_attach_noxa_initializations_rejects_missing_pool():
+    rows = build_noxa_launch_registry(
+        [launch()],
+        [state()],
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match="missing V3 Initialize"):
+        attach_noxa_initializations(rows, [])
+

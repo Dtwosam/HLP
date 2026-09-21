@@ -38,6 +38,11 @@ from hlp.config import (
     UNISWAP_V4_POOL_MANAGER,
     normalize_address,
 )
+from hlp.protocols.noxa import (
+    TOKEN_LAUNCHED_TOPIC as NOXA_TOKEN_LAUNCHED_TOPIC,
+    decode_noxa_launch,
+)
+from hlp.protocols.noxa_state import read_noxa_launched_token
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
     V3_POOL_CREATED_TOPIC,
@@ -123,6 +128,10 @@ from hlp.data.quote_v4_routes import (
 from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
     reconstruct_staggered_chainlink_usd_tapes,
+)
+from hlp.data.noxa_registry import (
+    attach_noxa_initializations,
+    build_noxa_launch_registry,
 )
 from hlp.data.market_quality import (
     build_candidate_canonical_market_series,
@@ -837,6 +846,96 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
 
 
 
+
+
+def cmd_rpc_noxa_registry_window(args: argparse.Namespace) -> int:
+    """Acquire NOXA launches and exact launch-block immutable state."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=NOXA_LAUNCH_FACTORY,
+        topics=[NOXA_TOKEN_LAUNCHED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    launches = [decode_noxa_launch(row) for row in raw]
+    states = [
+        read_noxa_launched_token(
+            rpc,
+            launch.token,
+            block=launch.block_number,
+        )
+        for launch in launches
+    ]
+    registry = build_noxa_launch_registry(launches, states)
+    manifest = write_jsonl_snapshot(
+        registry,
+        output=Path(args.out),
+        provenance={
+            "source": "noxa_launch_factory_and_launch_block_state",
+            "chain_id": 4663,
+            "factory": NOXA_LAUNCH_FACTORY.lower(),
+            "event_topic0": NOXA_TOKEN_LAUNCHED_TOPIC,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "state_semantics": "getLaunchedToken at launch block",
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "launches": len(registry),
+        "pools": len({row["pool"] for row in registry}),
+        "quote_tokens": sorted({
+            row["quote_token"] for row in registry
+        }),
+        "dex_factories": sorted({
+            row["dex_factory"] for row in registry
+        }),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_noxa_initialized_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Attach exact V3 Initialize identity to every NOXA launch pool."""
+    registry = _load_jsonl(args.registry)
+    initializes = _load_jsonl(args.initializes)
+    rows = attach_noxa_initializations(registry, initializes)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "noxa_registry_plus_exact_v3_initialize",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "initializes": Path(args.initializes).name,
+            "initializes_sha256": _sha256_file(args.initializes),
+        },
+    )
+    summary = {
+        "source_id": "noxa",
+        "launches": len(rows),
+        "pools": len({row["pool"] for row in rows}),
+        "quote_tokens": sorted({
+            row["quote_token"] for row in rows
+        }),
+        "initialized_registry_sha256": manifest["sha256"],
+        "source_coverage_complete": False,
+    }
+    Path(args.summary_out).write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(summary, sort_keys=True))
+    return 0
 
 
 def cmd_phase2_flap_graduation_markets(
@@ -7571,6 +7670,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+    noxa_registry = sub.add_parser("rpc-noxa-registry-window")
+    noxa_registry.add_argument("--from-block", type=int, required=True)
+    noxa_registry.add_argument("--to-block", type=int, required=True)
+    noxa_registry.add_argument("--chunk-size", type=int, default=100_000)
+    noxa_registry.add_argument("--min-chunk-size", type=int, default=1)
+    noxa_registry.add_argument("--out", required=True)
+    noxa_registry.set_defaults(func=cmd_rpc_noxa_registry_window)
+
+    noxa_initialized = sub.add_parser(
+        "phase2-noxa-initialized-registry"
+    )
+    noxa_initialized.add_argument("--registry", required=True)
+    noxa_initialized.add_argument("--initializes", required=True)
+    noxa_initialized.add_argument("--out", required=True)
+    noxa_initialized.add_argument("--summary-out", required=True)
+    noxa_initialized.set_defaults(
+        func=cmd_phase2_noxa_initialized_registry
+    )
 
     flap_registry = sub.add_parser("flap-registry")
     flap_registry.add_argument("--events", required=True)
