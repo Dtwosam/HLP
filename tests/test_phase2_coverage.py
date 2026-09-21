@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from hlp.data.phase2_coverage import (
+    PHASE2_BOUNDARY_REPORT_VERSION,
     PHASE2_COVERAGE_LEDGER_VERSION,
+    apply_phase2_source_boundaries,
     apply_phase2_source_coverage_report,
     validate_phase2_coverage_ledger,
     validate_phase2_source_coverage,
@@ -388,4 +390,87 @@ def test_apply_source_coverage_report_rejects_snapshot_drift():
             ledger,
             INVENTORY,
             report,
+        )
+
+
+
+def test_apply_source_boundaries_fills_start_without_claiming_coverage():
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            complete("pons_v1"),
+            {
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": None,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+        ],
+    }
+    updated, validation = apply_phase2_source_boundaries(
+        ledger,
+        INVENTORY,
+        {
+            "version": PHASE2_BOUNDARY_REPORT_VERSION,
+            "snapshot_head_block": 100,
+            "sources": [{
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "required_start_block": 20,
+            }],
+        },
+    )
+    rows = {row["source_id"]: row for row in updated["sources"]}
+    assert rows["noxa"]["required_start_block"] == 20
+    assert rows["noxa"]["coverage_status"] == "not_started"
+    assert rows["noxa"]["first_block"] is None
+    assert validation["complete_source_ids"] == ["pons_v1"]
+
+
+def test_apply_source_boundaries_rejects_existing_start_drift():
+    pending = {
+        "source_id": "noxa",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "not_started",
+        "required_start_block": 20,
+        "first_block": None,
+        "last_block": None,
+        "continuous": None,
+        "missing_ranges": [],
+        "tokens_discovered": 0,
+        "price_points": 0,
+        "priced_points": 0,
+        "observed_volume_usd": None,
+        "provenance_sha256": None,
+        "blocking_reason": None,
+    }
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [complete("pons_v1"), pending],
+    }
+    with pytest.raises(ValueError, match="existing start"):
+        apply_phase2_source_boundaries(
+            ledger,
+            INVENTORY,
+            {
+                "version": PHASE2_BOUNDARY_REPORT_VERSION,
+                "snapshot_head_block": 100,
+                "sources": [{
+                    "source_id": "noxa",
+                    "source_readiness": "adapter_ready",
+                    "required_start_block": 21,
+                }],
+            },
         )
