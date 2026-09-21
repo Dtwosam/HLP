@@ -9,6 +9,7 @@ from __future__ import annotations
 from decimal import Decimal, getcontext
 from typing import Iterable
 
+from hlp.data.market_quality import active_quote_liquidity_usd
 from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.reconstruct import event_order
 
@@ -97,6 +98,18 @@ def build_v3_launchpad_market_cap_points(
         market_cap_usd = (
             None if quote_usd is None else market_cap_quote * quote_usd
         )
+        liquidity_raw = event.get("liquidity")
+        active_liquidity_usd = (
+            None
+            if quote_usd is None or liquidity_raw is None
+            else active_quote_liquidity_usd(
+                sqrt_price_x96=int(event["sqrt_price_x96"]),
+                liquidity_raw=int(liquidity_raw),
+                token_is_currency0=token_is_token0,
+                quote_decimals=decimals,
+                quote_usd=quote_usd,
+            )
+        )
         output.append(
             {
                 "venue": launch["venue"],
@@ -104,13 +117,24 @@ def build_v3_launchpad_market_cap_points(
                 "event_type": event["_kind"],
                 "token": token,
                 "pool": pool,
+                "market_id": pool,
                 "quote_token": quote,
+                "quote_decimals": decimals,
+                "token_is_currency0": token_is_token0,
                 "supply_raw": supply_raw,
                 "block_number": int(event["block_number"]),
                 "transaction_hash": event["transaction_hash"],
                 "transaction_index": event.get("transaction_index"),
                 "log_index": int(event["log_index"]),
                 "sqrt_price_x96": int(event["sqrt_price_x96"]),
+                "liquidity_raw": (
+                    None if liquidity_raw is None else int(liquidity_raw)
+                ),
+                "active_quote_liquidity_usd": (
+                    None
+                    if active_liquidity_usd is None
+                    else str(active_liquidity_usd)
+                ),
                 "raw_quote_per_raw_token": str(raw_quote_per_raw_token),
                 "market_cap_quote": str(market_cap_quote),
                 "pricing_status": pricing_status,
