@@ -1,0 +1,68 @@
+name: phase2-source-coverage-gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-source-coverage-gate.yml'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+      - 'tests/test_phase2_coverage.py'
+      - 'tests/test_phase2_sources.py'
+  pull_request:
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-source-coverage-gate.yml'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate canonical Phase 2 source coverage ledger
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import validate_phase2_coverage_ledger
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          path = Path(".github/phase2-source-coverage.json")
+          ledger = json.loads(path.read_text())
+          report = validate_phase2_coverage_ledger(
+              ledger,
+              build_phase2_source_inventory(),
+          )
+          print(json.dumps(report, sort_keys=True))
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write("## Phase 2 source coverage\n\n")
+                  handle.write(f"- snapshot: {report['snapshot_head_block']}\n")
+                  handle.write(
+                      f"- complete sources: "
+                      f"{len(report['complete_source_ids'])}/"
+                      f"{report['inventory_sources']}\n"
+                  )
+                  handle.write(
+                      f"- universe coverage complete: "
+                      f"{report['phase2_universe_coverage_complete']}\n"
+                  )
+          PY
