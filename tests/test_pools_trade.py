@@ -105,3 +105,61 @@ def test_decode_token_distributed():
     assert row.token == TOKEN
     assert row.strategy == strategy.lower()
     assert row.amount_raw == 123456
+
+
+
+def test_decode_token_launched_for_explicit_lbp_strategy():
+    strategy = "0x" + "55" * 20
+    data = (
+        "0x"
+        + addr_word(TOKEN)
+        + addr_word(QUOTE)
+        + word(2500)
+        + word(25)
+        + addr_word("0x" + "00" * 20)
+    )
+    row = decode_pools_trade_token_launched(
+        raw(
+            strategy,
+            [
+                TOKEN_LAUNCHED_TOPIC,
+                POOL_ID,
+                topic_addr(TOKEN),
+                topic_addr(RECIPIENT),
+            ],
+            data,
+        ),
+        allowed_strategies={strategy},
+    )
+    assert row.strategy == strategy
+    assert row.pool_id == POOL_ID
+
+
+def test_decode_token_launched_rejects_unlisted_explicit_strategy():
+    strategy = "0x" + "55" * 20
+    data = (
+        "0x"
+        + addr_word(TOKEN)
+        + addr_word(QUOTE)
+        + word(2500)
+        + word(25)
+        + addr_word("0x" + "00" * 20)
+    )
+    try:
+        decode_pools_trade_token_launched(
+            raw(
+                strategy,
+                [
+                    TOKEN_LAUNCHED_TOPIC,
+                    POOL_ID,
+                    topic_addr(TOKEN),
+                    topic_addr(RECIPIENT),
+                ],
+                data,
+            ),
+            allowed_strategies={"0x" + "66" * 20},
+        )
+    except ValueError as exc:
+        assert "allowed pools.trade strategy" in str(exc)
+    else:
+        raise AssertionError("unlisted pools.trade strategy was accepted")
