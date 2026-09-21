@@ -261,8 +261,15 @@ Implemented foundation:
   continuous topic coverage, requires every registry token to have fully priced
   CCA history, and emits a merged CCA phase report with
   `cca_phase_coverage_complete=true` while explicitly keeping
-  `source_coverage_complete=false`. The optional migrated-V4 lifecycle merge
-  still has to be built/executed before LBP coverage can close;
+  `source_coverage_complete=false`. Migrated V4 reconstruction is now also
+  implemented: exact derived PoolIds are joined against the complete shared V4
+  Initialize surface, missing Initialize rows are retained semantically as
+  legitimate non-migrations, and every matched PoolId must reproduce the full
+  PoolKey. A dedicated V4 market-window path replays supply causally from the
+  original initializer-block seed through migration and later swaps, with
+  sparse USD pricing and explicit empty-window behavior. The final chain-wide
+  V4 merge/source-coverage workflow still has to be prepared/executed before
+  LBP coverage can close;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`

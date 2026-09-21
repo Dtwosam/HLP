@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.pools_trade_registry import (
     attach_pools_trade_instant_initializations,
+    attach_pools_trade_lbp_initializations,
     attach_pools_trade_lbp_supply_states,
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
@@ -363,5 +364,120 @@ def test_attach_lbp_supply_state_rejects_state_block_drift():
                 "token_decimals": 18,
                 "supply_raw": 1000,
             }],
+        )
+
+
+def _lbp_state_backed_registry_row():
+    return {
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "source_id": "pools_trade_lbp",
+        "source_kind": "launchpad",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "token_decimals": 18,
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "pool_fee": 2500,
+        "pool_tick_spacing": 50,
+        "pool_hook": ZERO,
+        "initializer": "0x" + "77" * 20,
+        "initializer_block": 10,
+        "initializer_transaction_hash": "0x" + "aa" * 32,
+        "initializer_transaction_index": 1,
+        "initializer_log_index": 2,
+        "migration_block": 20,
+        "state_block": 10,
+        "supply_seed_semantics": (
+            "initializer-block-end totalSupply; replay later "
+            "mint/burn Transfer deltas causally"
+        ),
+    }
+
+
+def test_attach_lbp_initialization_keeps_only_migrated_pool():
+    registry = [_lbp_state_backed_registry_row()]
+    initializes = [{
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 2500,
+        "tick_spacing": 50,
+        "hooks": ZERO,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 25,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }]
+
+    rows = attach_pools_trade_lbp_initializations(
+        registry,
+        initializes,
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["fee"] == 2500
+    assert row["tick_spacing"] == 50
+    assert row["initialize_block"] == 25
+    assert row["migration_delay_blocks"] == 5
+    assert row["initial_sqrt_price_x96"] == 2**96
+
+
+def test_attach_lbp_initialization_allows_non_migrating_pool():
+    rows = attach_pools_trade_lbp_initializations(
+        [_lbp_state_backed_registry_row()],
+        [],
+    )
+    assert rows == []
+
+
+def test_attach_lbp_initialization_rejects_poolkey_drift():
+    registry = [_lbp_state_backed_registry_row()]
+    initializes = [{
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 3000,
+        "tick_spacing": 50,
+        "hooks": ZERO,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 25,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }]
+    with pytest.raises(ValueError, match="PoolKey drift"):
+        attach_pools_trade_lbp_initializations(
+            registry,
+            initializes,
+        )
+
+
+def test_attach_lbp_initialization_rejects_pre_migration_init():
+    registry = [_lbp_state_backed_registry_row()]
+    initializes = [{
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 2500,
+        "tick_spacing": 50,
+        "hooks": ZERO,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 19,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 2,
+        "log_index": 3,
+    }]
+    with pytest.raises(ValueError, match="predates migration"):
+        attach_pools_trade_lbp_initializations(
+            registry,
+            initializes,
         )
 

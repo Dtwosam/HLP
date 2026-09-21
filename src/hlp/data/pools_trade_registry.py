@@ -273,6 +273,116 @@ def attach_pools_trade_lbp_supply_states(
     return output
 
 
+def attach_pools_trade_lbp_initializations(
+    registry_rows: Iterable[dict],
+    initialize_rows: Iterable[dict],
+) -> list[dict]:
+    """Attach exact V4 Initialize rows to successfully migrated LBPs.
+
+    The frozen LBP registry is authoritative. A missing Initialize is a valid
+    non-migration and is therefore omitted rather than treated as an error.
+    Any observed Initialize for a registered PoolId must match the complete
+    derived PoolKey exactly.
+    """
+    registry = [dict(row) for row in registry_rows]
+    by_pool: dict[str, list[dict]] = {}
+    for raw in initialize_rows:
+        row = dict(raw)
+        pool_id = str(row.get("pool_id") or "").lower()
+        if not pool_id:
+            raise ValueError("pools.trade LBP V4 Initialize has empty PoolId")
+        by_pool.setdefault(pool_id, []).append(row)
+
+    output = []
+    seen_tokens: set[str] = set()
+    seen_pools: set[str] = set()
+    for raw in registry:
+        row = dict(raw)
+        token = str(row["token"]).lower()
+        pool_id = str(row["pool_id"]).lower()
+        if token in seen_tokens:
+            raise ValueError(
+                f"duplicate pools.trade LBP token: {token}"
+            )
+        if pool_id in seen_pools:
+            raise ValueError(
+                f"duplicate pools.trade LBP PoolId: {pool_id}"
+            )
+        seen_tokens.add(token)
+        seen_pools.add(pool_id)
+
+        matches = by_pool.get(pool_id, [])
+        if len(matches) > 1:
+            raise ValueError(
+                "pools.trade LBP PoolId has multiple V4 Initialize rows: "
+                f"{pool_id}"
+            )
+        if not matches:
+            continue
+
+        init = matches[0]
+        expected_key = (
+            str(row["currency0"]).lower(),
+            str(row["currency1"]).lower(),
+            int(row["pool_fee"]),
+            int(row["pool_tick_spacing"]),
+            str(row["pool_hook"]).lower(),
+        )
+        actual_key = (
+            str(init["currency0"]).lower(),
+            str(init["currency1"]).lower(),
+            int(init["fee"]),
+            int(init["tick_spacing"]),
+            str(init["hooks"]).lower(),
+        )
+        if actual_key != expected_key:
+            raise ValueError(
+                f"pools.trade LBP PoolKey drift: {pool_id}"
+            )
+
+        initialize_block = int(init["block_number"])
+        initializer_block = int(row["initializer_block"])
+        migration_block = int(row["migration_block"])
+        if initialize_block < initializer_block:
+            raise ValueError(
+                "pools.trade LBP V4 Initialize predates initializer: "
+                f"{token}"
+            )
+        if initialize_block < migration_block:
+            raise ValueError(
+                "pools.trade LBP V4 Initialize predates migration block: "
+                f"{token}"
+            )
+
+        output.append({
+            **row,
+            "source_id": "pools_trade_lbp",
+            "source_kind": "launchpad",
+            "fee": int(row["pool_fee"]),
+            "tick_spacing": int(row["pool_tick_spacing"]),
+            "hooks": str(row["pool_hook"]).lower(),
+            "initialize_block": initialize_block,
+            "initialize_transaction_hash": str(
+                init["transaction_hash"]
+            ).lower(),
+            "initialize_transaction_index": init.get(
+                "transaction_index"
+            ),
+            "initialize_log_index": int(init["log_index"]),
+            "initial_sqrt_price_x96": int(init["sqrt_price_x96"]),
+            "initial_tick": int(init["tick"]),
+            "migration_delay_blocks": initialize_block - migration_block,
+        })
+
+    output.sort(
+        key=lambda row: (
+            int(row["initialize_block"]),
+            row["token"],
+        )
+    )
+    return output
+
+
 def build_pools_trade_lbp_registry(
     created_rows: Iterable[PoolsTradeTokenCreated],
     distributed_rows: Iterable[PoolsTradeTokenDistributed],
