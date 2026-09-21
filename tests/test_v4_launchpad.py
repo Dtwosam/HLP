@@ -106,6 +106,46 @@ def test_v4_recorded_registry_initialize_still_rejects_preinitialize_swap():
 
 
 
+
+def test_v4_market_cap_uses_causal_supply_delta_before_swap():
+    registry = [{
+        **REGISTRY[0],
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }]
+    init = point(txi=1, logi=0)
+    swap = {
+        **point(txi=2, logi=0),
+        "block_number": 11,
+        "liquidity": 1_000 * 10**18,
+    }
+    supply_deltas = [{
+        "token": TOKEN,
+        "supply_delta_raw": -10**17,
+        "block_number": 11,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }]
+    rows = build_v4_launchpad_market_cap_points(
+        registry,
+        [init],
+        [swap],
+        [],
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        initial_quote_usd={QUOTE: Decimal("2")},
+        supply_delta_rows=supply_deltas,
+    )
+
+    assert rows[0]["supply_raw"] == 10**18
+    assert rows[1]["supply_raw"] == 9 * 10**17
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("2")
+    assert Decimal(rows[1]["market_cap_proxy_usd"]) == Decimal("1.8")
+
+
+
 def test_v4_swap_emits_comparable_active_quote_liquidity():
     init = point(txi=1, logi=0)
     swap = {
