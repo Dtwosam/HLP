@@ -4372,7 +4372,7 @@ def cmd_rpc_pools_trade_lbp_initializer_tape(
         for row in logs
     ]
     state_manifest = None
-    if args.state_out:
+    if getattr(args, "state_out", None):
         states = []
         seen_tokens = set()
         for row in rows:
@@ -4603,10 +4603,11 @@ def cmd_pools_trade_lbp_registry(
         distributed,
         initializers,
     )
-    if args.states:
+    state_path = getattr(args, "states", None)
+    if state_path:
         rows = attach_pools_trade_lbp_supply_states(
             rows,
-            _load_jsonl(args.states),
+            _load_jsonl(state_path),
         )
     manifest = write_jsonl_snapshot(
         rows,
@@ -4618,14 +4619,14 @@ def cmd_pools_trade_lbp_registry(
             "distributed_tape": Path(args.distributed).name,
             "initializer_tape": Path(args.initializers).name,
             "state_tape": (
-                Path(args.states).name if args.states else None
+                Path(state_path).name if state_path else None
             ),
             "state_tape_sha256": (
-                _sha256_file(args.states) if args.states else None
+                _sha256_file(state_path) if state_path else None
             ),
             "supply_semantics": (
                 "initializer-block-end totalSupply"
-                if args.states
+                if state_path
                 else "provisional TokenDistributed amount"
             ),
         },
