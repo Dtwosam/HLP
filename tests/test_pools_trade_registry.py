@@ -116,6 +116,10 @@ def test_join_pools_trade_lbp_launch_registry():
     assert row["supply_raw"] == 1_000_000_000 * 10**18
     assert row["reserved_token_amount_for_lp"] == 200_000_000 * 10**18
     assert row["migration_block"] == 1000
+    assert row["currency0"] == ZERO
+    assert row["currency1"] == TOKEN
+    assert row["pool_id"].startswith("0x")
+    assert len(row["pool_id"]) == 66
 
 
 def test_lbp_registry_requires_matching_strategy_distribution():
