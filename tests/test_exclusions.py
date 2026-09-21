@@ -2,6 +2,7 @@ import pytest
 
 from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
 from hlp.data.exclusions import (
+    apply_phase2_exclusions,
     build_phase2_exclusion_registry,
     classify_excluded_asset,
     exclusion_map,
@@ -83,4 +84,42 @@ def test_duplicate_address_classification_fails_closed():
     with pytest.raises(ValueError, match="duplicate deterministic exclusion"):
         build_phase2_exclusion_registry(
             [stock_row(ROBINHOOD_WETH)],
+        )
+
+
+def test_apply_exclusions_preserves_threshold_evidence_and_marks_membership():
+    registry = build_phase2_exclusion_registry([stock_row()])
+    rows = apply_phase2_exclusions(
+        [
+            {
+                "token": AAPL,
+                "eligibility_status": "eligible",
+                "crossed_100k": True,
+                "max_market_cap_proxy_usd": "900000",
+            },
+            {
+                "token": IMPOSTOR,
+                "eligibility_status": "eligible",
+                "crossed_100k": True,
+                "max_market_cap_proxy_usd": "120000",
+            },
+        ],
+        registry,
+    )
+
+    assert rows[0]["phase2_universe_status"] == "excluded"
+    assert rows[0]["eligibility_status"] == "eligible"
+    assert rows[0]["crossed_100k"] is True
+    assert rows[0]["exclusion_category"] == "robinhood_canonical_asset"
+
+    assert rows[1]["phase2_universe_status"] == "eligible"
+    assert rows[1]["excluded"] is False
+    assert rows[1]["exclusion_reason"] is None
+
+
+def test_apply_exclusions_rejects_unclassified_threshold_status():
+    with pytest.raises(ValueError, match="invalid threshold eligibility"):
+        apply_phase2_exclusions(
+            [{"token": IMPOSTOR, "eligibility_status": "maybe"}],
+            build_phase2_exclusion_registry(),
         )
