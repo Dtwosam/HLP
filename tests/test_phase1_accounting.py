@@ -335,3 +335,34 @@ def test_summarize_action_run_ignores_skipped_job_without_log_or_runtime():
     assert result["job_runtime_seconds"] == 5
     assert result["all_completed_job_logs_available"] is True
     assert result["all_job_runtimes_valid"] is True
+
+
+def test_summarize_action_run_counts_nested_manifest_block_provenance_once():
+    run = {
+        "id": 129,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    jobs = [
+        {
+            "id": 12,
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-21T12:00:00Z",
+            "completed_at": "2026-09-21T12:01:00Z",
+        }
+    ]
+    log = (
+        'x {"elapsed_seconds": 10, "requests_made": 2, '
+        '"response_bytes_received": 100, "rpc_route": '
+        '"solidrpc_keyless_public", "graduations": {"provenance": '
+        '{"from_block": 54436036, "to_block": 54486035}}, '
+        '"registrations": {"provenance": '
+        '{"from_block": 54436036, "to_block": 54486035}}}\n'
+    )
+
+    result = summarize_action_run(run, jobs, [], {12: log})
+
+    assert result["reported_block_ranges"] == [[54436036, 54486035]]
+    assert result["reported_processed_blocks"] == 50000
+    assert result["reported_unique_processed_blocks"] == 50000
