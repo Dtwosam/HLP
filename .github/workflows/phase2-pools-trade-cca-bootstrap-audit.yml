@@ -2,13 +2,6 @@ name: phase2-pools-trade-cca-bootstrap-audit
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase2-pools-trade-cca-bootstrap-audit.yml'
-      - 'src/hlp/data/pools_trade_cca.py'
-      - 'src/hlp/protocols/pools_trade_lbp.py'
 
 permissions:
   contents: read
