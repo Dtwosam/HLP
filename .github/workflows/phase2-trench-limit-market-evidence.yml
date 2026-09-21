@@ -174,8 +174,8 @@ jobs:
                   ],
                   "direct_registry_sha256": direct_shas,
                   "matching_semantics": (
-                      "exact token plus canonicalized quote; all direct "
-                      "V3/V4 candidates retained without selection"
+                      "exact token plus canonicalized quote; "
+                      "all direct V3/V4 candidates retained without selection"
                   ),
               },
           )
