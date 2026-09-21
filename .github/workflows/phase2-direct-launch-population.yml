@@ -203,7 +203,9 @@ jobs:
           summary_path = Path(
               "artifacts/direct-launch-population-summary.json"
           )
-          summary = json.loads(summary_path.read_text())
+          summary_bytes = summary_path.read_bytes()
+          summary = json.loads(summary_bytes)
+          summary_sha = hashlib.sha256(summary_bytes).hexdigest()
           manifest_data = json.loads(manifest.read_text())
 
           if summary.get("direct_launch_population_conclusive") is not True:
@@ -263,8 +265,11 @@ jobs:
               )
 
           handoff = {
-              "version": "phase2-direct-launch-population-handoff-v1",
+              "version": "phase2-direct-launch-population-handoff-v2",
               "chain_id": 4663,
+              "snapshot_head_block": int(
+                  summary["snapshot_head_block"]
+              ),
               "base_commit": os.environ["GITHUB_SHA"],
               "attribution_run_id": int(
                   os.environ["ATTRIBUTION_RUN_ID"]
@@ -284,6 +289,9 @@ jobs:
               ],
               "attribution_report_sha256": expected_report,
               "direct_launch_population_sha256": population_sha,
+              "direct_launch_population_summary_sha256": summary_sha,
+              "direct_source_ids": list(summary["direct_source_ids"]),
+              "launch_source_ids": list(summary["launch_source_ids"]),
               "direct_launch_candidate_markets": int(
                   summary["direct_launch_candidate_markets"]
               ),
@@ -305,6 +313,7 @@ jobs:
           ).hexdigest()
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"population_sha256={population_sha}\n")
+              handle.write(f"summary_sha256={summary_sha}\n")
               handle.write(f"handoff_sha256={handoff_sha}\n")
           print(json.dumps(handoff, sort_keys=True))
           PY
@@ -322,11 +331,13 @@ jobs:
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           POPULATION_SHA256: ${{ steps.validate.outputs.population_sha256 }}
+          SUMMARY_SHA256: ${{ steps.validate.outputs.summary_sha256 }}
           HANDOFF_SHA256: ${{ steps.validate.outputs.handoff_sha256 }}
         run: |
           set -euo pipefail
           test -n "${ARTIFACT_DIGEST}"
           test -n "${POPULATION_SHA256}"
+          test -n "${SUMMARY_SHA256}"
           test -n "${HANDOFF_SHA256}"
           {
             echo "## Conclusive direct-launch population"
@@ -335,6 +346,7 @@ jobs:
             echo "- artifact_name: phase2-direct-launch-population"
             echo "- artifact_digest: ${ARTIFACT_DIGEST}"
             echo "- population_sha256: ${POPULATION_SHA256}"
+            echo "- population_summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- selector_freeze_ready: false"
             echo "- source_coverage_complete: false"

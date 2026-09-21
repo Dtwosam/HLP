@@ -171,8 +171,9 @@ Implemented foundation:
   launchpad population complete and supplied, a new dispatch-only conclusive
   direct-launch workflow can materialize only the unmatched direct markets.
   It binds the exact attribution run/artifact, attributed-registry SHA and
-  attribution-report SHA, emits a versioned population/handoff, and explicitly
-  keeps `selector_freeze_ready=false` and
+  attribution-report SHA, plus the population summary SHA, frozen snapshot and
+  exact direct/launch source sets. It emits a versioned population/handoff and
+  explicitly keeps `selector_freeze_ready=false` and
   `source_coverage_complete=false`; this separates launch-origin closure from
   the still-pending empirical multi-pool selector freeze;
 - pools.fun now has a prepared full Phase-2 coverage path that reuses the shared

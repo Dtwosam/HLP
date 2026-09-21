@@ -46,3 +46,16 @@ def test_direct_launch_population_workflow_publishes_provenance_handoff():
     assert "direct_launch_population_sha256" in text
     assert "attributed_registry_sha256" in text
     assert "attribution_report_sha256" in text
+
+
+def test_direct_launch_population_handoff_binds_summary_and_source_sets():
+    text = WORKFLOW.read_text()
+
+    assert '"version": "phase2-direct-launch-population-handoff-v2"' in text
+    assert '"snapshot_head_block": int(' in text
+    assert '"direct_launch_population_summary_sha256": summary_sha' in text
+    assert '"direct_source_ids": list(summary["direct_source_ids"])' in text
+    assert '"launch_source_ids": list(summary["launch_source_ids"])' in text
+    assert "summary_sha256=" in text
+    assert "population_summary_sha256: ${SUMMARY_SHA256}" in text
+
