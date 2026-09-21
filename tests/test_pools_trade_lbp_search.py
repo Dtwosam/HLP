@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from hlp.data.pools_trade_lbp_search import (
@@ -98,3 +101,29 @@ def test_validate_lbp_pool_init_search_rejects_flag_row_mismatch():
     }
     with pytest.raises(ValueError, match="absence contains"):
         validate(data)
+
+
+
+def test_repository_lbp_pool_init_absence_is_frozen():
+    frozen = json.loads(
+        Path(
+            ".github/phase2-pools-trade-lbp-pool-init-search.json"
+        ).read_text()
+    )
+    row = validate_pools_trade_lbp_pool_init_search(
+        frozen,
+        expected_token=(
+            "0x89e71858d3c13c0ea1d135edc9fccb32740c9dbc"
+        ),
+        expected_pool_id=(
+            "0x4513c2961cc5872078823f0183a94afa"
+            "dc169d66d507b5778e91f8a7bbef1c4f"
+        ),
+        expected_from_block=30_001_146,
+        expected_to_block=30_395_704,
+    )
+    assert row["initialize_found"] is False
+    assert row["initialize"] is None
+    assert row["shards"] == 16
+    assert row["rpc_requests"] == 2_061
+    assert row["rpc_routes"] == ["solidrpc_keyless_public"]
