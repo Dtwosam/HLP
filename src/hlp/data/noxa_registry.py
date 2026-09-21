@@ -112,7 +112,16 @@ def build_noxa_launch_registry(
             f"{extra_states[:5]}"
         )
 
-    output.sort(key=lambda row: (row["launch_block"], row["token"]))
+    output.sort(
+        key=lambda row: (
+            int(row["launch_block"]),
+            -1
+            if row.get("launch_transaction_index") is None
+            else int(row["launch_transaction_index"]),
+            int(row["launch_log_index"]),
+            row["token"],
+        )
+    )
     return output
 
 

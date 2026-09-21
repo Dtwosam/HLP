@@ -1,0 +1,326 @@
+name: phase2-noxa-registry-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-noxa-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '61688'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - id: matrix
+        name: Build exact shard matrix
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          count = int(os.environ["SHARD_COUNT"])
+          if count != 256:
+              raise SystemExit(f"NOXA shard count changed: {count}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "shards="
+                  + json.dumps(list(range(count)), separators=(",", ":"))
+                  + "\n"
+              )
+          PY
+
+  shard:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shards) }}
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact NOXA registry shard bounds
+        run: |
+          python - <<'PY'
+          import os
+
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + (span * index) // count
+          hi = start + (span * (index + 1)) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty NOXA registry shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": index, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire NOXA launch registry shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "${SHARD_INDEX}"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-noxa-registry-window \
+            --from-block "${FROM_BLOCK}" \
+            --to-block "${TO_BLOCK}" \
+            --chunk-size "${CHUNK}" \
+            --min-chunk-size 25 \
+            --out "artifacts/noxa-registry-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-noxa-registry-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-noxa-registry-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate and merge NOXA registry
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import NOXA_LAUNCH_FACTORY
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = int(os.environ["SHARD_COUNT"])
+
+          files = sorted(root.glob("noxa-registry-shard-*.jsonl"))
+          if len(files) != shard_count:
+              raise SystemExit(
+                  f"expected {shard_count} NOXA registry shards, "
+                  f"found {len(files)}"
+              )
+
+          aggregate_digest = hashlib.sha256()
+          total_records = 0
+          shards = []
+          for path in files:
+              manifest_path = path.with_suffix(
+                  path.suffix + ".manifest.json"
+              )
+              manifest = json.loads(manifest_path.read_text())
+              provenance = manifest.get("provenance") or {}
+              if (
+                  provenance.get("source")
+                  != "noxa_launch_factory_and_launch_block_state"
+              ):
+                  raise SystemExit(
+                      f"{path.name}: NOXA provenance source changed"
+                  )
+              if str(provenance.get("factory") or "").lower() != (
+                  NOXA_LAUNCH_FACTORY.lower()
+              ):
+                  raise SystemExit(
+                      f"{path.name}: NOXA factory identity changed"
+                  )
+              lo = int(provenance["from_block"])
+              hi = int(provenance["to_block"])
+
+              local_digest = hashlib.sha256()
+              records = 0
+              with path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate_digest.update(raw)
+                      local_digest.update(raw)
+                      if raw.strip():
+                          records += 1
+              if records != int(manifest["records"]):
+                  raise SystemExit(
+                      f"{path.name}: registry record count changed"
+                  )
+              if local_digest.hexdigest() != manifest["sha256"]:
+                  raise SystemExit(
+                      f"{path.name}: registry SHA changed"
+                  )
+              total_records += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": manifest["sha256"],
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual_path = Path(
+              "artifacts/noxa-registry-sharded.manifest.json"
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=virtual_path,
+              path_name="noxa-registry.jsonl",
+              records=total_records,
+              sha256=aggregate_digest.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "noxa_launch_factory_and_launch_block_state",
+                  "chain_id": 4663,
+                  "factory": NOXA_LAUNCH_FACTORY.lower(),
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shards": shards,
+              },
+          )
+
+          rows = list(iter_sharded_jsonl(root, virtual_path))
+          seen_tokens = set()
+          seen_pools = set()
+          previous = None
+          for row in rows:
+              token = row["token"].lower()
+              pool = row["pool"].lower()
+              order = (
+                  int(row["launch_block"]),
+                  -1
+                  if row.get("launch_transaction_index") is None
+                  else int(row["launch_transaction_index"]),
+                  int(row["launch_log_index"]),
+              )
+              if previous is not None and order < previous:
+                  raise SystemExit(
+                      "merged NOXA registry is not chronological"
+                  )
+              previous = order
+              if token in seen_tokens:
+                  raise SystemExit(
+                      f"duplicate NOXA token across shards: {token}"
+                  )
+              if pool in seen_pools:
+                  raise SystemExit(
+                      f"duplicate NOXA pool across shards: {pool}"
+                  )
+              if int(row["state_block"]) != int(row["launch_block"]):
+                  raise SystemExit(
+                      f"NOXA state block drift: {token}"
+                  )
+              if int(row["supply_raw"]) <= 0:
+                  raise SystemExit(
+                      f"NOXA non-positive launch supply: {token}"
+                  )
+              seen_tokens.add(token)
+              seen_pools.add(pool)
+
+          merged = write_jsonl_snapshot(
+              rows,
+              output=Path("artifacts/noxa-registry.jsonl"),
+              provenance={
+                  "source": "merged_noxa_registry_shards",
+                  "chain_id": 4663,
+                  "factory": NOXA_LAUNCH_FACTORY.lower(),
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shard_count": shard_count,
+                  "sharded_sha256": virtual["sha256"],
+                  "state_semantics": "getLaunchedToken at launch block",
+              },
+          )
+          if merged["records"] != virtual["records"]:
+              raise SystemExit("merged NOXA registry count changed")
+          if merged["sha256"] != virtual["sha256"]:
+              raise SystemExit("merged NOXA registry bytes changed")
+
+          summary = {
+              "version": "phase2-noxa-registry-v1",
+              "source_id": "noxa",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_registry_scan": True,
+              "missing_ranges": [],
+              "shards": shard_count,
+              "tokens_discovered": len(rows),
+              "pools_discovered": len(seen_pools),
+              "quote_tokens": sorted({
+                  row["quote_token"].lower()
+                  for row in rows
+              }),
+              "dex_factories": sorted({
+                  row["dex_factory"].lower()
+                  for row in rows
+              }),
+              "first_launch_block": (
+                  None if not rows else int(rows[0]["launch_block"])
+              ),
+              "last_launch_block": (
+                  None if not rows else int(rows[-1]["launch_block"])
+              ),
+              "registry_sha256": merged["sha256"],
+              "source_coverage_complete": False,
+          }
+          Path("artifacts/noxa-registry-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-noxa-registry-merged
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
