@@ -1,0 +1,370 @@
+name: phase2-trench-registry-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-trench-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '5773155'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact trench.today shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty trench.today shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          PY
+      - name: Acquire trench.today lifecycle plus launch state
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-trench-registry-window \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --events-out "artifacts/trench-events-${SHARD}.jsonl" \
+            --out "artifacts/trench-registry-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-registry-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-trench-registry-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate shards and build global trench.today registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.trench_registry import (
+              attach_trench_launch_static_states,
+              build_trench_launch_registry_ordered,
+          )
+          from hlp.data.types import TrenchEvent
+          from hlp.protocols.erc20 import Erc20StaticState
+
+          root = Path("inputs")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+          event_files = sorted(root.glob("trench-events-*.jsonl"))
+          registry_files = sorted(root.glob("trench-registry-*.jsonl"))
+          if len(event_files) != count or len(registry_files) != count:
+              raise SystemExit(
+                  "trench.today shard count changed: "
+                  f"events={len(event_files)} "
+                  f"registries={len(registry_files)} expected={count}"
+              )
+
+          aggregate = hashlib.sha256()
+          total = 0
+          event_counts = Counter()
+          shards = []
+          previous = None
+          for path in event_files:
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              provenance = manifest.get("provenance") or {}
+              if provenance.get("protocol") != (
+                  "trench_today_shared_curve_tape"
+              ):
+                  raise SystemExit(
+                      "trench.today event protocol identity drift"
+                  )
+              if int(provenance.get("chain_id", -1)) != 4663:
+                  raise SystemExit("trench.today event chain drift")
+
+              local = hashlib.sha256()
+              records = 0
+              first_order = None
+              last_order = None
+              with path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate.update(raw)
+                      local.update(raw)
+                      if not raw.strip():
+                          continue
+                      records += 1
+                      row = json.loads(raw)
+                      order = (
+                          int(row["block_number"]),
+                          -1
+                          if row.get("transaction_index") is None
+                          else int(row["transaction_index"]),
+                          int(row["log_index"]),
+                      )
+                      if last_order is not None and order < last_order:
+                          raise SystemExit(
+                              f"trench.today shard is not chronological: "
+                              f"{path.name}"
+                          )
+                      if first_order is None:
+                          first_order = order
+                      last_order = order
+                      event_counts[str(row["event_type"])] += 1
+
+              if records != int(manifest["records"]):
+                  raise SystemExit(
+                      "trench.today event shard record drift"
+                  )
+              if local.hexdigest() != manifest["sha256"]:
+                  raise SystemExit("trench.today event shard SHA drift")
+              if (
+                  previous is not None
+                  and first_order is not None
+                  and first_order < previous
+              ):
+                  raise SystemExit(
+                      "trench.today shards are not globally chronological"
+                  )
+              if last_order is not None:
+                  previous = last_order
+              total += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": manifest["sha256"],
+                  "from_block": int(provenance["from_block"]),
+                  "to_block": int(provenance["to_block"]),
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual_path = Path(
+              "artifacts/trench-event-shards.manifest.json"
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=virtual_path,
+              path_name="trench-events.jsonl",
+              records=total,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_trench_today_curve_events",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shards": shards,
+              },
+          )
+
+          def events():
+              for row in iter_sharded_jsonl(root, virtual_path):
+                  yield TrenchEvent(**row)
+
+          base = build_trench_launch_registry_ordered(events())
+
+          static_states = []
+          state_tokens = set()
+          for path in registry_files:
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              if hashlib.sha256(path.read_bytes()).hexdigest() != (
+                  manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      "trench.today state registry shard SHA drift"
+                  )
+              provenance = manifest.get("provenance") or {}
+              if provenance.get("state_semantics") != (
+                  "ERC20 decimals/totalSupply at launch block"
+              ):
+                  raise SystemExit(
+                      "trench.today launch state semantics drift"
+                  )
+              for line in path.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  token = row["token"].lower()
+                  if token in state_tokens:
+                      raise SystemExit(
+                          f"duplicate trench.today launch state: {token}"
+                      )
+                  state_tokens.add(token)
+                  static_states.append(
+                      Erc20StaticState(
+                          token=token,
+                          block_number=int(row["state_block"]),
+                          decimals=int(row["token_decimals"]),
+                          total_supply=int(row["supply_raw"]),
+                      )
+                  )
+
+          registry = attach_trench_launch_static_states(
+              base,
+              static_states,
+          )
+          if len(registry) != len(state_tokens):
+              raise SystemExit(
+                  "trench.today registry/state population drift"
+              )
+          registry_manifest = write_jsonl_snapshot(
+              registry,
+              output=Path("artifacts/trench-registry.jsonl"),
+              provenance={
+                  "source": "phase2_trench_today_global_registry",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "event_tape_sha256": virtual["sha256"],
+                  "event_source_run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "supply_semantics": (
+                      "ERC20 totalSupply/decimals at exact TokenCreate block"
+                  ),
+                  "limit_reach_semantics": (
+                      "global chronological event-sourced first LimitReach"
+                  ),
+              },
+          )
+          if any(
+              int(row["launch_block"]) < start
+              or int(row["launch_block"]) > head
+              for row in registry
+          ):
+              raise SystemExit(
+                  "trench.today launch outside frozen source range"
+              )
+          if any(
+              row["state_block"] != row["launch_block"]
+              for row in registry
+          ):
+              raise SystemExit(
+                  "trench.today launch state block drift"
+              )
+
+          limited = [
+              row for row in registry
+              if row["limit_reach_block"] is not None
+          ]
+          summary = {
+              "version": "phase2-trench-registry-v1",
+              "source_id": "trench_today",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_event_scan": True,
+              "missing_ranges": [],
+              "shards": count,
+              "event_records": total,
+              "event_counts": dict(sorted(event_counts.items())),
+              "event_tape_sha256": virtual["sha256"],
+              "tokens_discovered": len(registry),
+              "limit_reach_tokens": len(limited),
+              "quote_tokens": sorted({
+                  row["quote_token"] for row in registry
+              }),
+              "token_decimals": sorted({
+                  int(row["token_decimals"])
+                  for row in registry
+              }),
+              "supply_shapes": sorted({
+                  (
+                      int(row["token_decimals"]),
+                      int(row["supply_raw"]),
+                  )
+                  for row in registry
+              }),
+              "registry_sha256": registry_manifest["sha256"],
+              "source_coverage_complete": False,
+          }
+          Path(
+              "artifacts/trench-registry-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-registry-merged
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

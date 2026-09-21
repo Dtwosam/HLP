@@ -17,18 +17,14 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e .
-      - name: Acquire trench.today tape
+      - name: Acquire trench.today tape and launch-block state
         run: |
           mkdir -p artifacts
           hlp --timeout 30 --attempts 5 --min-interval 0.6 \
-            rpc-trench-tape \
+            rpc-trench-registry-window \
             --from-block 30000000 --to-block 30099999 \
             --chunk-size 2000 --min-chunk-size 25 \
-            --out artifacts/trench-events.jsonl
-      - name: Build in-shard launch registry
-        run: |
-          hlp trench-registry \
-            --events artifacts/trench-events.jsonl \
+            --events-out artifacts/trench-events.jsonl \
             --out artifacts/trench-registry.jsonl
       - name: Restrict validation to tokens launched inside shard
         run: |
@@ -51,6 +47,16 @@ jobs:
           Path("artifacts/trench-events-in-shard-launches.jsonl").write_text(
               "".join(json.dumps(row, sort_keys=True) + "\n" for row in filtered)
           )
+          quote_decimals = {}
+          for row in registry:
+              quote = row["quote_token"]
+              # Native ETH and the validated trench regime both use 18 raw
+              # quote decimals in this bounded smoke. Phase 2 coverage uses
+              # the canonical quote-decimals registry instead.
+              quote_decimals[quote] = 18
+          Path("artifacts/trench-quote-decimals.json").write_text(
+              json.dumps(quote_decimals, sort_keys=True) + "\n"
+          )
           print(json.dumps({
               "registry_tokens": len(tokens),
               "filtered_events": len(filtered),
@@ -69,6 +75,7 @@ jobs:
             rpc-trench-curve-market-cap-window \
             --events artifacts/trench-events-in-shard-launches.jsonl \
             --registry artifacts/trench-registry.jsonl \
+            --quote-decimals artifacts/trench-quote-decimals.json \
             --from-block 30000000 --to-block 30099999 \
             --chunk-size 2000 --min-chunk-size 25 \
             --out artifacts/trench-curve-market-caps.jsonl \

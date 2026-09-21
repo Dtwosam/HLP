@@ -795,8 +795,8 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
             "chain_id": 4663,
             "portal": FLAP_PORTAL.lower(),
             "events": Path(args.events).name,
-            "fixed_supply_raw": str(1_000_000_000 * 10**18),
-            "token_decimals": 18,
+            "supply_state_attached": False,
+            "usage": "event metadata registry only",
         },
     )
     incomplete_quotes = sum(row["quote_token"] is None for row in rows)
@@ -4128,6 +4128,22 @@ def cmd_rpc_trench_registry_window(args: argparse.Namespace) -> int:
         for row in base
     ]
     registry = attach_trench_launch_static_states(base, states)
+    if getattr(args, "events_out", None):
+        write_jsonl_snapshot(
+            events,
+            output=Path(args.events_out),
+            provenance={
+                "source": "evm_json_rpc",
+                "chain_id": 4663,
+                "protocol": "trench_today_shared_curve_tape",
+                "manager": TRENCH_MANAGER.lower(),
+                "event_topic0_or": list(TRENCH_CURVE_TOPICS),
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "initial_chunk_size": args.chunk_size,
+                "min_chunk_size": args.min_chunk_size,
+            },
+        )
     manifest = write_jsonl_snapshot(
         registry,
         output=Path(args.out),
@@ -8898,6 +8914,7 @@ def build_parser() -> argparse.ArgumentParser:
     trench_registry_window.add_argument(
         "--min-chunk-size", type=int, default=1
     )
+    trench_registry_window.add_argument("--events-out")
     trench_registry_window.add_argument("--out", required=True)
     trench_registry_window.set_defaults(
         func=cmd_rpc_trench_registry_window

@@ -30,8 +30,10 @@ def test_trench_phase2_registry_parser():
         "rpc-trench-registry-window",
         "--from-block", "10",
         "--to-block", "20",
+        "--events-out", "events.jsonl",
         "--out", "registry.jsonl",
     ])
+    assert args.events_out == "events.jsonl"
     assert args.from_block == 10
     assert args.to_block == 20
 
@@ -86,6 +88,7 @@ def test_trench_registry_window_reads_supply_at_launch_block(
         to_block=20,
         chunk_size=200,
         min_chunk_size=25,
+        events_out=None,
         out=str(out),
     )
     assert cmd_rpc_trench_registry_window(args) == 0
