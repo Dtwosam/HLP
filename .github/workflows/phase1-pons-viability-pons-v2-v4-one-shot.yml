@@ -1,4 +1,5 @@
 name: phase1-pons-viability-pons-v2-v4-one-shot
+# validation-generation: 1
 run-name: phase1 viability pons_v2_v4 ${{ github.sha }}
 
 on:
