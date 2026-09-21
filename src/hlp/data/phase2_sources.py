@@ -124,11 +124,13 @@ def build_phase2_source_inventory() -> list[dict]:
             "implementation_evidence": [
                 "hlp.protocols.pools_trade_lbp",
                 "hlp.data.pools_trade_registry",
+                "hlp.data.pools_trade_cca",
+                "hlp.data.pools_trade_lbp_evidence",
                 "hlp.data.types.CcaPriceEvent",
             ],
             "blocking_gap": (
-                "CCA clearing-price orientation/market-cap reconstruction "
-                "and migration stitching"
+                "CCA clearing-price orientation freeze and "
+                "post-auction V4 handoff evidence"
             ),
         },
         {
