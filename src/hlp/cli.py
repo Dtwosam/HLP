@@ -243,6 +243,52 @@ def _archive_rpc(args: argparse.Namespace) -> RpcClient:
     )
 
 
+def _sparse_weth_usd_anchors(
+    rpc: RpcClient,
+    targets,
+    *,
+    pool: str,
+    chunk_size: int,
+    fallback_block: int,
+) -> tuple[Decimal, list[dict], int | None]:
+    """Sample WETH/USD only at target event orders."""
+    rows = list(targets)
+    if not rows:
+        return (
+            v3_quote_price_at_block(
+                rpc,
+                token=ROBINHOOD_WETH,
+                quote_token=ROBINHOOD_USDG,
+                pool=pool,
+                block=fallback_block,
+            ),
+            [],
+            None,
+        )
+
+    window_size = int(chunk_size)
+    if window_size <= 0:
+        raise ValueError("anchor chunk size must be positive")
+    if rpc.route_label == "solidrpc_keyless_public":
+        window_size = min(
+            window_size,
+            SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+        )
+    anchors = build_sparse_v3_quote_points(
+        rpc,
+        rows,
+        token=ROBINHOOD_WETH,
+        quote_token=ROBINHOOD_USDG,
+        pool=pool,
+        window_size=window_size,
+    )
+    return (
+        Decimal(anchors[0]["quote_per_token"]),
+        anchors,
+        window_size,
+    )
+
+
 def cmd_network_smoke(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -705,21 +751,15 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
         raise SystemExit(
             "pools.fun has no V3 Initialize/Swap events to price"
         )
-    anchor_window_size = args.chunk_size
-    if rpc.route_label == "solidrpc_keyless_public":
-        anchor_window_size = min(
-            anchor_window_size,
-            SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+    initial_weth_usd, anchors, anchor_window_size = (
+        _sparse_weth_usd_anchors(
+            rpc,
+            target_events,
+            pool=args.usd_anchor_pool,
+            chunk_size=args.chunk_size,
+            fallback_block=args.from_block - 1,
         )
-    anchors = build_sparse_v3_quote_points(
-        rpc,
-        target_events,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        window_size=anchor_window_size,
     )
-    initial_weth_usd = Decimal(anchors[0]["quote_per_token"])
     quote_tokens = {row["quote_token"].lower() for row in registry}
     quote_decimals = {
         ROBINHOOD_WETH.lower(): 18,
@@ -1177,23 +1217,13 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    initial_weth_usd = v3_quote_price_at_block(
-        rpc,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        block=args.from_block - 1,
-    )
-    anchor_points = list(
-        reconstruct_v3_price_points(
+    initial_weth_usd, anchor_points, anchor_window_size = (
+        _sparse_weth_usd_anchors(
             rpc,
-            token=ROBINHOOD_WETH,
-            quote_token=ROBINHOOD_USDG,
+            events,
             pool=args.usd_anchor_pool,
-            from_block=args.from_block,
-            to_block=args.to_block,
             chunk_size=args.chunk_size,
-            min_chunk_size=args.min_chunk_size,
+            fallback_block=args.from_block - 1,
         )
     )
     points = build_hood_fun_curve_market_cap_points(
@@ -1215,6 +1245,8 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
             "price_semantics": (
                 "authoritative post-trade virtual ETH / virtual token reserve"
             ),
@@ -1245,6 +1277,12 @@ def cmd_rpc_hood_fun_curve_market_cap_window(args: argparse.Namespace) -> int:
                     bool(row["crossed_100k"]) for row in summary
                 ),
                 "initial_weth_usd": str(initial_weth_usd),
+                "sparse_anchor_points": len(anchor_points),
+                "sparse_anchor_windows": len({
+                    row["window_from_block"]
+                    for row in anchor_points
+                }),
+                "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
@@ -1348,23 +1386,13 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    initial_weth_usd = v3_quote_price_at_block(
-        rpc,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        block=args.from_block - 1,
-    )
-    anchor_points = list(
-        reconstruct_v3_price_points(
+    initial_weth_usd, anchor_points, anchor_window_size = (
+        _sparse_weth_usd_anchors(
             rpc,
-            token=ROBINHOOD_WETH,
-            quote_token=ROBINHOOD_USDG,
+            events,
             pool=args.usd_anchor_pool,
-            from_block=args.from_block,
-            to_block=args.to_block,
             chunk_size=args.chunk_size,
-            min_chunk_size=args.min_chunk_size,
+            fallback_block=args.from_block - 1,
         )
     )
     points = list(
@@ -1389,6 +1417,8 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
             "price_semantics": "virtualQuote / virtualToken from authoritative post-trade Sync",
             "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
         },
@@ -1415,6 +1445,12 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
                     bool(row["crossed_100k"]) for row in summary
                 ),
                 "initial_weth_usd": str(initial_weth_usd),
+                "sparse_anchor_points": len(anchor_points),
+                "sparse_anchor_windows": len({
+                    row["window_from_block"]
+                    for row in anchor_points
+                }),
+                "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
@@ -1490,23 +1526,13 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    initial_weth_usd = v3_quote_price_at_block(
-        rpc,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        block=args.from_block - 1,
-    )
-    anchor_points = list(
-        reconstruct_v3_price_points(
+    initial_weth_usd, anchor_points, anchor_window_size = (
+        _sparse_weth_usd_anchors(
             rpc,
-            token=ROBINHOOD_WETH,
-            quote_token=ROBINHOOD_USDG,
+            events,
             pool=args.usd_anchor_pool,
-            from_block=args.from_block,
-            to_block=args.to_block,
             chunk_size=args.chunk_size,
-            min_chunk_size=args.min_chunk_size,
+            fallback_block=args.from_block - 1,
         )
     )
     points = list(
@@ -1531,6 +1557,8 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
             "price_semantics": "postPrice is quote-token units with 18 decimals",
             "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
             "oracle_state": (
@@ -1564,6 +1592,12 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
                 ),
                 "unpriced_tokens": sum(r["priced_points"] == 0 for r in summary),
                 "initial_weth_usd": str(initial_weth_usd),
+                "sparse_anchor_points": len(anchor_points),
+                "sparse_anchor_windows": len({
+                    row["window_from_block"]
+                    for row in anchor_points
+                }),
+                "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
