@@ -72,6 +72,12 @@ jobs:
           run-id: ${{ inputs.cohort_run_id }}
       - uses: actions/download-artifact@v4
         with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
           name: phase2-direct_uniswap_v3-market-registry
           path: inputs/uniswap-v3
           github-token: ${{ github.token }}
@@ -91,6 +97,8 @@ jobs:
       - name: Validate cohort and registry provenance
         env:
           REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+          COHORT_RUN_ID: ${{ inputs.cohort_run_id }}
         run: |
           python - <<'PY'
           import hashlib
@@ -110,6 +118,29 @@ jobs:
               raise SystemExit("competition cohort unexpectedly froze selector")
           if summary["tokens"] < 1:
               raise SystemExit("competition cohort contains no competing tokens")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          quote_files = {
+              "registry_sha256": Path("inputs/quotes/direct-quotes.jsonl"),
+              "decimals_sha256": Path(
+                  "inputs/quotes/direct-quote-decimals.json"
+              ),
+              "feed_specs_sha256": Path(
+                  "inputs/quotes/direct-quote-feeds.jsonl"
+              ),
+          }
+          for field, path in quote_files.items():
+              if not path.exists():
+                  raise SystemExit(f"missing direct quote artifact: {path}")
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != quote_summary[field]:
+                  raise SystemExit(
+                      f"direct quote artifact SHA drift: {field}"
+                  )
 
           roots = {
               "direct_uniswap_v3": Path("inputs/uniswap-v3"),
@@ -138,6 +169,39 @@ jobs:
             --snapshot-head "$SNAPSHOT_HEAD" \
             --out artifacts/direct-market-evidence-plan.jsonl \
             --summary-out artifacts/direct-market-evidence-plan-summary.json
+      - name: Bind evidence-plan upstream provenance
+        env:
+          QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          COHORT_RUN_ID: ${{ inputs.cohort_run_id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/direct-market-evidence-plan-summary.json")
+          summary = json.loads(path.read_text())
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          summary.update({
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "cohort_run_id": int(os.environ["COHORT_RUN_ID"]),
+              "quote_registry_sha256": quote_summary["registry_sha256"],
+              "quote_decimals_sha256": quote_summary["decimals_sha256"],
+              "quote_feed_specs_sha256": quote_summary["feed_specs_sha256"],
+          })
+          plan = Path("artifacts/direct-market-evidence-plan.jsonl")
+          digest = hashlib.sha256(plan.read_bytes()).hexdigest()
+          if digest != summary["plan_sha256"]:
+              raise SystemExit("direct evidence plan SHA drift")
+          path.write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          PY
       - name: Filter sampled registries
         run: |
           hlp phase2-direct-evidence-filter \
@@ -563,11 +627,14 @@ jobs:
           QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
           REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
           COHORT_RUN_ID: ${{ inputs.cohort_run_id }}
+          V3_INITIALIZE_RUN_ID: ${{ inputs.v3_initialize_run_id }}
           V3_SWAP_RUN_ID: ${{ inputs.v3_swap_run_id }}
+          V4_INITIALIZE_RUN_ID: ${{ inputs.v4_initialize_run_id }}
           V4_SWAP_RUN_ID: ${{ inputs.v4_swap_run_id }}
           SUPPLY_RUN_ID: ${{ inputs.supply_delta_run_id }}
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -589,6 +656,40 @@ jobs:
           ] is not False:
               raise SystemExit("candidate series permits cross-pool double counting")
 
+          plan_path = Path("inputs/plan/direct-market-evidence-plan.jsonl")
+          plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+          if plan_sha256 != plan["plan_sha256"]:
+              raise SystemExit("final evidence plan SHA drift")
+
+          point_sha256 = {}
+          for source in (
+              "direct_uniswap_v3",
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+          ):
+              point_path = Path(f"inputs/points/{source}-points.jsonl")
+              report_path = Path(f"inputs/points/{source}-report.json")
+              if not point_path.exists() or not report_path.exists():
+                  raise SystemExit(
+                      f"missing direct market evidence output: {source}"
+                  )
+              digest = hashlib.sha256(point_path.read_bytes()).hexdigest()
+              point_sha256[source] = digest
+              source_report = json.loads(report_path.read_text())
+              expected = source_report.get("points_sha256")
+              if expected is not None and expected != digest:
+                  raise SystemExit(
+                      f"direct market point SHA drift: {source}"
+                  )
+              if source_report["market_selection_rule_frozen"] is not False:
+                  raise SystemExit(
+                      f"direct market source froze selector: {source}"
+                  )
+              if source_report["threshold_summary_emitted"] is not False:
+                  raise SystemExit(
+                      f"direct market source emitted threshold labels: {source}"
+                  )
+
           handoff = {
               "version": "phase2-direct-market-quality-evidence-v1",
               "chain_id": 4663,
@@ -600,9 +701,22 @@ jobs:
               "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
               "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
               "cohort_run_id": int(os.environ["COHORT_RUN_ID"]),
+              "v3_initialize_run_id": int(
+                  os.environ["V3_INITIALIZE_RUN_ID"]
+              ),
               "v3_swap_run_id": int(os.environ["V3_SWAP_RUN_ID"]),
+              "v4_initialize_run_id": int(
+                  os.environ["V4_INITIALIZE_RUN_ID"]
+              ),
               "v4_swap_run_id": int(os.environ["V4_SWAP_RUN_ID"]),
               "supply_delta_run_id": int(os.environ["SUPPLY_RUN_ID"]),
+              "plan_sha256": plan_sha256,
+              "quote_registry_sha256": plan["quote_registry_sha256"],
+              "quote_decimals_sha256": plan["quote_decimals_sha256"],
+              "quote_feed_specs_sha256": plan[
+                  "quote_feed_specs_sha256"
+              ],
+              "point_sha256": dict(sorted(point_sha256.items())),
               "market_quality_report": report,
               "selector_freeze_ready": False,
               "source_coverage_complete": False,
