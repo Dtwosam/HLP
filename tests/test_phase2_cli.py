@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_direct_evidence_filter,
     cmd_phase2_direct_market_competition_cohort,
+    cmd_phase2_direct_market_evidence_plan,
     cmd_phase2_direct_quote_registry,
     cmd_phase2_direct_v3_market_cap_window,
     cmd_phase2_direct_v3_registry,
@@ -466,6 +468,141 @@ def test_phase2_direct_quote_registry_command(
         "priced_chainlink_stock_token": 1,
     }
     assert report["chainlink_directory_sha256"] == "ab" * 32
+
+
+
+
+def _evidence_cohort_row():
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    pool = "0x" + "33" * 20
+    pool_id = "0x" + "44" * 32
+    return {
+        "token": token,
+        "market_count": 2,
+        "source_ids": ["direct_uniswap_v3", "direct_uniswap_v4"],
+        "venues": ["uniswap_v3", "uniswap_v4"],
+        "quote_tokens": [quote],
+        "first_initialize_block": 90,
+        "last_initialize_block": 100,
+        "markets": [
+            {
+                "source_id": "direct_uniswap_v3",
+                "venue": "uniswap_v3",
+                "market_kind": "v3_pool",
+                "market_id": pool,
+                "quote_token": quote,
+                "quote_decimals": 18,
+                "initialize_block": 90,
+            },
+            {
+                "source_id": "direct_uniswap_v4",
+                "venue": "uniswap_v4",
+                "market_kind": "v4_pool_id",
+                "market_id": pool_id,
+                "quote_token": quote,
+                "quote_decimals": 18,
+                "initialize_block": 100,
+            },
+        ],
+        "canonical_market_selection_complete": False,
+    }
+
+
+def test_phase2_direct_market_evidence_plan_command(tmp_path):
+    cohort = tmp_path / "cohort.jsonl"
+    plan = tmp_path / "plan.jsonl"
+    summary = tmp_path / "summary.json"
+    _write_jsonl(cohort, [_evidence_cohort_row()])
+
+    args = SimpleNamespace(
+        cohort=str(cohort),
+        sample_size=20,
+        window_blocks=50,
+        snapshot_head=120,
+        out=str(plan),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_direct_market_evidence_plan(args) == 0
+
+    row = json.loads(plan.read_text().strip())
+    assert row["evidence_window_from_block"] == 100
+    assert row["evidence_window_to_block"] == 120
+    assert row["selector_freeze_ready"] is False
+    report = json.loads(summary.read_text())
+    assert report["tokens"] == 1
+    assert report["selector_freeze_ready"] is False
+
+
+def test_phase2_direct_evidence_filter_market_file(tmp_path):
+    cohort = _evidence_cohort_row()
+    plan = tmp_path / "plan.jsonl"
+    events = tmp_path / "events.jsonl"
+    out = tmp_path / "filtered.jsonl"
+    summary = tmp_path / "summary.json"
+    planned = {
+        **cohort,
+        "evidence_sample_rank": 1,
+        "evidence_sample_rule": "chronological_even_spacing_v1",
+        "evidence_window_from_block": 100,
+        "evidence_window_to_block": 120,
+        "evidence_window_blocks": 21,
+        "snapshot_head_block": 120,
+        "selector_freeze_ready": False,
+    }
+    _write_jsonl(plan, [planned])
+    pool = cohort["markets"][0]["market_id"]
+    _write_jsonl(events, [
+        {
+            "pool": pool,
+            "block_number": 99,
+            "transaction_index": 1,
+            "log_index": 0,
+        },
+        {
+            "pool": pool,
+            "block_number": 110,
+            "transaction_index": 1,
+            "log_index": 0,
+        },
+    ])
+
+    args = SimpleNamespace(
+        plan=str(plan),
+        kind="v3-events",
+        input=str(events),
+        input_manifest=None,
+        input_shard_dir=None,
+        out=str(out),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_direct_evidence_filter(args) == 0
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    assert [row["block_number"] for row in rows] == [110]
+    report = json.loads(summary.read_text())
+    assert report["records"] == 1
+    assert report["selector_freeze_ready"] is False
+
+
+def test_phase2_direct_evidence_filter_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-evidence-filter",
+        "--plan", "plan.jsonl",
+        "--kind", "supply",
+        "--input-manifest", "supply.manifest.json",
+        "--input-shard-dir", "supply-inputs",
+        "--out", "filtered.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.kind == "supply"
+    assert args.input is None
+    assert args.input_manifest == "supply.manifest.json"
+    assert args.input_shard_dir == "supply-inputs"
 
 
 
