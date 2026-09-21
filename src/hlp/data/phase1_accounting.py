@@ -191,9 +191,13 @@ def summarize_action_run(
     jobs_with_logs = 0
     completed_job_ids: list[int] = []
     missing_completed_job_log_ids: list[int] = []
+    skipped_job_ids: list[int] = []
 
     for job in job_rows:
         job_id = _nonnegative_int(job.get("id"), field="job.id")
+        if str(job.get("conclusion") or "").lower() == "skipped":
+            skipped_job_ids.append(job_id)
+            continue
         runtime = _job_runtime_seconds(job)
         if runtime is not None:
             job_runtime_values.append(runtime)
@@ -257,6 +261,8 @@ def summarize_action_run(
         "job_conclusions": dict(sorted(conclusions.items())),
         "jobs_with_logs": jobs_with_logs,
         "completed_jobs": len(completed_job_ids),
+        "skipped_jobs": len(skipped_job_ids),
+        "skipped_job_ids": skipped_job_ids,
         "missing_completed_job_logs": len(missing_completed_job_log_ids),
         "missing_completed_job_log_ids": missing_completed_job_log_ids,
         "all_completed_job_logs_available": not missing_completed_job_log_ids,
@@ -425,7 +431,9 @@ def summarize_phase1_runs(
             "printed by HLP jobs; processed work blocks deduplicate repeated "
             "reported ranges within each job but preserve overlap across "
             "distinct jobs/scans, while runtime uses reported acquisition "
-            "timers plus GitHub job timestamps. Completed jobs whose historical "
+            "timers plus GitHub job timestamps. Jobs concluded as skipped are "
+            "excluded because GitHub did not execute them and does not produce "
+            "job logs for them. Completed jobs whose historical "
             "log blobs are unavailable are explicitly counted and omitted, so "
             "affected checkpoint totals are lower bounds. Jobs with impossible "
             "GitHub timestamps are explicitly counted and omitted from runtime "
