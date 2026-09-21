@@ -79,7 +79,7 @@ jobs:
               raise SystemExit(
                   f"legacy probe end {end} is before deployment {first}"
               )
-          chunk = 50_000 if key else 2_000
+          chunk = 50_000 if key else 200
 
           counts = Counter()
           first_samples = {}
