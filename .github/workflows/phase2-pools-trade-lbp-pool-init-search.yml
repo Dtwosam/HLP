@@ -2,12 +2,6 @@ name: phase2-pools-trade-lbp-pool-init-search
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase2-pools-trade-lbp-pool-init-search.yml'
-      - 'src/hlp/protocols/uniswap.py'
 
 permissions:
   contents: read
