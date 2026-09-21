@@ -40,6 +40,7 @@ def build_v3_launchpad_market_cap_points(
     quote_decimals: dict[str, int],
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
+    allow_registry_initialization: bool = False,
 ) -> list[dict]:
     """Build causal V3 initialization + swap market-cap points."""
     getcontext().prec = max(getcontext().prec, 80)
@@ -81,7 +82,25 @@ def build_v3_launchpad_market_cap_points(
         if event["_kind"] == "v3_initialize":
             initialized.add(pool)
         elif pool not in initialized:
-            raise ValueError(f"V3 swap precedes Initialize: {pool}")
+            if not allow_registry_initialization:
+                raise ValueError(f"V3 swap precedes Initialize: {pool}")
+            raw_block = launch.get("initialize_block")
+            raw_log = launch.get("initialize_log_index")
+            if raw_block is None or raw_log is None:
+                raise ValueError(
+                    f"V3 registry lacks Initialize order: {pool}"
+                )
+            raw_tx = launch.get("initialize_transaction_index")
+            initialize_order = (
+                int(raw_block),
+                -1 if raw_tx is None else int(raw_tx),
+                int(raw_log),
+            )
+            if event_order(event) <= initialize_order:
+                raise ValueError(
+                    f"V3 swap does not follow recorded Initialize: {pool}"
+                )
+            initialized.add(pool)
 
         token_is_token0 = int(token, 16) < int(quote, 16)
         raw_quote_per_raw_token = _raw_quote_per_raw_token(
