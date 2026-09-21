@@ -1,3 +1,5 @@
+import pytest
+
 from hlp.data.types import RawLog
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
@@ -10,6 +12,7 @@ from hlp.protocols.uniswap import (
     decode_v3_swap,
     decode_v4_pool_initialized,
     decode_v4_swap,
+    v4_pool_id,
 )
 
 
@@ -130,3 +133,50 @@ def test_decode_v4_pool_initialized():
     assert row.hooks == hook
     assert row.sqrt_price_x96 == 2**96
     assert row.tick == -17
+
+
+
+def test_v4_pool_id_round_trips_pool_key_into_initialize_topic():
+    currency0 = "0x" + "11" * 20
+    currency1 = "0x" + "22" * 20
+    hooks = "0x" + "33" * 20
+    pool_id = v4_pool_id(
+        currency0=currency0,
+        currency1=currency1,
+        fee=2500,
+        tick_spacing=-50,
+        hooks=hooks,
+    )
+    assert pool_id.startswith("0x")
+    assert len(pool_id) == 66
+
+    log = raw(
+        "0x" + "99" * 20,
+        [
+            V4_INITIALIZE_TOPIC,
+            pool_id,
+            topic_addr(currency0),
+            topic_addr(currency1),
+        ],
+        [2500, -50, int(hooks, 16), 2**96, -1],
+    )
+    decoded = decode_v4_pool_initialized(log)
+    assert decoded.pool_id == pool_id
+    assert v4_pool_id(
+        currency0=decoded.currency0,
+        currency1=decoded.currency1,
+        fee=decoded.fee,
+        tick_spacing=decoded.tick_spacing,
+        hooks=decoded.hooks,
+    ) == decoded.pool_id
+
+
+def test_v4_pool_id_requires_canonical_currency_order():
+    with pytest.raises(ValueError, match="canonically ordered"):
+        v4_pool_id(
+            currency0="0x" + "22" * 20,
+            currency1="0x" + "11" * 20,
+            fee=2500,
+            tick_spacing=50,
+            hooks="0x" + "00" * 20,
+        )
