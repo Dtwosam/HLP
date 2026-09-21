@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 from hlp.cli import (
     build_parser,
+    cmd_phase2_trench_v3_market_cap_window,
+    cmd_phase2_trench_v4_market_cap_window,
     cmd_phase2_v4_registry_event_filter,
     cmd_rpc_trench_registry_window,
 )
@@ -219,4 +221,69 @@ def test_v4_registry_event_filter_rejects_same_block_prelifecycle_event(
         assert "predates registry lifecycle" in str(exc)
     else:
         raise AssertionError("pre-lifecycle same-block V4 event was accepted")
+
+
+def test_trench_market_window_parsers():
+    parser = build_parser()
+    common = [
+        "--registry", "registry.jsonl",
+        "--initializes", "init.jsonl",
+        "--supply-deltas", "supply.jsonl",
+        "--swaps", "swaps.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--quote-feeds", "feeds.jsonl",
+        "--out", "points.jsonl",
+        "--report-out", "report.json",
+    ]
+    v3 = parser.parse_args(["phase2-trench-v3-market-window", *common])
+    v4 = parser.parse_args(["phase2-trench-v4-market-window", *common])
+    assert v3.registry == "registry.jsonl"
+    assert v4.registry == "registry.jsonl"
+    assert v3.quote_feeds == "feeds.jsonl"
+    assert v4.quote_feeds == "feeds.jsonl"
+
+
+def test_trench_market_window_wrappers_freeze_handoff_and_use_launch_seed(
+    monkeypatch,
+):
+    observed = []
+
+    def fake(args, *, version):
+        observed.append({
+            "version": version,
+            "namespace": args.report_namespace,
+            "seed": args.supply_seed_order,
+            "frozen": args.market_selection_rule_frozen,
+            "coverage": args.source_coverage_complete,
+        })
+        return 0
+
+    monkeypatch.setattr(
+        "hlp.cli._phase2_direct_market_cap_window",
+        fake,
+    )
+    assert cmd_phase2_trench_v3_market_cap_window(
+        SimpleNamespace()
+    ) == 0
+    assert cmd_phase2_trench_v4_market_cap_window(
+        SimpleNamespace()
+    ) == 0
+
+    assert observed == [
+        {
+            "version": "v3",
+            "namespace": "trench",
+            "seed": "launch",
+            "frozen": True,
+            "coverage": False,
+        },
+        {
+            "version": "v4",
+            "namespace": "trench",
+            "seed": "launch",
+            "frozen": True,
+            "coverage": False,
+        },
+    ]
 

@@ -3419,6 +3419,23 @@ def _phase2_direct_market_cap_window(
     if args.from_block <= 0 or args.to_block < args.from_block:
         raise SystemExit("direct market window has invalid block bounds")
 
+    report_namespace = str(
+        getattr(args, "report_namespace", "direct") or "direct"
+    )
+    supply_seed_order = str(
+        getattr(args, "supply_seed_order", "initialize") or "initialize"
+    ).lower()
+    if supply_seed_order not in {"initialize", "launch"}:
+        raise SystemExit(
+            f"unsupported market-window supply seed: {supply_seed_order}"
+        )
+    market_selection_rule_frozen = bool(
+        getattr(args, "market_selection_rule_frozen", False)
+    )
+    source_coverage_complete = getattr(
+        args, "source_coverage_complete", None
+    )
+
     registry = _load_jsonl(args.registry)
     if not registry:
         raise SystemExit("direct market registry is empty")
@@ -3519,9 +3536,10 @@ def _phase2_direct_market_cap_window(
             aggregate_manifest=args.supply_deltas_manifest,
         ),
         "supply_deltas_sha256": supply_delta_sha256,
+        "supply_seed_order": supply_seed_order,
         "supply_semantics": (
-            "initialize-block-end totalSupply corrected to event order "
-            "and advanced by complete mint/burn Transfer deltas"
+            f"{supply_seed_order}-block-end totalSupply corrected to "
+            "event order and advanced by complete mint/burn Transfer deltas"
         ),
         "swaps": _event_tape_source_name(
             file_path=args.swaps,
@@ -3530,7 +3548,7 @@ def _phase2_direct_market_cap_window(
         "swaps_sha256": swap_sha256,
         "from_block": args.from_block,
         "to_block": args.to_block,
-        "market_selection_rule_frozen": False,
+        "market_selection_rule_frozen": market_selection_rule_frozen,
         "threshold_summary_emitted": False,
         "quote_feeds": (
             None
@@ -3550,12 +3568,12 @@ def _phase2_direct_market_cap_window(
             output=Path(args.out),
             provenance={
                 **common_provenance,
-                "source": f"derived_direct_{version}_market_window",
+                "source": f"derived_{report_namespace}_{version}_market_window",
                 "usd_anchor_mode": "not_required_empty_window",
             },
         )
         report = {
-            "version": f"phase2-direct-{version}-market-window-v1",
+            "version": f"phase2-{report_namespace}-{version}-market-window-v1",
             "source_id": source_id,
             "venue": venue,
             "from_block": args.from_block,
@@ -3567,7 +3585,7 @@ def _phase2_direct_market_cap_window(
             "priced_points": 0,
             "quality_ready_points": 0,
             "points_sha256": manifest["sha256"],
-            "market_selection_rule_frozen": False,
+            "market_selection_rule_frozen": market_selection_rule_frozen,
             "threshold_summary_emitted": False,
             "rpc_route": None,
             "requests_made": 0,
@@ -3654,6 +3672,7 @@ def _phase2_direct_market_cap_window(
                 quote_usd_updates=quote_usd_updates,
                 allow_registry_initialization=True,
                 supply_delta_rows=supply_deltas,
+                supply_seed_order=supply_seed_order,
             )
         else:
             points = build_v4_launchpad_market_cap_points(
@@ -3667,6 +3686,7 @@ def _phase2_direct_market_cap_window(
                 quote_usd_updates=quote_usd_updates,
                 allow_registry_initialization=True,
                 supply_delta_rows=supply_deltas,
+                supply_seed_order=supply_seed_order,
             )
 
         for row in points:
@@ -3677,7 +3697,7 @@ def _phase2_direct_market_cap_window(
             output=Path(args.out),
             provenance={
                 **common_provenance,
-                "source": f"derived_direct_{version}_market_window",
+                "source": f"derived_{report_namespace}_{version}_market_window",
                 "usd_anchor_pool": normalize_address(args.usd_anchor_pool),
                 "usd_anchor_mode": "sparse_v3_state_and_swaps",
                 "usd_anchor_window_size": anchor_window_size,
@@ -3698,7 +3718,7 @@ def _phase2_direct_market_cap_window(
         )
         competition = summarize_market_competition(points)
         report = {
-            "version": f"phase2-direct-{version}-market-window-v1",
+            "version": f"phase2-{report_namespace}-{version}-market-window-v1",
             "source_id": source_id,
             "venue": venue,
             "from_block": args.from_block,
@@ -3719,13 +3739,19 @@ def _phase2_direct_market_cap_window(
             }),
             "anchor_window_size": anchor_window_size,
             "initial_weth_usd": str(initial_weth_usd),
-            "market_selection_rule_frozen": False,
+            "market_selection_rule_frozen": market_selection_rule_frozen,
             "threshold_summary_emitted": False,
             "rpc_route": rpc.route_label,
             "requests_made": rpc.requests_made,
             "response_bytes_received": rpc.response_bytes_received,
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
+
+    if source_coverage_complete is not None:
+        report["source_coverage_complete"] = bool(
+            source_coverage_complete
+        )
+        report["supply_seed_order"] = supply_seed_order
 
     out = Path(args.report_out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -3745,6 +3771,29 @@ def cmd_phase2_direct_v4_market_cap_window(
     args: argparse.Namespace,
 ) -> int:
     """Build one direct-V4 market-point window without preselecting a pool."""
+    return _phase2_direct_market_cap_window(args, version="v4")
+
+
+def _configure_trench_market_window(args: argparse.Namespace) -> None:
+    args.report_namespace = "trench"
+    args.supply_seed_order = "launch"
+    args.market_selection_rule_frozen = True
+    args.source_coverage_complete = False
+
+
+def cmd_phase2_trench_v3_market_cap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Replay one frozen trench.today V3 post-LimitReach window."""
+    _configure_trench_market_window(args)
+    return _phase2_direct_market_cap_window(args, version="v3")
+
+
+def cmd_phase2_trench_v4_market_cap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Replay one frozen trench.today V4 post-LimitReach window."""
+    _configure_trench_market_window(args)
     return _phase2_direct_market_cap_window(args, version="v4")
 
 
@@ -9328,6 +9377,70 @@ def build_parser() -> argparse.ArgumentParser:
     direct_v4_market.add_argument("--report-out", required=True)
     direct_v4_market.set_defaults(
         func=cmd_phase2_direct_v4_market_cap_window
+    )
+
+    trench_v3_market = sub.add_parser(
+        "phase2-trench-v3-market-window"
+    )
+    trench_v3_market.add_argument("--registry", required=True)
+    trench_v3_market.add_argument("--initializes", required=True)
+    trench_v3_supply = trench_v3_market.add_mutually_exclusive_group(
+        required=True
+    )
+    trench_v3_supply.add_argument("--supply-deltas")
+    trench_v3_supply.add_argument("--supply-deltas-manifest")
+    trench_v3_market.add_argument("--supply-deltas-shard-dir")
+    trench_v3_swaps = trench_v3_market.add_mutually_exclusive_group(
+        required=True
+    )
+    trench_v3_swaps.add_argument("--swaps")
+    trench_v3_swaps.add_argument("--swaps-manifest")
+    trench_v3_market.add_argument("--swaps-shard-dir")
+    trench_v3_market.add_argument("--from-block", type=int, required=True)
+    trench_v3_market.add_argument("--to-block", type=int, required=True)
+    trench_v3_market.add_argument("--chunk-size", type=int, default=100_000)
+    trench_v3_market.add_argument("--min-chunk-size", type=int, default=1)
+    trench_v3_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    trench_v3_market.add_argument("--quote-feeds", required=True)
+    trench_v3_market.add_argument("--out", required=True)
+    trench_v3_market.add_argument("--report-out", required=True)
+    trench_v3_market.set_defaults(
+        func=cmd_phase2_trench_v3_market_cap_window
+    )
+
+    trench_v4_market = sub.add_parser(
+        "phase2-trench-v4-market-window"
+    )
+    trench_v4_market.add_argument("--registry", required=True)
+    trench_v4_market.add_argument("--initializes", required=True)
+    trench_v4_supply = trench_v4_market.add_mutually_exclusive_group(
+        required=True
+    )
+    trench_v4_supply.add_argument("--supply-deltas")
+    trench_v4_supply.add_argument("--supply-deltas-manifest")
+    trench_v4_market.add_argument("--supply-deltas-shard-dir")
+    trench_v4_swaps = trench_v4_market.add_mutually_exclusive_group(
+        required=True
+    )
+    trench_v4_swaps.add_argument("--swaps")
+    trench_v4_swaps.add_argument("--swaps-manifest")
+    trench_v4_market.add_argument("--swaps-shard-dir")
+    trench_v4_market.add_argument("--from-block", type=int, required=True)
+    trench_v4_market.add_argument("--to-block", type=int, required=True)
+    trench_v4_market.add_argument("--chunk-size", type=int, default=100_000)
+    trench_v4_market.add_argument("--min-chunk-size", type=int, default=1)
+    trench_v4_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    trench_v4_market.add_argument("--quote-feeds", required=True)
+    trench_v4_market.add_argument("--out", required=True)
+    trench_v4_market.add_argument("--report-out", required=True)
+    trench_v4_market.set_defaults(
+        func=cmd_phase2_trench_v4_market_cap_window
     )
 
     pools_fun_v3 = sub.add_parser("rpc-pools-fun-v3-tape")

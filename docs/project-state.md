@@ -373,8 +373,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   authoritative launch state. A generic V4 registry-event filter now mirrors
   the V3 filter's exact block/transaction/log lifecycle floor, so selected V4
   PoolIds can reuse the shared chain-wide Swap tape without admitting same-block
-  pre-handoff events. No trench source coverage is claimed until real evidence
-  satisfies the rule and the selected markets are fully replayed and priced;
+  pre-handoff events. Dedicated trench V3/V4 market-window commands now reuse
+  the shared direct replay engine with the frozen handoff flag and
+  `supply_seed_order=launch`; direct-market commands keep their original
+  Initialize-seed/unfrozen defaults. The trench commands remain
+  `source_coverage_complete=false` and require canonical sparse quote feeds.
+  No trench source coverage is claimed until real evidence satisfies the rule
+  and the selected markets are fully replayed and priced;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
