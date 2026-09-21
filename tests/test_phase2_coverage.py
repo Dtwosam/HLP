@@ -281,3 +281,18 @@ def test_repository_pons_rows_are_complete_and_provenanced():
         "2e880af79350530d4c30cda8d10778f"
         "ee8156c284ccb523cae226f1a886cc566"
     )
+
+
+
+def test_complete_coverage_rejects_unpriced_points():
+    row = {
+        **complete("pons_v1"),
+        "price_points": 20,
+        "priced_points": 19,
+    }
+    with pytest.raises(ValueError, match="unpriced points"):
+        validate_phase2_source_coverage(
+            INVENTORY,
+            [row],
+            snapshot_head_block=100,
+        )
