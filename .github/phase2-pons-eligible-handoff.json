@@ -1,0 +1,20 @@
+{
+  "version": "phase2-pons-eligible-handoff-v1",
+  "accepted_finalizer_run_id": 35601191874,
+  "evidence_run_id": 35576917452,
+  "evidence_head_sha": "2897cf4068a1a048b3a719253a4936fc5bf8b68b",
+  "artifact_id": 10628353314,
+  "artifact_name": "phase1-pons-eligible-universe",
+  "artifact_digest": "sha256:4b47d09ea383c061d6fa8a7c037227928805a6ffd59634e22527039ebaf51bcb",
+  "universe_filename": "pons-eligible-100k-universe.jsonl",
+  "manifest_filename": "pons-eligible-100k-universe.jsonl.manifest.json",
+  "summary_filename": "pons-eligible-universe-summary.json",
+  "universe_sha256": "d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cefc4aa33ad2d8b2e8d",
+  "snapshot_head_block": 54486035,
+  "all_pons_launches": 494639,
+  "eligible_tokens": 6972,
+  "eligible_v1": 5161,
+  "eligible_v2": 1811,
+  "unknown_tokens": 0,
+  "eligibility_threshold_usd": "100000"
+}
