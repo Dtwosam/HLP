@@ -384,8 +384,11 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   launch must have at least one genuine curve Sync price point, every
   LimitReach token must have selected post-limit market history, all points
   must be priced, and the frozen handoff rule/version must be bound into the
-  final provenance. End-of-block tokenInfo is deliberately not used to invent
-  a launch-time price because it could see later same-block state;
+  final provenance. The frozen handoff report now also carries the originating
+  trench registry run/SHA and direct-registry run/per-source SHAs forward, so
+  final coverage can reject registry substitution after handoff selection.
+  End-of-block tokenInfo is deliberately not used to invent a launch-time price
+  because it could see later same-block state;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

@@ -215,6 +215,16 @@ jobs:
                   "EXPECTED_ARTIFACT_DIGEST"
               ].lower(),
               "evidence_report_sha256": actual_report_sha,
+              "registry_run_id": int(report["registry_run_id"]),
+              "direct_registry_run_id": int(
+                  report["direct_registry_run_id"]
+              ),
+              "trench_registry_sha256": report[
+                  "trench_registry_sha256"
+              ],
+              "direct_registry_sha256": report[
+                  "direct_registry_sha256"
+              ],
               "candidate_manifest_sha256": candidate_sha,
               "handoff_manifest_sha256": manifest["sha256"],
               **summary,

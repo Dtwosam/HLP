@@ -31,3 +31,13 @@ def test_trench_handoff_freeze_is_strict_and_nonfinal():
     assert "apply_phase2_source_coverage_report" not in text
     assert "git commit" not in text
     assert "git push" not in text
+
+
+def test_trench_handoff_freeze_carries_registry_provenance_forward():
+    text = WORKFLOW.read_text()
+
+    assert '"registry_run_id": int(report["registry_run_id"])' in text
+    assert '"direct_registry_run_id": int(' in text
+    assert '"trench_registry_sha256": report[' in text
+    assert '"direct_registry_sha256": report[' in text
+
