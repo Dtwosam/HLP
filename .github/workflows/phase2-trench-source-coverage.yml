@@ -410,6 +410,20 @@ jobs:
               ),
           }
           direct_shas = {}
+          direct_handoff_paths = {
+              "direct_uniswap_v3": Path(
+                  "inputs/direct-uniswap-v3/"
+                  "direct_uniswap_v3-registry-handoff.json"
+              ),
+              "direct_sushiswap_v3": Path(
+                  "inputs/direct-sushi-v3/"
+                  "direct_sushiswap_v3-registry-handoff.json"
+              ),
+              "direct_uniswap_v4": Path(
+                  "inputs/direct-v4/"
+                  "direct_uniswap_v4-registry-handoff.json"
+              ),
+          }
           for source, path in direct_paths.items():
               digest = sha(path)
               direct_shas[source] = digest
@@ -419,6 +433,39 @@ jobs:
               if digest != expected:
                   raise SystemExit(
                       f"trench direct registry SHA drift: {source}"
+                  )
+              handoff = load(direct_handoff_paths[source])
+              if handoff["version"] != (
+                  "phase2-direct-market-registry-handoff-v1"
+              ):
+                  raise SystemExit(
+                      f"direct registry handoff version drift: {source}"
+                  )
+              if handoff["source_id"] != source:
+                  raise SystemExit(
+                      f"direct registry handoff source drift: {source}"
+                  )
+              if handoff["registry_sha256"] != digest:
+                  raise SystemExit(
+                      f"direct registry handoff SHA drift: {source}"
+                  )
+              if int(handoff["quote_run_id"]) != int(
+                  os.environ["QUOTE_RUN_ID"]
+              ):
+                  raise SystemExit(
+                      f"direct registry quote run drift: {source}"
+                  )
+              if source == "direct_uniswap_v4":
+                  expected_init_run = int(
+                      os.environ["V4_INITIALIZE_RUN_ID"]
+                  )
+              else:
+                  expected_init_run = int(
+                      os.environ["V3_INITIALIZE_RUN_ID"]
+                  )
+              if int(handoff["initialize_run_id"]) != expected_init_run:
+                  raise SystemExit(
+                      f"direct registry Initialize run drift: {source}"
                   )
 
           quote_summary = load(

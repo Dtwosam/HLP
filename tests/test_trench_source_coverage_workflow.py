@@ -60,3 +60,14 @@ def test_trench_source_coverage_validates_but_never_mutates_ledger():
     assert "git commit" not in text
     assert "git push" not in text
     assert "contents: write" not in text
+
+
+def test_trench_source_coverage_binds_direct_registry_upstream_runs():
+    text = WORKFLOW.read_text()
+
+    assert "direct_uniswap_v3-registry-handoff.json" in text
+    assert "direct_sushiswap_v3-registry-handoff.json" in text
+    assert "direct_uniswap_v4-registry-handoff.json" in text
+    assert "direct registry quote run drift" in text
+    assert "direct registry Initialize run drift" in text
+

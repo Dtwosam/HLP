@@ -394,7 +394,10 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   originating trench/direct registries, reuses shared V3/V4 Initialize/Swap and
   supply-delta surfaces, filters the full supply tape once to selected trench
   tokens, supports V3-only/V4-only/mixed handoffs, and validates a proposed
-  canonical `complete` row in memory without mutating the ledger;
+  canonical `complete` row in memory without mutating the ledger. The setup
+  additionally validates each selected direct-registry handoff against the
+  supplied canonical quote run and exact V3/V4 Initialize run, preventing
+  upstream-generation mixing during replay;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
