@@ -100,6 +100,95 @@ def build_pools_trade_instant_registry(
 
 
 
+def attach_pools_trade_instant_initializations(
+    registry_rows: Iterable[dict],
+    initialize_rows: Iterable[dict],
+) -> list[dict]:
+    """Attach the exact canonical V4 Initialize to every Instant pool."""
+    registry = [dict(row) for row in registry_rows]
+    by_pool: dict[str, list[dict]] = {}
+    for raw in initialize_rows:
+        row = dict(raw)
+        pool_id = str(row.get("pool_id") or "").lower()
+        if not pool_id:
+            raise ValueError("pools.trade V4 Initialize has empty PoolId")
+        by_pool.setdefault(pool_id, []).append(row)
+
+    output = []
+    seen_tokens: set[str] = set()
+    seen_pools: set[str] = set()
+    for raw in registry:
+        row = dict(raw)
+        token = str(row["token"]).lower()
+        pool_id = str(row["pool_id"]).lower()
+        if token in seen_tokens:
+            raise ValueError(
+                f"duplicate pools.trade Instant token: {token}"
+            )
+        if pool_id in seen_pools:
+            raise ValueError(
+                f"duplicate pools.trade Instant PoolId: {pool_id}"
+            )
+        matches = by_pool.get(pool_id, [])
+        if len(matches) != 1:
+            raise ValueError(
+                "pools.trade Instant pool expected exactly one V4 Initialize: "
+                f"{pool_id}, found {len(matches)}"
+            )
+        init = matches[0]
+        expected_key = (
+            str(row["currency0"]).lower(),
+            str(row["currency1"]).lower(),
+            int(row["fee"]),
+            int(row["tick_spacing"]),
+            str(row["hooks"]).lower(),
+        )
+        actual_key = (
+            str(init["currency0"]).lower(),
+            str(init["currency1"]).lower(),
+            int(init["fee"]),
+            int(init["tick_spacing"]),
+            str(init["hooks"]).lower(),
+        )
+        if actual_key != expected_key:
+            raise ValueError(
+                f"pools.trade Instant PoolKey drift: {pool_id}"
+            )
+        created_block = int(row["created_block"])
+        initialize_block = int(init["block_number"])
+        if initialize_block < created_block:
+            raise ValueError(
+                "pools.trade Instant Initialize predates token creation: "
+                f"{token}"
+            )
+
+        seen_tokens.add(token)
+        seen_pools.add(pool_id)
+        output.append({
+            **row,
+            "source_id": "pools_trade_instant",
+            "source_kind": "launchpad",
+            "initialize_block": initialize_block,
+            "initialize_transaction_hash": str(
+                init["transaction_hash"]
+            ).lower(),
+            "initialize_transaction_index": init.get(
+                "transaction_index"
+            ),
+            "initialize_log_index": int(init["log_index"]),
+            "initial_sqrt_price_x96": int(init["sqrt_price_x96"]),
+            "initial_tick": int(init["tick"]),
+        })
+
+    output.sort(
+        key=lambda row: (
+            int(row["initialize_block"]),
+            row["token"],
+        )
+    )
+    return output
+
+
 def build_pools_trade_lbp_registry(
     created_rows: Iterable[PoolsTradeTokenCreated],
     distributed_rows: Iterable[PoolsTradeTokenDistributed],

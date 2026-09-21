@@ -157,6 +157,7 @@ from hlp.data.pools_fun_registry import (
     build_pools_fun_registry,
 )
 from hlp.data.pools_trade_registry import (
+    attach_pools_trade_instant_initializations,
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
 )
@@ -4148,6 +4149,107 @@ def cmd_pools_trade_instant_registry(
         **manifest,
         "instant_launches": len(rows),
     }, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_pools_trade_instant_initialized_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Join Instant registry to exact V4 Initialize and block-end supply."""
+    registry = _load_jsonl(args.registry)
+    initializes = _load_jsonl(args.initializes)
+    attached = attach_pools_trade_instant_initializations(
+        registry,
+        initializes,
+    )
+    if not attached:
+        raise SystemExit("pools.trade Instant initialized registry is empty")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    enriched = []
+    for row in attached:
+        token = normalize_address(str(row["token"]))
+        block = int(row["initialize_block"])
+        static = read_erc20_static(rpc, token, block=block)
+        supply = int(static.total_supply)
+        decimals = int(static.decimals)
+        if supply <= 0:
+            raise SystemExit(
+                f"pools.trade Instant totalSupply is non-positive: {token}"
+            )
+        if decimals < 0 or decimals > 255:
+            raise SystemExit(
+                f"pools.trade Instant token decimals invalid: {token}"
+            )
+        distributed = int(row["supply_raw"])
+        if distributed <= 0 or distributed > supply:
+            raise SystemExit(
+                "pools.trade Instant distributed amount exceeds "
+                f"initialize-block supply: {token}"
+            )
+        enriched.append({
+            **row,
+            "distribution_amount_raw": distributed,
+            "supply_raw": supply,
+            "token_decimals": decimals,
+            "state_block": block,
+            "supply_seed_semantics": (
+                "initialize-block-end totalSupply; replay later "
+                "mint/burn Transfer deltas causally"
+            ),
+        })
+
+    manifest = write_jsonl_snapshot(
+        enriched,
+        output=Path(args.out),
+        provenance={
+            "source": (
+                "phase2_pools_trade_instant_registry_plus_v4_initialize_state"
+            ),
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "initializes": Path(args.initializes).name,
+            "initializes_sha256": _sha256_file(args.initializes),
+            "supply_state_semantics": (
+                "ERC20 totalSupply/decimals at exact V4 Initialize block"
+            ),
+        },
+    )
+    same_tx = sum(
+        str(row["initialize_transaction_hash"]).lower()
+        == str(row["launch_transaction_hash"]).lower()
+        for row in enriched
+    )
+    summary = {
+        "version": "phase2-pools-trade-instant-initialized-registry-v1",
+        "source_id": "pools_trade_instant",
+        "tokens_discovered": len(enriched),
+        "pools": len({row["pool_id"] for row in enriched}),
+        "quote_tokens": sorted({
+            normalize_address(str(row["quote_token"]))
+            for row in enriched
+        }),
+        "registry_sha256": _sha256_file(args.registry),
+        "v4_initialize_sha256": _sha256_file(args.initializes),
+        "initialized_registry_sha256": manifest["sha256"],
+        "same_transaction_initialize_count": same_tx,
+        "all_pools_initialized": len(enriched) == len(registry),
+        "supply_seed_semantics": (
+            "initialize-block-end totalSupply plus causal supply deltas"
+        ),
+        "source_coverage_complete": False,
+        "rpc_route": rpc.route_label,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }
+    Path(args.summary_out).write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 
@@ -9549,6 +9651,17 @@ def build_parser() -> argparse.ArgumentParser:
     pools_trade_instant_registry.add_argument("--out", required=True)
     pools_trade_instant_registry.set_defaults(
         func=cmd_pools_trade_instant_registry
+    )
+
+    pools_trade_initialized = sub.add_parser(
+        "phase2-pools-trade-instant-initialized-registry"
+    )
+    pools_trade_initialized.add_argument("--registry", required=True)
+    pools_trade_initialized.add_argument("--initializes", required=True)
+    pools_trade_initialized.add_argument("--out", required=True)
+    pools_trade_initialized.add_argument("--summary-out", required=True)
+    pools_trade_initialized.set_defaults(
+        func=cmd_phase2_pools_trade_instant_initialized_registry
     )
 
     pools_trade_lbp_registry = sub.add_parser(

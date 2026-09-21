@@ -224,9 +224,14 @@ Implemented foundation:
   contracts continuously from required start **3,338,007** through snapshot
   **54,486,035**, binds the exact shared launcher TokenCreated/TokenDistributed
   run, merges the complete TokenLaunched tape, and builds one deterministic
-  Instant V4 registry with unique token/PoolId identities. It remains
-  `source_coverage_complete=false` until the registered pools are joined to
-  the shared V4 Initialize/Swap and supply/quote surfaces and fully priced;
+  Instant V4 registry with unique token/PoolId identities. The registry path
+  now also binds the exact shared V4 Initialize run, verifies each PoolKey,
+  and reads ERC-20 totalSupply/decimals at the exact Initialize block. The
+  original TokenDistributed amount is retained separately while the canonical
+  supply seed becomes Initialize-block-end totalSupply, ready for causal
+  mint/burn replay. It remains `source_coverage_complete=false` until the
+  shared V4 Swap, supply-delta and quote surfaces are replayed and fully
+  priced;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`

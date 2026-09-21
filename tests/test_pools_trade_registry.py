@@ -1,6 +1,7 @@
 import pytest
 
 from hlp.data.pools_trade_registry import (
+    attach_pools_trade_instant_initializations,
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
 )
@@ -199,3 +200,93 @@ def test_lbp_registry_rejects_reserved_allocation_above_supply():
         build_pools_trade_lbp_registry(
             [created], [distributed], [initializer]
         )
+
+
+def test_attach_pools_trade_instant_initialization():
+    registry = [{
+        "venue": "pools.trade",
+        "launch_kind": "instant_v4",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 10**27,
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 2500,
+        "tick_spacing": 25,
+        "hooks": ZERO,
+        "created_block": 10,
+        "launch_block": 11,
+        "launch_transaction_hash": "0x" + "aa" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 4,
+    }]
+    init = [{
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 2500,
+        "tick_spacing": 25,
+        "hooks": ZERO,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 11,
+        "transaction_hash": "0x" + "aa" * 32,
+        "transaction_index": 1,
+        "log_index": 3,
+    }]
+
+    rows = attach_pools_trade_instant_initializations(
+        registry,
+        init,
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_id"] == "pools_trade_instant"
+    assert row["source_kind"] == "launchpad"
+    assert row["initialize_block"] == 11
+    assert row["initialize_log_index"] == 3
+    assert row["initial_sqrt_price_x96"] == 2**96
+
+
+def test_attach_pools_trade_instant_initialization_rejects_poolkey_drift():
+    registry = [{
+        "venue": "pools.trade",
+        "launch_kind": "instant_v4",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 10**27,
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 2500,
+        "tick_spacing": 25,
+        "hooks": ZERO,
+        "created_block": 10,
+        "launch_block": 11,
+        "launch_transaction_hash": "0x" + "aa" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 4,
+    }]
+    init = [{
+        "pool_id": POOL_ID,
+        "currency0": ZERO,
+        "currency1": TOKEN,
+        "fee": 3000,
+        "tick_spacing": 25,
+        "hooks": ZERO,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 11,
+        "transaction_hash": "0x" + "aa" * 32,
+        "transaction_index": 1,
+        "log_index": 3,
+    }]
+
+    with pytest.raises(ValueError, match="PoolKey drift"):
+        attach_pools_trade_instant_initializations(
+            registry,
+            init,
+        )
+

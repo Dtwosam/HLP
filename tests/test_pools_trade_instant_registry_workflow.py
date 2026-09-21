@@ -39,3 +39,18 @@ def test_pools_trade_instant_registry_remains_nonfinal():
     assert "apply_phase2_source_coverage_report" not in text
     assert "git commit" not in text
     assert "git push" not in text
+
+
+def test_pools_trade_instant_registry_binds_shared_v4_and_supply_seed():
+    text = WORKFLOW.read_text()
+
+    assert "v4_initialize_run_id:" in text
+    assert "phase2-direct-v4-initialize-merged" in text
+    assert "shared V4 Initialize SHA drift" in text
+    assert (
+        "phase2-pools-trade-instant-initialized-registry"
+        in text
+    )
+    assert "initialized registry population drift" in text
+    assert "pools.trade Instant registry has uninitialized pools" in text
+
