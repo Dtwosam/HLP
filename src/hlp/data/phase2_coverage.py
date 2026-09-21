@@ -77,9 +77,14 @@ def validate_phase2_source_coverage(
                 f"{source_id} has invalid coverage_status: {status!r}"
             )
 
-        required_start = _nonnegative_int(
-            raw.get("required_start_block"),
-            field=f"{source_id}.required_start_block",
+        required_start_raw = raw.get("required_start_block")
+        required_start = (
+            None
+            if required_start_raw is None
+            else _nonnegative_int(
+                required_start_raw,
+                field=f"{source_id}.required_start_block",
+            )
         )
         tokens = _nonnegative_int(
             raw.get("tokens_discovered", 0),
@@ -152,6 +157,10 @@ def validate_phase2_source_coverage(
 
         provenance = raw.get("provenance_sha256")
         if status == "complete":
+            if required_start is None:
+                raise ValueError(
+                    f"{source_id} complete coverage has no required start"
+                )
             if first is None or last is None:
                 raise ValueError(
                     f"{source_id} complete coverage has no range"
@@ -173,6 +182,15 @@ def validate_phase2_source_coverage(
                     f"{source_id} complete coverage has missing ranges"
                 )
             provenance = _sha256(provenance, source_id=source_id)
+        elif status == "partial":
+            if required_start is None:
+                raise ValueError(
+                    f"{source_id} partial coverage has no required start"
+                )
+            if first is None or last is None:
+                raise ValueError(
+                    f"{source_id} partial coverage has no range"
+                )
         elif status == "not_started":
             if first is not None or last is not None:
                 raise ValueError(
