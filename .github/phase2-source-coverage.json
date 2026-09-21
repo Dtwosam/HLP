@@ -160,7 +160,7 @@
       "observed_volume_usd": null,
       "provenance_sha256": null,
       "blocking_reason": null,
-      "source_readiness": "discovery_pending"
+      "source_readiness": "adapter_ready"
     },
     {
       "source_id": "noxa",
