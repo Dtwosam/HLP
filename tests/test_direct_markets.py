@@ -158,6 +158,7 @@ def test_v3_discovers_exactly_one_supported_quote_side():
     assert row["token"] == TOKEN
     assert row["quote_token"] == QUOTE
     assert row["supply_raw"] == 1_000_000 * 10**18
+    assert row["supply_seed_semantics"] == "initialize_block_end_total_supply"
     assert row["state_block"] == row["initialize_block"] == 20
     assert row["origin_classification"] == "unresolved"
 
@@ -185,8 +186,8 @@ def test_v3_skips_quote_quote_and_unpriceable_pairs():
     ) == []
 
 
-def test_v3_requires_exact_initialize_block_supply():
-    with pytest.raises(KeyError, match="exact-block ERC20 state"):
+def test_v3_requires_initialize_block_end_supply_seed():
+    with pytest.raises(KeyError, match="Initialize-block-end ERC20 state"):
         build_v3_direct_market_registry(
             [v3_created()],
             [v3_init()],
