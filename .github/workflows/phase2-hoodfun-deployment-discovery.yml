@@ -44,6 +44,7 @@ jobs:
               HOOD_FUN_CURRENT,
               HOOD_FUN_PREVIOUS,
               SOLIDRPC_AUTH_RPC_URL,
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
               SOLIDRPC_PUBLIC_RPC_URL,
           )
           from hlp.data.rpc import RpcClient
@@ -95,10 +96,36 @@ jobs:
                   ).hexdigest(),
               }
 
+          anchor_first = rpc.find_first_code_block(
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              low=0,
+              high=head,
+          )
+          anchor_code = rpc.get_code(
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              anchor_first,
+          )
+          if anchor_code in {"0x", "0x0", ""}:
+              raise SystemExit(
+                  "canonical WETH/USDG anchor has no deployment code"
+              )
+
           output = {
               "chain_id": 4663,
               "snapshot_head_block": head,
               "contracts": rows,
+              "pricing_anchor": {
+                  "address": (
+                      UNISWAP_V3_WETH_USDG_ANCHOR_POOL.lower()
+                  ),
+                  "first_code_block": anchor_first,
+                  "code_bytes": (
+                      len(anchor_code.removeprefix("0x")) // 2
+                  ),
+                  "code_sha256": hashlib.sha256(
+                      bytes.fromhex(anchor_code.removeprefix("0x"))
+                  ).hexdigest(),
+              },
               "requests_made": rpc.requests_made,
           }
           Path(
