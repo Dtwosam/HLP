@@ -10,10 +10,16 @@ from hlp.cli import (
     build_parser,
     cmd_rpc_pons_transfer_tape,
     cmd_rpc_pools_fun_market_cap_window,
+    cmd_rpc_v3_pool_created_window,
+    cmd_rpc_v4_initialize_window,
     cmd_rpc_pools_trade_market_cap_window,
     cmd_rpc_v2_v4_tape,
 )
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
+from hlp.protocols.uniswap import (
+    V3_POOL_CREATED_TOPIC,
+    V4_INITIALIZE_TOPIC,
+)
 
 
 def args():
@@ -946,3 +952,129 @@ def test_pools_trade_market_cap_uses_sparse_keyless_anchor_windows(
         "sparse_v3_state_and_swaps"
     )
     assert provenances[0]["usd_anchor_window_size"] == 200
+
+
+
+class _FakeDiscoveryRpc:
+    route_label = "solidrpc_keyless_public"
+    requests_made = 3
+    response_bytes_received = 456
+
+    def __init__(self):
+        self.calls = []
+
+    def assert_robinhood(self):
+        return None
+
+    def iter_logs_chunked(
+        self,
+        from_block,
+        to_block,
+        *,
+        address,
+        topics,
+        chunk_size,
+        min_chunk_size,
+    ):
+        self.calls.append({
+            "from_block": from_block,
+            "to_block": to_block,
+            "address": address,
+            "topics": topics,
+            "chunk_size": chunk_size,
+            "min_chunk_size": min_chunk_size,
+        })
+        return [object()]
+
+
+def test_generic_v3_pool_created_window_is_factory_scoped(
+    monkeypatch,
+    tmp_path,
+):
+    rpc = _FakeDiscoveryRpc()
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: rpc)
+    monkeypatch.setattr(
+        "hlp.cli.decode_v3_pool_created",
+        lambda log: {"pool": "0x" + "11" * 20},
+    )
+    snapshots = []
+
+    def fake_snapshot(rows, *, output, provenance):
+        snapshots.append({
+            "rows": list(rows),
+            "output": str(output),
+            "provenance": provenance,
+        })
+        return {"records": len(snapshots[-1]["rows"]), "sha256": "ab" * 32}
+
+    monkeypatch.setattr("hlp.cli.write_jsonl_snapshot", fake_snapshot)
+    out = tmp_path / "created.jsonl"
+    parsed = SimpleNamespace(
+        factory="0x" + "44" * 20,
+        from_block=10,
+        to_block=20,
+        chunk_size=200,
+        min_chunk_size=25,
+        out=str(out),
+    )
+
+    assert cmd_rpc_v3_pool_created_window(parsed) == 0
+    assert rpc.calls == [{
+        "from_block": 10,
+        "to_block": 20,
+        "address": parsed.factory,
+        "topics": [V3_POOL_CREATED_TOPIC],
+        "chunk_size": 200,
+        "min_chunk_size": 25,
+    }]
+    assert snapshots[0]["provenance"]["factory"] == parsed.factory
+    assert snapshots[0]["provenance"]["from_block"] == 10
+    assert snapshots[0]["provenance"]["to_block"] == 20
+
+
+def test_generic_v4_initialize_window_is_manager_scoped(
+    monkeypatch,
+    tmp_path,
+):
+    rpc = _FakeDiscoveryRpc()
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: rpc)
+    monkeypatch.setattr(
+        "hlp.cli.decode_v4_pool_initialized",
+        lambda log: {"pool_id": "0x" + "22" * 32},
+    )
+    snapshots = []
+
+    def fake_snapshot(rows, *, output, provenance):
+        snapshots.append({
+            "rows": list(rows),
+            "output": str(output),
+            "provenance": provenance,
+        })
+        return {"records": len(snapshots[-1]["rows"]), "sha256": "cd" * 32}
+
+    monkeypatch.setattr("hlp.cli.write_jsonl_snapshot", fake_snapshot)
+    out = tmp_path / "initialize.jsonl"
+    parsed = SimpleNamespace(
+        pool_manager="0x" + "66" * 20,
+        from_block=30,
+        to_block=40,
+        chunk_size=200,
+        min_chunk_size=25,
+        out=str(out),
+    )
+
+    assert cmd_rpc_v4_initialize_window(parsed) == 0
+    assert rpc.calls == [{
+        "from_block": 30,
+        "to_block": 40,
+        "address": parsed.pool_manager,
+        "topics": [V4_INITIALIZE_TOPIC],
+        "chunk_size": 200,
+        "min_chunk_size": 25,
+    }]
+    assert (
+        snapshots[0]["provenance"]["pool_manager"]
+        == parsed.pool_manager
+    )
+    assert snapshots[0]["provenance"]["from_block"] == 30
+    assert snapshots[0]["provenance"]["to_block"] == 40
