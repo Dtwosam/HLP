@@ -18,12 +18,12 @@ concurrency:
 
 env:
   SNAPSHOT_HEAD: '54486035'
-  PROBE_SPAN: '1000000'
+  PREVIOUS_END_BLOCK: '5611264'
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
     steps:
@@ -69,42 +69,55 @@ jobs:
           rpc.assert_robinhood()
 
           head = int(os.environ["SNAPSHOT_HEAD"])
-          span = int(os.environ["PROBE_SPAN"])
           first = rpc.find_first_code_block(
               HOOD_FUN_PREVIOUS,
               low=0,
               high=head,
           )
-          end = min(head, first + span - 1)
+          end = int(os.environ["PREVIOUS_END_BLOCK"])
+          if end < first:
+              raise SystemExit(
+                  f"legacy probe end {end} is before deployment {first}"
+              )
           chunk = 50_000 if key else 2_000
 
           counts = Counter()
           first_samples = {}
           decoded = 0
-          for raw in rpc.iter_logs_chunked(
-              first,
-              end,
-              address=HOOD_FUN_PREVIOUS,
-              topics=[list(HOOD_FUN_CURVE_TOPICS)],
-              chunk_size=chunk,
-              min_chunk_size=25,
-          ):
-              row = decode_hood_fun_event(
-                  raw,
-                  contract=HOOD_FUN_PREVIOUS,
+          last_scanned_block = first - 1
+          chunks_scanned = 0
+          for lo in range(first, end + 1, chunk):
+              hi = min(end, lo + chunk - 1)
+              chunks_scanned += 1
+              rows = rpc.get_logs(
+                  lo,
+                  hi,
+                  address=HOOD_FUN_PREVIOUS,
+                  topics=[list(HOOD_FUN_CURVE_TOPICS)],
               )
-              counts[row.event_type] += 1
-              decoded += 1
-              first_samples.setdefault(
-                  row.event_type,
-                  {
-                      "block_number": row.block_number,
-                      "transaction_hash": row.transaction_hash,
-                      "transaction_index": row.transaction_index,
-                      "log_index": row.log_index,
-                      "token": row.token,
-                  },
-              )
+              last_scanned_block = hi
+              for raw in rows:
+                  row = decode_hood_fun_event(
+                      raw,
+                      contract=HOOD_FUN_PREVIOUS,
+                  )
+                  counts[row.event_type] += 1
+                  decoded += 1
+                  first_samples.setdefault(
+                      row.event_type,
+                      {
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                          "token": row.token,
+                      },
+                  )
+              if (
+                  counts["token_created"] > 0
+                  and counts["trade"] > 0
+              ):
+                  break
 
           created = counts["token_created"]
           trades = counts["trade"]
@@ -114,8 +127,12 @@ jobs:
               "generation": "previous",
               "contract": HOOD_FUN_PREVIOUS.lower(),
               "first_code_block": first,
-              "probe_to_block": end,
-              "probe_blocks": end - first + 1,
+              "probe_limit_block": end,
+              "last_scanned_block": last_scanned_block,
+              "probe_blocks_scanned": (
+                  last_scanned_block - first + 1
+              ),
+              "chunks_scanned": chunks_scanned,
               "known_topics": {
                   "token_created": TOKEN_CREATED_TOPIC,
                   "trade": TRADE_TOPIC,
@@ -129,6 +146,7 @@ jobs:
                   "log decoded with the shared hood.fun layout"
               ),
               "requests_made": rpc.requests_made,
+              "stopped_on_compatibility": compatible,
           }
           Path(
               "artifacts/hoodfun-legacy-compatibility.json"
