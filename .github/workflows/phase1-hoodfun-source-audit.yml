@@ -34,6 +34,10 @@ jobs:
 
           from hlp.config import SOLIDRPC_PUBLIC_RPC_URL
           from hlp.data.rpc import RpcClient
+          from hlp.protocols.hood_fun import (
+              TOKEN_CREATED_TOPIC,
+              TRADE_TOPIC,
+          )
 
           contracts = {
               "current": "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c",
@@ -59,7 +63,10 @@ jobs:
               assert code not in {"0x", "0x0", ""}, (label, address)
               first_code = rpc.find_first_code_block(address, low=0, high=head)
               start = first_code
-              end = min(head, first_code + 99_999)
+              # One million blocks gives the legacy generation enough runway
+              # to expose its stable event surface without assuming that the
+              # first 100k blocks contain representative activity.
+              end = min(head, first_code + 999_999)
               logs = list(
                   rpc.iter_logs_chunked(
                       start,
@@ -90,6 +97,46 @@ jobs:
                               else None
                           ),
                       }
+              known_layout = {
+                  "token_created": {
+                      "topic": TOKEN_CREATED_TOPIC,
+                      "count": topic_counts.get(TOKEN_CREATED_TOPIC, 0),
+                      "expected_topics": 3,
+                      "expected_min_data_words": 6,
+                  },
+                  "trade": {
+                      "topic": TRADE_TOPIC,
+                      "count": topic_counts.get(TRADE_TOPIC, 0),
+                      "expected_topics": 3,
+                      "expected_data_words": 6,
+                  },
+              }
+              compatible_samples = {}
+              for kind, spec in known_layout.items():
+                  sample = first_by_topic.get(spec["topic"])
+                  if sample is None:
+                      compatible_samples[kind] = {
+                          "present": False,
+                          "layout_compatible": False,
+                      }
+                      continue
+                  topics_ok = len(sample["topics"]) == spec["expected_topics"]
+                  words = sample["data_words"]
+                  if "expected_data_words" in spec:
+                      words_ok = words == spec["expected_data_words"]
+                  else:
+                      words_ok = (
+                          words is not None
+                          and words >= spec["expected_min_data_words"]
+                      )
+                  compatible_samples[kind] = {
+                      "present": True,
+                      "layout_compatible": topics_ok and words_ok,
+                      "topic_count": len(sample["topics"]),
+                      "data_words": words,
+                      "block_number": sample["block_number"],
+                  }
+
               output[label] = {
                   "address": address.lower(),
                   "first_code_block": first_code,
@@ -102,6 +149,11 @@ jobs:
                   "logs": len(logs),
                   "topic_counts": dict(topic_counts),
                   "first_by_topic": first_by_topic,
+                  "known_topic_compatibility": compatible_samples,
+                  "current_surface_compatible": (
+                      compatible_samples["token_created"]["layout_compatible"]
+                      and compatible_samples["trade"]["layout_compatible"]
+                  ),
               }
 
           Path("artifacts/hoodfun-source-audit.json").write_text(
@@ -116,6 +168,8 @@ jobs:
                   "code_bytes": row["code_bytes"],
                   "logs": row["logs"],
                   "topic_counts": row["topic_counts"],
+                  "known_topic_compatibility": row["known_topic_compatibility"],
+                  "current_surface_compatible": row["current_surface_compatible"],
                   "first_by_topic": row["first_by_topic"],
               }
               for label, row in output.items()
