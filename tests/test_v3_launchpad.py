@@ -243,3 +243,38 @@ def test_merge_v3_launchpad_market_cap_summaries_rejects_identity_drift():
                 "crossed_100k": False,
             },
         ])
+
+
+def test_v3_market_cap_can_replay_supply_from_launch_block_seed():
+    registry = [{
+        **REGISTRY[0],
+        "launch_block": 9,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }]
+    supply_deltas = [{
+        "token": TOKEN,
+        "supply_delta_raw": 10**17,
+        "block_number": 10,
+        "transaction_hash": "0x" + "cc" * 32,
+        "transaction_index": 0,
+        "log_index": 0,
+    }]
+    rows = build_v3_launchpad_market_cap_points(
+        registry,
+        [point(txi=1, logi=0)],
+        [],
+        [],
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        initial_quote_usd={QUOTE: Decimal("2")},
+        supply_delta_rows=supply_deltas,
+        supply_seed_order="launch",
+    )
+
+    assert rows[0]["supply_raw"] == 11 * 10**17
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("2.2")
+

@@ -91,7 +91,17 @@ class DirectSupplyTimeline:
         self,
         registry_rows: Iterable[Mapping[str, object]],
         supply_delta_rows: Iterable[Mapping[str, object]],
+        *,
+        seed_order: str = "initialize",
     ):
+        seed_order = str(seed_order).strip().lower()
+        if seed_order not in {"initialize", "launch"}:
+            raise ValueError(
+                f"unsupported direct supply seed order: {seed_order!r}"
+            )
+        seed_label = (
+            "Initialize" if seed_order == "initialize" else "launch"
+        )
         deltas_by_token: dict[str, list[dict]] = {}
         for raw in supply_delta_rows:
             row = _row_dict(raw)
@@ -117,13 +127,14 @@ class DirectSupplyTimeline:
         for raw in registry_rows:
             row = _row_dict(raw)
             token = normalize_address(str(row["token"]))
-            raw_block = row.get("initialize_block")
-            raw_log = row.get("initialize_log_index")
+            raw_block = row.get(f"{seed_order}_block")
+            raw_log = row.get(f"{seed_order}_log_index")
             if raw_block is None or raw_log is None:
                 raise ValueError(
-                    f"direct supply registry lacks Initialize order: {token}"
+                    "direct supply registry lacks "
+                    f"{seed_label} order: {token}"
                 )
-            raw_tx = row.get("initialize_transaction_index")
+            raw_tx = row.get(f"{seed_order}_transaction_index")
             order = (
                 int(raw_block),
                 -1 if raw_tx is None else int(raw_tx),
@@ -144,7 +155,7 @@ class DirectSupplyTimeline:
             event_supply = block_end_supply - after_delta
             if event_supply <= 0:
                 raise ValueError(
-                    f"derived Initialize-order supply is non-positive: {token}"
+                    f"derived {seed_label}-order supply is non-positive: {token}"
                 )
             seeds_by_token.setdefault(token, []).append({
                 "order": order,
@@ -186,6 +197,7 @@ class DirectSupplyTimeline:
                 "update_index": 0,
                 "checks": checks,
                 "check_index": 0,
+                "seed_label": seed_label,
             }
 
     def _advance(self, token: str, target: tuple[int, int, int]) -> int:
@@ -227,7 +239,7 @@ class DirectSupplyTimeline:
                 if state["supply"] != expected:
                     raise ValueError(
                         "direct supply replay disagrees with later "
-                        f"Initialize seed for {token}: "
+                        f"{state['seed_label']} seed for {token}: "
                         f"{state['supply']} != {expected}"
                     )
                 state["check_index"] += 1

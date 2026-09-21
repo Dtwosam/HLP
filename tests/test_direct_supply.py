@@ -138,3 +138,49 @@ def test_supply_timeline_rejects_target_before_first_initialize():
     )
     with pytest.raises(ValueError, match="predates current state"):
         timeline.supply_at(TOKEN, (9, 1, 0))
+
+
+def test_supply_timeline_can_seed_from_end_of_launch_block():
+    deltas = build_direct_supply_delta_rows([
+        transfer(
+            from_address=ZERO,
+            to_address=ALICE,
+            value=100,
+            block=10,
+            txi=3,
+            logi=0,
+        ),
+        transfer(
+            from_address=ZERO,
+            to_address=ALICE,
+            value=50,
+            block=11,
+            txi=1,
+            logi=0,
+        ),
+    ])
+    timeline = DirectSupplyTimeline(
+        [{
+            "token": TOKEN,
+            "supply_raw": 1100,
+            "launch_block": 10,
+            "launch_transaction_index": 1,
+            "launch_log_index": 0,
+        }],
+        deltas,
+        seed_order="launch",
+    )
+
+    assert timeline.supply_at(TOKEN, (10, 1, 0)) == 1000
+    assert timeline.supply_at(TOKEN, (10, 3, 0)) == 1100
+    assert timeline.supply_at(TOKEN, (11, 1, 0)) == 1150
+
+
+def test_supply_timeline_rejects_unknown_seed_order():
+    with pytest.raises(ValueError, match="unsupported direct supply seed"):
+        DirectSupplyTimeline(
+            [seed(block=10, txi=1, logi=0, supply=1000)],
+            [],
+            seed_order="future",
+        )
+
