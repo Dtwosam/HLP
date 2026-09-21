@@ -182,6 +182,10 @@ def validate_phase2_source_coverage(
                 raise ValueError(
                     f"{source_id} complete coverage has missing ranges"
                 )
+            if priced_points != price_points:
+                raise ValueError(
+                    f"{source_id} complete coverage has unpriced points"
+                )
             provenance = _sha256(provenance, source_id=source_id)
         elif status == "partial":
             if required_start is None:
