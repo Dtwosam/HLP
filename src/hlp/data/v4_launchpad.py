@@ -39,6 +39,7 @@ def build_v4_launchpad_market_cap_points(
     quote_usd_updates: Iterable[dict] = (),
     allow_registry_initialization: bool = False,
     supply_delta_rows: Iterable[dict] | None = None,
+    supply_seed_order: str = "initialize",
 ) -> list[dict]:
     getcontext().prec = max(getcontext().prec, 80)
     registry = {
@@ -57,6 +58,7 @@ def build_v4_launchpad_market_cap_points(
         else DirectSupplyTimeline(
             registry.values(),
             supply_delta_rows,
+            seed_order=supply_seed_order,
         )
     )
     events = []

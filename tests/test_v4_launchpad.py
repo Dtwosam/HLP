@@ -230,3 +230,38 @@ def test_merge_v4_launchpad_summaries_uses_earliest_equal_max():
     ])
     assert rows[0]["max_market_cap_block"] == 25
 
+
+def test_v4_market_cap_can_replay_supply_from_launch_seed():
+    registry = [{
+        **REGISTRY[0],
+        "launch_block": 9,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }]
+    init = point(txi=1, logi=0)
+    supply_deltas = [{
+        "token": TOKEN,
+        "supply_delta_raw": 10**17,
+        "block_number": 9,
+        "transaction_hash": "0x" + "bb" * 32,
+        "transaction_index": 2,
+        "log_index": 0,
+    }]
+    rows = build_v4_launchpad_market_cap_points(
+        registry,
+        [init],
+        [],
+        [],
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        initial_quote_usd={QUOTE: Decimal("2")},
+        supply_delta_rows=supply_deltas,
+        supply_seed_order="launch",
+    )
+
+    assert rows[0]["supply_raw"] == 10**18 + 10**17
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == Decimal("2.2")
+

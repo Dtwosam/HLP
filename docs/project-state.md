@@ -364,9 +364,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   has exactly one direct market Initialize later in the exact same transaction;
   unmatched or multiply qualifying tokens fail closed. The resulting selected
   handoff registry remains `source_coverage_complete=false` and is intended to
-  gate the later post-limit market replay; no trench source coverage is claimed
-  until real evidence satisfies the rule and the selected markets are fully
-  replayed/priced;
+  gate the later post-limit market replay. A replay-registry builder is now
+  prepared behind that frozen handoff: it rejoins each selected market to the
+  exact direct V3/V4 registry, preserves trench's launch-block supply seed and
+  LimitReach lifecycle floor, and emits separate replay-ready V3/V4 registries.
+  Generic V4 launchpad replay now supports a launch-order supply seed (matching
+  V3) so later mint/burn deltas can be replayed causally from trench's
+  authoritative launch state. No trench source coverage is claimed until real
+  evidence satisfies the rule and the selected markets are fully replayed and
+  priced;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

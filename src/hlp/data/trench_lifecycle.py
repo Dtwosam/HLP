@@ -413,3 +413,224 @@ def freeze_trench_limit_market_handoffs(
         raise ValueError("trench handoff freeze left unresolved tokens")
     return selected, summary
 
+
+def build_trench_handoff_market_registries(
+    trench_registry: Iterable[Mapping[str, object]],
+    handoffs: Iterable[Mapping[str, object]],
+    market_registries: Iterable[Mapping[str, object]],
+) -> dict[str, list[dict]]:
+    """Build replay-ready V3/V4 registries from frozen trench handoffs."""
+    launches: dict[str, dict] = {}
+    for raw in trench_registry:
+        row = dict(raw)
+        if row.get("limit_reach_block") is None:
+            continue
+        token = normalize_address(str(row["token"]))
+        if token in launches:
+            raise ValueError(
+                f"duplicate trench LimitReach registry token: {token}"
+            )
+        supply_raw = int(row.get("supply_raw") or 0)
+        token_decimals = int(row.get("token_decimals", -1))
+        if supply_raw <= 0 or token_decimals < 0 or token_decimals > 255:
+            raise ValueError(
+                f"trench handoff launch supply metadata invalid: {token}"
+            )
+        launches[token] = row
+
+    frozen: dict[str, dict] = {}
+    for raw in handoffs:
+        row = dict(raw)
+        token = normalize_address(str(row["token"]))
+        if row.get("handoff_rule_frozen") is not True:
+            raise ValueError(
+                f"trench handoff is not frozen: {token}"
+            )
+        if str(row.get("handoff_rule_version") or "") != (
+            TRENCH_HANDOFF_RULE_VERSION
+        ):
+            raise ValueError(
+                f"trench handoff rule version changed: {token}"
+            )
+        if row.get("source_coverage_complete") is not False:
+            raise ValueError(
+                f"trench handoff cannot claim source coverage: {token}"
+            )
+        if token in frozen:
+            raise ValueError(f"duplicate frozen trench handoff: {token}")
+        frozen[token] = row
+
+    if set(frozen) != set(launches):
+        missing = sorted(set(launches) - set(frozen))
+        extra = sorted(set(frozen) - set(launches))
+        raise ValueError(
+            "trench frozen handoff population mismatch: "
+            f"missing={missing[:10]} extra={extra[:10]}"
+        )
+
+    markets: dict[tuple[str, str], dict] = {}
+    for raw in market_registries:
+        row = dict(raw)
+        if str(row.get("source_kind") or "") != "direct_dex":
+            raise ValueError("trench replay market is not direct_dex")
+        source_id = str(row.get("source_id") or "")
+        market_id = str(
+            row.get("pool_id") or row.get("pool") or ""
+        ).lower()
+        if not source_id or not market_id:
+            raise ValueError("trench replay market lacks identity")
+        key = (source_id, market_id)
+        if key in markets:
+            raise ValueError(
+                f"duplicate trench replay market: {source_id} {market_id}"
+            )
+        markets[key] = row
+
+    v3_rows: list[dict] = []
+    v4_rows: list[dict] = []
+    for token in sorted(launches):
+        launch = launches[token]
+        handoff = frozen[token]
+        source_id = str(handoff["market_source_id"])
+        market_id = str(handoff["market_id"]).lower()
+        market = markets.get((source_id, market_id))
+        if market is None:
+            raise ValueError(
+                f"frozen trench handoff market missing: {token} "
+                f"{source_id} {market_id}"
+            )
+
+        market_token = normalize_address(str(market["token"]))
+        quote = normalize_address(str(market["quote_token"]))
+        if market_token != token:
+            raise ValueError(
+                f"trench frozen market token mismatch: {token}"
+            )
+        if quote != normalize_address(str(handoff["dex_quote_token"])):
+            raise ValueError(
+                f"trench frozen market quote mismatch: {token}"
+            )
+
+        limit_order = _order(
+            launch["limit_reach_block"],
+            launch.get("limit_reach_transaction_index"),
+            launch["limit_reach_log_index"],
+        )
+        initialize_order = _order(
+            market["initialize_block"],
+            market.get("initialize_transaction_index"),
+            market["initialize_log_index"],
+        )
+        limit_tx = str(
+            launch.get("limit_reach_transaction_hash") or ""
+        ).lower()
+        init_tx = str(
+            market.get("initialize_transaction_hash") or ""
+        ).lower()
+        if initialize_order <= limit_order or not limit_tx or init_tx != limit_tx:
+            raise ValueError(
+                f"trench frozen market no longer satisfies handoff rule: {token}"
+            )
+        if (
+            int(handoff["market_initialize_block"]) != initialize_order[0]
+            or handoff.get("market_initialize_transaction_index")
+            != (
+                None if initialize_order[1] < 0 else initialize_order[1]
+            )
+            or int(handoff["market_initialize_log_index"])
+            != initialize_order[2]
+        ):
+            raise ValueError(
+                f"trench frozen market Initialize order drift: {token}"
+            )
+
+        common = {
+            "source_id": "trench_today",
+            "venue": "trench.today",
+            "token": token,
+            "quote_token": quote,
+            "quote_decimals": int(market["quote_decimals"]),
+            "token_decimals": int(launch["token_decimals"]),
+            "supply_raw": int(launch["supply_raw"]),
+            "supply_seed_semantics": "launch_block_end_total_supply",
+            "launch_block": int(launch["launch_block"]),
+            "launch_transaction_hash": str(
+                launch["launch_transaction_hash"]
+            ).lower(),
+            "launch_transaction_index": launch.get(
+                "launch_transaction_index"
+            ),
+            "launch_log_index": int(launch["launch_log_index"]),
+            "lifecycle_block": limit_order[0],
+            "lifecycle_transaction_hash": limit_tx,
+            "lifecycle_transaction_index": (
+                None if limit_order[1] < 0 else limit_order[1]
+            ),
+            "lifecycle_log_index": limit_order[2],
+            "market_source_id": source_id,
+            "market_venue": str(market["venue"]),
+            "handoff_rule_version": TRENCH_HANDOFF_RULE_VERSION,
+            "initialize_block": initialize_order[0],
+            "initialize_transaction_hash": init_tx,
+            "initialize_transaction_index": (
+                None if initialize_order[1] < 0 else initialize_order[1]
+            ),
+            "initialize_log_index": initialize_order[2],
+            "initial_sqrt_price_x96": int(
+                market["initial_sqrt_price_x96"]
+            ),
+            "initial_tick": int(market["initial_tick"]),
+        }
+
+        if market.get("pool_id") is not None:
+            pool_id = str(market["pool_id"]).lower()
+            if pool_id != market_id:
+                raise ValueError(
+                    f"trench V4 market id drift: {token}"
+                )
+            v4_rows.append({
+                **common,
+                "launch_kind": "curve_to_v4",
+                "pool_id": pool_id,
+                "pool_manager": normalize_address(
+                    str(market["pool_manager"])
+                ),
+                "currency0": normalize_address(
+                    str(market["currency0"])
+                ),
+                "currency1": normalize_address(
+                    str(market["currency1"])
+                ),
+                "fee": int(market["fee"]),
+                "tick_spacing": int(market["tick_spacing"]),
+                "hooks": normalize_address(str(market["hooks"])),
+            })
+        else:
+            pool = normalize_address(str(market["pool"]))
+            if pool != normalize_address(market_id):
+                raise ValueError(
+                    f"trench V3 market id drift: {token}"
+                )
+            v3_rows.append({
+                **common,
+                "launch_kind": "curve_to_v3",
+                "pool": pool,
+                "factory": normalize_address(str(market["factory"])),
+                "token0": normalize_address(str(market["token0"])),
+                "token1": normalize_address(str(market["token1"])),
+                "fee": int(market["fee"]),
+                "tick_spacing": int(market["tick_spacing"]),
+            })
+
+    key = lambda row: (
+        int(row["lifecycle_block"]),
+        -1
+        if row.get("lifecycle_transaction_index") is None
+        else int(row["lifecycle_transaction_index"]),
+        int(row["lifecycle_log_index"]),
+        row["token"],
+    )
+    v3_rows.sort(key=key)
+    v4_rows.sort(key=key)
+    return {"v3": v3_rows, "v4": v4_rows}
+

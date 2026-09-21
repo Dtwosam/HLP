@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.trench_lifecycle import (
     TRENCH_HANDOFF_RULE_VERSION,
+    build_trench_handoff_market_registries,
     build_trench_limit_market_candidates,
     freeze_trench_limit_market_handoffs,
     summarize_trench_limit_market_candidates,
@@ -182,4 +183,88 @@ def test_freeze_trench_handoff_rejects_ambiguous_same_transaction_markets():
 
     with pytest.raises(ValueError, match="not uniquely same-transaction"):
         freeze_trench_limit_market_handoffs(rows)
+
+
+def test_build_trench_handoff_market_registry_keeps_launch_supply_seed():
+    candidates = build_trench_limit_market_candidates(
+        [launch()],
+        [market()],
+    )
+    handoffs, _ = freeze_trench_limit_market_handoffs(candidates)
+    trench_registry = [{
+        **launch(),
+        "launch_block": 90,
+        "launch_transaction_hash": "0x" + "dd" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 2,
+        "supply_raw": 10**18,
+        "token_decimals": 18,
+    }]
+    direct_registry = [{
+        **market(),
+        "quote_decimals": 18,
+        "token_decimals": 18,
+        "supply_raw": 10**18,
+        "source_kind": "direct_dex",
+        "factory": "0x" + "44" * 20,
+        "token0": TOKEN,
+        "token1": WETH,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "initial_sqrt_price_x96": 2**96,
+        "initial_tick": 0,
+    }]
+
+    registries = build_trench_handoff_market_registries(
+        trench_registry,
+        handoffs,
+        direct_registry,
+    )
+
+    assert len(registries["v3"]) == 1
+    assert registries["v4"] == []
+    row = registries["v3"][0]
+    assert row["supply_raw"] == 10**18
+    assert row["supply_seed_semantics"] == "launch_block_end_total_supply"
+    assert row["launch_block"] == 90
+    assert row["lifecycle_block"] == 100
+    assert row["initialize_block"] == 100
+    assert row["handoff_rule_version"] == TRENCH_HANDOFF_RULE_VERSION
+
+
+def test_build_trench_handoff_market_registry_rejects_unfrozen_handoff():
+    candidates = build_trench_limit_market_candidates(
+        [launch()],
+        [market()],
+    )
+    trench_registry = [{
+        **launch(),
+        "launch_block": 90,
+        "launch_transaction_hash": "0x" + "dd" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 2,
+        "supply_raw": 10**18,
+        "token_decimals": 18,
+    }]
+    direct_registry = [{
+        **market(),
+        "quote_decimals": 18,
+        "token_decimals": 18,
+        "supply_raw": 10**18,
+        "source_kind": "direct_dex",
+        "factory": "0x" + "44" * 20,
+        "token0": TOKEN,
+        "token1": WETH,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "initial_sqrt_price_x96": 2**96,
+        "initial_tick": 0,
+    }]
+
+    with pytest.raises(ValueError, match="not frozen"):
+        build_trench_handoff_market_registries(
+            trench_registry,
+            candidates,
+            direct_registry,
+        )
 

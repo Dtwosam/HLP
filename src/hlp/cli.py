@@ -221,6 +221,9 @@ from hlp.data.trench_registry import (
     attach_trench_launch_static_states,
     build_trench_launch_registry,
 )
+from hlp.data.trench_lifecycle import (
+    build_trench_handoff_market_registries,
+)
 from hlp.data.types import (
     FlapEvent,
     HoodFunEvent,
@@ -1559,6 +1562,71 @@ def cmd_phase2_noxa_market_window(
         "empty_window": False,
     }
     Path(args.report_out).write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_trench_handoff_market_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Build replay-ready V3/V4 registries from frozen trench handoffs."""
+    trench_registry = _load_jsonl(args.registry)
+    handoffs = _load_jsonl(args.handoffs)
+    market_rows = []
+    market_sources = []
+    for path in args.market_registry:
+        market_rows.extend(_load_jsonl(path))
+        market_sources.append({
+            "file": Path(path).name,
+            "sha256": _sha256_file(path),
+        })
+
+    registries = build_trench_handoff_market_registries(
+        trench_registry,
+        handoffs,
+        market_rows,
+    )
+    v3_manifest = write_jsonl_snapshot(
+        registries["v3"],
+        output=Path(args.v3_out),
+        provenance={
+            "source": "phase2_trench_frozen_handoff_v3_registry",
+            "chain_id": 4663,
+            "trench_registry_sha256": _sha256_file(args.registry),
+            "handoffs_sha256": _sha256_file(args.handoffs),
+            "market_registries": market_sources,
+            "supply_seed_order": "launch",
+        },
+    )
+    v4_manifest = write_jsonl_snapshot(
+        registries["v4"],
+        output=Path(args.v4_out),
+        provenance={
+            "source": "phase2_trench_frozen_handoff_v4_registry",
+            "chain_id": 4663,
+            "trench_registry_sha256": _sha256_file(args.registry),
+            "handoffs_sha256": _sha256_file(args.handoffs),
+            "market_registries": market_sources,
+            "supply_seed_order": "launch",
+        },
+    )
+    report = {
+        "version": "phase2-trench-handoff-market-registry-v1",
+        "source_id": "trench_today",
+        "v3_markets": len(registries["v3"]),
+        "v4_markets": len(registries["v4"]),
+        "markets": len(registries["v3"]) + len(registries["v4"]),
+        "v3_registry_sha256": v3_manifest["sha256"],
+        "v4_registry_sha256": v4_manifest["sha256"],
+        "supply_seed_order": "launch",
+        "handoff_rule_frozen": True,
+        "source_coverage_complete": False,
+    }
+    path = Path(args.summary_out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
     )
     print(json.dumps(report, sort_keys=True))
@@ -8737,6 +8805,23 @@ def build_parser() -> argparse.ArgumentParser:
     flap_registry.add_argument("--events", required=True)
     flap_registry.add_argument("--out", required=True)
     flap_registry.set_defaults(func=cmd_flap_registry)
+
+    trench_handoff_registry = sub.add_parser(
+        "phase2-trench-handoff-market-registry"
+    )
+    trench_handoff_registry.add_argument("--registry", required=True)
+    trench_handoff_registry.add_argument("--handoffs", required=True)
+    trench_handoff_registry.add_argument(
+        "--market-registry",
+        action="append",
+        required=True,
+    )
+    trench_handoff_registry.add_argument("--v3-out", required=True)
+    trench_handoff_registry.add_argument("--v4-out", required=True)
+    trench_handoff_registry.add_argument("--summary-out", required=True)
+    trench_handoff_registry.set_defaults(
+        func=cmd_phase2_trench_handoff_market_registry
+    )
 
     flap_graduation_markets = sub.add_parser(
         "phase2-flap-graduation-markets"

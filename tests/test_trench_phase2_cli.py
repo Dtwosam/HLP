@@ -96,3 +96,24 @@ def test_trench_registry_window_reads_supply_at_launch_block(
     row = json.loads(out.read_text().strip())
     assert row["supply_raw"] == 123_000_000
     assert row["token_decimals"] == 9
+
+
+def test_trench_handoff_market_registry_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-trench-handoff-market-registry",
+        "--registry", "trench.jsonl",
+        "--handoffs", "handoffs.jsonl",
+        "--market-registry", "v3.jsonl",
+        "--market-registry", "v4.jsonl",
+        "--v3-out", "trench-v3.jsonl",
+        "--v4-out", "trench-v4.jsonl",
+        "--summary-out", "summary.json",
+    ])
+
+    assert args.registry == "trench.jsonl"
+    assert args.handoffs == "handoffs.jsonl"
+    assert args.market_registry == ["v3.jsonl", "v4.jsonl"]
+    assert args.v3_out == "trench-v3.jsonl"
+    assert args.v4_out == "trench-v4.jsonl"
+
