@@ -6564,6 +6564,64 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_phase2_direct_v4_registry
     )
 
+    direct_v3_market = sub.add_parser(
+        "phase2-direct-v3-market-window"
+    )
+    direct_v3_market.add_argument("--registry", required=True)
+    direct_v3_market.add_argument("--initializes", required=True)
+    direct_v3_swaps = direct_v3_market.add_mutually_exclusive_group(
+        required=True
+    )
+    direct_v3_swaps.add_argument("--swaps")
+    direct_v3_swaps.add_argument("--swaps-manifest")
+    direct_v3_market.add_argument("--swaps-shard-dir")
+    direct_v3_market.add_argument("--from-block", type=int, required=True)
+    direct_v3_market.add_argument("--to-block", type=int, required=True)
+    direct_v3_market.add_argument("--chunk-size", type=int, default=100_000)
+    direct_v3_market.add_argument("--min-chunk-size", type=int, default=1)
+    direct_v3_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    direct_v3_market.add_argument("--oracle-state")
+    direct_v3_market.add_argument("--oracle-events")
+    direct_v3_market.add_argument("--fallback-state")
+    direct_v3_market.add_argument("--fallback-events")
+    direct_v3_market.add_argument("--out", required=True)
+    direct_v3_market.add_argument("--report-out", required=True)
+    direct_v3_market.set_defaults(
+        func=cmd_phase2_direct_v3_market_cap_window
+    )
+
+    direct_v4_market = sub.add_parser(
+        "phase2-direct-v4-market-window"
+    )
+    direct_v4_market.add_argument("--registry", required=True)
+    direct_v4_market.add_argument("--initializes", required=True)
+    direct_v4_swaps = direct_v4_market.add_mutually_exclusive_group(
+        required=True
+    )
+    direct_v4_swaps.add_argument("--swaps")
+    direct_v4_swaps.add_argument("--swaps-manifest")
+    direct_v4_market.add_argument("--swaps-shard-dir")
+    direct_v4_market.add_argument("--from-block", type=int, required=True)
+    direct_v4_market.add_argument("--to-block", type=int, required=True)
+    direct_v4_market.add_argument("--chunk-size", type=int, default=100_000)
+    direct_v4_market.add_argument("--min-chunk-size", type=int, default=1)
+    direct_v4_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    direct_v4_market.add_argument("--oracle-state")
+    direct_v4_market.add_argument("--oracle-events")
+    direct_v4_market.add_argument("--fallback-state")
+    direct_v4_market.add_argument("--fallback-events")
+    direct_v4_market.add_argument("--out", required=True)
+    direct_v4_market.add_argument("--report-out", required=True)
+    direct_v4_market.set_defaults(
+        func=cmd_phase2_direct_v4_market_cap_window
+    )
+
     pools_fun_v3 = sub.add_parser("rpc-pools-fun-v3-tape")
     pools_fun_v3.add_argument("--registry", required=True)
     pools_fun_v3.add_argument("--from-block", type=int, required=True)
