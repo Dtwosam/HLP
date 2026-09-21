@@ -94,6 +94,22 @@ Implemented foundation:
   quote-USD depth. This is research evidence for multi-pool selection only;
   **no canonical selector is frozen yet**. The integrated V3/V4 annotation suite
   passed in run **35605822567**;
+- the concrete multi-pool candidate policy is now implemented but remains
+  **research-only**: at each event it selects the deepest latest-observed
+  active quote-side USD market with stable market-ID tie-breaking, emits a
+  candidate canonical point only when the selected market updates or leadership
+  switches, and excludes non-selected pool events from canonical volume. The
+  `phase2-market-quality-audit` CLI emits the causal competition trace,
+  candidate single-market series and SHA-bound audit report; empirical
+  real-market evidence is still required before freezing the selector;
+- generic direct-DEX acquisition primitives are now in place:
+  `rpc-v3-pool-created-window` and `rpc-v4-initialize-window`. Dispatch-only
+  sharded backfill contracts are prepared for direct Uniswap V4 Initialize
+  history from block **9,070** and for Uniswap V3/Sushi V3 PoolCreated history
+  from blocks **8,930**/**6,292,626** through snapshot **54,486,035**. These
+  workflows intentionally report `source_coverage_complete=false` until
+  supported-quote filtering, exact initialization-block ERC-20 state, market
+  event reconstruction and selector evidence are complete;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;
@@ -130,15 +146,6 @@ Implemented foundation:
   `35b9aab31f5b258540dcb7b018c07181838a4c9a742d9bd996b2786a0b8fd26d`.
   That sample is therefore not valid migration-price evidence for freezing the
   CCA Q96 orientation; successful-LBP discovery is being studied separately.
-- population-level pools.trade LBP handoff evidence is also frozen. Run
-  **35626412874** discovered **437** LBP candidates in blocks
-  **30,000,000..31,000,000** and searched their exact derived PoolIds
-  continuously through block **31,500,000**. **149** candidates have a matching
-  V4 Initialize, with **7,807** keyless requests and no missing ranges. The
-  merged artifact is **10653894082**, SHA-256
-  `d23486f7792d595b18850f07a095e11ae2795f478f23e246356704ea088b798b`;
-  migration-to-initialize gaps range from **3** to **1,545** blocks (median
-  **57**).
 - pools.trade LBP CCA orientation is closed by successful-auction evidence.
   Run **35627264268** observed the final CCA checkpoint and exact derived-PoolId
   V4 Initialize in the **same transaction** at block **30,493,816**. The direct
@@ -168,8 +175,8 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
 - complete historical backfills for both hood.fun generations; the previous
   deployment's core TokenCreated/Trade surface is now proven compatible with
   the shared hood.fun adapter;
-- deterministic canonical multi-pool market selection for tokens with several
-  priceable V3/V4/Sushi markets;
+- empirical freeze of the causal active-quote-liquidity multi-pool selector
+  using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
   source population;
 - only after those are complete: empirical first-major-dump research, detector
