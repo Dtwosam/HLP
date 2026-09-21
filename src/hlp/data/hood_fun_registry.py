@@ -18,13 +18,21 @@ def _order(row: HoodFunEvent) -> tuple[int, int, int]:
     )
 
 
-def build_hood_fun_launch_registry(events: Iterable[HoodFunEvent]) -> list[dict]:
+def build_hood_fun_launch_registry(
+    events: Iterable[HoodFunEvent],
+    *,
+    generation: str = "current",
+) -> list[dict]:
     """Build immutable per-launch curve parameters.
 
     hood.fun reserves 80% of chosen token supply for the curve and 20% for
     post-graduation liquidity. Mainnet conservation audits verify the
     TokenCreated curve-inventory field obeys that split exactly.
     """
+    generation = str(generation).strip()
+    if not generation:
+        raise ValueError("hood.fun generation cannot be empty")
+
     output: list[dict] = []
     seen: set[str] = set()
     for event in sorted(list(events), key=_order):
@@ -58,7 +66,7 @@ def build_hood_fun_launch_registry(events: Iterable[HoodFunEvent]) -> list[dict]
         output.append(
             {
                 "venue": "hood.fun",
-                "generation": "current",
+                "generation": generation,
                 "token": token,
                 "creator": event.actor.lower(),
                 "name": event.name,
