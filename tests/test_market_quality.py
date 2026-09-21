@@ -3,9 +3,12 @@ from decimal import Decimal
 import pytest
 
 from hlp.data.market_quality import (
+    MARKET_SELECTION_CANDIDATE_VERSION,
     active_quote_liquidity_usd,
+    build_candidate_canonical_market_series,
     build_causal_market_quality_trace,
     rank_market_quality_snapshot,
+    summarize_candidate_canonical_market_series,
     summarize_causal_market_quality_trace,
     summarize_market_competition,
 )
@@ -306,3 +309,120 @@ def test_trace_summary_rejects_accidental_selector_freeze():
                 }
             ]
         )
+
+
+
+def test_candidate_canonical_series_ignores_nonselected_pool_updates():
+    rows = build_candidate_canonical_market_series(
+        [
+            _market_event(
+                "0xaaa",
+                block=10,
+                txi=1,
+                depth=500,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=11,
+                txi=1,
+                depth=100,
+                mcap=200_000,
+            ),
+            _market_event(
+                "0xaaa",
+                block=12,
+                txi=1,
+                depth=450,
+                mcap=110_000,
+            ),
+        ]
+    )
+
+    assert [row["block_number"] for row in rows] == [10, 12]
+    assert [row["selected_market_id"] for row in rows] == [
+        "0xaaa",
+        "0xaaa",
+    ]
+    assert all(row["canonical_volume_eligible"] for row in rows)
+    assert all(row["selection_rule_frozen"] is False for row in rows)
+
+
+def test_candidate_canonical_series_emits_on_causal_leadership_switch():
+    rows = build_candidate_canonical_market_series(
+        [
+            _market_event(
+                "0xaaa",
+                block=10,
+                txi=1,
+                depth=500,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=11,
+                txi=1,
+                depth=600,
+                mcap=150_000,
+            ),
+        ]
+    )
+
+    assert len(rows) == 2
+    assert rows[-1]["selected_market_id"] == "0xbbb"
+    assert rows[-1]["leadership_switched"] is True
+    assert rows[-1]["ranked_market_ids"] == ["0xbbb", "0xaaa"]
+
+
+def test_candidate_canonical_series_tie_break_is_stable_market_id():
+    rows = build_candidate_canonical_market_series(
+        [
+            _market_event(
+                "0xbbb",
+                block=10,
+                txi=1,
+                depth=100,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xaaa",
+                block=11,
+                txi=1,
+                depth=100,
+                mcap=100_000,
+            ),
+        ]
+    )
+
+    assert rows[-1]["selected_market_id"] == "0xaaa"
+    assert rows[-1]["leadership_switched"] is True
+
+
+def test_candidate_canonical_summary_preserves_research_only_status():
+    rows = build_candidate_canonical_market_series(
+        [
+            _market_event(
+                "0xaaa",
+                block=10,
+                txi=1,
+                depth=500,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=11,
+                txi=1,
+                depth=600,
+                mcap=150_000,
+            ),
+        ]
+    )
+    report = summarize_candidate_canonical_market_series(rows)
+
+    assert report["points"] == 2
+    assert report["leadership_switches"] == 1
+    assert report["selection_policy_candidate_version"] == (
+        MARKET_SELECTION_CANDIDATE_VERSION
+    )
+    assert report["selection_rule_frozen"] is False
+    assert report["cross_pool_volume_double_counting_allowed"] is False
