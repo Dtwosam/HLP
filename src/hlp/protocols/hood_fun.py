@@ -45,9 +45,16 @@ def _base(log: RawLog, event_type: str, token: str, **kwargs) -> HoodFunEvent:
     )
 
 
-def decode_hood_fun_event(log: RawLog) -> HoodFunEvent:
-    if log.address != normalize_address(HOOD_FUN_CURRENT):
-        raise ValueError("not the validated current hood.fun contract")
+def decode_hood_fun_event(
+    log: RawLog,
+    *,
+    contract: str = HOOD_FUN_CURRENT,
+) -> HoodFunEvent:
+    expected_contract = normalize_address(contract)
+    if log.address != expected_contract:
+        raise ValueError(
+            f"not the requested hood.fun contract: {expected_contract}"
+        )
     if not log.topics:
         raise ValueError("hood.fun log has no topic0")
 
