@@ -91,6 +91,7 @@ def build_hood_fun_curve_market_cap_points(
         output.append(
             {
                 "venue": "hood.fun",
+                "generation": str(launch.get("generation") or "current"),
                 "phase": "curve",
                 "event_type": event.event_type,
                 "token": token,
@@ -128,6 +129,7 @@ def summarize_hood_fun_curve_market_caps(rows: Iterable[dict]) -> list[dict]:
             current = {
                 "token": token,
                 "venue": "hood.fun",
+                "generation": str(row.get("generation") or "current"),
                 "price_points": 0,
                 "priced_points": 0,
                 "max_market_cap_proxy_usd": None,
@@ -135,6 +137,11 @@ def summarize_hood_fun_curve_market_caps(rows: Iterable[dict]) -> list[dict]:
                 "crossed_100k": False,
             }
             summary[token] = current
+        generation = str(row.get("generation") or "current")
+        if current["generation"] != generation:
+            raise ValueError(
+                f"hood.fun token appears in multiple generations: {token}"
+            )
         current["price_points"] += 1
         if mcap is None:
             continue
