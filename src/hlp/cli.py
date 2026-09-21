@@ -169,7 +169,10 @@ from hlp.data.reconstruct import (
 )
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.data.sparse_quote_usd import build_sparse_v3_quote_points
-from hlp.data.sharded_tape import iter_sharded_jsonl
+from hlp.data.sharded_tape import (
+    iter_sharded_jsonl,
+    iter_sharded_jsonl_matching_field_values,
+)
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
 from hlp.data.transition import summarize_v2_transition_continuity
 from hlp.data.trench_curve import (
@@ -192,6 +195,9 @@ from hlp.data.types import (
 from hlp.data.v3_launchpad import (
     build_v3_launchpad_market_cap_points,
     summarize_v3_launchpad_market_caps,
+)
+from hlp.data.v4_launchpad import (
+    build_v4_launchpad_market_cap_points,
 )
 from hlp.data.v2_curve import (
     build_v2_curve_market_cap_points,
@@ -5229,6 +5235,79 @@ def _event_tape_source_name(
     if not source:
         raise SystemExit("event tape source is missing")
     return Path(source).name
+
+
+def _iter_filtered_event_tape(
+    *,
+    file_path: str | None,
+    shard_dir: str | None,
+    aggregate_manifest: str | None,
+    label: str,
+    field: str,
+    values,
+):
+    wanted = sorted({str(value).lower() for value in values})
+    if not wanted:
+        return iter(())
+    if file_path:
+        if shard_dir or aggregate_manifest:
+            raise SystemExit(
+                f"{label}: single-file and sharded inputs are mutually exclusive"
+            )
+        wanted_set = set(wanted)
+        return (
+            row
+            for row in _iter_jsonl(file_path)
+            if str(row.get(field) or "").lower() in wanted_set
+        )
+    if not shard_dir or not aggregate_manifest:
+        raise SystemExit(
+            f"{label}: sharded input requires both directory and manifest"
+        )
+    return iter_sharded_jsonl_matching_field_values(
+        Path(shard_dir),
+        Path(aggregate_manifest),
+        field=field,
+        values=wanted,
+    )
+
+
+def _event_tape_sha256(
+    *,
+    file_path: str | None,
+    aggregate_manifest: str | None,
+    label: str,
+) -> str:
+    if file_path:
+        if aggregate_manifest:
+            raise SystemExit(
+                f"{label}: single-file and aggregate manifest are mutually exclusive"
+            )
+        return _sha256_file(file_path)
+    if not aggregate_manifest:
+        raise SystemExit(f"{label}: aggregate manifest is missing")
+    payload = json.loads(Path(aggregate_manifest).read_text())
+    value = str(payload.get("sha256") or "")
+    if len(value) != 64:
+        raise SystemExit(f"{label}: aggregate manifest SHA is invalid")
+    int(value, 16)
+    return value
+
+
+def _direct_registry_quote_decimals(registry_rows) -> dict[str, int]:
+    output: dict[str, int] = {}
+    for row in registry_rows:
+        quote = normalize_address(str(row["quote_token"]))
+        decimals = int(row["quote_decimals"])
+        prior = output.get(quote)
+        if prior is not None and prior != decimals:
+            raise SystemExit(
+                f"direct registry quote decimals disagree for {quote}"
+            )
+        output[quote] = decimals
+    if not output:
+        raise SystemExit("direct market registry has no quote assets")
+    return output
 
 
 def _load_quote_usd_inputs(
