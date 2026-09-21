@@ -4,6 +4,7 @@ import pytest
 
 from hlp.data.v4_launchpad import (
     build_v4_launchpad_market_cap_points,
+    merge_v4_launchpad_market_cap_summaries,
     summarize_v4_launchpad_market_caps,
 )
 
@@ -167,3 +168,65 @@ def test_v4_swap_emits_comparable_active_quote_liquidity():
     assert rows[1]["quote_decimals"] == 18
     assert rows[1]["token_is_currency0"] is True
     assert Decimal(rows[1]["active_quote_liquidity_usd"]) == Decimal("2000")
+
+
+def test_merge_v4_launchpad_summaries_is_shard_invariant():
+    rows = merge_v4_launchpad_market_cap_summaries([
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool_id": POOL_ID,
+            "quote_token": QUOTE,
+            "price_points": 2,
+            "priced_points": 2,
+            "max_market_cap_proxy_usd": "100",
+            "max_market_cap_block": 20,
+            "crossed_100k": False,
+        },
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool_id": POOL_ID,
+            "quote_token": QUOTE,
+            "price_points": 3,
+            "priced_points": 3,
+            "max_market_cap_proxy_usd": "200",
+            "max_market_cap_block": 30,
+            "crossed_100k": True,
+        },
+    ])
+    assert len(rows) == 1
+    assert rows[0]["price_points"] == 5
+    assert rows[0]["priced_points"] == 5
+    assert rows[0]["max_market_cap_proxy_usd"] == "200"
+    assert rows[0]["max_market_cap_block"] == 30
+    assert rows[0]["crossed_100k"] is True
+
+
+def test_merge_v4_launchpad_summaries_uses_earliest_equal_max():
+    rows = merge_v4_launchpad_market_cap_summaries([
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool_id": POOL_ID,
+            "quote_token": QUOTE,
+            "price_points": 1,
+            "priced_points": 1,
+            "max_market_cap_proxy_usd": "200",
+            "max_market_cap_block": 30,
+            "crossed_100k": False,
+        },
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool_id": POOL_ID,
+            "quote_token": QUOTE,
+            "price_points": 1,
+            "priced_points": 1,
+            "max_market_cap_proxy_usd": "200",
+            "max_market_cap_block": 25,
+            "crossed_100k": False,
+        },
+    ])
+    assert rows[0]["max_market_cap_block"] == 25
+
