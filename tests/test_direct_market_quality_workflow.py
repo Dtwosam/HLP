@@ -38,3 +38,23 @@ def test_direct_market_quality_evidence_binds_all_upstream_runs():
     assert "direct-v3-swap-sharded.manifest.json" in text
     assert "direct-v4-swap-sharded.manifest.json" in text
     assert "direct-supply-delta-sharded.manifest.json" in text
+
+
+def test_direct_market_quality_evidence_binds_exact_artifact_hashes():
+    text = WORKFLOW.read_text()
+
+    for field in (
+        "quote_registry_sha256",
+        "quote_decimals_sha256",
+        "quote_feed_specs_sha256",
+        "plan_sha256",
+        "point_sha256",
+    ):
+        assert field in text
+
+    assert "direct-quote-summary.json" in text
+    assert "direct-quotes.jsonl" in text
+    assert "direct-quote-decimals.json" in text
+    assert "direct-quote-feeds.jsonl" in text
+    assert "direct market point SHA drift" in text
+    assert "final evidence plan SHA drift" in text
