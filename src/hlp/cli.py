@@ -69,6 +69,7 @@ from hlp.data.direct_evidence import (
     filter_direct_supply_deltas,
     summarize_direct_market_evidence_plan,
 )
+from hlp.data.direct_origin import build_direct_origin_attribution
 from hlp.data.direct_quotes import (
     DIRECT_PRICEABLE_STATUSES,
     build_direct_quote_registry_from_clients,
@@ -964,6 +965,90 @@ def _sha256_file(path: str) -> str:
 
 
 
+
+
+
+
+def _parse_named_jsonl_inputs(values: list[str], *, label: str) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for raw in values:
+        if "=" not in raw:
+            raise SystemExit(
+                f"{label} must use SOURCE_ID=PATH syntax: {raw!r}"
+            )
+        source_id, path = raw.split("=", 1)
+        source_id = source_id.strip()
+        path = path.strip()
+        if not source_id or not path:
+            raise SystemExit(
+                f"{label} must use non-empty SOURCE_ID=PATH syntax"
+            )
+        if source_id in output:
+            raise SystemExit(f"{label} repeats source: {source_id}")
+        output[source_id] = path
+    return output
+
+
+def cmd_phase2_direct_origin_attribution(args: argparse.Namespace) -> int:
+    """Attach exact known launch origins without assuming unmatched is direct."""
+    market_rows = []
+    market_sha256 = {}
+    for path in args.market_registry:
+        rows = _load_jsonl(path)
+        market_rows.extend(rows)
+        market_sha256[Path(path).name] = _sha256_file(path)
+    if not market_rows:
+        raise SystemExit("direct origin attribution received no market rows")
+
+    named_paths = _parse_named_jsonl_inputs(
+        args.launch_registry,
+        label="--launch-registry",
+    )
+    launch_registries = {
+        source_id: _load_jsonl(path)
+        for source_id, path in named_paths.items()
+    }
+    launch_sha256 = {
+        source_id: _sha256_file(path)
+        for source_id, path in named_paths.items()
+    }
+
+    ledger_path = Path(args.coverage_ledger)
+    ledger = json.loads(ledger_path.read_text())
+    inventory = build_phase2_source_inventory()
+    attributed, report = build_direct_origin_attribution(
+        market_rows,
+        launch_registries,
+        source_inventory=inventory,
+        coverage_ledger=ledger,
+    )
+    manifest = write_jsonl_snapshot(
+        attributed,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_direct_market_origin_attribution",
+            "chain_id": 4663,
+            "market_registry_sha256": dict(sorted(market_sha256.items())),
+            "launch_registry_sha256": dict(sorted(launch_sha256.items())),
+            "coverage_ledger": ledger_path.name,
+            "coverage_ledger_sha256": _sha256_file(args.coverage_ledger),
+            "absence_from_launch_registries_is_conclusive": report[
+                "absence_from_launch_registries_is_conclusive"
+            ],
+        },
+    )
+    payload = {
+        **report,
+        "market_registry_sha256": dict(sorted(market_sha256.items())),
+        "launch_registry_sha256": dict(sorted(launch_sha256.items())),
+        "coverage_ledger_sha256": _sha256_file(args.coverage_ledger),
+        "attributed_registry_sha256": manifest["sha256"],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(payload, sort_keys=True))
+    return 0
 
 
 
@@ -6917,6 +7002,30 @@ def build_parser() -> argparse.ArgumentParser:
     v4_swap.add_argument("--out", required=True)
     v4_swap.set_defaults(
         func=cmd_rpc_v4_swap_window
+    )
+
+    direct_origin = sub.add_parser(
+        "phase2-direct-origin-attribution"
+    )
+    direct_origin.add_argument(
+        "--market-registry",
+        action="append",
+        required=True,
+    )
+    direct_origin.add_argument(
+        "--launch-registry",
+        action="append",
+        default=[],
+        metavar="SOURCE_ID=PATH",
+    )
+    direct_origin.add_argument(
+        "--coverage-ledger",
+        default=".github/phase2-source-coverage.json",
+    )
+    direct_origin.add_argument("--out", required=True)
+    direct_origin.add_argument("--summary-out", required=True)
+    direct_origin.set_defaults(
+        func=cmd_phase2_direct_origin_attribution
     )
 
     direct_evidence_plan = sub.add_parser(
