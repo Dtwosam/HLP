@@ -68,6 +68,7 @@ from hlp.data.direct_quotes import (
     direct_quote_decimals,
     direct_quote_feed_specs,
 )
+from hlp.data.direct_supply import build_direct_supply_delta_rows
 from hlp.data.chainlink_directory import ChainlinkDirectoryClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.hood_fun_curve import (
@@ -210,7 +211,11 @@ from hlp.data.v4 import (
     build_v2_graduation_seed_points,
     build_v2_v4_market_cap_points,
 )
-from hlp.protocols.erc20 import TRANSFER_TOPIC, read_erc20_static
+from hlp.protocols.erc20 import (
+    TRANSFER_TOPIC,
+    decode_erc20_transfer,
+    read_erc20_static,
+)
 from hlp.protocols.flap import FLAP_RECONSTRUCTION_TOPICS, decode_flap_event
 from hlp.protocols.hood_fun import HOOD_FUN_CURVE_TOPICS, decode_hood_fun_event
 from hlp.protocols.trench import TRENCH_CURVE_TOPICS, decode_trench_event
@@ -751,6 +756,80 @@ def cmd_rpc_v3_pool_created_window(
     print(json.dumps({
         "pools_created": manifest["records"],
         "factory": args.factory.lower(),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_supply_delta_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire shared chain-wide ERC-20 mint/burn supply deltas."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    zero_topic = "0x" + "00" * 32
+
+    raw_logs = []
+    for topics in (
+        [TRANSFER_TOPIC, zero_topic],
+        [TRANSFER_TOPIC, None, zero_topic],
+    ):
+        raw_logs.extend(
+            rpc.iter_logs_chunked(
+                args.from_block,
+                args.to_block,
+                topics=topics,
+                chunk_size=args.chunk_size,
+                min_chunk_size=args.min_chunk_size,
+            )
+        )
+
+    decoded = []
+    skipped_non_erc20_shape = 0
+    seen: set[tuple[str, str, int]] = set()
+    for log in raw_logs:
+        key = (
+            normalize_address(log.address),
+            log.transaction_hash.lower(),
+            int(log.log_index),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            decoded.append(decode_erc20_transfer(log))
+        except ValueError:
+            skipped_non_erc20_shape += 1
+
+    rows = build_direct_supply_delta_rows(decoded)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "erc20_transfer_supply_delta",
+            "address_filter": None,
+            "shared_direct_supply_surface": True,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": TRANSFER_TOPIC,
+            "mint_topic1": zero_topic,
+            "burn_topic2": zero_topic,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "supply_delta_events": manifest["records"],
+        "tokens": len({row["token"] for row in rows}),
+        "mint_events": sum(bool(row["is_mint"]) for row in rows),
+        "burn_events": sum(bool(row["is_burn"]) for row in rows),
+        "skipped_non_erc20_transfer_shape": skipped_non_erc20_shape,
+        "shared_direct_supply_surface": True,
         "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
@@ -6503,6 +6582,22 @@ def build_parser() -> argparse.ArgumentParser:
     v3_pool_created.add_argument("--out", required=True)
     v3_pool_created.set_defaults(
         func=cmd_rpc_v3_pool_created_window
+    )
+
+    supply_delta = sub.add_parser(
+        "rpc-supply-delta-window"
+    )
+    supply_delta.add_argument("--from-block", type=int, required=True)
+    supply_delta.add_argument("--to-block", type=int, required=True)
+    supply_delta.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    supply_delta.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    supply_delta.add_argument("--out", required=True)
+    supply_delta.set_defaults(
+        func=cmd_rpc_supply_delta_window
     )
 
     v3_initialize = sub.add_parser(
