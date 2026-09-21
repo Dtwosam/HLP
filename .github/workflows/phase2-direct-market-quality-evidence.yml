@@ -1,0 +1,562 @@
+name: phase2-direct-market-quality-evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+      registry_run_id:
+        description: Successful phase2-direct-market-registry-backfill run ID
+        required: true
+        type: string
+      cohort_run_id:
+        description: Successful phase2-direct-market-competition-cohort run ID
+        required: true
+        type: string
+      v3_initialize_run_id:
+        description: Successful phase2-direct-v3-initialize-backfill run ID
+        required: true
+        type: string
+      v3_swap_run_id:
+        description: Successful phase2-direct-v3-swap-backfill run ID
+        required: true
+        type: string
+      v4_initialize_run_id:
+        description: Successful phase2-direct-uniswap-v4-initialize-backfill run ID
+        required: true
+        type: string
+      v4_swap_run_id:
+        description: Successful phase2-direct-v4-swap-backfill run ID
+        required: true
+        type: string
+      supply_delta_run_id:
+        description: Successful phase2-direct-supply-delta-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-direct-market-quality-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SAMPLE_SIZE: '20'
+  WINDOW_BLOCKS: '100000'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      from_block: ${{ steps.bounds.outputs.from_block }}
+      to_block: ${{ steps.bounds.outputs.to_block }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-competition-cohort
+          path: inputs/cohort
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.cohort_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v3-market-registry
+          path: inputs/uniswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_sushiswap_v3-market-registry
+          path: inputs/sushiswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-registry
+          path: inputs/uniswap-v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - name: Validate cohort and registry provenance
+        env:
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          cohort = Path("inputs/cohort/direct-market-competition-cohort.jsonl")
+          summary = json.loads(
+              Path("inputs/cohort/direct-market-competition-summary.json").read_text()
+          )
+          if summary["registry_run_id"] != int(os.environ["REGISTRY_RUN_ID"]):
+              raise SystemExit("competition cohort registry run drift")
+          if hashlib.sha256(cohort.read_bytes()).hexdigest() != summary["cohort_sha256"]:
+              raise SystemExit("competition cohort SHA drift")
+          if summary["canonical_market_selection_complete"] is not False:
+              raise SystemExit("competition cohort unexpectedly froze selector")
+          if summary["tokens"] < 1:
+              raise SystemExit("competition cohort contains no competing tokens")
+
+          roots = {
+              "direct_uniswap_v3": Path("inputs/uniswap-v3"),
+              "direct_sushiswap_v3": Path("inputs/sushiswap-v3"),
+              "direct_uniswap_v4": Path("inputs/uniswap-v4"),
+          }
+          for source, root in roots.items():
+              handoff = json.loads(
+                  (root / f"{source}-registry-handoff.json").read_text()
+              )
+              if handoff["source_id"] != source:
+                  raise SystemExit(f"{source}: registry identity drift")
+              if handoff["source_coverage_complete"] is not False:
+                  raise SystemExit(f"{source}: registry cannot close coverage")
+              registry = root / f"{source}-registry.jsonl"
+              if hashlib.sha256(registry.read_bytes()).hexdigest() != handoff["registry_sha256"]:
+                  raise SystemExit(f"{source}: registry SHA drift")
+          PY
+      - name: Build bounded chronology-spanning evidence plan
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-market-evidence-plan \
+            --cohort inputs/cohort/direct-market-competition-cohort.jsonl \
+            --sample-size "$SAMPLE_SIZE" \
+            --window-blocks "$WINDOW_BLOCKS" \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --out artifacts/direct-market-evidence-plan.jsonl \
+            --summary-out artifacts/direct-market-evidence-plan-summary.json
+      - name: Filter sampled registries
+        run: |
+          hlp phase2-direct-evidence-filter \
+            --plan artifacts/direct-market-evidence-plan.jsonl \
+            --kind registry \
+            --input inputs/uniswap-v3/direct_uniswap_v3-registry.jsonl \
+            --out artifacts/direct_uniswap_v3-registry.jsonl \
+            --summary-out artifacts/direct_uniswap_v3-registry-filter.json
+          hlp phase2-direct-evidence-filter \
+            --plan artifacts/direct-market-evidence-plan.jsonl \
+            --kind registry \
+            --input inputs/sushiswap-v3/direct_sushiswap_v3-registry.jsonl \
+            --out artifacts/direct_sushiswap_v3-registry.jsonl \
+            --summary-out artifacts/direct_sushiswap_v3-registry-filter.json
+          hlp phase2-direct-evidence-filter \
+            --plan artifacts/direct-market-evidence-plan.jsonl \
+            --kind registry \
+            --input inputs/uniswap-v4/direct_uniswap_v4-registry.jsonl \
+            --out artifacts/direct_uniswap_v4-registry.jsonl \
+            --summary-out artifacts/direct_uniswap_v4-registry-filter.json
+      - id: bounds
+        name: Publish evidence bounds
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(
+              Path("artifacts/direct-market-evidence-plan-summary.json").read_text()
+          )
+          if summary["selector_freeze_ready"] is not False:
+              raise SystemExit("evidence plan cannot freeze selector")
+          if summary["tokens"] < 1:
+              raise SystemExit("evidence plan is empty")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"from_block={summary['first_window_block']}\n")
+              handle.write(f"to_block={summary['last_window_block']}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: artifacts/
+          if-no-files-found: error
+
+  filter-v3:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v3-initialize-merged
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_initialize_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-v3-swap-*
+          path: inputs/swaps
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v3_swap_run_id }}
+      - name: Filter V3 Initialize and Swap evidence
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-evidence-filter \
+            --plan inputs/plan/direct-market-evidence-plan.jsonl \
+            --kind v3-events \
+            --input inputs/initialize/direct-v3-initialize.jsonl \
+            --out artifacts/direct-v3-initialize-evidence.jsonl \
+            --summary-out artifacts/direct-v3-initialize-evidence-summary.json
+          hlp phase2-direct-evidence-filter \
+            --plan inputs/plan/direct-market-evidence-plan.jsonl \
+            --kind v3-events \
+            --input-manifest inputs/swaps/direct-v3-swap-sharded.manifest.json \
+            --input-shard-dir inputs/swaps \
+            --out artifacts/direct-v3-swap-evidence.jsonl \
+            --summary-out artifacts/direct-v3-swap-evidence-summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-quality-v3-inputs
+          path: artifacts/
+          if-no-files-found: error
+
+  filter-v4:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v4-initialize-merged
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v4_initialize_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-v4-swap-*
+          path: inputs/swaps
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v4_swap_run_id }}
+      - name: Filter V4 Initialize and Swap evidence
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-evidence-filter \
+            --plan inputs/plan/direct-market-evidence-plan.jsonl \
+            --kind v4-events \
+            --input inputs/initialize/direct-v4-initialize.jsonl \
+            --out artifacts/direct-v4-initialize-evidence.jsonl \
+            --summary-out artifacts/direct-v4-initialize-evidence-summary.json
+          hlp phase2-direct-evidence-filter \
+            --plan inputs/plan/direct-market-evidence-plan.jsonl \
+            --kind v4-events \
+            --input-manifest inputs/swaps/direct-v4-swap-sharded.manifest.json \
+            --input-shard-dir inputs/swaps \
+            --out artifacts/direct-v4-swap-evidence.jsonl \
+            --summary-out artifacts/direct-v4-swap-evidence-summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-quality-v4-inputs
+          path: artifacts/
+          if-no-files-found: error
+
+  filter-supply:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-supply-delta-*
+          path: inputs/supply
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.supply_delta_run_id }}
+      - name: Filter causal supply evidence
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-evidence-filter \
+            --plan inputs/plan/direct-market-evidence-plan.jsonl \
+            --kind supply \
+            --input-manifest inputs/supply/direct-supply-delta-sharded.manifest.json \
+            --input-shard-dir inputs/supply \
+            --out artifacts/direct-supply-evidence.jsonl \
+            --summary-out artifacts/direct-supply-evidence-summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-quality-supply-inputs
+          path: artifacts/
+          if-no-files-found: error
+
+  reconstruct-v3:
+    needs: [plan, filter-v3, filter-supply]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        source:
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+    env:
+      SOURCE_ID: ${{ matrix.source }}
+      FROM_BLOCK: ${{ needs.plan.outputs.from_block }}
+      TO_BLOCK: ${{ needs.plan.outputs.to_block }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-v3-inputs
+          path: inputs/v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-supply-inputs
+          path: inputs/supply
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - name: Reconstruct direct V3 evidence points
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-direct-v3-market-window \
+            --registry "inputs/plan/${SOURCE_ID}-registry.jsonl" \
+            --initializes inputs/v3/direct-v3-initialize-evidence.jsonl \
+            --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
+            --swaps inputs/v3/direct-v3-swap-evidence.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
+            --out "artifacts/${SOURCE_ID}-points.jsonl" \
+            --report-out "artifacts/${SOURCE_ID}-report.json"
+      - name: Verify V3 evidence remains research-only
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = os.environ["SOURCE_ID"]
+          report = json.loads(Path(f"artifacts/{source}-report.json").read_text())
+          if report["market_selection_rule_frozen"] is not False:
+              raise SystemExit("direct V3 evidence unexpectedly froze selector")
+          if report["threshold_summary_emitted"] is not False:
+              raise SystemExit("direct V3 evidence unexpectedly emitted threshold labels")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-${{ matrix.source }}-market-quality-points
+          path: artifacts/
+          if-no-files-found: error
+
+  reconstruct-v4:
+    needs: [plan, filter-v4, filter-supply]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FROM_BLOCK: ${{ needs.plan.outputs.from_block }}
+      TO_BLOCK: ${{ needs.plan.outputs.to_block }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-v4-inputs
+          path: inputs/v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-supply-inputs
+          path: inputs/supply
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - name: Reconstruct direct V4 evidence points
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-direct-v4-market-window \
+            --registry inputs/plan/direct_uniswap_v4-registry.jsonl \
+            --initializes inputs/v4/direct-v4-initialize-evidence.jsonl \
+            --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
+            --swaps inputs/v4/direct-v4-swap-evidence.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
+            --out artifacts/direct_uniswap_v4-points.jsonl \
+            --report-out artifacts/direct_uniswap_v4-report.json
+      - name: Verify V4 evidence remains research-only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path("artifacts/direct_uniswap_v4-report.json").read_text()
+          )
+          if report["market_selection_rule_frozen"] is not False:
+              raise SystemExit("direct V4 evidence unexpectedly froze selector")
+          if report["threshold_summary_emitted"] is not False:
+              raise SystemExit("direct V4 evidence unexpectedly emitted threshold labels")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-quality-points
+          path: artifacts/
+          if-no-files-found: error
+
+  audit:
+    needs: [plan, reconstruct-v3, reconstruct-v4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-quality-plan
+          path: inputs/plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct_*-market-quality-points
+          path: inputs/points
+          merge-multiple: true
+      - name: Build real-market selector evidence
+        run: |
+          mkdir -p artifacts
+          hlp phase2-market-quality-audit \
+            --points inputs/points/direct_uniswap_v3-points.jsonl \
+            --points inputs/points/direct_sushiswap_v3-points.jsonl \
+            --points inputs/points/direct_uniswap_v4-points.jsonl \
+            --trace-out artifacts/direct-market-quality-trace.jsonl \
+            --candidate-out artifacts/direct-market-candidate-series.jsonl \
+            --report-out artifacts/direct-market-quality-report.json
+      - name: Bind pilot evidence provenance
+        env:
+          QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+          REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+          COHORT_RUN_ID: ${{ inputs.cohort_run_id }}
+          V3_SWAP_RUN_ID: ${{ inputs.v3_swap_run_id }}
+          V4_SWAP_RUN_ID: ${{ inputs.v4_swap_run_id }}
+          SUPPLY_RUN_ID: ${{ inputs.supply_delta_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(
+              Path("artifacts/direct-market-quality-report.json").read_text()
+          )
+          plan = json.loads(
+              Path("inputs/plan/direct-market-evidence-plan-summary.json").read_text()
+          )
+          if report["selection_rule_frozen"] is not False:
+              raise SystemExit("market-quality audit unexpectedly froze selector")
+          if report["causal_trace"]["multi_market_snapshots"] < 1:
+              raise SystemExit(
+                  "pilot produced no causal snapshot with competing usable markets"
+              )
+          if report["candidate_canonical_series"][
+              "cross_pool_volume_double_counting_allowed"
+          ] is not False:
+              raise SystemExit("candidate series permits cross-pool double counting")
+
+          handoff = {
+              "version": "phase2-direct-market-quality-evidence-v1",
+              "chain_id": 4663,
+              "snapshot_head_block": int(os.environ["SNAPSHOT_HEAD"]),
+              "sample_tokens": plan["tokens"],
+              "sample_markets": plan["markets"],
+              "sampling_rule": plan["sampling_rule"],
+              "window_blocks": int(os.environ["WINDOW_BLOCKS"]),
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "cohort_run_id": int(os.environ["COHORT_RUN_ID"]),
+              "v3_swap_run_id": int(os.environ["V3_SWAP_RUN_ID"]),
+              "v4_swap_run_id": int(os.environ["V4_SWAP_RUN_ID"]),
+              "supply_delta_run_id": int(os.environ["SUPPLY_RUN_ID"]),
+              "market_quality_report": report,
+              "selector_freeze_ready": False,
+              "source_coverage_complete": False,
+              "remaining_steps": [
+                  "review real-market liquidity leadership stability",
+                  "expand or revise evidence window if competition is sparse",
+                  "freeze selector only in an explicit versioned decision",
+                  "complete direct source historical coverage",
+              ],
+          }
+          Path(
+              "artifacts/direct-market-quality-evidence-handoff.json"
+          ).write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-quality-evidence
+          path: artifacts/
+          if-no-files-found: error
