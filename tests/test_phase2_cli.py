@@ -840,6 +840,8 @@ def _direct_market_args(
         swaps=str(swaps),
         swaps_shard_dir=None,
         supply_deltas=str(supply_deltas),
+        supply_deltas_manifest=None,
+        supply_deltas_shard_dir=None,
         swaps_manifest=None,
         from_block=10,
         to_block=20,
@@ -875,7 +877,8 @@ def test_phase2_direct_market_window_parsers():
         "phase2-direct-v4-market-window",
         "--registry", "registry.jsonl",
         "--initializes", "initializes.jsonl",
-        "--supply-deltas", "supply.jsonl",
+        "--supply-deltas-manifest", "supply.manifest.json",
+        "--supply-deltas-shard-dir", "supply-inputs",
         "--swaps-manifest", "swaps.manifest.json",
         "--swaps-shard-dir", "inputs",
         "--from-block", "10",
@@ -883,6 +886,9 @@ def test_phase2_direct_market_window_parsers():
         "--out", "points.jsonl",
         "--report-out", "report.json",
     ])
+    assert v4.supply_deltas is None
+    assert v4.supply_deltas_manifest == "supply.manifest.json"
+    assert v4.supply_deltas_shard_dir == "supply-inputs"
     assert v4.swaps is None
     assert v4.swaps_manifest == "swaps.manifest.json"
     assert v4.swaps_shard_dir == "inputs"
