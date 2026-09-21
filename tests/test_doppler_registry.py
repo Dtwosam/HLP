@@ -40,3 +40,74 @@ def test_doppler_registry_uses_same_tx_currency_pair():
     assert rows[0]["pool_id"]==POOL_ID
     assert rows[0]["supply_raw"]==10**27
     assert rows[0]["pool_or_hook"]==TOKEN
+
+
+def test_doppler_registry_freezes_initial_price_and_supply_seed():
+    launch=DopplerLaunch(
+        asset=TOKEN,
+        numeraire=QUOTE,
+        initializer="0x"+"44"*20,
+        pool_or_hook=TOKEN,
+        block_number=10,
+        transaction_hash=TX,
+        transaction_index=1,
+        log_index=2,
+    )
+    init={
+        "pool_id":POOL_ID,
+        "currency0":TOKEN,
+        "currency1":QUOTE,
+        "fee":10000,
+        "tick_spacing":200,
+        "hooks":"0x"+"44"*20,
+        "sqrt_price_x96":2**96,
+        "tick":0,
+        "block_number":10,
+        "transaction_hash":TX,
+        "transaction_index":1,
+        "log_index":3,
+    }
+    row=build_doppler_v4_registry(
+        [launch],[init],supply_raw_by_asset={TOKEN:10**27}
+    )[0]
+    assert row["source_id"] == "doppler"
+    assert row["source_kind"] == "launchpad"
+    assert row["state_block"] == 10
+    assert row["initial_sqrt_price_x96"] == 2**96
+    assert row["initial_tick"] == 0
+    assert row["supply_seed_semantics"] == (
+        "launch_block_end_total_supply_same_block_as_initialize"
+    )
+
+
+def test_doppler_registry_rejects_initialize_before_create():
+    launch=DopplerLaunch(
+        asset=TOKEN,
+        numeraire=QUOTE,
+        initializer="0x"+"44"*20,
+        pool_or_hook=TOKEN,
+        block_number=10,
+        transaction_hash=TX,
+        transaction_index=1,
+        log_index=3,
+    )
+    init={
+        "pool_id":POOL_ID,
+        "currency0":TOKEN,
+        "currency1":QUOTE,
+        "fee":10000,
+        "tick_spacing":200,
+        "hooks":"0x"+"44"*20,
+        "sqrt_price_x96":2**96,
+        "tick":0,
+        "block_number":10,
+        "transaction_hash":TX,
+        "transaction_index":1,
+        "log_index":2,
+    }
+    import pytest
+    with pytest.raises(ValueError, match="does not follow Airlock Create"):
+        build_doppler_v4_registry(
+            [launch],[init],supply_raw_by_asset={TOKEN:10**27}
+        )
+
