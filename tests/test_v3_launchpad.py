@@ -63,6 +63,56 @@ def test_v3_swap_requires_initialize():
 
 
 
+
+def test_v3_swap_can_use_recorded_registry_initialize_for_later_shard():
+    registry = [{
+        **REGISTRY[0],
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }]
+    swap = {
+        **point(txi=2, logi=0),
+        "block_number": 11,
+        "liquidity": 1_000 * 10**18,
+    }
+    rows = build_v3_launchpad_market_cap_points(
+        registry,
+        [],
+        [swap],
+        [],
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        initial_quote_usd={QUOTE: Decimal("2")},
+        allow_registry_initialization=True,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "v3_swap"
+    assert rows[0]["block_number"] == 11
+
+
+def test_v3_recorded_registry_initialize_still_rejects_preinitialize_swap():
+    registry = [{
+        **REGISTRY[0],
+        "initialize_block": 10,
+        "initialize_transaction_index": 2,
+        "initialize_log_index": 0,
+    }]
+    with pytest.raises(ValueError, match="does not follow recorded Initialize"):
+        build_v3_launchpad_market_cap_points(
+            registry,
+            [],
+            [point(txi=1, logi=0)],
+            [],
+            initial_weth_usd=Decimal("2000"),
+            quote_decimals={QUOTE: 18},
+            initial_quote_usd={QUOTE: Decimal("2")},
+            allow_registry_initialization=True,
+        )
+
+
+
 def test_v3_swap_emits_comparable_active_quote_liquidity():
     init = point(txi=1, logi=0)
     swap = {
