@@ -284,9 +284,10 @@ def test_viability_measurement_accepts_normalized_recovered_evidence_path():
     )
     assert "recovered_evidence_paths" in workflow
     assert (
-        "viability measurement recovered evidence is not marked recovered"
+        '"viability measurement recovered evidence is not marked "'
         in workflow
     )
+    assert '"recovered"' in workflow
     assert (
         "viability measurement normal evidence routing changed"
         in workflow
