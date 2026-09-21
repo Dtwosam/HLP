@@ -1,11 +1,14 @@
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
     cmd_phase2_direct_quote_registry,
+    cmd_phase2_direct_v3_market_cap_window,
     cmd_phase2_direct_v3_registry,
+    cmd_phase2_direct_v4_market_cap_window,
     cmd_phase2_direct_v4_registry,
     cmd_phase2_market_quality_audit,
     cmd_pools_trade_instant_registry,
@@ -753,6 +756,238 @@ def test_phase2_direct_v4_registry_does_not_read_quote_quote_state(
     assert summary["supported_quote_candidate_markets"] == 0
     assert summary["exact_state_reads"] == 0
     assert summary["registry"]["markets"] == 0
+
+
+
+def _direct_market_args(
+    *,
+    registry,
+    initializes,
+    swaps,
+    out,
+    report,
+):
+    return SimpleNamespace(
+        registry=str(registry),
+        initializes=str(initializes),
+        swaps=str(swaps),
+        swaps_shard_dir=None,
+        swaps_manifest=None,
+        from_block=10,
+        to_block=20,
+        chunk_size=100_000,
+        min_chunk_size=25,
+        usd_anchor_pool="0x" + "99" * 20,
+        oracle_state=None,
+        oracle_events=None,
+        fallback_state=None,
+        fallback_events=None,
+        out=str(out),
+        report_out=str(report),
+    )
+
+
+def test_phase2_direct_market_window_parsers():
+    parser = build_parser()
+    v3 = parser.parse_args([
+        "phase2-direct-v3-market-window",
+        "--registry", "registry.jsonl",
+        "--initializes", "initializes.jsonl",
+        "--swaps", "swaps.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "points.jsonl",
+        "--report-out", "report.json",
+    ])
+    assert v3.swaps == "swaps.jsonl"
+    assert v3.swaps_manifest is None
+
+    v4 = parser.parse_args([
+        "phase2-direct-v4-market-window",
+        "--registry", "registry.jsonl",
+        "--initializes", "initializes.jsonl",
+        "--swaps-manifest", "swaps.manifest.json",
+        "--swaps-shard-dir", "inputs",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "points.jsonl",
+        "--report-out", "report.json",
+    ])
+    assert v4.swaps is None
+    assert v4.swaps_manifest == "swaps.manifest.json"
+    assert v4.swaps_shard_dir == "inputs"
+
+
+def test_phase2_direct_v3_market_window_keeps_pool_points_unselected(
+    monkeypatch,
+    tmp_path,
+):
+    from hlp.config import ROBINHOOD_WETH
+
+    token = "0x" + "11" * 20
+    quote = ROBINHOOD_WETH.lower()
+    pool = "0x" + "55" * 20
+    registry = tmp_path / "registry.jsonl"
+    initializes = tmp_path / "initializes.jsonl"
+    swaps = tmp_path / "swaps.jsonl"
+    out = tmp_path / "points.jsonl"
+    report = tmp_path / "report.json"
+
+    _write_jsonl(registry, [{
+        "source_id": "direct_uniswap_v3",
+        "venue": "uniswap_v3",
+        "token": token,
+        "quote_token": quote,
+        "quote_decimals": 18,
+        "supply_raw": 1_000_000 * 10**18,
+        "pool": pool,
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }])
+    _write_jsonl(initializes, [{
+        "pool": pool,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 10,
+        "transaction_hash": "0x" + "01" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+    _write_jsonl(swaps, [{
+        "pool": pool,
+        "sender": "0x" + "77" * 20,
+        "recipient": "0x" + "88" * 20,
+        "amount0": -10**18,
+        "amount1": 10**18,
+        "sqrt_price_x96": 2**96,
+        "liquidity": 1_000 * 10**18,
+        "tick": 0,
+        "block_number": 11,
+        "transaction_hash": "0x" + "02" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 0
+        response_bytes_received = 0
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+    monkeypatch.setattr(
+        "hlp.cli._sparse_weth_usd_anchors",
+        lambda *args, **kwargs: (Decimal("2000"), [], 200),
+    )
+
+    args = _direct_market_args(
+        registry=registry,
+        initializes=initializes,
+        swaps=swaps,
+        out=out,
+        report=report,
+    )
+    assert cmd_phase2_direct_v3_market_cap_window(args) == 0
+
+    points = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(points) == 2
+    assert all(row["source_id"] == "direct_uniswap_v3" for row in points)
+    assert points[-1]["market_id"] == pool
+    assert points[-1]["active_quote_liquidity_usd"] is not None
+
+    payload = json.loads(report.read_text())
+    assert payload["market_cap_points"] == 2
+    assert payload["quality_ready_points"] == 1
+    assert payload["market_selection_rule_frozen"] is False
+    assert payload["threshold_summary_emitted"] is False
+
+
+def test_phase2_direct_v4_market_window_uses_registry_initialize_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    from hlp.config import ROBINHOOD_WETH
+
+    token = "0x" + "11" * 20
+    quote = ROBINHOOD_WETH.lower()
+    pool_id = "0x" + "aa" * 32
+    registry = tmp_path / "registry.jsonl"
+    initializes = tmp_path / "initializes.jsonl"
+    swaps = tmp_path / "swaps.jsonl"
+    out = tmp_path / "points.jsonl"
+    report = tmp_path / "report.json"
+
+    _write_jsonl(registry, [{
+        "source_id": "direct_uniswap_v4",
+        "venue": "uniswap_v4",
+        "token": token,
+        "quote_token": quote,
+        "quote_decimals": 18,
+        "supply_raw": 1_000_000 * 10**18,
+        "pool_id": pool_id,
+        "currency0": token,
+        "currency1": quote,
+        "initialize_block": 5,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }])
+    _write_jsonl(initializes, [])
+    _write_jsonl(swaps, [{
+        "pool_manager": "0x" + "66" * 20,
+        "pool_id": pool_id,
+        "sender": "0x" + "77" * 20,
+        "amount0": -10**18,
+        "amount1": 10**18,
+        "sqrt_price_x96": 2**96,
+        "liquidity": 1_000 * 10**18,
+        "tick": 0,
+        "fee": 3000,
+        "block_number": 11,
+        "transaction_hash": "0x" + "03" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 0
+        response_bytes_received = 0
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+    monkeypatch.setattr(
+        "hlp.cli._sparse_weth_usd_anchors",
+        lambda *args, **kwargs: (Decimal("2000"), [], 200),
+    )
+
+    args = _direct_market_args(
+        registry=registry,
+        initializes=initializes,
+        swaps=swaps,
+        out=out,
+        report=report,
+    )
+    assert cmd_phase2_direct_v4_market_cap_window(args) == 0
+    point = json.loads(out.read_text().strip())
+    assert point["source_id"] == "direct_uniswap_v4"
+    assert point["market_id"] == pool_id
+    assert point["block_number"] == 11
+
+    payload = json.loads(report.read_text())
+    assert payload["initialize_events"] == 0
+    assert payload["swap_events"] == 1
+    assert payload["quality_ready_points"] == 1
+    assert payload["market_selection_rule_frozen"] is False
+
 
 
 def test_phase2_market_quality_audit_parser():
