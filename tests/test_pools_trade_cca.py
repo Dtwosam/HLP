@@ -34,6 +34,10 @@ def test_explicit_cca_orientation_is_required():
         raw,
         orientation="quote_per_token",
     ) == Decimal(raw) / Q96
+    assert cca_quote_per_token(
+        raw,
+        orientation="token_per_quote",
+    ) == Q96 / Decimal(raw)
 
     with pytest.raises(ValueError, match="invalid CCA price orientation"):
         cca_quote_per_token(raw, orientation="unknown")
