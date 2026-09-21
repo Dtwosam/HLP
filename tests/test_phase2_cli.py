@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_pools_trade_instant_registry,
+    cmd_pools_trade_lbp_registry,
 )
 from hlp.data.phase2_coverage import PHASE2_COVERAGE_LEDGER_VERSION
 
@@ -123,3 +125,171 @@ def test_phase2_apply_source_coverage_command(
         "pons_v1",
     ]
     assert validation["phase2_universe_coverage_complete"] is True
+
+
+
+def test_reusable_pools_trade_tape_parsers():
+    parser = build_parser()
+
+    launcher = parser.parse_args([
+        "rpc-pools-trade-launcher-tape",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--created-out", "created.jsonl",
+        "--distributed-out", "distributed.jsonl",
+    ])
+    assert launcher.created_out == "created.jsonl"
+    assert launcher.distributed_out == "distributed.jsonl"
+
+    instant = parser.parse_args([
+        "rpc-pools-trade-instant-launch-tape",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "launched.jsonl",
+    ])
+    assert instant.out == "launched.jsonl"
+
+    lbp = parser.parse_args([
+        "rpc-pools-trade-lbp-initializer-tape",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "initializers.jsonl",
+    ])
+    assert lbp.out == "initializers.jsonl"
+
+
+def _write_jsonl(path, rows):
+    path.write_text(
+        "".join(
+            json.dumps(row, sort_keys=True) + "\n"
+            for row in rows
+        )
+    )
+
+
+def test_pools_trade_instant_registry_assembles_reusable_tapes(
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    zero = "0x" + "00" * 20
+    strategy = "0x" + "22" * 20
+    pool_id = "0x" + "33" * 32
+    launcher = "0x" + "44" * 20
+    tx = "0x" + "aa" * 32
+
+    created = tmp_path / "created.jsonl"
+    distributed = tmp_path / "distributed.jsonl"
+    launched = tmp_path / "launched.jsonl"
+    out = tmp_path / "registry.jsonl"
+    _write_jsonl(created, [{
+        "launcher": launcher,
+        "token": token,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+    _write_jsonl(distributed, [{
+        "launcher": launcher,
+        "token": token,
+        "strategy": strategy,
+        "amount_raw": 10**27,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 1,
+    }])
+    _write_jsonl(launched, [{
+        "strategy": strategy,
+        "pool_id": pool_id,
+        "token": token,
+        "final_position_recipient": "0x" + "55" * 20,
+        "currency0": zero,
+        "currency1": token,
+        "fee": 2500,
+        "tick_spacing": 50,
+        "hooks": zero,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 2,
+    }])
+
+    args = SimpleNamespace(
+        created=str(created),
+        distributed=str(distributed),
+        launched=str(launched),
+        out=str(out),
+    )
+    assert cmd_pools_trade_instant_registry(args) == 0
+    row = json.loads(out.read_text().strip())
+    assert row["token"] == token
+    assert row["pool_id"] == pool_id
+    assert row["supply_raw"] == 10**27
+
+
+def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    zero = "0x" + "00" * 20
+    strategy = "0x" + "22" * 20
+    launcher = "0x" + "44" * 20
+    initializer = "0x" + "66" * 20
+    tx = "0x" + "aa" * 32
+
+    created = tmp_path / "created.jsonl"
+    distributed = tmp_path / "distributed.jsonl"
+    initializers = tmp_path / "initializers.jsonl"
+    out = tmp_path / "lbp-registry.jsonl"
+    _write_jsonl(created, [{
+        "launcher": launcher,
+        "token": token,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+    _write_jsonl(distributed, [{
+        "launcher": launcher,
+        "token": token,
+        "strategy": strategy,
+        "amount_raw": 1_000_000_000 * 10**18,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 1,
+    }])
+    _write_jsonl(initializers, [{
+        "strategy": strategy,
+        "initializer": initializer,
+        "token": token,
+        "currency": zero,
+        "migration_block": 100,
+        "reserved_token_amount_for_lp": 100 * 10**18,
+        "recipient": "0x" + "77" * 20,
+        "position_recipient": "0x" + "88" * 20,
+        "pool_fee": 2500,
+        "pool_tick_spacing": 50,
+        "pool_hook": zero,
+        "position_definitions_offset": 352,
+        "lp_allocation_schedule_offset": 576,
+        "block_number": 10,
+        "transaction_hash": tx,
+        "transaction_index": 1,
+        "log_index": 2,
+    }])
+
+    args = SimpleNamespace(
+        created=str(created),
+        distributed=str(distributed),
+        initializers=str(initializers),
+        out=str(out),
+    )
+    assert cmd_pools_trade_lbp_registry(args) == 0
+    row = json.loads(out.read_text().strip())
+    assert row["token"] == token
+    assert row["currency0"] == zero
+    assert row["currency1"] == token
+    assert row["pool_id"].startswith("0x")
+    assert len(row["pool_id"]) == 66
