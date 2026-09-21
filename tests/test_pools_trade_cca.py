@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, getcontext
 
 import pytest
 
@@ -169,3 +169,31 @@ def test_cca_summary_preserves_unpriced_points_and_threshold():
     assert summary[0]["priced_points"] == 1
     assert summary[0]["crossed_100k"] is True
     assert summary[0]["max_market_cap_block"] == 101
+
+
+
+def test_cca_orientation_math_ignores_global_decimal_precision():
+    raw = 7_962_430_332_683_565_928_151_168
+    migrated = Decimal(
+        "0.00010050000000000000000000001251111621485482844073392923021628218528362978949759907"
+    )
+    prior = getcontext().prec
+    try:
+        getcontext().prec = 140
+        high = infer_cca_price_orientation(
+            raw,
+            migrated_quote_per_token=migrated,
+        )
+        getcontext().prec = 28
+        low = infer_cca_price_orientation(
+            raw,
+            migrated_quote_per_token=migrated,
+        )
+    finally:
+        getcontext().prec = prior
+
+    assert high == low
+    assert high["orientation"] == "quote_per_token"
+    assert str(high["direct_quote_per_token"]) == (
+        "0.00010050000000000000000000001251110676486454358243005646755818816018290817737579346"
+    )
