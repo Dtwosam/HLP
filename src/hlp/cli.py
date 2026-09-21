@@ -158,6 +158,7 @@ from hlp.data.pools_fun_registry import (
 )
 from hlp.data.pools_trade_registry import (
     attach_pools_trade_instant_initializations,
+    attach_pools_trade_lbp_supply_states,
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
 )
@@ -4370,6 +4371,53 @@ def cmd_rpc_pools_trade_lbp_initializer_tape(
         decode_pools_trade_lbp_initializer_created(row)
         for row in logs
     ]
+    state_manifest = None
+    if args.state_out:
+        states = []
+        seen_tokens = set()
+        for row in rows:
+            token = normalize_address(row.token)
+            if token in seen_tokens:
+                raise SystemExit(
+                    f"duplicate LBP initializer token in shard: {token}"
+                )
+            seen_tokens.add(token)
+            static = read_erc20_static(
+                rpc,
+                token,
+                block=int(row.block_number),
+            )
+            supply = int(static.total_supply)
+            decimals = int(static.decimals)
+            if supply <= 0:
+                raise SystemExit(
+                    f"LBP initializer supply is non-positive: {token}"
+                )
+            if decimals < 0 or decimals > 255:
+                raise SystemExit(
+                    f"LBP initializer decimals invalid: {token}"
+                )
+            states.append({
+                "token": token,
+                "state_block": int(row.block_number),
+                "token_decimals": decimals,
+                "supply_raw": supply,
+            })
+        state_manifest = write_jsonl_snapshot(
+            states,
+            output=Path(args.state_out),
+            provenance={
+                "source": "pools_trade_lbp_initializer_block_erc20_state",
+                "chain_id": 4663,
+                "strategy": POOLS_TRADE_LBP_STRATEGY.lower(),
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "state_semantics": (
+                    "ERC20 decimals/totalSupply at exact InitializerCreated block"
+                ),
+            },
+        )
+
     manifest = write_jsonl_snapshot(
         rows,
         output=Path(args.out),
@@ -4385,6 +4433,7 @@ def cmd_rpc_pools_trade_lbp_initializer_tape(
     print(json.dumps({
         **manifest,
         "initializers": manifest["records"],
+        "state": state_manifest,
         "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
@@ -4554,6 +4603,11 @@ def cmd_pools_trade_lbp_registry(
         distributed,
         initializers,
     )
+    if args.states:
+        rows = attach_pools_trade_lbp_supply_states(
+            rows,
+            _load_jsonl(args.states),
+        )
     manifest = write_jsonl_snapshot(
         rows,
         output=Path(args.out),
@@ -9943,6 +9997,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-chunk-size", type=int, default=1
     )
     pools_trade_lbp_tape.add_argument("--out", required=True)
+    pools_trade_lbp_tape.add_argument("--state-out")
     pools_trade_lbp_tape.set_defaults(
         func=cmd_rpc_pools_trade_lbp_initializer_tape
     )
@@ -9985,6 +10040,7 @@ def build_parser() -> argparse.ArgumentParser:
     pools_trade_lbp_registry.add_argument(
         "--initializers", required=True
     )
+    pools_trade_lbp_registry.add_argument("--states")
     pools_trade_lbp_registry.add_argument("--out", required=True)
     pools_trade_lbp_registry.set_defaults(
         func=cmd_pools_trade_lbp_registry

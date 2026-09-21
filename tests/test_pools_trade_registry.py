@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.pools_trade_registry import (
     attach_pools_trade_instant_initializations,
+    attach_pools_trade_lbp_supply_states,
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
 )
@@ -288,5 +289,79 @@ def test_attach_pools_trade_instant_initialization_rejects_poolkey_drift():
         attach_pools_trade_instant_initializations(
             registry,
             init,
+        )
+
+
+def test_attach_lbp_initializer_supply_state():
+    registry = [{
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 900,
+        "pool_id": POOL_ID,
+        "reserved_token_amount_for_lp": 200,
+        "initializer_block": 10,
+    }]
+    rows = attach_pools_trade_lbp_supply_states(
+        registry,
+        [{
+            "token": TOKEN,
+            "state_block": 10,
+            "token_decimals": 18,
+            "supply_raw": 1000,
+        }],
+    )
+    row = rows[0]
+    assert row["source_id"] == "pools_trade_lbp"
+    assert row["distribution_amount_raw"] == 900
+    assert row["supply_raw"] == 1000
+    assert row["token_decimals"] == 18
+    assert row["state_block"] == 10
+
+
+def test_attach_lbp_supply_state_rejects_distribution_above_supply():
+    registry = [{
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 1001,
+        "pool_id": POOL_ID,
+        "reserved_token_amount_for_lp": 200,
+        "initializer_block": 10,
+    }]
+    with pytest.raises(ValueError, match="distributed amount exceeds"):
+        attach_pools_trade_lbp_supply_states(
+            registry,
+            [{
+                "token": TOKEN,
+                "state_block": 10,
+                "token_decimals": 18,
+                "supply_raw": 1000,
+            }],
+        )
+
+
+def test_attach_lbp_supply_state_rejects_state_block_drift():
+    registry = [{
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "supply_raw": 900,
+        "pool_id": POOL_ID,
+        "reserved_token_amount_for_lp": 200,
+        "initializer_block": 10,
+    }]
+    with pytest.raises(ValueError, match="state block"):
+        attach_pools_trade_lbp_supply_states(
+            registry,
+            [{
+                "token": TOKEN,
+                "state_block": 11,
+                "token_decimals": 18,
+                "supply_raw": 1000,
+            }],
         )
 

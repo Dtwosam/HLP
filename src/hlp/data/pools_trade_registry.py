@@ -189,6 +189,90 @@ def attach_pools_trade_instant_initializations(
     return output
 
 
+def attach_pools_trade_lbp_supply_states(
+    registry_rows: Iterable[dict],
+    state_rows: Iterable[dict],
+) -> list[dict]:
+    """Replace provisional distribution supply with initializer-block state."""
+    states: dict[str, dict] = {}
+    for raw in state_rows:
+        row = dict(raw)
+        token = str(row.get("token") or "").lower()
+        if not token:
+            raise ValueError("pools.trade LBP state row has no token")
+        if token in states:
+            raise ValueError(
+                f"duplicate pools.trade LBP state token: {token}"
+            )
+        states[token] = row
+
+    registry = [dict(row) for row in registry_rows]
+    if len(states) != len(registry):
+        raise ValueError(
+            "pools.trade LBP state population does not match registry: "
+            f"{len(states)} != {len(registry)}"
+        )
+
+    output = []
+    for row in registry:
+        token = str(row["token"]).lower()
+        state = states.get(token)
+        if state is None:
+            raise ValueError(
+                f"missing pools.trade LBP initializer state: {token}"
+            )
+        initializer_block = int(row["initializer_block"])
+        state_block = int(state.get("state_block", -1))
+        if state_block != initializer_block:
+            raise ValueError(
+                "pools.trade LBP state block does not match initializer: "
+                f"{token} {state_block} != {initializer_block}"
+            )
+        decimals = int(state.get("token_decimals", -1))
+        supply = int(state.get("supply_raw", 0))
+        distribution = int(row["supply_raw"])
+        reserved = int(row["reserved_token_amount_for_lp"])
+        if decimals < 0 or decimals > 255:
+            raise ValueError(
+                f"pools.trade LBP token decimals invalid: {token}"
+            )
+        if supply <= 0:
+            raise ValueError(
+                f"pools.trade LBP totalSupply is non-positive: {token}"
+            )
+        if distribution <= 0 or distribution > supply:
+            raise ValueError(
+                "pools.trade LBP distributed amount exceeds "
+                f"initializer-block supply: {token}"
+            )
+        if reserved < 0 or reserved > supply:
+            raise ValueError(
+                "pools.trade LBP reserved allocation exceeds "
+                f"initializer-block supply: {token}"
+            )
+        output.append({
+            **row,
+            "source_id": "pools_trade_lbp",
+            "source_kind": "launchpad",
+            "distribution_amount_raw": distribution,
+            "supply_raw": supply,
+            "token_decimals": decimals,
+            "state_block": state_block,
+            "supply_seed_semantics": (
+                "initializer-block-end totalSupply; replay later "
+                "mint/burn Transfer deltas causally"
+            ),
+        })
+
+    output.sort(
+        key=lambda row: (
+            int(row["initializer_block"]),
+            row["token"],
+        )
+    )
+    return output
+
+
 def build_pools_trade_lbp_registry(
     created_rows: Iterable[PoolsTradeTokenCreated],
     distributed_rows: Iterable[PoolsTradeTokenDistributed],
