@@ -80,7 +80,10 @@ from hlp.data.direct_evidence import (
     filter_direct_supply_deltas,
     summarize_direct_market_evidence_plan,
 )
-from hlp.data.direct_origin import build_direct_origin_attribution
+from hlp.data.direct_origin import (
+    build_conclusive_direct_launch_population,
+    build_direct_origin_attribution,
+)
 from hlp.data.direct_quotes import (
     DIRECT_PRICEABLE_STATUSES,
     build_direct_quote_registry_from_clients,
@@ -3102,6 +3105,58 @@ def cmd_phase2_direct_origin_attribution(args: argparse.Namespace) -> int:
     print(json.dumps(payload, sort_keys=True))
     return 0
 
+
+
+
+def cmd_phase2_direct_launch_population(args: argparse.Namespace) -> int:
+    """Freeze conclusive non-launchpad direct market candidates."""
+    attributed_path = Path(args.attributed_registry)
+    report_path = Path(args.attribution_report)
+    attributed = _load_jsonl(args.attributed_registry)
+    report = json.loads(report_path.read_text())
+    if not isinstance(report, dict):
+        raise SystemExit("direct attribution report must be a JSON object")
+
+    rows, summary = build_conclusive_direct_launch_population(
+        attributed,
+        report,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_conclusive_direct_launch_population",
+            "chain_id": 4663,
+            "attributed_registry": attributed_path.name,
+            "attributed_registry_sha256": _sha256_file(
+                args.attributed_registry
+            ),
+            "attribution_report": report_path.name,
+            "attribution_report_sha256": _sha256_file(
+                args.attribution_report
+            ),
+            "direct_launch_population_conclusive": True,
+            "selector_freeze_ready": False,
+            "source_coverage_complete": False,
+        },
+    )
+    payload = {
+        **summary,
+        "attributed_registry_sha256": _sha256_file(
+            args.attributed_registry
+        ),
+        "attribution_report_sha256": _sha256_file(
+            args.attribution_report
+        ),
+        "direct_launch_population_sha256": manifest["sha256"],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(payload, sort_keys=True))
+    return 0
 
 
 def cmd_phase2_direct_market_evidence_plan(
@@ -10585,6 +10640,23 @@ def build_parser() -> argparse.ArgumentParser:
     direct_origin.add_argument("--summary-out", required=True)
     direct_origin.set_defaults(
         func=cmd_phase2_direct_origin_attribution
+    )
+
+    direct_launch_population = sub.add_parser(
+        "phase2-direct-launch-population"
+    )
+    direct_launch_population.add_argument(
+        "--attributed-registry", required=True
+    )
+    direct_launch_population.add_argument(
+        "--attribution-report", required=True
+    )
+    direct_launch_population.add_argument("--out", required=True)
+    direct_launch_population.add_argument(
+        "--summary-out", required=True
+    )
+    direct_launch_population.set_defaults(
+        func=cmd_phase2_direct_launch_population
     )
 
     direct_evidence_plan = sub.add_parser(
