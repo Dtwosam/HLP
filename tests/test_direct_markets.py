@@ -1,6 +1,7 @@
 import pytest
 
 from hlp.data.direct_markets import (
+    attribute_direct_market_origins,
     build_v3_direct_market_registry,
     build_v4_direct_market_registry,
     summarize_direct_market_registry,
@@ -175,3 +176,69 @@ def test_discovery_summary_keeps_canonical_selection_open():
     assert report["tokens"] == 1
     assert report["unresolved_origin_markets"] == 1
     assert report["canonical_market_selection_complete"] is False
+
+
+
+def test_market_origin_attribution_matches_exact_token_address_only():
+    rows = build_v4_direct_market_registry(
+        [v4_init()],
+        [state()],
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18},
+    )
+    attributed = attribute_direct_market_origins(
+        rows,
+        {
+            "pons_v2": [{"token": TOKEN}],
+            "noxa": [{"token": OTHER}],
+        },
+    )
+
+    row = attributed[0]
+    assert row["origin_classification"] == "known_launch_source"
+    assert row["origin_attribution_complete"] is True
+    assert row["launch_source_ids"] == ["pons_v2"]
+
+
+def test_unmatched_market_origin_stays_unattributed_not_direct_by_assumption():
+    rows = build_v4_direct_market_registry(
+        [v4_init()],
+        [state()],
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18},
+    )
+    attributed = attribute_direct_market_origins(
+        rows,
+        {"pons_v2": [{"token": OTHER}]},
+    )
+
+    row = attributed[0]
+    assert row["origin_classification"] == "unattributed"
+    assert row["origin_attribution_complete"] is False
+    assert row["launch_source_ids"] == []
+
+
+def test_origin_registry_duplicate_token_fails_closed():
+    rows = build_v4_direct_market_registry(
+        [v4_init()],
+        [state()],
+        source_id="direct_uniswap_v4",
+        venue="uniswap_v4",
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18},
+    )
+
+    with pytest.raises(ValueError, match="repeats token"):
+        attribute_direct_market_origins(
+            rows,
+            {
+                "pons_v2": [
+                    {"token": TOKEN},
+                    {"token": TOKEN},
+                ]
+            },
+        )
