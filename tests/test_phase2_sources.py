@@ -66,6 +66,7 @@ def test_inventory_tracks_partial_lifecycle_adapters_without_claiming_phase1_pro
         "flap",
         "trench_today",
         "hood_fun_current",
+        "hood_fun_previous",
     ):
         assert rows[source_id]["readiness"] == "adapter_ready"
         assert rows[source_id]["implementation_evidence"]
@@ -81,3 +82,15 @@ def test_pools_trade_lbp_price_surface_is_decoded_before_reconstruction():
     assert "hlp.data.types.CcaPriceEvent" in lbp["implementation_evidence"]
     assert "clearing-price orientation" in lbp["blocking_gap"]
     assert "migration stitching" in lbp["blocking_gap"]
+
+
+
+def test_legacy_hood_fun_reuses_compatible_curve_adapter():
+    rows = {row["source_id"]: row for row in build_phase2_source_inventory()}
+    legacy = rows["hood_fun_previous"]
+
+    assert legacy["readiness"] == "adapter_ready"
+    assert legacy["market_phases"] == ["curve"]
+    assert "hlp.protocols.hood_fun" in legacy["implementation_evidence"]
+    assert "hlp.data.hood_fun_generations" in legacy["implementation_evidence"]
+    assert "historical backfill" in legacy["blocking_gap"]
