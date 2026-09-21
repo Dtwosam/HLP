@@ -102,6 +102,10 @@ Implemented foundation:
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
+- the keyless SolidRPC filtered log cap is now **200 blocks** (observed
+  2026-09-21), so Phase-2 backfills must use more aggressive source sharing,
+  sparse quote-price sampling, or the free authenticated route rather than the
+  older 2,000-block assumption;
 - pools.trade LBP price-path reconstruction and migration lifecycle;
 - legacy hood.fun contract discovery/adapter for the previous deployment;
 - deterministic canonical multi-pool market selection for tokens with several
@@ -154,9 +158,14 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
 
 **Historical archive:** SolidRPC Robinhood archive.
 
-Verified provider facts at 2026-09-04:
+Verified provider facts:
 - keyless public Robinhood route works from our runner;
-- public eth_getLogs maximum range is 2,000 blocks;
+- the accepted Phase-1 measurements on 2026-09-04 observed a 2,000-block
+  public filtered `eth_getLogs` range;
+- **re-verification on 2026-09-21 found the keyless filtered range reduced to
+  200 blocks**. SolidRPC's RPC error explicitly reports
+  `maxFilteredBlockRange=200` and recommends a free API key for wider
+  ranges. Phase-2 acquisition must use the 200-block cap unless authenticated;
 - authenticated Free plan is $0, no card required;
 - Free allowance is 10,000 RPC method calls per UTC day;
 - Robinhood uses archive nodes on the Free plan;
