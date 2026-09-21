@@ -128,6 +128,8 @@ def test_noxa_initialized_registry_cli(tmp_path):
         "pool": POOL,
         "supply_raw": 10**18,
         "launch_block": 10,
+        "launch_transaction_index": 1,
+        "launch_log_index": 2,
     }) + "\n")
     initializes.write_text(json.dumps({
         "pool": POOL,
