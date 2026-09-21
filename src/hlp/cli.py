@@ -1118,6 +1118,49 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_v3_swap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire one shared V3 Swap topic tape across all pool addresses."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = [
+        decode_v3_swap(log)
+        for log in rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            topics=[V3_SWAP_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "uniswap_v3_swap",
+            "address_filter": None,
+            "shared_direct_v3_surface": True,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V3_SWAP_TOPIC,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "swaps": manifest["records"],
+        "shared_direct_v3_surface": True,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_v4_swap_window(
     args: argparse.Namespace,
 ) -> int:
@@ -6051,6 +6094,22 @@ def build_parser() -> argparse.ArgumentParser:
     v4_initialize.add_argument("--out", required=True)
     v4_initialize.set_defaults(
         func=cmd_rpc_v4_initialize_window
+    )
+
+    v3_swap = sub.add_parser(
+        "rpc-v3-swap-window"
+    )
+    v3_swap.add_argument("--from-block", type=int, required=True)
+    v3_swap.add_argument("--to-block", type=int, required=True)
+    v3_swap.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    v3_swap.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    v3_swap.add_argument("--out", required=True)
+    v3_swap.set_defaults(
+        func=cmd_rpc_v3_swap_window
     )
 
     v4_swap = sub.add_parser(
