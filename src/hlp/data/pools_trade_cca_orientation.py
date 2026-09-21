@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Mapping
 
 from hlp.config import ROBINHOOD_CHAIN_ID, normalize_address
@@ -183,28 +183,33 @@ def validate_pools_trade_cca_orientation(
     recomputed_direct_error = inferred["direct_relative_error"]
     recomputed_inverse_error = inferred["inverse_relative_error"]
 
-    price_evidence_error = abs(
-        direct / recomputed_direct - Decimal(1)
-    )
+    with localcontext() as context:
+        context.prec = 80
+        price_evidence_error = abs(
+            direct / recomputed_direct - Decimal(1)
+        )
+        direct_error_evidence_error = abs(
+            direct_error - recomputed_direct_error
+        )
+        inverse_error_evidence_error = abs(
+            inverse_error - recomputed_inverse_error
+        )
+        inverse_error_scale = max(
+            Decimal(1),
+            abs(recomputed_inverse_error),
+        )
+        inverse_error_relative = (
+            inverse_error_evidence_error / inverse_error_scale
+        )
     if price_evidence_error > max_error:
         raise ValueError(
             "pools.trade CCA direct price evidence exceeds error threshold"
         )
-    direct_error_evidence_error = abs(
-        direct_error - recomputed_direct_error
-    )
     if direct_error_evidence_error > max_error:
         raise ValueError(
             "pools.trade CCA direct error evidence exceeds error threshold"
         )
-    inverse_error_evidence_error = abs(
-        inverse_error - recomputed_inverse_error
-    )
-    inverse_error_scale = max(
-        Decimal(1),
-        abs(recomputed_inverse_error),
-    )
-    if inverse_error_evidence_error / inverse_error_scale > max_error:
+    if inverse_error_relative > max_error:
         raise ValueError(
             "pools.trade CCA inverse error evidence exceeds error threshold"
         )
