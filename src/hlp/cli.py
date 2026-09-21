@@ -99,7 +99,10 @@ from hlp.data.oracles import (
 from hlp.data.phase2_coverage import apply_phase2_source_coverage_report
 from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.pools_fun_registry import build_pools_fun_registry
-from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
+from hlp.data.pools_trade_registry import (
+    build_pools_trade_instant_registry,
+    build_pools_trade_lbp_registry,
+)
 from hlp.data.pools_trade_v4 import (
     build_pools_trade_v4_market_cap_points,
     summarize_pools_trade_market_caps,
@@ -154,7 +157,15 @@ from hlp.data.trench_curve import (
     summarize_trench_curve_market_caps,
 )
 from hlp.data.trench_registry import build_trench_launch_registry
-from hlp.data.types import FlapEvent, HoodFunEvent, TrenchEvent
+from hlp.data.types import (
+    FlapEvent,
+    HoodFunEvent,
+    PoolsTradeLbpInitializerCreated,
+    PoolsTradeTokenCreated,
+    PoolsTradeTokenDistributed,
+    PoolsTradeTokenLaunched,
+    TrenchEvent,
+)
 from hlp.data.v3_launchpad import (
     build_v3_launchpad_market_cap_points,
     summarize_v3_launchpad_market_caps,
@@ -185,6 +196,11 @@ from hlp.protocols.pools_trade import (
     decode_pools_trade_token_created,
     decode_pools_trade_token_distributed,
     decode_pools_trade_token_launched,
+)
+from hlp.protocols.pools_trade_lbp import (
+    INITIALIZER_CREATED_TOPIC as POOLS_TRADE_LBP_INITIALIZER_CREATED_TOPIC,
+    POOLS_TRADE_LBP_STRATEGY,
+    decode_pools_trade_lbp_initializer_created,
 )
 from hlp.protocols.pons import (
     V1_LAUNCH_CONFIG_ADDED_TOPIC,
@@ -828,6 +844,236 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pools_trade_launcher_tape(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire shared pools.trade TokenCreated/TokenDistributed tapes."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    launchers = [
+        POOLS_TRADE_LAUNCHER_CURRENT,
+        POOLS_TRADE_LAUNCHER_ORIGINAL,
+    ]
+    logs = list(
+        rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=launchers,
+            topics=[[
+                POOLS_TRADE_TOKEN_CREATED_TOPIC,
+                POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC,
+            ]],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    )
+    created = [
+        decode_pools_trade_token_created(row)
+        for row in logs
+        if row.topics[0] == POOLS_TRADE_TOKEN_CREATED_TOPIC
+    ]
+    distributed = [
+        decode_pools_trade_token_distributed(row)
+        for row in logs
+        if row.topics[0] == POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC
+    ]
+    common = {
+        "source": "pools_trade_launcher_events",
+        "chain_id": 4663,
+        "launchers": [address.lower() for address in launchers],
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+    }
+    created_manifest = write_jsonl_snapshot(
+        created,
+        output=Path(args.created_out),
+        provenance={
+            **common,
+            "event_topic0": POOLS_TRADE_TOKEN_CREATED_TOPIC,
+        },
+    )
+    distributed_manifest = write_jsonl_snapshot(
+        distributed,
+        output=Path(args.distributed_out),
+        provenance={
+            **common,
+            "event_topic0": POOLS_TRADE_TOKEN_DISTRIBUTED_TOPIC,
+        },
+    )
+    print(json.dumps({
+        "created": created_manifest,
+        "distributed": distributed_manifest,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pools_trade_instant_launch_tape(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire pools.trade InstantLaunchStrategy TokenLaunched tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    logs = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=list(POOLS_TRADE_INSTANT_STRATEGIES),
+        topics=[POOLS_TRADE_TOKEN_LAUNCHED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    rows = [decode_pools_trade_token_launched(row) for row in logs]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "pools_trade_instant_strategy_events",
+            "chain_id": 4663,
+            "instant_strategies": [
+                address.lower()
+                for address in POOLS_TRADE_INSTANT_STRATEGIES
+            ],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": POOLS_TRADE_TOKEN_LAUNCHED_TOPIC,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "launches": manifest["records"],
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_pools_trade_lbp_initializer_tape(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire pools.trade LBP InitializerCreated tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    logs = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=POOLS_TRADE_LBP_STRATEGY,
+        topics=[POOLS_TRADE_LBP_INITIALIZER_CREATED_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    rows = [
+        decode_pools_trade_lbp_initializer_created(row)
+        for row in logs
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "pools_trade_lbp_initializer_events",
+            "chain_id": 4663,
+            "strategy": POOLS_TRADE_LBP_STRATEGY.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": POOLS_TRADE_LBP_INITIALIZER_CREATED_TOPIC,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "initializers": manifest["records"],
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pools_trade_instant_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Assemble instant registry from reusable pools.trade tapes."""
+    created = [
+        PoolsTradeTokenCreated(**row)
+        for row in _load_jsonl(args.created)
+    ]
+    distributed = [
+        PoolsTradeTokenDistributed(**row)
+        for row in _load_jsonl(args.distributed)
+    ]
+    launched = [
+        PoolsTradeTokenLaunched(**row)
+        for row in _load_jsonl(args.launched)
+    ]
+    rows = build_pools_trade_instant_registry(
+        created,
+        distributed,
+        launched,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "assembled_pools_trade_instant_registry",
+            "chain_id": 4663,
+            "created_tape": Path(args.created).name,
+            "distributed_tape": Path(args.distributed).name,
+            "launched_tape": Path(args.launched).name,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "instant_launches": len(rows),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_pools_trade_lbp_registry(
+    args: argparse.Namespace,
+) -> int:
+    """Assemble LBP registry from shared launcher + initializer tapes."""
+    created = [
+        PoolsTradeTokenCreated(**row)
+        for row in _load_jsonl(args.created)
+    ]
+    distributed = [
+        PoolsTradeTokenDistributed(**row)
+        for row in _load_jsonl(args.distributed)
+    ]
+    initializers = [
+        PoolsTradeLbpInitializerCreated(**row)
+        for row in _load_jsonl(args.initializers)
+    ]
+    rows = build_pools_trade_lbp_registry(
+        created,
+        distributed,
+        initializers,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "assembled_pools_trade_lbp_registry",
+            "chain_id": 4663,
+            "created_tape": Path(args.created).name,
+            "distributed_tape": Path(args.distributed).name,
+            "initializer_tape": Path(args.initializers).name,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "lbp_launches": len(rows),
     }, sort_keys=True))
     return 0
 
@@ -5246,6 +5492,101 @@ def build_parser() -> argparse.ArgumentParser:
     pools_fun_mcap.add_argument("--out", required=True)
     pools_fun_mcap.add_argument("--summary-out", required=True)
     pools_fun_mcap.set_defaults(func=cmd_rpc_pools_fun_market_cap_window)
+
+    pools_trade_launcher = sub.add_parser(
+        "rpc-pools-trade-launcher-tape"
+    )
+    pools_trade_launcher.add_argument(
+        "--from-block", type=int, required=True
+    )
+    pools_trade_launcher.add_argument(
+        "--to-block", type=int, required=True
+    )
+    pools_trade_launcher.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    pools_trade_launcher.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    pools_trade_launcher.add_argument("--created-out", required=True)
+    pools_trade_launcher.add_argument(
+        "--distributed-out", required=True
+    )
+    pools_trade_launcher.set_defaults(
+        func=cmd_rpc_pools_trade_launcher_tape
+    )
+
+    pools_trade_instant_tape = sub.add_parser(
+        "rpc-pools-trade-instant-launch-tape"
+    )
+    pools_trade_instant_tape.add_argument(
+        "--from-block", type=int, required=True
+    )
+    pools_trade_instant_tape.add_argument(
+        "--to-block", type=int, required=True
+    )
+    pools_trade_instant_tape.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    pools_trade_instant_tape.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    pools_trade_instant_tape.add_argument("--out", required=True)
+    pools_trade_instant_tape.set_defaults(
+        func=cmd_rpc_pools_trade_instant_launch_tape
+    )
+
+    pools_trade_lbp_tape = sub.add_parser(
+        "rpc-pools-trade-lbp-initializer-tape"
+    )
+    pools_trade_lbp_tape.add_argument(
+        "--from-block", type=int, required=True
+    )
+    pools_trade_lbp_tape.add_argument(
+        "--to-block", type=int, required=True
+    )
+    pools_trade_lbp_tape.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    pools_trade_lbp_tape.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    pools_trade_lbp_tape.add_argument("--out", required=True)
+    pools_trade_lbp_tape.set_defaults(
+        func=cmd_rpc_pools_trade_lbp_initializer_tape
+    )
+
+    pools_trade_instant_registry = sub.add_parser(
+        "pools-trade-instant-registry"
+    )
+    pools_trade_instant_registry.add_argument(
+        "--created", required=True
+    )
+    pools_trade_instant_registry.add_argument(
+        "--distributed", required=True
+    )
+    pools_trade_instant_registry.add_argument(
+        "--launched", required=True
+    )
+    pools_trade_instant_registry.add_argument("--out", required=True)
+    pools_trade_instant_registry.set_defaults(
+        func=cmd_pools_trade_instant_registry
+    )
+
+    pools_trade_lbp_registry = sub.add_parser(
+        "pools-trade-lbp-registry"
+    )
+    pools_trade_lbp_registry.add_argument("--created", required=True)
+    pools_trade_lbp_registry.add_argument(
+        "--distributed", required=True
+    )
+    pools_trade_lbp_registry.add_argument(
+        "--initializers", required=True
+    )
+    pools_trade_lbp_registry.add_argument("--out", required=True)
+    pools_trade_lbp_registry.set_defaults(
+        func=cmd_pools_trade_lbp_registry
+    )
 
     pools_trade_registry = sub.add_parser("rpc-pools-trade-registry-window")
     pools_trade_registry.add_argument("--from-block", type=int, required=True)
