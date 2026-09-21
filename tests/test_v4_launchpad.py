@@ -245,9 +245,9 @@ def test_v4_market_cap_can_replay_supply_from_launch_seed():
     supply_deltas = [{
         "token": TOKEN,
         "supply_delta_raw": 10**17,
-        "block_number": 9,
+        "block_number": 10,
         "transaction_hash": "0x" + "bb" * 32,
-        "transaction_index": 2,
+        "transaction_index": 0,
         "log_index": 0,
     }]
     rows = build_v4_launchpad_market_cap_points(
