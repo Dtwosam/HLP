@@ -80,10 +80,11 @@ Implemented foundation:
   treated as proof of a direct launch;
 - a persistent pools.trade Crowd Launch/LBP registry reconciling token creation,
   strategy distribution, supply, reserved LP allocation and initializer state.
-  CCA price events are decoded and deterministic orientation-gated market-cap
-  reconstruction is implemented. The source remains `decoder_ready` until
-  clearing-price orientation and the post-auction V4 handoff are frozen from
-  chain evidence;
+  CCA price orientation is now frozen as `quote_per_token` from a
+  same-transaction CCA-checkpoint → V4-Initialize anchor, the registry derives
+  the exact V4 PoolId/PoolKey, and CCA plus migrated-V4 summaries merge into one
+  fail-closed lifecycle. `pools_trade_lbp` is therefore `adapter_ready`;
+  historical coverage remains `not_started`;
 - a fail-closed Phase-2 historical coverage contract, CI-proven in run
   **35605506698**, that requires every source to report continuous
   reconstruction through the frozen snapshot with SHA-256 provenance before
@@ -129,6 +130,21 @@ Implemented foundation:
   `35b9aab31f5b258540dcb7b018c07181838a4c9a742d9bd996b2786a0b8fd26d`.
   That sample is therefore not valid migration-price evidence for freezing the
   CCA Q96 orientation; successful-LBP discovery is being studied separately.
+- pools.trade LBP CCA orientation is closed by successful-auction evidence.
+  Run **35627264268** observed the final CCA checkpoint and exact derived-PoolId
+  V4 Initialize in the **same transaction** at block **30,493,816**. The direct
+  Q96 interpretation (`quote_per_token`) agrees with the V4 raw price to
+  roughly **9.4e-32 relative error**; artifact **10653022924** has SHA-256
+  `b466e75ad7db3f89c3f0d7b548f109979291bd45d798b1e34755bdb7d8576e3b`.
+- the orientation/handoff path is corroborated across a broader LBP population.
+  Run **35626412874** discovered **437** LBP initializers over blocks
+  **30,000,000..31,000,000** and found **149** exact derived-PoolId V4
+  Initializes in a continuous search through block **31,500,000**, using
+  **7,807** keyless requests with no missing ranges. Artifact **10653894082**
+  has SHA-256
+  `d23486f7792d595b18850f07a095e11ae2795f478f23e246356704ea088b798b`.
+  The migration-to-Initialize gap among those successes ranges from **3** to
+  **1,545** blocks (median **57**).
 - launchpad USD conversion no longer requires continuous WETH/USD scans:
   pools.fun, Flap, trench.today and hood.fun now share sparse causal V3 anchor
   sampling bounded to the observed keyless **200-block** filtered-log cap.
@@ -139,8 +155,7 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   2026-09-21), so Phase-2 backfills must use more aggressive source sharing,
   sparse quote-price sampling, or the free authenticated route rather than the
   older 2,000-block assumption;
-- pools.trade LBP clearing-price orientation freeze and post-auction V4
-  handoff evidence;
+- complete pools.trade LBP historical CCA and migrated-V4 backfill;
 - complete historical backfills for both hood.fun generations; the previous
   deployment's core TokenCreated/Trade surface is now proven compatible with
   the shared hood.fun adapter;
