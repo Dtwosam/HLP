@@ -129,6 +129,7 @@ def test_flap_v3_graduation_registry_cli(tmp_path):
         "market_available_at_graduation": True,
         "market_source_id": "direct_uniswap_v3",
         "market_venue": "uniswap_v3",
+        "market_quote_token": quote,
         "market_quote_decimals": 18,
         "market_initialize_block": 20,
         "market_initialize_transaction_index": 2,
