@@ -110,6 +110,35 @@ Implemented foundation:
   workflows intentionally report `source_coverage_complete=false` until
   supported-quote filtering, exact initialization-block ERC-20 state, market
   event reconstruction and selector evidence are complete;
+- the direct-DEX discovery path now has a canonical address-level quote
+  registry built from official Robinhood asset identity plus exact Chainlink
+  directory matches. WETH/native ETH and USDG use the existing canonical
+  anchor semantics; the previously verified cbBTC Chainlink route is retained.
+  Robinhood assets with no official feed remain visible as
+  `missing_chainlink_feed` and are excluded from the priceable quote allowlist
+  rather than silently treated as priceable;
+- shared direct V3/V4 Swap acquisition and ERC-20 mint/burn supply-delta
+  acquisition are implemented with dispatch-only **128-shard** backfill
+  contracts. Their aggregate manifests preserve exact block continuity and
+  SHA-256 identity without materializing the full swap/supply histories into
+  one in-memory tape;
+- direct V3/V4 market-window reconstruction now consumes those sharded inputs,
+  carries Initialize-block-end supply seeds forward with causal mint/burn
+  deltas, and retains every candidate market independently. WETH/USD uses the
+  sparse causal V3 anchor path; Chainlink-priced direct quotes now have an
+  analogous sparse causal sampler that reads state immediately before only the
+  windows containing target market events and replays same-window
+  `AnswerUpdated` events in transaction/log order;
+- a dispatch-only real-market selector-evidence pilot is prepared. It samples
+  up to **20** competing tokens by deterministic chronological even spacing,
+  studies **100,000-block** overlap windows beginning only after all sampled
+  markets exist, filters each full raw tape once into compact evidence inputs,
+  reconstructs Uniswap V3/Sushi V3/Uniswap V4 market points, then feeds the
+  existing `phase2-market-quality-audit`. The pilot is intentionally
+  research-only: `selector_freeze_ready=false`,
+  `source_coverage_complete=false`, and no threshold/universe labels are
+  emitted. It has not yet produced empirical evidence because the required
+  upstream direct-market backfill artifacts still need to be executed;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;
