@@ -7301,6 +7301,55 @@ def build_parser() -> argparse.ArgumentParser:
     pools_fun_registry.add_argument("--out", required=True)
     pools_fun_registry.set_defaults(func=cmd_rpc_pools_fun_registry_window)
 
+    v3_registry_filter = sub.add_parser(
+        "phase2-v3-registry-event-filter"
+    )
+    v3_registry_filter.add_argument("--registry", required=True)
+    v3_filter_input = v3_registry_filter.add_mutually_exclusive_group(
+        required=True
+    )
+    v3_filter_input.add_argument("--input")
+    v3_filter_input.add_argument("--input-manifest")
+    v3_registry_filter.add_argument("--input-shard-dir")
+    v3_registry_filter.add_argument("--out", required=True)
+    v3_registry_filter.add_argument("--summary-out", required=True)
+    v3_registry_filter.set_defaults(
+        func=cmd_phase2_v3_registry_event_filter
+    )
+
+    pools_fun_initialized = sub.add_parser(
+        "phase2-pools-fun-initialized-registry"
+    )
+    pools_fun_initialized.add_argument("--registry", required=True)
+    pools_fun_initialized.add_argument("--initializes", required=True)
+    pools_fun_initialized.add_argument("--out", required=True)
+    pools_fun_initialized.add_argument("--summary-out", required=True)
+    pools_fun_initialized.set_defaults(
+        func=cmd_pools_fun_initialized_registry
+    )
+
+    pools_fun_market = sub.add_parser(
+        "phase2-pools-fun-market-window"
+    )
+    pools_fun_market.add_argument("--registry", required=True)
+    pools_fun_market.add_argument("--swaps", required=True)
+    pools_fun_market.add_argument("--from-block", type=int, required=True)
+    pools_fun_market.add_argument("--to-block", type=int, required=True)
+    pools_fun_market.add_argument("--chunk-size", type=int, default=100_000)
+    pools_fun_market.add_argument("--min-chunk-size", type=int, default=1)
+    pools_fun_market.add_argument(
+        "--usd-anchor-pool",
+        default=UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+    )
+    pools_fun_market.add_argument("--quote-decimals", required=True)
+    pools_fun_market.add_argument("--quote-feeds", required=True)
+    pools_fun_market.add_argument("--out", required=True)
+    pools_fun_market.add_argument("--summary-out", required=True)
+    pools_fun_market.add_argument("--report-out", required=True)
+    pools_fun_market.set_defaults(
+        func=cmd_phase2_pools_fun_market_window
+    )
+
     v3_pool_created = sub.add_parser(
         "rpc-v3-pool-created-window"
     )
