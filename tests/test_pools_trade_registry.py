@@ -1,5 +1,11 @@
-from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
+import pytest
+
+from hlp.data.pools_trade_registry import (
+    build_pools_trade_instant_registry,
+    build_pools_trade_lbp_registry,
+)
 from hlp.data.types import (
+    PoolsTradeLbpInitializerCreated,
     PoolsTradeTokenCreated,
     PoolsTradeTokenDistributed,
     PoolsTradeTokenLaunched,
@@ -55,3 +61,137 @@ def test_join_pools_trade_instant_launch():
     assert row["quote_token"] == ZERO
     assert row["pool_id"] == POOL_ID
     assert row["supply_raw"] == 10**27
+
+
+
+def test_join_pools_trade_lbp_launch_registry():
+    created = PoolsTradeTokenCreated(
+        launcher="0x" + "44" * 20,
+        token=TOKEN,
+        block_number=10,
+        transaction_hash="0x" + "aa" * 32,
+        transaction_index=1,
+        log_index=0,
+    )
+    strategy = "0x" + "66" * 20
+    distributed = PoolsTradeTokenDistributed(
+        launcher=created.launcher,
+        token=TOKEN,
+        strategy=strategy,
+        amount_raw=1_000_000_000 * 10**18,
+        block_number=10,
+        transaction_hash=created.transaction_hash,
+        transaction_index=1,
+        log_index=1,
+    )
+    initializer = PoolsTradeLbpInitializerCreated(
+        strategy=strategy,
+        initializer="0x" + "77" * 20,
+        token=TOKEN,
+        currency=ZERO,
+        migration_block=1000,
+        reserved_token_amount_for_lp=200_000_000 * 10**18,
+        recipient="0x" + "88" * 20,
+        position_recipient="0x" + "99" * 20,
+        pool_fee=2500,
+        pool_tick_spacing=50,
+        pool_hook=ZERO,
+        position_definitions_offset=352,
+        lp_allocation_schedule_offset=576,
+        block_number=10,
+        transaction_hash=created.transaction_hash,
+        transaction_index=1,
+        log_index=2,
+    )
+
+    rows = build_pools_trade_lbp_registry(
+        [created], [distributed], [initializer]
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["launch_kind"] == "crowd_lbp"
+    assert row["token"] == TOKEN
+    assert row["quote_token"] == ZERO
+    assert row["supply_raw"] == 1_000_000_000 * 10**18
+    assert row["reserved_token_amount_for_lp"] == 200_000_000 * 10**18
+    assert row["migration_block"] == 1000
+
+
+def test_lbp_registry_requires_matching_strategy_distribution():
+    created = PoolsTradeTokenCreated(
+        launcher="0x" + "44" * 20,
+        token=TOKEN,
+        block_number=10,
+        transaction_hash="0x" + "aa" * 32,
+        transaction_index=1,
+        log_index=0,
+    )
+    initializer = PoolsTradeLbpInitializerCreated(
+        strategy="0x" + "66" * 20,
+        initializer="0x" + "77" * 20,
+        token=TOKEN,
+        currency=ZERO,
+        migration_block=1000,
+        reserved_token_amount_for_lp=0,
+        recipient="0x" + "88" * 20,
+        position_recipient="0x" + "99" * 20,
+        pool_fee=2500,
+        pool_tick_spacing=50,
+        pool_hook=ZERO,
+        position_definitions_offset=352,
+        lp_allocation_schedule_offset=576,
+        block_number=10,
+        transaction_hash=created.transaction_hash,
+        transaction_index=1,
+        log_index=2,
+    )
+
+    with pytest.raises(ValueError, match="matching distribution"):
+        build_pools_trade_lbp_registry([created], [], [initializer])
+
+
+def test_lbp_registry_rejects_reserved_allocation_above_supply():
+    created = PoolsTradeTokenCreated(
+        launcher="0x" + "44" * 20,
+        token=TOKEN,
+        block_number=10,
+        transaction_hash="0x" + "aa" * 32,
+        transaction_index=1,
+        log_index=0,
+    )
+    strategy = "0x" + "66" * 20
+    distributed = PoolsTradeTokenDistributed(
+        launcher=created.launcher,
+        token=TOKEN,
+        strategy=strategy,
+        amount_raw=100,
+        block_number=10,
+        transaction_hash=created.transaction_hash,
+        transaction_index=1,
+        log_index=1,
+    )
+    initializer = PoolsTradeLbpInitializerCreated(
+        strategy=strategy,
+        initializer="0x" + "77" * 20,
+        token=TOKEN,
+        currency=ZERO,
+        migration_block=1000,
+        reserved_token_amount_for_lp=101,
+        recipient="0x" + "88" * 20,
+        position_recipient="0x" + "99" * 20,
+        pool_fee=2500,
+        pool_tick_spacing=50,
+        pool_hook=ZERO,
+        position_definitions_offset=352,
+        lp_allocation_schedule_offset=576,
+        block_number=10,
+        transaction_hash=created.transaction_hash,
+        transaction_index=1,
+        log_index=2,
+    )
+
+    with pytest.raises(ValueError, match="exceeds supply"):
+        build_pools_trade_lbp_registry(
+            [created], [distributed], [initializer]
+        )
