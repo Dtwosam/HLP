@@ -258,3 +258,113 @@ def build_causal_market_quality_trace(
         )
 
     return output
+
+
+
+def summarize_causal_market_quality_trace(
+    rows: Iterable[Mapping[str, object]],
+) -> dict:
+    """Summarize candidate stability and cross-market price disagreement.
+
+    This is diagnostic evidence only. It intentionally does not select or
+    freeze a production market-selection rule.
+    """
+    data = [dict(row) for row in rows]
+    if not data:
+        return {
+            "snapshots": 0,
+            "tokens": 0,
+            "multi_market_snapshots": 0,
+            "candidate_switches": 0,
+            "tokens_with_candidate_switches": 0,
+            "candidate_snapshots_by_market": {},
+            "median_market_cap_dispersion_multiple": None,
+            "max_market_cap_dispersion_multiple": None,
+            "selection_rule_frozen": False,
+        }
+
+    data.sort(
+        key=lambda row: (
+            str(row.get("token") or "").lower(),
+            int(row["block_number"]),
+            -1
+            if row.get("transaction_index") is None
+            else int(row["transaction_index"]),
+            int(row["log_index"]),
+            str(row.get("event_market_id") or "").lower(),
+        )
+    )
+
+    last_candidate: dict[str, str] = {}
+    switches_by_token: dict[str, int] = {}
+    candidate_counts: dict[str, int] = {}
+    dispersions: list[Decimal] = []
+    tokens: set[str] = set()
+    multi_market = 0
+
+    for row in data:
+        token = str(row.get("token") or "").lower()
+        candidate = str(row.get("candidate_market_id") or "").lower()
+        if not token or not candidate:
+            raise ValueError(
+                "market-quality trace summary row lacks token/candidate"
+            )
+        if row.get("selection_rule_frozen") is not False:
+            raise ValueError(
+                "market-quality trace unexpectedly freezes selection"
+            )
+        observed = int(row.get("observed_markets", 0))
+        if observed < 1:
+            raise ValueError(
+                "market-quality trace observed_markets must be positive"
+            )
+        tokens.add(token)
+        candidate_counts[candidate] = candidate_counts.get(candidate, 0) + 1
+        if observed > 1:
+            multi_market += 1
+            raw_dispersion = row.get("market_cap_dispersion_multiple")
+            if raw_dispersion is not None:
+                dispersion = Decimal(str(raw_dispersion))
+                if dispersion < 1:
+                    raise ValueError(
+                        "market-cap dispersion multiple cannot be below one"
+                    )
+                dispersions.append(dispersion)
+
+        previous = last_candidate.get(token)
+        if previous is not None and previous != candidate:
+            switches_by_token[token] = switches_by_token.get(token, 0) + 1
+        last_candidate[token] = candidate
+
+    sorted_dispersion = sorted(dispersions)
+    if sorted_dispersion:
+        middle = len(sorted_dispersion) // 2
+        if len(sorted_dispersion) % 2:
+            median = sorted_dispersion[middle]
+        else:
+            median = (
+                sorted_dispersion[middle - 1]
+                + sorted_dispersion[middle]
+            ) / Decimal(2)
+        maximum = sorted_dispersion[-1]
+    else:
+        median = None
+        maximum = None
+
+    return {
+        "snapshots": len(data),
+        "tokens": len(tokens),
+        "multi_market_snapshots": multi_market,
+        "candidate_switches": sum(switches_by_token.values()),
+        "tokens_with_candidate_switches": len(switches_by_token),
+        "candidate_switches_by_token": dict(sorted(switches_by_token.items())),
+        "candidate_snapshots_by_market": dict(sorted(candidate_counts.items())),
+        "dispersion_samples": len(sorted_dispersion),
+        "median_market_cap_dispersion_multiple": (
+            None if median is None else str(median)
+        ),
+        "max_market_cap_dispersion_multiple": (
+            None if maximum is None else str(maximum)
+        ),
+        "selection_rule_frozen": False,
+    }
