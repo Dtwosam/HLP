@@ -1,0 +1,300 @@
+name: phase2-direct-v3-pool-created-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-direct-v3-pool-created-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        source:
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SOURCE_ID: ${{ matrix.source }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: source
+        name: Resolve source contract and boundary
+        run: |
+          case "$SOURCE_ID" in
+            direct_uniswap_v3)
+              echo "factory=0x1f7d7550b1b028f7571e69a784071f0205fd2efa" >> "$GITHUB_OUTPUT"
+              echo "start=8930" >> "$GITHUB_OUTPUT"
+              ;;
+            direct_sushiswap_v3)
+              echo "factory=0xe51960f1b45f1c9fb6d166e6a884f866fc70433b" >> "$GITHUB_OUTPUT"
+              echo "start=6292626" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unknown direct V3 source: $SOURCE_ID" >&2
+              exit 1
+              ;;
+          esac
+      - id: bounds
+        name: Compute exact PoolCreated shard bounds
+        env:
+          REQUIRED_START_BLOCK: ${{ steps.source.outputs.start }}
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty direct V3 shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": index, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire V3 PoolCreated shard
+        env:
+          FACTORY: ${{ steps.source.outputs.factory }}
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v3-pool-created-window \
+            --factory "$FACTORY" \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/${SOURCE_ID}-pool-created-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-${{ matrix.source }}-pool-created-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        source:
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+    env:
+      SOURCE_ID: ${{ matrix.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-${{ matrix.source }}-pool-created-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate and merge PoolCreated discovery
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source_id = os.environ["SOURCE_ID"]
+          if source_id == "direct_uniswap_v3":
+              factory = "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+              start = 8930
+          elif source_id == "direct_sushiswap_v3":
+              factory = "0xe51960f1b45f1c9fb6d166e6a884f866fc70433b"
+              start = 6292626
+          else:
+              raise SystemExit(f"unknown source {source_id}")
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+          root = Path("inputs")
+          files = sorted(
+              root.glob(f"{source_id}-pool-created-*.jsonl")
+          )
+          if len(files) != count:
+              raise SystemExit(
+                  f"expected {count} {source_id} shards, found {len(files)}"
+              )
+
+          aggregate = hashlib.sha256()
+          total = 0
+          shards = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              provenance = manifest.get("provenance") or {}
+              if provenance.get("factory", "").lower() != factory:
+                  raise SystemExit("direct V3 shard factory drift")
+              local = hashlib.sha256()
+              records = 0
+              with path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate.update(raw)
+                      local.update(raw)
+                      if raw.strip():
+                          records += 1
+              if records != int(manifest["records"]):
+                  raise SystemExit("direct V3 shard record drift")
+              if local.hexdigest() != manifest["sha256"]:
+                  raise SystemExit("direct V3 shard SHA drift")
+              total += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": manifest["sha256"],
+                  "from_block": int(provenance["from_block"]),
+                  "to_block": int(provenance["to_block"]),
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual_path = Path(
+              f"artifacts/{source_id}-pool-created-sharded.manifest.json"
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=virtual_path,
+              path_name=f"{source_id}-pool-created.jsonl",
+              records=total,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "uniswap_v3_pool_created",
+                  "source_id": source_id,
+                  "chain_id": 4663,
+                  "factory": factory,
+                  "from_block": start,
+                  "to_block": head,
+                  "shards": shards,
+              },
+          )
+          rows = list(iter_sharded_jsonl(root, virtual_path))
+          seen = set()
+          previous = None
+          for row in rows:
+              pool = row["pool"].lower()
+              if pool in seen:
+                  raise SystemExit(
+                      f"duplicate V3 PoolCreated pool: {pool}"
+                  )
+              seen.add(pool)
+              order = (
+                  int(row["block_number"]),
+                  -1
+                  if row.get("transaction_index") is None
+                  else int(row["transaction_index"]),
+                  int(row["log_index"]),
+                  pool,
+              )
+              if previous is not None and order < previous:
+                  raise SystemExit(
+                      "merged direct V3 PoolCreated tape not chronological"
+                  )
+              previous = order
+
+          merged = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  f"artifacts/{source_id}-pool-created.jsonl"
+              ),
+              provenance={
+                  "source": "merged_uniswap_v3_pool_created_shards",
+                  "source_id": source_id,
+                  "chain_id": 4663,
+                  "factory": factory,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shard_count": count,
+                  "sharded_sha256": virtual["sha256"],
+              },
+          )
+          if merged["records"] != virtual["records"]:
+              raise SystemExit("merged direct V3 record count changed")
+          if merged["sha256"] != virtual["sha256"]:
+              raise SystemExit("merged direct V3 bytes changed")
+
+          summary = {
+              "version": "phase2-direct-v3-pool-created-discovery-v1",
+              "source_id": source_id,
+              "chain_id": 4663,
+              "factory": factory,
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_event_scan": True,
+              "missing_ranges": [],
+              "shards": count,
+              "pools_created": len(rows),
+              "pool_created_sha256": merged["sha256"],
+              "source_coverage_complete": False,
+              "remaining_steps": [
+                  "supported-quote filtering",
+                  "pool Initialize acquisition",
+                  "exact-initialize-block ERC20 state",
+                  "market event reconstruction",
+                  "multi-pool selector evidence",
+              ],
+          }
+          Path(
+              f"artifacts/{source_id}-pool-created-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-${{ matrix.source }}-pool-created-merged
+          path: artifacts/
+          if-no-files-found: error
