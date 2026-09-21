@@ -826,6 +826,7 @@ def _direct_market_args(
     registry,
     initializes,
     swaps,
+    supply_deltas,
     out,
     report,
 ):
@@ -834,6 +835,7 @@ def _direct_market_args(
         initializes=str(initializes),
         swaps=str(swaps),
         swaps_shard_dir=None,
+        supply_deltas=str(supply_deltas),
         swaps_manifest=None,
         from_block=10,
         to_block=20,
@@ -855,6 +857,7 @@ def test_phase2_direct_market_window_parsers():
         "phase2-direct-v3-market-window",
         "--registry", "registry.jsonl",
         "--initializes", "initializes.jsonl",
+        "--supply-deltas", "supply.jsonl",
         "--swaps", "swaps.jsonl",
         "--from-block", "10",
         "--to-block", "20",
@@ -868,6 +871,7 @@ def test_phase2_direct_market_window_parsers():
         "phase2-direct-v4-market-window",
         "--registry", "registry.jsonl",
         "--initializes", "initializes.jsonl",
+        "--supply-deltas", "supply.jsonl",
         "--swaps-manifest", "swaps.manifest.json",
         "--swaps-shard-dir", "inputs",
         "--from-block", "10",
@@ -892,6 +896,7 @@ def test_phase2_direct_v3_market_window_keeps_pool_points_unselected(
     registry = tmp_path / "registry.jsonl"
     initializes = tmp_path / "initializes.jsonl"
     swaps = tmp_path / "swaps.jsonl"
+    supply_deltas = tmp_path / "supply.jsonl"
     out = tmp_path / "points.jsonl"
     report = tmp_path / "report.json"
 
@@ -930,6 +935,8 @@ def test_phase2_direct_v3_market_window_keeps_pool_points_unselected(
         "transaction_index": 1,
         "log_index": 0,
     }])
+    _write_jsonl(supply_deltas, [])
+
 
     class FakeRpc:
         route_label = "test_archive"
@@ -949,6 +956,7 @@ def test_phase2_direct_v3_market_window_keeps_pool_points_unselected(
         registry=registry,
         initializes=initializes,
         swaps=swaps,
+        supply_deltas=supply_deltas,
         out=out,
         report=report,
     )
@@ -983,6 +991,7 @@ def test_phase2_direct_v4_market_window_uses_registry_initialize_evidence(
     registry = tmp_path / "registry.jsonl"
     initializes = tmp_path / "initializes.jsonl"
     swaps = tmp_path / "swaps.jsonl"
+    supply_deltas = tmp_path / "supply.jsonl"
     out = tmp_path / "points.jsonl"
     report = tmp_path / "report.json"
 
@@ -1016,6 +1025,8 @@ def test_phase2_direct_v4_market_window_uses_registry_initialize_evidence(
         "transaction_index": 1,
         "log_index": 0,
     }])
+    _write_jsonl(supply_deltas, [])
+
 
     class FakeRpc:
         route_label = "test_archive"
@@ -1035,6 +1046,7 @@ def test_phase2_direct_v4_market_window_uses_registry_initialize_evidence(
         registry=registry,
         initializes=initializes,
         swaps=swaps,
+        supply_deltas=supply_deltas,
         out=out,
         report=report,
     )
