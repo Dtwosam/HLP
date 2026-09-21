@@ -1,0 +1,194 @@
+name: phase2-pools-trade-cca-event-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-cca-event-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-cca-event-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  INITIALIZER: '0xc5137968f7e6802736ba40e59acd164071ba73cf'
+  CREATED_BLOCK: '30001146'
+  MIGRATION_BLOCK: '30145704'
+  MAX_PROBE_BLOCKS: '20000'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit one proven pools.trade CCA initializer
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+
+          address = os.environ["INITIALIZER"].lower()
+          created = int(os.environ["CREATED_BLOCK"])
+          migration = int(os.environ["MIGRATION_BLOCK"])
+          max_probe = int(os.environ["MAX_PROBE_BLOCKS"])
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+
+          code = rpc.get_code(address, created)
+          if code in {"0x", "0x0", ""}:
+              raise SystemExit("proven CCA initializer has no code at creation")
+
+          end = min(migration, created + max_probe - 1)
+          chunk = 50_000 if key else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          logs = []
+          topic_counts = Counter()
+          first_by_topic = {}
+          last_scanned = created - 1
+          chunks_scanned = 0
+
+          for lo in range(created, end + 1, chunk):
+              hi = min(end, lo + chunk - 1)
+              rows = rpc.get_logs(lo, hi, address=address)
+              chunks_scanned += 1
+              last_scanned = hi
+              for row in rows:
+                  logs.append(row)
+                  topic0 = row.topics[0] if row.topics else "<none>"
+                  topic_counts[topic0] += 1
+                  first_by_topic.setdefault(
+                      topic0,
+                      {
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                          "topics": list(row.topics),
+                          "data": row.data,
+                          "data_bytes": len(
+                              row.data.removeprefix("0x")
+                          ) // 2,
+                          "data_words": (
+                              len(row.data.removeprefix("0x")) // 64
+                              if len(row.data.removeprefix("0x")) % 64 == 0
+                              else None
+                          ),
+                      },
+                  )
+
+              # Stop once the contract has exposed a useful sample without
+              # scanning the full auction window.
+              if len(logs) >= 100 and len(topic_counts) >= 2:
+                  break
+
+          samples = []
+          per_topic = Counter()
+          for row in logs:
+              topic0 = row.topics[0] if row.topics else "<none>"
+              if per_topic[topic0] >= 8:
+                  continue
+              per_topic[topic0] += 1
+              samples.append({
+                  "block_number": row.block_number,
+                  "transaction_hash": row.transaction_hash,
+                  "transaction_index": row.transaction_index,
+                  "log_index": row.log_index,
+                  "topics": list(row.topics),
+                  "data": row.data,
+                  "data_words": (
+                      [
+                          int(
+                              row.data.removeprefix("0x")[i:i+64],
+                              16,
+                          )
+                          for i in range(
+                              0,
+                              len(row.data.removeprefix("0x")),
+                              64,
+                          )
+                      ]
+                      if len(row.data.removeprefix("0x")) % 64 == 0
+                      else None
+                  ),
+              })
+
+          report = {
+              "chain_id": 4663,
+              "initializer": address,
+              "created_block": created,
+              "migration_block": migration,
+              "probe_limit_block": end,
+              "last_scanned_block": last_scanned,
+              "chunks_scanned": chunks_scanned,
+              "logs_observed": len(logs),
+              "topic_counts": dict(topic_counts),
+              "first_by_topic": first_by_topic,
+              "samples": samples,
+              "code_bytes": len(code.removeprefix("0x")) // 2,
+              "code_sha256": hashlib.sha256(
+                  bytes.fromhex(code.removeprefix("0x"))
+              ).hexdigest(),
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          Path("artifacts/pools-trade-cca-event-audit.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              key: report[key]
+              for key in (
+                  "initializer",
+                  "created_block",
+                  "migration_block",
+                  "last_scanned_block",
+                  "chunks_scanned",
+                  "logs_observed",
+                  "topic_counts",
+                  "first_by_topic",
+                  "rpc_requests",
+                  "rpc_route",
+              )
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-cca-event-audit
+          path: artifacts/
+          if-no-files-found: error
