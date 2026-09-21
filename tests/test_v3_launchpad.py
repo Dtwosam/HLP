@@ -4,6 +4,7 @@ import pytest
 
 from hlp.data.v3_launchpad import (
     build_v3_launchpad_market_cap_points,
+    merge_v3_launchpad_market_cap_summaries,
     summarize_v3_launchpad_market_caps,
 )
 
@@ -174,3 +175,71 @@ def test_v3_swap_emits_comparable_active_quote_liquidity():
     assert rows[1]["quote_decimals"] == 18
     assert rows[1]["token_is_currency0"] is True
     assert Decimal(rows[1]["active_quote_liquidity_usd"]) == Decimal("2000")
+
+
+
+def test_merge_v3_launchpad_market_cap_summaries():
+    rows = merge_v3_launchpad_market_cap_summaries([
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool": POOL,
+            "quote_token": QUOTE,
+            "price_points": 2,
+            "priced_points": 2,
+            "max_market_cap_proxy_usd": "90000",
+            "max_market_cap_block": 10,
+            "crossed_100k": False,
+        },
+        {
+            "token": TOKEN,
+            "venue": "example",
+            "pool": POOL,
+            "quote_token": QUOTE,
+            "price_points": 3,
+            "priced_points": 3,
+            "max_market_cap_proxy_usd": "150000",
+            "max_market_cap_block": 20,
+            "crossed_100k": True,
+        },
+    ])
+
+    assert rows == [{
+        "token": TOKEN,
+        "venue": "example",
+        "pool": POOL,
+        "quote_token": QUOTE,
+        "price_points": 5,
+        "priced_points": 5,
+        "max_market_cap_proxy_usd": "150000",
+        "max_market_cap_block": 20,
+        "crossed_100k": True,
+    }]
+
+
+def test_merge_v3_launchpad_market_cap_summaries_rejects_identity_drift():
+    with pytest.raises(ValueError, match="identity drift"):
+        merge_v3_launchpad_market_cap_summaries([
+            {
+                "token": TOKEN,
+                "venue": "example",
+                "pool": POOL,
+                "quote_token": QUOTE,
+                "price_points": 1,
+                "priced_points": 1,
+                "max_market_cap_proxy_usd": "1",
+                "max_market_cap_block": 10,
+                "crossed_100k": False,
+            },
+            {
+                "token": TOKEN,
+                "venue": "example",
+                "pool": "0x" + "99" * 20,
+                "quote_token": QUOTE,
+                "price_points": 1,
+                "priced_points": 1,
+                "max_market_cap_proxy_usd": "2",
+                "max_market_cap_block": 11,
+                "crossed_100k": False,
+            },
+        ])
