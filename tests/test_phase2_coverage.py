@@ -189,6 +189,8 @@ def test_versioned_coverage_ledger_requires_every_inventory_source_row():
     )
     assert report["version"] == PHASE2_COVERAGE_LEDGER_VERSION
     assert report["all_sources_reported"] is True
+    assert report["coverage_status_counts"]["complete"] == 2
+    assert report["complete_source_ids"] == ["pons_v1", "pons_v2"]
     assert report["phase2_universe_coverage_complete"] is False
 
 
@@ -247,3 +249,33 @@ def test_coverage_ledger_rejects_source_readiness_drift():
             },
             INVENTORY,
         )
+
+
+
+def test_repository_pons_rows_are_complete_and_provenanced():
+    ledger = json.loads(
+        Path(".github/phase2-source-coverage.json").read_text()
+    )
+    rows = {row["source_id"]: row for row in ledger["sources"]}
+
+    v1 = rows["pons_v1"]
+    assert v1["coverage_status"] == "complete"
+    assert v1["required_start_block"] == 8_621_658
+    assert v1["last_block"] == 54_486_035
+    assert v1["tokens_discovered"] == 268_688
+    assert v1["price_points"] == v1["priced_points"] == 63_560_072
+    assert v1["provenance_sha256"] == (
+        "74a43a5401d88d299070b21414e7d2ef"
+        "aaa90c8469596d2207ef41a9456ede31"
+    )
+
+    v2 = rows["pons_v2"]
+    assert v2["coverage_status"] == "complete"
+    assert v2["required_start_block"] == 27_027_321
+    assert v2["last_block"] == 54_486_035
+    assert v2["tokens_discovered"] == 225_951
+    assert v2["price_points"] == v2["priced_points"] == 24_319_652
+    assert v2["provenance_sha256"] == (
+        "2e880af79350530d4c30cda8d10778f"
+        "ee8156c284ccb523cae226f1a886cc566"
+    )
