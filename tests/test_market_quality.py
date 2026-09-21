@@ -4,6 +4,7 @@ import pytest
 
 from hlp.data.market_quality import (
     active_quote_liquidity_usd,
+    build_causal_market_quality_trace,
     rank_market_quality_snapshot,
     summarize_market_competition,
 )
@@ -97,3 +98,132 @@ def test_market_competition_summary_does_not_freeze_selector():
     assert report["multi_market_tokens"] == 1
     assert report["max_markets_per_token"] == 2
     assert report["selection_rule_frozen"] is False
+
+
+
+def _market_event(
+    market_id,
+    *,
+    block,
+    txi,
+    depth,
+    mcap,
+):
+    return {
+        "token": TOKEN,
+        "market_id": market_id,
+        "block_number": block,
+        "transaction_index": txi,
+        "log_index": 0,
+        "active_quote_liquidity_usd": str(depth),
+        "market_cap_proxy_usd": str(mcap),
+    }
+
+
+def test_causal_trace_does_not_leak_future_market_depth_backward():
+    rows = build_causal_market_quality_trace(
+        [
+            _market_event(
+                "0xaaa",
+                block=10,
+                txi=1,
+                depth=100,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=20,
+                txi=1,
+                depth=1_000,
+                mcap=120_000,
+            ),
+        ]
+    )
+
+    assert rows[0]["block_number"] == 10
+    assert rows[0]["observed_markets"] == 1
+    assert rows[0]["candidate_market_id"] == "0xaaa"
+
+    assert rows[1]["block_number"] == 20
+    assert rows[1]["observed_markets"] == 2
+    assert rows[1]["candidate_market_id"] == "0xbbb"
+    assert rows[1]["selection_rule_frozen"] is False
+
+
+def test_causal_trace_uses_latest_prior_state_of_other_market():
+    rows = build_causal_market_quality_trace(
+        [
+            _market_event(
+                "0xaaa",
+                block=10,
+                txi=1,
+                depth=500,
+                mcap=100_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=11,
+                txi=1,
+                depth=400,
+                mcap=200_000,
+            ),
+            _market_event(
+                "0xbbb",
+                block=12,
+                txi=1,
+                depth=600,
+                mcap=150_000,
+            ),
+        ]
+    )
+
+    final = rows[-1]
+    assert final["candidate_market_id"] == "0xbbb"
+    assert final["ranked_market_ids"] == ["0xbbb", "0xaaa"]
+    assert Decimal(final["min_observed_market_cap_proxy_usd"]) == Decimal(
+        "100000"
+    )
+    assert Decimal(final["max_observed_market_cap_proxy_usd"]) == Decimal(
+        "150000"
+    )
+    assert Decimal(final["market_cap_dispersion_multiple"]) == Decimal(
+        "1.5"
+    )
+
+
+def test_causal_trace_skips_unpriced_or_depthless_state_until_usable():
+    rows = build_causal_market_quality_trace(
+        [
+            {
+                **_market_event(
+                    "0xaaa",
+                    block=10,
+                    txi=1,
+                    depth=100,
+                    mcap=100_000,
+                ),
+                "active_quote_liquidity_usd": None,
+            },
+            _market_event(
+                "0xaaa",
+                block=11,
+                txi=1,
+                depth=100,
+                mcap=100_000,
+            ),
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0]["block_number"] == 11
+
+
+def test_causal_trace_rejects_duplicate_event_identity():
+    event = _market_event(
+        "0xaaa",
+        block=10,
+        txi=1,
+        depth=100,
+        mcap=100_000,
+    )
+    with pytest.raises(ValueError, match="duplicate market-quality event"):
+        build_causal_market_quality_trace([event, event])
