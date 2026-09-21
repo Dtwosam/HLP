@@ -160,10 +160,10 @@ def build_sparse_chainlink_usd_points(
         updates.sort(key=lambda item: item[0])
 
         update_index = 0
+        active_round = initial.round_id & ((1 << 64) - 1)
+        active_updated_at = initial.updated_at
         for target in window_targets:
             target_order = event_order(target)
-            active_round = initial.round_id & ((1 << 64) - 1)
-            active_updated_at = initial.updated_at
             while (
                 update_index < len(updates)
                 and updates[update_index][0] <= target_order
