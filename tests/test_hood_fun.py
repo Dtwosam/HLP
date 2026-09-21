@@ -23,7 +23,7 @@ def topic_addr(address: str) -> str:
     return "0x" + address.removeprefix("0x").rjust(64, "0")
 
 
-def raw(topics, data):
+def raw(topics, data, *, address=HOOD_FUN_CURRENT):
     return RawLog(
         chain_id=4663,
         block_number=100,
@@ -31,7 +31,7 @@ def raw(topics, data):
         transaction_hash="0x" + "aa" * 32,
         transaction_index=2,
         log_index=3,
-        address=HOOD_FUN_CURRENT.lower(),
+        address=address.lower(),
         topics=tuple(topic.lower() for topic in topics),
         data=data,
         removed=False,
@@ -107,3 +107,46 @@ def test_decode_hood_fun_trade():
     assert row.is_buy is True
     assert row.quote_amount_raw == 2 * 10**15
     assert row.fee_raw == 2 * 10**13
+
+
+
+def test_decode_hood_fun_layout_for_explicit_alternate_contract():
+    alternate = "0x" + "44" * 20
+    row = decode_hood_fun_event(
+        raw(
+            [TRADE_TOPIC, topic_addr(TOKEN), topic_addr(TRADER)],
+            "0x"
+            + word(1)
+            + word(2 * 10**15)
+            + word(806_229 * 10**18)
+            + word(2 * 10**13)
+            + word(2_811_980_000_000_000_000)
+            + word(1_144_193_771 * 10**18),
+            address=alternate,
+        ),
+        contract=alternate,
+    )
+    assert row.event_type == "trade"
+    assert row.token == TOKEN
+
+
+def test_decode_hood_fun_rejects_wrong_explicit_contract():
+    alternate = "0x" + "44" * 20
+    try:
+        decode_hood_fun_event(
+            raw(
+                [TRADE_TOPIC, topic_addr(TOKEN), topic_addr(TRADER)],
+                "0x"
+                + word(1)
+                + word(2)
+                + word(3)
+                + word(4)
+                + word(5)
+                + word(6),
+            ),
+            contract=alternate,
+        )
+    except ValueError as exc:
+        assert "requested hood.fun contract" in str(exc)
+    else:
+        raise AssertionError("wrong hood.fun contract was accepted")
