@@ -69,3 +69,13 @@ def test_inventory_tracks_partial_lifecycle_adapters_without_claiming_phase1_pro
     ):
         assert rows[source_id]["readiness"] == "adapter_ready"
         assert rows[source_id]["implementation_evidence"]
+
+
+
+def test_pools_trade_lbp_registry_is_ready_before_price_path():
+    rows = {row["source_id"]: row for row in build_phase2_source_inventory()}
+    lbp = rows["pools_trade_lbp"]
+
+    assert lbp["readiness"] == "registry_ready"
+    assert "hlp.data.pools_trade_registry" in lbp["implementation_evidence"]
+    assert "price-path reconstruction" in lbp["blocking_gap"]
