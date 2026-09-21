@@ -273,8 +273,10 @@ Implemented foundation:
   freezes exact address-based V3 graduation registries, rejects unresolved or
   not-yet-available markets, reconstructs the pool price causally at the exact
   LaunchedToDEX order, and merges curve plus post-graduation summaries across
-  the full launch population. A dedicated market-window CLI prices that
-  graduation snapshot plus only later V3 swaps. A final dispatch-only Flap
+  the full launch population. Native-ETH curve quotes are explicitly mapped
+  to canonical WETH only for V3 handoff matching, while the original curve
+  quote remains preserved in provenance. A dedicated market-window CLI prices
+  that graduation snapshot plus only later V3 swaps. A final dispatch-only Flap
   source-coverage workflow is now prepared: it binds the exact accepted curve
   artifact, requires every LaunchedToDEX pool to resolve to an address-based
   Uniswap/Sushi V3 market already available at graduation, filters the shared

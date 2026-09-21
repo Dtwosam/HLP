@@ -2,6 +2,8 @@ import pytest
 
 from decimal import Decimal
 
+from hlp.config import ROBINHOOD_WETH
+
 from hlp.data.flap_lifecycle import (
     build_flap_graduation_market_handoffs,
     build_flap_graduation_snapshot_points,
@@ -230,4 +232,34 @@ def test_merge_flap_lifecycle_summaries_preserves_full_population():
     assert by_token[TOKEN]["crossed_100k"] is True
     assert by_token[TOKEN]["max_market_cap_proxy_usd"] == "150000"
     assert by_token["0x" + "55" * 20]["price_points"] == 0
+
+
+def test_flap_graduation_handoff_maps_native_curve_quote_to_weth_v3():
+    native = "0x" + "00" * 20
+    rows = build_flap_graduation_market_handoffs(
+        [flap_row(quote=native)],
+        [market_row(quote=ROBINHOOD_WETH.lower())],
+    )
+
+    row = rows[0]
+    assert row["graduation_quote_token"] == native
+    assert row["graduation_dex_quote_token"] == ROBINHOOD_WETH.lower()
+    assert row["market_quote_token"] == ROBINHOOD_WETH.lower()
+    assert row["market_handoff_complete"] is True
+
+
+def test_flap_v3_registry_preserves_curve_quote_and_uses_dex_quote():
+    native = "0x" + "00" * 20
+    launch = full_flap_row()
+    launch["graduation_quote_token"] = native
+    handoffs = build_flap_graduation_market_handoffs(
+        [{**launch, "graduation_quote_token": native}],
+        [market_row(quote=ROBINHOOD_WETH.lower())],
+    )
+    registry = build_flap_v3_graduation_registry(
+        [{**launch, "graduation_quote_token": native}],
+        handoffs,
+    )
+    assert registry[0]["curve_quote_token"] == native
+    assert registry[0]["quote_token"] == ROBINHOOD_WETH.lower()
 

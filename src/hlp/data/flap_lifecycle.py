@@ -5,8 +5,19 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Iterable, Mapping
 
-from hlp.config import normalize_address
+from hlp.config import ROBINHOOD_WETH, normalize_address
 from hlp.data.quote_usd import QuoteUsdTimeline
+
+
+ZERO_ADDRESS = "0x" + "00" * 20
+
+
+def _dex_quote_token(address: str) -> str:
+    """Normalize native ETH to its canonical WETH address for V3 matching."""
+    quote = normalize_address(address)
+    if quote == ZERO_ADDRESS:
+        return ROBINHOOD_WETH.lower()
+    return quote
 
 
 def _order(
@@ -76,6 +87,7 @@ def build_flap_graduation_market_handoffs(
                 f"graduated Flap token has no frozen quote: {token}"
             )
         quote = normalize_address(str(quote_raw))
+        dex_quote = _dex_quote_token(quote)
         graduation_order = _order(
             graduation_block,
             row.get("graduation_transaction_index"),
@@ -87,6 +99,7 @@ def build_flap_graduation_market_handoffs(
             "token": token,
             "graduation_pool": pool,
             "graduation_quote_token": quote,
+            "graduation_dex_quote_token": dex_quote,
             "graduation_dex_id": row.get("graduation_dex_id"),
             "graduation_lp_fee_profile": row.get(
                 "graduation_lp_fee_profile"
@@ -127,10 +140,11 @@ def build_flap_graduation_market_handoffs(
                 f"{pool} {market_token} != {token}"
             )
         market_quote = normalize_address(str(market["quote_token"]))
-        if market_quote != quote:
+        if market_quote != dex_quote:
             raise ValueError(
                 "Flap graduation pool quote mismatch: "
-                f"{pool} {market_quote} != {quote}"
+                f"{pool} {market_quote} != {dex_quote} "
+                f"(curve quote {quote})"
             )
 
         initialize_order = _order(
@@ -270,6 +284,9 @@ def build_flap_v3_graduation_registry(
             raise ValueError(f"duplicate Flap graduation pool: {pool}")
         seen_pools.add(pool)
         quote = normalize_address(
+            str(handoff["market_quote_token"])
+        )
+        curve_quote = normalize_address(
             str(handoff["graduation_quote_token"])
         )
         graduation_order = _order(
@@ -301,6 +318,7 @@ def build_flap_v3_graduation_registry(
             "token": token,
             "pool": pool,
             "quote_token": quote,
+            "curve_quote_token": curve_quote,
             "quote_decimals": int(handoff["market_quote_decimals"]),
             "token_decimals": token_decimals,
             "supply_raw": supply_raw,
