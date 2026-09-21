@@ -364,17 +364,52 @@ jobs:
       - name: Reconstruct direct V3 evidence points
         run: |
           mkdir -p artifacts
-          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
-            phase2-direct-v3-market-window \
-            --registry "inputs/plan/${SOURCE_ID}-registry.jsonl" \
-            --initializes inputs/v3/direct-v3-initialize-evidence.jsonl \
-            --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
-            --swaps inputs/v3/direct-v3-swap-evidence.jsonl \
-            --from-block "$FROM_BLOCK" \
-            --to-block "$TO_BLOCK" \
-            --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
-            --out "artifacts/${SOURCE_ID}-points.jsonl" \
-            --report-out "artifacts/${SOURCE_ID}-report.json"
+          REGISTRY="inputs/plan/${SOURCE_ID}-registry.jsonl"
+          if [ ! -s "$REGISTRY" ]; then
+            : > "artifacts/${SOURCE_ID}-points.jsonl"
+            python - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+
+            source = os.environ["SOURCE_ID"]
+            report = {
+                "version": "phase2-direct-v3-market-window-v1",
+                "source_id": source,
+                "venue": (
+                    "uniswap_v3"
+                    if source == "direct_uniswap_v3"
+                    else "sushiswap_v3"
+                ),
+                "from_block": int(os.environ["FROM_BLOCK"]),
+                "to_block": int(os.environ["TO_BLOCK"]),
+                "registry_markets": 0,
+                "initialize_events": 0,
+                "swap_events": 0,
+                "market_cap_points": 0,
+                "priced_points": 0,
+                "quality_ready_points": 0,
+                "market_selection_rule_frozen": False,
+                "threshold_summary_emitted": False,
+                "empty_sample_source": True,
+            }
+            Path(f"artifacts/{source}-report.json").write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            )
+            PY
+          else
+            hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+              phase2-direct-v3-market-window \
+              --registry "$REGISTRY" \
+              --initializes inputs/v3/direct-v3-initialize-evidence.jsonl \
+              --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
+              --swaps inputs/v3/direct-v3-swap-evidence.jsonl \
+              --from-block "$FROM_BLOCK" \
+              --to-block "$TO_BLOCK" \
+              --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
+              --out "artifacts/${SOURCE_ID}-points.jsonl" \
+              --report-out "artifacts/${SOURCE_ID}-report.json"
+          fi
       - name: Verify V3 evidence remains research-only
         run: |
           python - <<'PY'
@@ -431,17 +466,47 @@ jobs:
       - name: Reconstruct direct V4 evidence points
         run: |
           mkdir -p artifacts
-          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
-            phase2-direct-v4-market-window \
-            --registry inputs/plan/direct_uniswap_v4-registry.jsonl \
-            --initializes inputs/v4/direct-v4-initialize-evidence.jsonl \
-            --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
-            --swaps inputs/v4/direct-v4-swap-evidence.jsonl \
-            --from-block "$FROM_BLOCK" \
-            --to-block "$TO_BLOCK" \
-            --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
-            --out artifacts/direct_uniswap_v4-points.jsonl \
-            --report-out artifacts/direct_uniswap_v4-report.json
+          REGISTRY=inputs/plan/direct_uniswap_v4-registry.jsonl
+          if [ ! -s "$REGISTRY" ]; then
+            : > artifacts/direct_uniswap_v4-points.jsonl
+            python - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+
+            report = {
+                "version": "phase2-direct-v4-market-window-v1",
+                "source_id": "direct_uniswap_v4",
+                "venue": "uniswap_v4",
+                "from_block": int(os.environ["FROM_BLOCK"]),
+                "to_block": int(os.environ["TO_BLOCK"]),
+                "registry_markets": 0,
+                "initialize_events": 0,
+                "swap_events": 0,
+                "market_cap_points": 0,
+                "priced_points": 0,
+                "quality_ready_points": 0,
+                "market_selection_rule_frozen": False,
+                "threshold_summary_emitted": False,
+                "empty_sample_source": True,
+            }
+            Path("artifacts/direct_uniswap_v4-report.json").write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            )
+            PY
+          else
+            hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+              phase2-direct-v4-market-window \
+              --registry "$REGISTRY" \
+              --initializes inputs/v4/direct-v4-initialize-evidence.jsonl \
+              --supply-deltas inputs/supply/direct-supply-evidence.jsonl \
+              --swaps inputs/v4/direct-v4-swap-evidence.jsonl \
+              --from-block "$FROM_BLOCK" \
+              --to-block "$TO_BLOCK" \
+              --quote-feeds inputs/quotes/direct-quote-feeds.jsonl \
+              --out artifacts/direct_uniswap_v4-points.jsonl \
+              --report-out artifacts/direct_uniswap_v4-report.json
+          fi
       - name: Verify V4 evidence remains research-only
         run: |
           python - <<'PY'
