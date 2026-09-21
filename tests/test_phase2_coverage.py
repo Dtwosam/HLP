@@ -21,6 +21,9 @@ INVENTORY = [
 def complete(source_id):
     return {
         "source_id": source_id,
+        "source_readiness": (
+            "phase1_proven" if source_id == "pons_v1" else "adapter_ready"
+        ),
         "coverage_status": "complete",
         "required_start_block": 10,
         "first_block": 10,
@@ -130,6 +133,7 @@ def test_blocked_coverage_requires_reason():
 def test_not_started_source_may_leave_required_start_unresolved():
     pending = {
         "source_id": "noxa",
+        "source_readiness": "adapter_ready",
         "coverage_status": "not_started",
         "required_start_block": None,
         "first_block": None,
@@ -163,6 +167,7 @@ def test_complete_source_cannot_leave_required_start_unresolved():
 def test_versioned_coverage_ledger_requires_every_inventory_source_row():
     pending = {
         "source_id": "noxa",
+        "source_readiness": "adapter_ready",
         "coverage_status": "not_started",
         "required_start_block": None,
         "first_block": None,
@@ -215,3 +220,30 @@ def test_repository_phase2_coverage_ledger_matches_source_inventory():
     assert report["reported_sources"] == 14
     assert report["all_sources_reported"] is True
     assert report["phase2_universe_coverage_complete"] is False
+
+
+
+def test_coverage_ledger_rejects_source_readiness_drift():
+    pending = {
+        "source_id": "noxa",
+        "source_readiness": "decoder_ready",
+        "coverage_status": "not_started",
+        "required_start_block": None,
+        "first_block": None,
+        "last_block": None,
+        "continuous": None,
+        "missing_ranges": [],
+        "tokens_discovered": 0,
+        "price_points": 0,
+        "priced_points": 0,
+        "provenance_sha256": None,
+    }
+    with pytest.raises(ValueError, match="readiness drift"):
+        validate_phase2_coverage_ledger(
+            {
+                "version": PHASE2_COVERAGE_LEDGER_VERSION,
+                "snapshot_head_block": 100,
+                "sources": [complete("pons_v1"), pending],
+            },
+            INVENTORY,
+        )
