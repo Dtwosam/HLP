@@ -82,9 +82,15 @@ Implemented foundation:
   strategy distribution, supply, reserved LP allocation and initializer state.
   This source is `registry_ready`, not adapter-ready, because its auction/LBP
   price path is not yet decoded;
-- a fail-closed Phase-2 historical coverage contract that requires every source
-  to report continuous reconstruction through the frozen snapshot with SHA-256
-  provenance before `phase2_universe_coverage_complete` can become true.
+- a fail-closed Phase-2 historical coverage contract, CI-proven in run
+  **35605506698**, that requires every source to report continuous
+  reconstruction through the frozen snapshot with SHA-256 provenance before
+  `phase2_universe_coverage_complete` can become true;
+- a causal concentrated-liquidity market-quality audit: generic V3/V4 paths now
+  retain market identity, raw active liquidity and point-in-time active
+  quote-USD depth. This is research evidence for multi-pool selection only;
+  **no canonical selector is frozen yet**. The integrated V3/V4 annotation suite
+  passed in run **35605822567**.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
