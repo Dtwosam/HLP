@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_market_quality_audit,
     cmd_pools_trade_instant_registry,
     cmd_pools_trade_lbp_registry,
 )
@@ -293,3 +294,85 @@ def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
     assert row["currency1"] == token
     assert row["pool_id"].startswith("0x")
     assert len(row["pool_id"]) == 66
+
+
+
+def test_phase2_market_quality_audit_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-market-quality-audit",
+        "--points", "v3.jsonl",
+        "--points", "v4.jsonl",
+        "--trace-out", "trace.jsonl",
+        "--candidate-out", "candidate.jsonl",
+        "--report-out", "report.json",
+    ])
+    assert args.points == ["v3.jsonl", "v4.jsonl"]
+    assert args.trace_out == "trace.jsonl"
+    assert args.candidate_out == "candidate.jsonl"
+
+
+def test_phase2_market_quality_audit_command(tmp_path):
+    token = "0x" + "11" * 20
+    v3 = tmp_path / "v3.jsonl"
+    v4 = tmp_path / "v4.jsonl"
+    v3.write_text(
+        json.dumps({
+            "token": token,
+            "market_id": "0xaaa",
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 0,
+            "active_quote_liquidity_usd": "500",
+            "market_cap_proxy_usd": "100000",
+        }) + "\n"
+    )
+    v4.write_text(
+        json.dumps({
+            "token": token,
+            "market_id": "0xbbb",
+            "block_number": 11,
+            "transaction_index": 1,
+            "log_index": 0,
+            "active_quote_liquidity_usd": "600",
+            "market_cap_proxy_usd": "150000",
+        }) + "\n"
+    )
+
+    trace = tmp_path / "trace.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    report = tmp_path / "report.json"
+    args = SimpleNamespace(
+        points=[str(v3), str(v4)],
+        trace_out=str(trace),
+        candidate_out=str(candidate),
+        report_out=str(report),
+    )
+    assert cmd_phase2_market_quality_audit(args) == 0
+
+    payload = json.loads(report.read_text())
+    assert payload["version"] == "phase2-market-quality-audit-v1"
+    assert payload["selection_rule_frozen"] is False
+    assert payload["input_points"] == 2
+    assert payload["competition"]["multi_market_tokens"] == 1
+    assert payload["causal_trace"]["candidate_switches"] == 1
+    assert (
+        payload["candidate_canonical_series"]["leadership_switches"]
+        == 1
+    )
+    assert (
+        payload["candidate_canonical_series"][
+            "cross_pool_volume_double_counting_allowed"
+        ]
+        is False
+    )
+
+    candidate_rows = [
+        json.loads(line)
+        for line in candidate.read_text().splitlines()
+        if line.strip()
+    ]
+    assert [row["selected_market_id"] for row in candidate_rows] == [
+        "0xaaa",
+        "0xbbb",
+    ]
