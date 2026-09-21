@@ -330,7 +330,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   surface so LimitReach events in later shards are attached to their original
   launch, then overlays one exact supply/decimals state per token. It emits a
   continuous event manifest and immutable global registry while keeping
-  `source_coverage_complete=false`; no trench coverage is claimed yet;
+  `source_coverage_complete=false`. A second dispatch-only trench.today
+  curve-coverage workflow is now prepared on top of that exact registry run
+  plus the canonical direct-quote registry. It rejects Sync snapshots after
+  the recorded LimitReach order, requires canonical quote decimals and causal
+  USD ownership, requires every curve point to be priced, and emits a
+  deterministic sharded point manifest plus global eligibility summary. The
+  segment remains explicitly non-final with
+  `post_limit_dex_lifecycle_unresolved` whenever any token reaches its curve
+  limit; no trench source coverage is claimed yet;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
