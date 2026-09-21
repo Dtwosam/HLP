@@ -38,6 +38,7 @@ def test_direct_pons_origin_attribution_publishes_per_source_registries():
         "direct_sushiswap_v3",
         "direct_uniswap_v4",
     ):
-        assert f"{source}-attributed.jsonl" in text
+        assert source in text
 
+    assert 'artifacts/{source}-attributed.jsonl' in text
     assert "direct-market-pons-attribution-handoff.json" in text
