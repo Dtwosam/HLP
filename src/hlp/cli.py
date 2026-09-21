@@ -172,6 +172,7 @@ from hlp.data.reconstruct import (
 )
 from hlp.data.snapshot import write_jsonl_snapshot
 from hlp.data.sparse_quote_usd import build_sparse_v3_quote_points
+from hlp.data.sparse_chainlink_usd import build_sparse_chainlink_usd_points
 from hlp.data.sharded_tape import (
     iter_sharded_jsonl,
     iter_sharded_jsonl_matching_field_values,
@@ -1470,10 +1471,22 @@ def _phase2_direct_market_cap_window(
             normalize_address(str(row["pool"]))
             for row in registry
         }
+        quote_by_market = {
+            normalize_address(str(row["pool"])): normalize_address(
+                str(row["quote_token"])
+            )
+            for row in registry
+        }
     elif version == "v4":
         market_field = "pool_id"
         market_ids = {
             str(row["pool_id"]).lower()
+            for row in registry
+        }
+        quote_by_market = {
+            str(row["pool_id"]).lower(): normalize_address(
+                str(row["quote_token"])
+            )
             for row in registry
         }
     else:
@@ -1530,6 +1543,16 @@ def _phase2_direct_market_cap_window(
         "to_block": args.to_block,
         "market_selection_rule_frozen": False,
         "threshold_summary_emitted": False,
+        "quote_feeds": (
+            None
+            if not getattr(args, "quote_feeds", None)
+            else Path(args.quote_feeds).name
+        ),
+        "quote_feeds_sha256": (
+            None
+            if not getattr(args, "quote_feeds", None)
+            else _sha256_file(args.quote_feeds)
+        ),
     }
 
     if not target_events:
@@ -1562,7 +1585,20 @@ def _phase2_direct_market_cap_window(
             "response_bytes_received": 0,
         }
     else:
-        initial_quote_usd, quote_usd_updates = _load_quote_usd_inputs(args)
+        sparse_quote_feed_path = getattr(args, "quote_feeds", None)
+        if sparse_quote_feed_path and any(
+            getattr(args, field, None)
+            for field in (
+                "oracle_state",
+                "oracle_events",
+                "fallback_state",
+                "fallback_events",
+            )
+        ):
+            raise SystemExit(
+                "--quote-feeds cannot be combined with oracle/fallback tapes"
+            )
+
         rpc = _archive_rpc(args)
         rpc.assert_robinhood()
         started = time.monotonic()
@@ -1575,6 +1611,47 @@ def _phase2_direct_market_cap_window(
                 fallback_block=args.from_block - 1,
             )
         )
+
+        sparse_chainlink_points = []
+        if sparse_quote_feed_path:
+            feed_specs = _load_jsonl(sparse_quote_feed_path)
+            feed_tokens = {
+                normalize_address(str(row["quote_token"]))
+                for row in feed_specs
+            }
+            built_in_quotes = {
+                "0x" + "00" * 20,
+                ROBINHOOD_WETH.lower(),
+                ROBINHOOD_USDG.lower(),
+            }
+            sparse_targets = []
+            required_feed_quotes = set()
+            for event in target_events:
+                market_id = str(event[market_field]).lower()
+                quote = quote_by_market[market_id]
+                if quote in built_in_quotes:
+                    continue
+                required_feed_quotes.add(quote)
+                sparse_targets.append({
+                    **event,
+                    "quote_token": quote,
+                })
+            missing = sorted(required_feed_quotes - feed_tokens)
+            if missing:
+                raise SystemExit(
+                    "direct quote feed registry is missing: "
+                    + ", ".join(missing)
+                )
+            sparse_chainlink_points = build_sparse_chainlink_usd_points(
+                rpc,
+                sparse_targets,
+                feed_specs=feed_specs,
+                window_size=anchor_window_size,
+            )
+            initial_quote_usd = {}
+            quote_usd_updates = iter(sparse_chainlink_points)
+        else:
+            initial_quote_usd, quote_usd_updates = _load_quote_usd_inputs(args)
 
         if version == "v3":
             points = build_v3_launchpad_market_cap_points(
@@ -1646,6 +1723,11 @@ def _phase2_direct_market_cap_window(
             "points_sha256": manifest["sha256"],
             "competition": competition,
             "sparse_anchor_points": len(anchors),
+            "sparse_chainlink_points": len(sparse_chainlink_points),
+            "sparse_chainlink_windows": len({
+                (row["quote_token"], row["window_from_block"])
+                for row in sparse_chainlink_points
+            }),
             "anchor_window_size": anchor_window_size,
             "initial_weth_usd": str(initial_weth_usd),
             "market_selection_rule_frozen": False,
@@ -6785,6 +6867,10 @@ def build_parser() -> argparse.ArgumentParser:
     direct_v3_market.add_argument("--oracle-events")
     direct_v3_market.add_argument("--fallback-state")
     direct_v3_market.add_argument("--fallback-events")
+    direct_v3_market.add_argument(
+        "--quote-feeds",
+        help="canonical direct quote feed specs for sparse causal USD sampling",
+    )
     direct_v3_market.add_argument("--out", required=True)
     direct_v3_market.add_argument("--report-out", required=True)
     direct_v3_market.set_defaults(
@@ -6820,6 +6906,10 @@ def build_parser() -> argparse.ArgumentParser:
     direct_v4_market.add_argument("--oracle-events")
     direct_v4_market.add_argument("--fallback-state")
     direct_v4_market.add_argument("--fallback-events")
+    direct_v4_market.add_argument(
+        "--quote-feeds",
+        help="canonical direct quote feed specs for sparse causal USD sampling",
+    )
     direct_v4_market.add_argument("--out", required=True)
     direct_v4_market.add_argument("--report-out", required=True)
     direct_v4_market.set_defaults(
