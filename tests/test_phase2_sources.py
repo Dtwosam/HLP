@@ -39,7 +39,7 @@ def test_noxa_registry_adapter_is_ready_without_claiming_phase1_proof():
     assert "hlp.data.noxa_registry" in noxa["implementation_evidence"]
 
 
-def test_direct_dex_populations_remain_explicit_discovery_gaps():
+def test_direct_dex_market_adapters_are_ready_without_claiming_origin_resolution():
     rows = {row["source_id"]: row for row in build_phase2_source_inventory()}
 
     for source_id in (
@@ -47,9 +47,13 @@ def test_direct_dex_populations_remain_explicit_discovery_gaps():
         "direct_uniswap_v4",
         "direct_sushiswap_v3",
     ):
-        assert rows[source_id]["source_kind"] == "direct_dex"
-        assert rows[source_id]["readiness"] == "discovery_pending"
-        assert rows[source_id]["launch_contracts"] == []
+        row = rows[source_id]
+        assert row["source_kind"] == "direct_dex"
+        assert row["readiness"] == "adapter_ready"
+        assert row["launch_contracts"] == []
+        assert "hlp.data.direct_markets" in row["implementation_evidence"]
+        assert "multi-pool selection" in row["blocking_gap"]
+        assert "launch-origin attribution" in row["blocking_gap"]
 
 
 def test_inventory_tracks_partial_lifecycle_adapters_without_claiming_phase1_proof():
