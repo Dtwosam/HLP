@@ -270,3 +270,52 @@ def summarize_direct_market_registry(rows: Iterable[Mapping[str, object]]) -> di
         "unresolved_origin_markets": unresolved,
         "canonical_market_selection_complete": False,
     }
+
+
+
+def attribute_direct_market_origins(
+    market_rows: Iterable[Mapping[str, object]],
+    launch_registries: Mapping[str, Iterable[Mapping[str, object]]],
+) -> list[dict]:
+    """Attach deterministic launch-source matches by exact token address.
+
+    Absence from the supplied launch registries is not treated as proof of a
+    direct launch. Such markets remain explicitly unattributed until source
+    coverage is complete.
+    """
+    origins: dict[str, set[str]] = {}
+    for source_id, rows in launch_registries.items():
+        source_id = str(source_id)
+        if not source_id:
+            raise ValueError("launch-origin source id cannot be empty")
+        seen_in_source: set[str] = set()
+        for raw in rows:
+            if "token" not in raw:
+                raise ValueError(
+                    f"launch registry {source_id} contains row without token"
+                )
+            token = normalize_address(str(raw["token"]))
+            if token in seen_in_source:
+                raise ValueError(
+                    f"launch registry {source_id} repeats token: {token}"
+                )
+            seen_in_source.add(token)
+            origins.setdefault(token, set()).add(source_id)
+
+    output: list[dict] = []
+    for raw in market_rows:
+        token = normalize_address(str(raw["token"]))
+        matched = sorted(origins.get(token, set()))
+        row = dict(raw)
+        row["token"] = token
+        row["launch_source_ids"] = matched
+        row["launch_source_count"] = len(matched)
+        if matched:
+            row["origin_classification"] = "known_launch_source"
+            row["origin_attribution_complete"] = True
+        else:
+            row["origin_classification"] = "unattributed"
+            row["origin_attribution_complete"] = False
+        output.append(row)
+
+    return output
