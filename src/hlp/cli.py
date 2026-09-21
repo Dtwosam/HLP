@@ -356,6 +356,133 @@ def _sparse_weth_usd_anchors(
     )
 
 
+def _sparse_chainlink_launchpad_points(
+    rpc: RpcClient,
+    targets: list[dict],
+    *,
+    feed_path: str,
+    window_size: int,
+    label: str,
+) -> list[dict]:
+    """Price only non-built-in launchpad quotes at target event orders."""
+    feed_specs = _load_jsonl(feed_path)
+    feed_tokens = {
+        normalize_address(str(row["quote_token"]))
+        for row in feed_specs
+    }
+    built_in_quotes = {
+        "0x" + "00" * 20,
+        ROBINHOOD_WETH.lower(),
+        ROBINHOOD_USDG.lower(),
+    }
+    sparse_targets = []
+    required = set()
+    for raw in targets:
+        row = dict(raw)
+        quote = row.get("quote_token")
+        if not quote:
+            continue
+        quote = normalize_address(str(quote))
+        if quote in built_in_quotes:
+            continue
+        required.add(quote)
+        row["quote_token"] = quote
+        sparse_targets.append(row)
+
+    missing = sorted(required - feed_tokens)
+    if missing:
+        raise SystemExit(
+            f"{label} quote feed registry is missing: "
+            + ", ".join(missing)
+        )
+    return build_sparse_chainlink_usd_points(
+        rpc,
+        sparse_targets,
+        feed_specs=feed_specs,
+        window_size=window_size,
+    )
+
+
+def _causal_flap_trade_quote_targets(
+    events: list[FlapEvent],
+    launch_registry: list[dict],
+) -> list[dict]:
+    """Attach only already-observed Flap quote configuration to trades."""
+    rows = sorted(events, key=lambda row: (
+        row.block_number,
+        -1 if row.transaction_index is None else row.transaction_index,
+        row.log_index,
+    ))
+    if not rows:
+        return []
+    first_order = (
+        rows[0].block_number,
+        -1 if rows[0].transaction_index is None
+        else rows[0].transaction_index,
+        rows[0].log_index,
+    )
+    seen_launches = set()
+    quote_by_token = {}
+
+    for raw in launch_registry:
+        token = normalize_address(str(raw["token"]))
+        launch_block = raw.get("launch_block")
+        launch_log = raw.get("launch_log_index")
+        if launch_block is not None and launch_log is not None:
+            launch_order = (
+                int(launch_block),
+                -1
+                if raw.get("launch_transaction_index") is None
+                else int(raw["launch_transaction_index"]),
+                int(launch_log),
+            )
+            if launch_order < first_order:
+                seen_launches.add(token)
+
+        quote = raw.get("quote_token")
+        quote_block = raw.get("quote_set_block")
+        quote_log = raw.get("quote_set_log_index")
+        if quote and quote_block is not None and quote_log is not None:
+            quote_order = (
+                int(quote_block),
+                -1
+                if raw.get("quote_set_transaction_index") is None
+                else int(raw["quote_set_transaction_index"]),
+                int(quote_log),
+            )
+            if quote_order < first_order:
+                quote_by_token[token] = normalize_address(str(quote))
+
+    targets = []
+    for event in rows:
+        token = normalize_address(event.token)
+        if event.event_type == "token_created":
+            seen_launches.add(token)
+            continue
+        if event.event_type == "quote_set":
+            if event.actor is None:
+                raise ValueError(
+                    f"Flap quote_set has no quote token: {token}"
+                )
+            quote_by_token[token] = normalize_address(event.actor)
+            continue
+        if event.event_type not in {"token_bought", "token_sold"}:
+            continue
+        if token not in seen_launches:
+            raise ValueError(
+                f"Flap trade precedes TokenCreated in supplied history: "
+                f"{token}"
+            )
+        quote = quote_by_token.get(token)
+        if quote is None:
+            continue
+        targets.append({
+            **asdict(event),
+            "quote_token": quote,
+        })
+    return targets
+
+
 def cmd_network_smoke(args: argparse.Namespace) -> int:
     rpc = _rpc(args)
     rpc.assert_robinhood()
@@ -3059,6 +3186,13 @@ def cmd_rpc_pools_trade_market_cap_window(args: argparse.Namespace) -> int:
                     row["window_from_block"]
                     for row in anchor_points
                 }),
+                "sparse_chainlink_points": len(
+                    sparse_chainlink_points
+                ),
+                "sparse_chainlink_windows": len({
+                    (row["quote_token"], row["window_from_block"])
+                    for row in sparse_chainlink_points
+                }),
                 "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
@@ -3338,7 +3472,13 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
         raise SystemExit("from-block must be > 0")
     events = [TrenchEvent(**row) for row in _load_jsonl(args.events)]
     registry = _load_jsonl(args.registry)
-    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    if getattr(args, "quote_feeds", None) and any(
+        getattr(args, field, None)
+        for field in ("oracle_state", "oracle_events")
+    ):
+        raise SystemExit(
+            "--quote-feeds cannot be combined with oracle tapes"
+        )
 
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
@@ -3352,6 +3492,37 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
             fallback_block=args.from_block - 1,
         )
     )
+    sparse_chainlink_points = []
+    if getattr(args, "quote_feeds", None):
+        quote_by_token = {
+            normalize_address(str(row["token"])): normalize_address(
+                str(row["quote_token"])
+            )
+            for row in registry
+        }
+        targets = [
+            {
+                **asdict(event),
+                "quote_token": quote_by_token.get(
+                    normalize_address(event.token)
+                ),
+            }
+            for event in events
+            if event.event_type == "sync"
+        ]
+        sparse_chainlink_points = _sparse_chainlink_launchpad_points(
+            rpc,
+            targets,
+            feed_path=args.quote_feeds,
+            window_size=anchor_window_size,
+            label="trench.today",
+        )
+        initial_quote_usd = {}
+        quote_usd_updates = iter(sparse_chainlink_points)
+    else:
+        initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(
+            args
+        )
     points = list(
         build_trench_curve_market_cap_points(
             events,
@@ -3376,6 +3547,16 @@ def cmd_rpc_trench_curve_market_cap_window(args: argparse.Namespace) -> int:
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
             "usd_anchor_mode": "sparse_v3_state_and_swaps",
             "usd_anchor_window_size": anchor_window_size,
+            "quote_feeds": (
+                Path(args.quote_feeds).name
+                if getattr(args, "quote_feeds", None)
+                else None
+            ),
+            "quote_feeds_sha256": (
+                _sha256_file(args.quote_feeds)
+                if getattr(args, "quote_feeds", None)
+                else None
+            ),
             "price_semantics": "virtualQuote / virtualToken from authoritative post-trade Sync",
             "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
         },
@@ -3478,7 +3659,13 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
     event_rows = _load_jsonl(args.events)
     events = [FlapEvent(**row) for row in event_rows]
     launch_registry = _load_jsonl(args.registry)
-    initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(args)
+    if getattr(args, "quote_feeds", None) and any(
+        getattr(args, field, None)
+        for field in ("oracle_state", "oracle_events")
+    ):
+        raise SystemExit(
+            "--quote-feeds cannot be combined with oracle tapes"
+        )
 
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
@@ -3492,6 +3679,25 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             fallback_block=args.from_block - 1,
         )
     )
+    sparse_chainlink_points = []
+    if getattr(args, "quote_feeds", None):
+        targets = _causal_flap_trade_quote_targets(
+            events,
+            launch_registry,
+        )
+        sparse_chainlink_points = _sparse_chainlink_launchpad_points(
+            rpc,
+            targets,
+            feed_path=args.quote_feeds,
+            window_size=anchor_window_size,
+            label="Flap",
+        )
+        initial_quote_usd = {}
+        quote_usd_updates = iter(sparse_chainlink_points)
+    else:
+        initial_quote_usd, quote_usd_updates = _load_quote_oracle_inputs(
+            args
+        )
     points = list(
         build_flap_curve_market_cap_points(
             events,
@@ -3516,6 +3722,16 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
             "usd_anchor_mode": "sparse_v3_state_and_swaps",
             "usd_anchor_window_size": anchor_window_size,
+            "quote_feeds": (
+                Path(args.quote_feeds).name
+                if getattr(args, "quote_feeds", None)
+                else None
+            ),
+            "quote_feeds_sha256": (
+                _sha256_file(args.quote_feeds)
+                if getattr(args, "quote_feeds", None)
+                else None
+            ),
             "price_semantics": "postPrice is quote-token units with 18 decimals",
             "supply_semantics": "fixed 1B supply, 18 decimals, validated on Robinhood mainnet launch samples",
             "oracle_state": (
@@ -3553,6 +3769,13 @@ def cmd_rpc_flap_curve_market_cap_window(args: argparse.Namespace) -> int:
                 "sparse_anchor_windows": len({
                     row["window_from_block"]
                     for row in anchor_points
+                }),
+                "sparse_chainlink_points": len(
+                    sparse_chainlink_points
+                ),
+                "sparse_chainlink_windows": len({
+                    (row["quote_token"], row["window_from_block"])
+                    for row in sparse_chainlink_points
                 }),
                 "anchor_window_size": anchor_window_size,
                 "requests_made": rpc.requests_made,
@@ -7875,6 +8098,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trench_mcap.add_argument("--oracle-state")
     trench_mcap.add_argument("--oracle-events")
+    trench_mcap.add_argument(
+        "--quote-feeds",
+        help="canonical quote feed specs for sparse causal USD sampling",
+    )
     trench_mcap.add_argument("--out", required=True)
     trench_mcap.add_argument("--summary-out", required=True)
     trench_mcap.set_defaults(func=cmd_rpc_trench_curve_market_cap_window)
@@ -7900,6 +8127,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     flap_mcap.add_argument("--oracle-state")
     flap_mcap.add_argument("--oracle-events")
+    flap_mcap.add_argument(
+        "--quote-feeds",
+        help="canonical quote feed specs for sparse causal USD sampling",
+    )
     flap_mcap.add_argument("--out", required=True)
     flap_mcap.add_argument("--summary-out", required=True)
     flap_mcap.set_defaults(func=cmd_rpc_flap_curve_market_cap_window)

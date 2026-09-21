@@ -227,7 +227,10 @@ Implemented foundation:
   quote-token configuration is activated only when its recorded TokenQuoteSet
   order is already before the replay window, while in-window quote changes
   remain event-driven. trench.today Sync pricing now also fails if a snapshot
-  is not strictly after its recorded launch order.
+  is not strictly after its recorded launch order. Both Flap and trench.today
+  market-cap CLIs can now consume the canonical quote-feed registry and sample
+  Chainlink/USD only at the causal trade/Sync orders that need non-WETH quotes;
+  sparse quote ownership cannot be mixed with pre-materialized oracle tapes.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
