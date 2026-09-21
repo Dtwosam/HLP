@@ -388,7 +388,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   trench registry run/SHA and direct-registry run/per-source SHAs forward, so
   final coverage can reject registry substitution after handoff selection.
   End-of-block tokenInfo is deliberately not used to invent a launch-time price
-  because it could see later same-block state;
+  because it could see later same-block state. A dispatch-only full
+  `trench_today` source-coverage workflow is now prepared around this
+  contract. It binds the exact curve and frozen-handoff artifacts, verifies the
+  originating trench/direct registries, reuses shared V3/V4 Initialize/Swap and
+  supply-delta surfaces, filters the full supply tape once to selected trench
+  tokens, supports V3-only/V4-only/mixed handoffs, and validates a proposed
+  canonical `complete` row in memory without mutating the ledger;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
