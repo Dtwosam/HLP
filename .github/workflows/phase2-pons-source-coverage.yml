@@ -37,22 +37,98 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e .
-      - name: Download accepted Pons V1 lifecycle artifact
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: 10607208490
-          path: artifacts/v1
-          github-token: ${{ github.token }}
-          repository: Dtwosam/HLP
-          run-id: 35518892463
-      - name: Download accepted Pons V2 lifecycle artifact
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: 10607362928
-          path: artifacts/v2
-          github-token: ${{ github.token }}
-          repository: Dtwosam/HLP
-          run-id: 35518892463
+      - name: Download exact accepted Pons lifecycle artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+          )
+          from hlp.data.phase2_pons_coverage import (
+              validate_pons_source_coverage_descriptor,
+          )
+
+          descriptor = validate_pons_source_coverage_descriptor(
+              json.loads(
+                  Path(
+                      ".github/phase2-pons-source-coverage.json"
+                  ).read_text()
+              )
+          )
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          for source in descriptor["sources"]:
+              artifact_id = int(source["artifact_id"])
+              metadata_url = (
+                  f"{api}/repos/{repo}/actions/artifacts/{artifact_id}"
+              )
+              metadata = fetch_github_actions_json(
+                  metadata_url,
+                  token,
+                  timeout=60,
+              )
+              if metadata.get("expired"):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact expired: {artifact_id}"
+                  )
+              if str(metadata.get("name") or "") != source["artifact_name"]:
+                  raise SystemExit(
+                      f"{source['source_id']} artifact name changed"
+                  )
+              if str(metadata.get("digest") or "").lower() != (
+                  source["artifact_digest"]
+              ):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact digest changed"
+                  )
+              workflow_run = metadata.get("workflow_run") or {}
+              if int(workflow_run.get("id", 0)) != int(
+                  source["artifact_run_id"]
+              ):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact run binding changed"
+                  )
+
+              archive = fetch_github_actions_artifact_zip(
+                  f"{metadata_url}/zip",
+                  token,
+                  timeout=120,
+                  attempts=4,
+              )
+              destination = Path(
+                  "artifacts/v1"
+                  if source["source_id"] == "pons_v1"
+                  else "artifacts/v2"
+              )
+              destination.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+                  zf.extractall(destination)
+              print(
+                  json.dumps(
+                      {
+                          "source_id": source["source_id"],
+                          "artifact_id": artifact_id,
+                          "artifact_run_id": source["artifact_run_id"],
+                          "artifact_digest": source["artifact_digest"],
+                          "files": sorted(
+                              path.name
+                              for path in destination.iterdir()
+                          ),
+                      },
+                      sort_keys=True,
+                  )
+              )
+          PY
       - name: Validate source coverage and canonical ledger
         run: |
           python - <<'PY'
