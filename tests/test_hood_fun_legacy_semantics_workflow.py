@@ -28,3 +28,23 @@ def test_legacy_hood_semantics_proves_supply_and_reserve_conservation():
     assert '"semantic_proof_complete": True' in text
     assert "coverage_status" not in text
     assert "apply_phase2_source_coverage_report" not in text
+
+
+def test_legacy_hood_semantics_publishes_exact_handoff():
+    text = WORKFLOW.read_text()
+
+    assert "id: proof" in text
+    assert "report_sha256=" in text
+    assert "id: upload" in text
+    assert "steps.upload.outputs.artifact-digest" in text
+    assert "semantics_run_id: ${GITHUB_RUN_ID}" in text
+    assert (
+        "semantics_artifact_name: "
+        "phase2-hoodfun-legacy-curve-semantics"
+        in text
+    )
+    assert (
+        "expected_semantics_report_sha256: ${REPORT_SHA256}"
+        in text
+    )
+

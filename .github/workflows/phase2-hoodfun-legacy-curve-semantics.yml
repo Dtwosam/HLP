@@ -24,9 +24,11 @@ jobs:
       - name: Install
         run: python -m pip install -e .
       - name: Prove legacy hood.fun supply and reserve semantics
+        id: proof
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -233,16 +235,43 @@ jobs:
               "rpc_route": rpc.route_label,
               "rpc_requests": rpc.requests_made,
           }
-          Path(
-              "artifacts/hoodfun-legacy-curve-semantics.json"
-          ).write_text(
+          report_text = (
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
-          print(json.dumps(report, sort_keys=True))
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/hoodfun-legacy-curve-semantics.json"
+          ).write_text(report_text)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "report": report,
+              "report_sha256": report_sha,
+          }, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Upload legacy semantic proof
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: phase2-hoodfun-legacy-curve-semantics
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
+      - name: Publish semantic-proof handoff
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.proof.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## hood.fun previous semantic proof"
+            echo
+            echo "- semantics_run_id: ${GITHUB_RUN_ID}"
+            echo "- semantics_artifact_name: phase2-hoodfun-legacy-curve-semantics"
+            echo "- expected_semantics_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- expected_semantics_report_sha256: ${REPORT_SHA256}"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -239,9 +239,12 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   semantic-proof workflow is now prepared from the frozen TokenCreated sample
   through the end of the previous deployment: it requires launch-block ERC-20
   supply/decimals to match the derived 80/20 registry and sequential decoded
-  virtual reserves to conserve across launch-linked trades. That evidence has
-  not yet been executed/frozen, so previous-generation full coverage remains
-  blocked until the semantic proof passes;
+  virtual reserves to conserve across launch-linked trades. That semantic
+  workflow now publishes exact run/artifact/report identities, and a separate
+  dispatch-only `hood_fun_previous` full-coverage path is prepared that refuses
+  to run without those exact proof identities and binds the proof SHA into the
+  market-cap provenance. Neither the semantic proof nor previous-generation
+  full backfill has been executed/frozen yet;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
