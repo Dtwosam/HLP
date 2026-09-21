@@ -867,11 +867,13 @@ def test_phase2_direct_market_window_parsers():
         "--swaps", "swaps.jsonl",
         "--from-block", "10",
         "--to-block", "20",
+        "--quote-feeds", "feeds.jsonl",
         "--out", "points.jsonl",
         "--report-out", "report.json",
     ])
     assert v3.swaps == "swaps.jsonl"
     assert v3.swaps_manifest is None
+    assert v3.quote_feeds == "feeds.jsonl"
 
     v4 = parser.parse_args([
         "phase2-direct-v4-market-window",
@@ -987,6 +989,127 @@ def test_phase2_direct_v3_market_window_keeps_pool_points_unselected(
     assert payload["quality_ready_points"] == 1
     assert payload["market_selection_rule_frozen"] is False
     assert payload["threshold_summary_emitted"] is False
+
+
+
+def test_phase2_direct_v3_market_window_uses_sparse_chainlink_quote(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    pool = "0x" + "55" * 20
+    registry = tmp_path / "registry.jsonl"
+    initializes = tmp_path / "initializes.jsonl"
+    swaps = tmp_path / "swaps.jsonl"
+    supply_deltas = tmp_path / "supply.jsonl"
+    feeds = tmp_path / "feeds.jsonl"
+    out = tmp_path / "points.jsonl"
+    report = tmp_path / "report.json"
+
+    _write_jsonl(registry, [{
+        "source_id": "direct_uniswap_v3",
+        "venue": "uniswap_v3",
+        "token": token,
+        "quote_token": quote,
+        "quote_decimals": 18,
+        "supply_raw": 1_000_000 * 10**18,
+        "pool": pool,
+        "initialize_block": 10,
+        "initialize_transaction_index": 1,
+        "initialize_log_index": 0,
+    }])
+    _write_jsonl(initializes, [{
+        "pool": pool,
+        "sqrt_price_x96": 2**96,
+        "tick": 0,
+        "block_number": 10,
+        "transaction_hash": "0x" + "01" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+    _write_jsonl(swaps, [{
+        "pool": pool,
+        "sender": "0x" + "77" * 20,
+        "recipient": "0x" + "88" * 20,
+        "amount0": -10**18,
+        "amount1": 10**18,
+        "sqrt_price_x96": 2**96,
+        "liquidity": 1_000 * 10**18,
+        "tick": 0,
+        "block_number": 11,
+        "transaction_hash": "0x" + "02" * 32,
+        "transaction_index": 1,
+        "log_index": 0,
+    }])
+    _write_jsonl(supply_deltas, [])
+    _write_jsonl(feeds, [{
+        "quote_token": quote,
+        "symbol": "TEST",
+        "quote_decimals": 18,
+        "pricing_status": "priced_chainlink_stock_token",
+        "feed": "0x" + "66" * 20,
+        "secondary_feed": None,
+        "heartbeat_seconds": 86400,
+        "directory_name": "Robinhood TEST / USD",
+        "directory_path": "robinhood-test-usd",
+    }])
+
+    class FakeRpc:
+        route_label = "test_archive"
+        requests_made = 0
+        response_bytes_received = 0
+
+        def assert_robinhood(self):
+            return None
+
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: FakeRpc())
+    monkeypatch.setattr(
+        "hlp.cli._sparse_weth_usd_anchors",
+        lambda *args, **kwargs: (Decimal("2000"), [], 200),
+    )
+    captured = {}
+
+    def fake_sparse(rpc, targets, *, feed_specs, window_size):
+        target_rows = list(targets)
+        captured["targets"] = target_rows
+        captured["feeds"] = list(feed_specs)
+        captured["window_size"] = window_size
+        return [{
+            "quote_token": row["quote_token"],
+            "block_number": row["block_number"],
+            "transaction_index": row.get("transaction_index"),
+            "log_index": row["log_index"],
+            "usd_price": "2",
+            "pricing_status": "priced_chainlink_stock_token",
+            "pricing_source": "sparse_chainlink_state_and_updates",
+            "window_from_block": 0,
+        } for row in target_rows]
+
+    monkeypatch.setattr(
+        "hlp.cli.build_sparse_chainlink_usd_points",
+        fake_sparse,
+    )
+
+    args = _direct_market_args(
+        registry=registry,
+        initializes=initializes,
+        swaps=swaps,
+        supply_deltas=supply_deltas,
+        out=out,
+        report=report,
+    )
+    args.quote_feeds = str(feeds)
+    assert cmd_phase2_direct_v3_market_cap_window(args) == 0
+
+    assert len(captured["targets"]) == 2
+    assert all(row["quote_token"] == quote for row in captured["targets"])
+    assert captured["window_size"] == 200
+    payload = json.loads(report.read_text())
+    assert payload["priced_points"] == 2
+    assert payload["sparse_chainlink_points"] == 2
+    assert payload["sparse_chainlink_windows"] == 1
+
 
 
 def test_phase2_direct_v4_market_window_uses_registry_initialize_evidence(
