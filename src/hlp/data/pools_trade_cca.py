@@ -10,6 +10,7 @@ from __future__ import annotations
 from decimal import Decimal, getcontext
 from typing import Iterable
 
+from hlp.data.quote_usd import QuoteUsdTimeline
 from hlp.data.types import CcaPriceEvent
 
 
@@ -125,4 +126,221 @@ def build_cca_quote_price_points(
                 "log_index": int(row.log_index),
             }
         )
+    return output
+
+
+
+def build_cca_market_cap_points(
+    registry_rows: Iterable[dict],
+    events: Iterable[CcaPriceEvent],
+    weth_usd_anchor_points: Iterable[dict],
+    *,
+    orientation: str,
+    initial_weth_usd: Decimal,
+    quote_decimals: dict[str, int],
+    initial_quote_usd: dict[str, Decimal] | None = None,
+    quote_usd_updates: Iterable[dict] = (),
+) -> list[dict]:
+    """Build causal pools.trade CCA market-cap points.
+
+    The CCA Q96 value is treated as a raw-unit quote/token ratio, matching the
+    raw-unit market-cap formulation used by V3/V4 reconstructors:
+
+        raw_quote_per_raw_token * supply_raw / 10**quote_decimals
+
+    Orientation must already be frozen by independent migration evidence.
+    """
+    if orientation not in CCA_ORIENTATIONS:
+        raise ValueError(f"invalid CCA price orientation: {orientation!r}")
+
+    registry: dict[str, dict] = {}
+    for raw in registry_rows:
+        row = dict(raw)
+        initializer = str(row.get("initializer") or "").lower()
+        if not initializer:
+            raise ValueError("CCA registry row has no initializer")
+        if initializer in registry:
+            raise ValueError(
+                f"duplicate CCA registry initializer: {initializer}"
+            )
+        supply_raw = int(row.get("supply_raw", 0))
+        if supply_raw <= 0:
+            raise ValueError(
+                f"CCA registry has non-positive supply: {initializer}"
+            )
+        quote = str(row.get("quote_token") or "").lower()
+        token = str(row.get("token") or "").lower()
+        if not quote or not token:
+            raise ValueError(
+                f"CCA registry row lacks token/quote: {initializer}"
+            )
+        registry[initializer] = row
+
+    timeline = QuoteUsdTimeline(
+        initial_weth_usd=initial_weth_usd,
+        weth_anchor_points=weth_usd_anchor_points,
+        initial_quote_usd=initial_quote_usd,
+        oracle_updates=quote_usd_updates,
+    )
+
+    ordered = sorted(
+        list(events),
+        key=lambda row: (
+            int(row.block_number),
+            -1 if row.transaction_index is None
+            else int(row.transaction_index),
+            int(row.log_index),
+        ),
+    )
+    output: list[dict] = []
+    previous_order: tuple[int, int, int] | None = None
+    for event in ordered:
+        order = (
+            int(event.block_number),
+            -1 if event.transaction_index is None
+            else int(event.transaction_index),
+            int(event.log_index),
+        )
+        if previous_order == order:
+            raise ValueError(f"duplicate CCA price event order: {order}")
+        previous_order = order
+
+        initializer = event.auction.lower()
+        launch = registry.get(initializer)
+        if launch is None:
+            raise ValueError(
+                "CCA price event missing launch registry row: "
+                f"{initializer}"
+            )
+
+        timeline.advance_to(order)
+        quote = str(launch["quote_token"]).lower()
+        decimals = quote_decimals.get(quote)
+        if decimals is None:
+            raise KeyError(
+                f"missing quote decimals for CCA quote {quote}"
+            )
+        decimals = int(decimals)
+        if decimals < 0 or decimals > 255:
+            raise ValueError(
+                f"invalid quote decimals for CCA quote {quote}: {decimals}"
+            )
+
+        raw_quote_per_raw_token = cca_quote_per_token(
+            event.clearing_price_x96,
+            orientation=orientation,
+        )
+        market_cap_quote = (
+            raw_quote_per_raw_token
+            * Decimal(int(launch["supply_raw"]))
+            / (Decimal(10) ** decimals)
+        )
+        quote_usd = timeline.price(quote)
+        pricing_status = timeline.pricing_status(quote)
+        market_cap_usd = (
+            None
+            if quote_usd is None
+            else market_cap_quote * quote_usd
+        )
+
+        output.append({
+            "venue": "pools.trade",
+            "phase": "cca",
+            "event_type": event.event_type,
+            "token": str(launch["token"]).lower(),
+            "initializer": initializer,
+            "quote_token": quote,
+            "quote_decimals": decimals,
+            "supply_raw": int(launch["supply_raw"]),
+            "orientation": orientation,
+            "checkpoint_block": int(event.checkpoint_block),
+            "clearing_price_x96": int(event.clearing_price_x96),
+            "cumulative_mps": event.cumulative_mps,
+            "block_number": int(event.block_number),
+            "transaction_hash": event.transaction_hash.lower(),
+            "transaction_index": event.transaction_index,
+            "log_index": int(event.log_index),
+            "raw_quote_per_raw_token": str(
+                raw_quote_per_raw_token
+            ),
+            "market_cap_quote": str(market_cap_quote),
+            "pricing_status": pricing_status,
+            "quote_usd": (
+                None if quote_usd is None else str(quote_usd)
+            ),
+            "market_cap_proxy_usd": (
+                None
+                if market_cap_usd is None
+                else str(market_cap_usd)
+            ),
+        })
+    return output
+
+
+def summarize_cca_market_caps(
+    rows: Iterable[dict],
+) -> list[dict]:
+    """Summarize CCA eligibility evidence without hiding unpriced points."""
+    summary: dict[str, dict] = {}
+    for raw in rows:
+        row = dict(raw)
+        token = str(row["token"]).lower()
+        value = row.get("market_cap_proxy_usd")
+        market_cap = (
+            None if value is None else Decimal(str(value))
+        )
+        current = summary.get(token)
+        if current is None:
+            current = {
+                "token": token,
+                "venue": "pools.trade",
+                "phase": "cca",
+                "initializer": row["initializer"],
+                "quote_token": row["quote_token"],
+                "orientation": row["orientation"],
+                "price_points": 0,
+                "priced_points": 0,
+                "pricing_statuses": set(),
+                "max_market_cap_proxy_usd": None,
+                "max_market_cap_block": None,
+                "crossed_100k": False,
+            }
+            summary[token] = current
+        if current["initializer"] != row["initializer"]:
+            raise ValueError(
+                f"CCA token appears under multiple initializers: {token}"
+            )
+        if current["orientation"] != row["orientation"]:
+            raise ValueError(
+                f"CCA token mixes price orientations: {token}"
+            )
+
+        current["price_points"] += 1
+        current["pricing_statuses"].add(
+            str(row.get("pricing_status") or "")
+        )
+        if market_cap is None:
+            continue
+        current["priced_points"] += 1
+        prior = current["max_market_cap_proxy_usd"]
+        if prior is None or market_cap > prior:
+            current["max_market_cap_proxy_usd"] = market_cap
+            current["max_market_cap_block"] = int(
+                row["block_number"]
+            )
+        if market_cap >= Decimal("100000"):
+            current["crossed_100k"] = True
+
+    output: list[dict] = []
+    for current in summary.values():
+        row = dict(current)
+        row["pricing_statuses"] = sorted(
+            status for status in row["pricing_statuses"] if status
+        )
+        if row["max_market_cap_proxy_usd"] is not None:
+            row["max_market_cap_proxy_usd"] = str(
+                row["max_market_cap_proxy_usd"]
+            )
+        output.append(row)
+    output.sort(key=lambda row: row["token"])
     return output
