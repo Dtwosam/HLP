@@ -32,6 +32,7 @@ READINESS_STATES = frozenset(
     {
         "phase1_proven",
         "adapter_ready",
+        "registry_ready",
         "decoder_ready",
         "discovery_pending",
     }
@@ -48,9 +49,10 @@ def build_phase2_source_inventory() -> list[dict]:
     phase1_proven means the source has same-snapshot lifecycle evidence from
     the accepted Phase-1 Pons path. adapter_ready means deterministic source
     registry/discovery plus native price-path adapters exist, but chain-wide
-    historical coverage is not yet frozen. decoder_ready means identity/event
-    decoding exists but registry
-    or lifecycle assembly remains. discovery_pending means the DEX is a
+    historical coverage is not yet frozen. registry_ready means event identity
+    and persistent source registry are assembled but native price-path decoding
+    is still missing. decoder_ready means identity/event decoding exists but
+    registry or lifecycle assembly remains. discovery_pending means the DEX is a
     material chain-wide trading venue whose direct-launch population still
     needs deterministic discovery.
     """
@@ -118,11 +120,12 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": _addresses(POOLS_TRADE_LBP_STRATEGY),
             "trading_contracts": _addresses(UNISWAP_V4_POOL_MANAGER),
             "market_phases": ["lbp", "uniswap_v4"],
-            "readiness": "decoder_ready",
+            "readiness": "registry_ready",
             "implementation_evidence": [
                 "hlp.protocols.pools_trade_lbp",
+                "hlp.data.pools_trade_registry",
             ],
-            "blocking_gap": "persistent LBP registry and lifecycle assembly",
+            "blocking_gap": "LBP price-path reconstruction and migration lifecycle",
         },
         {
             "source_id": "doppler",
