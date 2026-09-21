@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -118,3 +119,25 @@ def test_handoff_descriptor_rejects_version_count_drift():
     spec["eligible_v2"] = 2
     with pytest.raises(ValueError, match="do not sum"):
         validate_pons_handoff_descriptor(spec)
+
+
+
+def test_repository_pons_handoff_descriptor_is_frozen():
+    spec = validate_pons_handoff_descriptor(
+        json.loads(
+            Path(".github/phase2-pons-eligible-handoff.json").read_text()
+        )
+    )
+
+    assert spec["evidence_run_id"] == 35_576_917_452
+    assert spec["artifact_id"] == 10_628_353_314
+    assert spec["accepted_finalizer_run_id"] == 35_601_191_874
+    assert spec["snapshot_head_block"] == 54_486_035
+    assert spec["eligible_tokens"] == 6_972
+    assert spec["eligible_v1"] == 5_161
+    assert spec["eligible_v2"] == 1_811
+    assert spec["unknown_tokens"] == 0
+    assert spec["universe_sha256"] == (
+        "d5eb4ff0551eb2a0e12834b4d823dec4"
+        "299d59b88eb73cefc4aa33ad2d8b2e8d"
+    )
