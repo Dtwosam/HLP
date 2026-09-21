@@ -81,9 +81,18 @@ def decode_pools_trade_token_distributed(log: RawLog) -> PoolsTradeTokenDistribu
     )
 
 
-def decode_pools_trade_token_launched(log: RawLog) -> PoolsTradeTokenLaunched:
-    if log.address not in STRATEGIES:
-        raise ValueError("not a pools.trade InstantLaunchStrategy log")
+def decode_pools_trade_token_launched(
+    log: RawLog,
+    *,
+    allowed_strategies: set[str] | None = None,
+) -> PoolsTradeTokenLaunched:
+    strategies = (
+        STRATEGIES
+        if allowed_strategies is None
+        else {normalize_address(address) for address in allowed_strategies}
+    )
+    if log.address not in strategies:
+        raise ValueError("not an allowed pools.trade strategy log")
     if not log.topics or log.topics[0] != TOKEN_LAUNCHED_TOPIC:
         raise ValueError("not pools.trade TokenLaunched")
     if len(log.topics) != 4:
