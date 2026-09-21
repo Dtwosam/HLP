@@ -361,6 +361,114 @@ def build_v4_direct_market_registry(
     return output
 
 
+def build_direct_market_competition_cohort(
+    registry_rows: Iterable[Mapping[str, object]],
+    *,
+    min_markets: int = 2,
+) -> list[dict]:
+    """Group priceable direct markets by token without selecting a winner."""
+    threshold = int(min_markets)
+    if threshold < 2:
+        raise ValueError("direct market competition requires at least two markets")
+
+    grouped: dict[str, list[dict]] = {}
+    seen_markets: set[tuple[str, str]] = set()
+    for raw in registry_rows:
+        token = normalize_address(str(raw["token"]))
+        source_id = str(raw.get("source_id") or "")
+        venue = str(raw.get("venue") or "")
+        if not source_id or not venue:
+            raise ValueError(
+                f"direct market row lacks source identity: {token}"
+            )
+        raw_market = raw.get("pool_id")
+        market_kind = "v4_pool_id"
+        if raw_market is None:
+            raw_market = raw.get("pool")
+            market_kind = "v3_pool"
+        market_id = str(raw_market or "").lower()
+        if not market_id:
+            raise ValueError(
+                f"direct market row lacks market identity: {token}"
+            )
+        key = (source_id, market_id)
+        if key in seen_markets:
+            raise ValueError(
+                f"duplicate direct market identity: {source_id} {market_id}"
+            )
+        seen_markets.add(key)
+
+        initialize_block = int(raw["initialize_block"])
+        if initialize_block < 0:
+            raise ValueError(
+                f"direct market has invalid initialize block: {market_id}"
+            )
+        grouped.setdefault(token, []).append({
+            "source_id": source_id,
+            "venue": venue,
+            "market_kind": market_kind,
+            "market_id": market_id,
+            "quote_token": normalize_address(str(raw["quote_token"])),
+            "quote_decimals": int(raw["quote_decimals"]),
+            "initialize_block": initialize_block,
+        })
+
+    output = []
+    for token in sorted(grouped):
+        markets = sorted(
+            grouped[token],
+            key=lambda row: (
+                row["initialize_block"],
+                row["source_id"],
+                row["market_id"],
+            ),
+        )
+        if len(markets) < threshold:
+            continue
+        output.append({
+            "token": token,
+            "market_count": len(markets),
+            "source_ids": sorted({row["source_id"] for row in markets}),
+            "venues": sorted({row["venue"] for row in markets}),
+            "quote_tokens": sorted({row["quote_token"] for row in markets}),
+            "first_initialize_block": min(
+                row["initialize_block"] for row in markets
+            ),
+            "last_initialize_block": max(
+                row["initialize_block"] for row in markets
+            ),
+            "markets": markets,
+            "canonical_market_selection_complete": False,
+        })
+    return output
+
+
+def summarize_direct_market_competition_cohort(
+    rows: Iterable[Mapping[str, object]],
+) -> dict:
+    """Summarize a multi-market research cohort without ranking markets."""
+    data = [dict(row) for row in rows]
+    market_counts = [int(row["market_count"]) for row in data]
+    source_ids = {
+        str(source_id)
+        for row in data
+        for source_id in row.get("source_ids", [])
+    }
+    venues = {
+        str(venue)
+        for row in data
+        for venue in row.get("venues", [])
+    }
+    return {
+        "tokens": len(data),
+        "markets": sum(market_counts),
+        "max_markets_per_token": max(market_counts, default=0),
+        "source_ids": sorted(source_ids),
+        "venues": sorted(venues),
+        "canonical_market_selection_complete": False,
+    }
+
+
 def summarize_direct_market_registry(rows: Iterable[Mapping[str, object]]) -> dict:
     """Return coverage counts while keeping origin and pool selection unresolved."""
     data = [dict(row) for row in rows]
