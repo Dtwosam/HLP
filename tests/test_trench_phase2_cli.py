@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from hlp.cli import (
     build_parser,
+    cmd_phase2_v4_registry_event_filter,
     cmd_rpc_trench_registry_window,
 )
 from hlp.data.types import TrenchEvent
@@ -116,4 +117,106 @@ def test_trench_handoff_market_registry_parser():
     assert args.market_registry == ["v3.jsonl", "v4.jsonl"]
     assert args.v3_out == "trench-v3.jsonl"
     assert args.v4_out == "trench-v4.jsonl"
+
+
+def test_v4_registry_event_filter_parser():
+    args = build_parser().parse_args([
+        "phase2-v4-registry-event-filter",
+        "--registry", "registry.jsonl",
+        "--input", "swaps.jsonl",
+        "--out", "filtered.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.registry == "registry.jsonl"
+    assert args.input == "swaps.jsonl"
+    assert args.input_manifest is None
+
+
+def test_v4_registry_event_filter_keeps_only_registered_pool_id(tmp_path):
+    pool_id = "0x" + "22" * 32
+    other = "0x" + "33" * 32
+    registry = tmp_path / "registry.jsonl"
+    events = tmp_path / "events.jsonl"
+    out = tmp_path / "filtered.jsonl"
+    summary = tmp_path / "summary.json"
+    registry.write_text(json.dumps({
+        "pool_id": pool_id,
+        "lifecycle_block": 10,
+        "lifecycle_transaction_index": 1,
+        "lifecycle_log_index": 2,
+    }) + "\n")
+    events.write_text(
+        json.dumps({
+            "pool_id": pool_id,
+            "block_number": 11,
+            "transaction_hash": "0x" + "aa" * 32,
+            "transaction_index": 1,
+            "log_index": 0,
+        }) + "\n" +
+        json.dumps({
+            "pool_id": other,
+            "block_number": 11,
+            "transaction_hash": "0x" + "bb" * 32,
+            "transaction_index": 1,
+            "log_index": 1,
+        }) + "\n"
+    )
+
+    args = SimpleNamespace(
+        registry=str(registry),
+        input=str(events),
+        input_manifest=None,
+        input_shard_dir=None,
+        out=str(out),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_v4_registry_event_filter(args) == 0
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["pool_id"] == pool_id
+    report = json.loads(summary.read_text())
+    assert report["records"] == 1
+    assert report["matched_pool_ids"] == 1
+
+
+def test_v4_registry_event_filter_rejects_same_block_prelifecycle_event(
+    tmp_path,
+):
+    pool_id = "0x" + "22" * 32
+    registry = tmp_path / "registry.jsonl"
+    events = tmp_path / "events.jsonl"
+    out = tmp_path / "filtered.jsonl"
+    summary = tmp_path / "summary.json"
+    registry.write_text(json.dumps({
+        "pool_id": pool_id,
+        "lifecycle_block": 10,
+        "lifecycle_transaction_index": 1,
+        "lifecycle_log_index": 2,
+    }) + "\n")
+    events.write_text(json.dumps({
+        "pool_id": pool_id,
+        "block_number": 10,
+        "transaction_hash": "0x" + "aa" * 32,
+        "transaction_index": 1,
+        "log_index": 1,
+    }) + "\n")
+
+    args = SimpleNamespace(
+        registry=str(registry),
+        input=str(events),
+        input_manifest=None,
+        input_shard_dir=None,
+        out=str(out),
+        summary_out=str(summary),
+    )
+    try:
+        cmd_phase2_v4_registry_event_filter(args)
+    except ValueError as exc:
+        assert "predates registry lifecycle" in str(exc)
+    else:
+        raise AssertionError("pre-lifecycle same-block V4 event was accepted")
 

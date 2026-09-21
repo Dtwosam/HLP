@@ -370,9 +370,11 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   LimitReach lifecycle floor, and emits separate replay-ready V3/V4 registries.
   Generic V4 launchpad replay now supports a launch-order supply seed (matching
   V3) so later mint/burn deltas can be replayed causally from trench's
-  authoritative launch state. No trench source coverage is claimed until real
-  evidence satisfies the rule and the selected markets are fully replayed and
-  priced;
+  authoritative launch state. A generic V4 registry-event filter now mirrors
+  the V3 filter's exact block/transaction/log lifecycle floor, so selected V4
+  PoolIds can reuse the shared chain-wide Swap tape without admitting same-block
+  pre-handoff events. No trench source coverage is claimed until real evidence
+  satisfies the rule and the selected markets are fully replayed and priced;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

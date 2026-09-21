@@ -2078,6 +2078,115 @@ def cmd_phase2_v3_registry_event_filter(
     return 0
 
 
+def cmd_phase2_v4_registry_event_filter(
+    args: argparse.Namespace,
+) -> int:
+    """Filter one shared V4 event tape to exact registry PoolIds."""
+    registry = _load_jsonl(args.registry)
+    pool_floor: dict[str, tuple[int, int, int]] = {}
+    for row in registry:
+        pool_id = str(row["pool_id"]).lower()
+        if not pool_id:
+            raise SystemExit("V4 registry row has empty pool_id")
+        prefix = None
+        for candidate in ("lifecycle", "launch", "initialize"):
+            if row.get(f"{candidate}_block") is not None:
+                prefix = candidate
+                break
+        if prefix is None:
+            raise SystemExit(
+                "V4 registry row has no lifecycle/launch/Initialize block: "
+                f"{pool_id}"
+            )
+        raw_tx = row.get(f"{prefix}_transaction_index")
+        raw_log = row.get(f"{prefix}_log_index")
+        floor = (
+            int(row[f"{prefix}_block"]),
+            -1 if raw_tx is None else int(raw_tx),
+            -1 if raw_log is None else int(raw_log),
+        )
+        prior = pool_floor.get(pool_id)
+        if prior is not None and prior != floor:
+            raise SystemExit(
+                f"V4 registry repeats PoolId with drift: {pool_id}"
+            )
+        pool_floor[pool_id] = floor
+    if not pool_floor:
+        raise SystemExit("V4 event filter registry contains no PoolIds")
+
+    source_sha256 = _event_tape_sha256(
+        file_path=args.input,
+        aggregate_manifest=args.input_manifest,
+        label="V4 registry event filter",
+    )
+    source = _iter_filtered_event_tape(
+        file_path=args.input,
+        shard_dir=args.input_shard_dir,
+        aggregate_manifest=args.input_manifest,
+        label="V4 registry event filter",
+        field="pool_id",
+        values=pool_floor,
+    )
+
+    matched_pools: set[str] = set()
+    seen: set[tuple[str, tuple[int, int, int]]] = set()
+    previous = None
+
+    def checked():
+        nonlocal previous
+        for raw in source:
+            row = dict(raw)
+            pool_id = str(row["pool_id"]).lower()
+            order = event_order(row)
+            if order < pool_floor[pool_id]:
+                raise ValueError(
+                    f"V4 event predates registry lifecycle: {pool_id}"
+                )
+            key = (pool_id, order)
+            if key in seen:
+                raise ValueError(
+                    f"duplicate V4 registry event: {pool_id} {order}"
+                )
+            seen.add(key)
+            stable = (*order, pool_id)
+            if previous is not None and stable < previous:
+                raise ValueError("filtered V4 event tape is not chronological")
+            previous = stable
+            matched_pools.add(pool_id)
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        checked(),
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_v4_registry_event_filter",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "input": _event_tape_source_name(
+                file_path=args.input,
+                aggregate_manifest=args.input_manifest,
+            ),
+            "input_sha256": source_sha256,
+            "registry_pool_ids": len(pool_floor),
+        },
+    )
+    report = {
+        "version": "phase2-v4-registry-event-filter-v1",
+        "registry_pool_ids": len(pool_floor),
+        "matched_pool_ids": len(matched_pools),
+        "records": manifest["records"],
+        "registry_sha256": _sha256_file(args.registry),
+        "input_sha256": source_sha256,
+        "output_sha256": manifest["sha256"],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
 def cmd_pools_fun_initialized_registry(args: argparse.Namespace) -> int:
     """Join the complete pools.fun registry to exact shared V3 Initialize."""
     registry = _load_jsonl(args.registry)
@@ -8865,6 +8974,22 @@ def build_parser() -> argparse.ArgumentParser:
     v3_registry_filter.add_argument("--summary-out", required=True)
     v3_registry_filter.set_defaults(
         func=cmd_phase2_v3_registry_event_filter
+    )
+
+    v4_registry_filter = sub.add_parser(
+        "phase2-v4-registry-event-filter"
+    )
+    v4_registry_filter.add_argument("--registry", required=True)
+    v4_filter_input = v4_registry_filter.add_mutually_exclusive_group(
+        required=True
+    )
+    v4_filter_input.add_argument("--input")
+    v4_filter_input.add_argument("--input-manifest")
+    v4_registry_filter.add_argument("--input-shard-dir")
+    v4_registry_filter.add_argument("--out", required=True)
+    v4_registry_filter.add_argument("--summary-out", required=True)
+    v4_registry_filter.set_defaults(
+        func=cmd_phase2_v4_registry_event_filter
     )
 
     pools_fun_initialized = sub.add_parser(
