@@ -314,6 +314,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          merge-multiple: true
           path: evidence-handoff
           run-id: ${{ inputs.evidence_run_id }}
           github-token: ${{ github.token }}
@@ -327,6 +328,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          merge-multiple: true
           path: evidence-handoff
           run-id: ${{ inputs.evidence_run_id }}
           github-token: ${{ github.token }}
@@ -338,6 +340,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.evidence.outputs.evidence_artifact_id }}
+          merge-multiple: true
           path: evidence-handoff
           run-id: ${{ inputs.evidence_run_id }}
           github-token: ${{ github.token }}
