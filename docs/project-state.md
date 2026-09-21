@@ -267,9 +267,16 @@ Implemented foundation:
   legitimate non-migrations, and every matched PoolId must reproduce the full
   PoolKey. A dedicated V4 market-window path replays supply causally from the
   original initializer-block seed through migration and later swaps, with
-  sparse USD pricing and explicit empty-window behavior. The final chain-wide
-  V4 merge/source-coverage workflow still has to be prepared/executed before
-  LBP coverage can close;
+  sparse USD pricing and explicit empty-window behavior. A final dispatch-only
+  lifecycle/source-coverage workflow is now prepared from the exact CCA run,
+  complete shared V4 Initialize run and shared V4 Swap run. It treats missing
+  exact derived PoolIds as conclusively non-migrated only because the shared
+  Initialize scan is continuous through the frozen snapshot, requires CCA
+  coverage for every LBP token and V4 coverage for every migrated token, merges
+  both phases into one fully priced lifecycle summary, validates a proposed
+  `pools_trade_lbp=complete` row in memory, and publishes exact promotion
+  metadata without mutating the canonical ledger. This is prepared execution
+  logic, not completed historical evidence;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
