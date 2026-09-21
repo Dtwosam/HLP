@@ -30,13 +30,13 @@ def test_pons_sources_are_phase1_proven():
     assert rows["pons_v2"]["launch_contracts"] == [PONS_V2_FACTORY.lower()]
 
 
-def test_noxa_identity_is_not_mistaken_for_complete_coverage():
+def test_noxa_registry_adapter_is_ready_without_claiming_phase1_proof():
     rows = {row["source_id"]: row for row in build_phase2_source_inventory()}
     noxa = rows["noxa"]
 
     assert noxa["launch_contracts"] == [NOXA_LAUNCH_FACTORY.lower()]
-    assert noxa["readiness"] == "decoder_ready"
-    assert "persistent historical launch registry" in noxa["blocking_gap"]
+    assert noxa["readiness"] == "adapter_ready"
+    assert "hlp.data.noxa_registry" in noxa["implementation_evidence"]
 
 
 def test_direct_dex_populations_remain_explicit_discovery_gaps():
