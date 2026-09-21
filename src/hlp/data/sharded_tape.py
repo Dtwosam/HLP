@@ -228,3 +228,64 @@ def iter_sharded_jsonl_matching_field_values(
         aggregate_manifest_path,
         raw_matcher=_field_value_matcher(field, values),
     )
+
+
+
+def validate_shard_block_coverage(
+    shards: Iterable[dict],
+    *,
+    start_block: int,
+    end_block: int,
+) -> list[dict]:
+    """Validate exact, gapless, non-overlapping block coverage.
+
+    Rows may contain arbitrary extra metadata but must provide from_block and
+    to_block. The returned rows are sorted by block range.
+    """
+    start = int(start_block)
+    end = int(end_block)
+    if start < 0 or end < start:
+        raise ValueError(
+            f"invalid required shard range: {start}..{end}"
+        )
+
+    ordered = sorted(
+        (dict(row) for row in shards),
+        key=lambda row: (
+            int(row["from_block"]),
+            int(row["to_block"]),
+        ),
+    )
+    if not ordered:
+        raise ValueError("shard coverage is empty")
+
+    cursor = start
+    for row in ordered:
+        lo = int(row["from_block"])
+        hi = int(row["to_block"])
+        if lo < 0 or hi < lo:
+            raise ValueError(f"invalid shard range: {lo}..{hi}")
+        if lo != cursor:
+            if lo < cursor:
+                raise ValueError(
+                    "shard coverage overlaps or repeats: "
+                    f"expected {cursor}, got {lo}"
+                )
+            raise ValueError(
+                f"shard coverage gap: {cursor}..{lo - 1}"
+            )
+        cursor = hi + 1
+
+    if ordered[0]["from_block"] != start:
+        raise ValueError(
+            "shard coverage does not start at required block"
+        )
+    if cursor != end + 1:
+        if cursor <= end:
+            raise ValueError(
+                f"shard coverage ends early: {cursor - 1} < {end}"
+            )
+        raise ValueError(
+            f"shard coverage exceeds required end: {cursor - 1} > {end}"
+        )
+    return ordered
