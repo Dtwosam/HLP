@@ -38,3 +38,21 @@ def test_hood_fun_registry_derives_configurable_supply_from_80pct_curve_inventor
 def test_hood_fun_registry_scales_arbitrary_supply():
     rows = build_hood_fun_launch_registry([launch(8 * 10**17)])
     assert rows[0]["supply_raw"] == 10**18
+
+
+
+def test_hood_fun_registry_preserves_explicit_generation():
+    rows = build_hood_fun_launch_registry(
+        [launch()],
+        generation="previous",
+    )
+    assert rows[0]["generation"] == "previous"
+
+
+def test_hood_fun_registry_rejects_empty_generation():
+    try:
+        build_hood_fun_launch_registry([launch()], generation=" ")
+    except ValueError as exc:
+        assert "generation cannot be empty" in str(exc)
+    else:
+        raise AssertionError("empty hood.fun generation was accepted")
