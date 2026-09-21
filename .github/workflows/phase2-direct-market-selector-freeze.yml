@@ -1,0 +1,238 @@
+name: phase2-direct-market-selector-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: Exact phase2-direct-market-quality-evidence run ID
+        required: true
+        type: string
+      expected_artifact_digest:
+        description: Exact selector-evidence artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_handoff_sha256:
+        description: Exact SHA-256 of direct-market-quality-evidence-handoff.json
+        required: true
+        type: string
+      freeze_active_quote_liquidity_causal_v1:
+        description: Explicitly freeze active-quote-liquidity-causal-v1 from this evidence
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-direct-market-selector-freeze-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+      EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
+      EXPECTED_HANDOFF_SHA256: ${{ inputs.expected_handoff_sha256 }}
+      FREEZE_APPROVED: ${{ inputs.freeze_active_quote_liquidity_causal_v1 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit selector-freeze approval
+        run: |
+          set -euo pipefail
+          if [ "${FREEZE_APPROVED}" != "true" ]; then
+            echo "selector freeze requires explicit approval" >&2
+            exit 1
+          fi
+
+      - name: Verify exact selector-evidence artifact
+        run: |
+          set -euo pipefail
+          ARTIFACT_NAME=phase2-direct-market-quality-evidence
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${EVIDENCE_RUN_ID}/artifacts?name=${ARTIFACT_NAME}" \
+            > /tmp/selector-evidence-artifacts.json
+          python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(open("/tmp/selector-evidence-artifacts.json"))
+          matches = [
+              row
+              for row in payload.get("artifacts", [])
+              if row.get("name")
+              == "phase2-direct-market-quality-evidence"
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected one selector evidence artifact; "
+                  f"found {len(matches)}"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit("selector evidence artifact is expired")
+          actual = str(artifact.get("digest") or "").lower()
+          expected = os.environ["EXPECTED_ARTIFACT_DIGEST"].lower()
+          if not expected.startswith("sha256:"):
+              raise SystemExit(
+                  "selector evidence artifact digest must use sha256:<hex>"
+              )
+          if actual != expected:
+              raise SystemExit(
+                  f"selector evidence artifact digest drift: "
+                  f"{actual} != {expected}"
+              )
+          PY
+          mkdir -p inputs
+          gh run download "${EVIDENCE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${ARTIFACT_NAME}" \
+            --dir inputs
+
+      - name: Verify exact final selector evidence
+        id: evidence
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          handoff_path = Path(
+              "inputs/direct-market-quality-evidence-handoff.json"
+          )
+          handoff_bytes = handoff_path.read_bytes()
+          handoff_sha = hashlib.sha256(handoff_bytes).hexdigest()
+          expected_handoff = os.environ[
+              "EXPECTED_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if handoff_sha != expected_handoff:
+              raise SystemExit(
+                  f"selector evidence handoff SHA drift: "
+                  f"{handoff_sha} != {expected_handoff}"
+              )
+          handoff = json.loads(handoff_bytes)
+
+          if (
+              handoff.get("version")
+              != "phase2-direct-market-quality-evidence-v2"
+          ):
+              raise SystemExit("selector evidence handoff version changed")
+          if handoff.get("selector_freeze_ready") is not False:
+              raise SystemExit(
+                  "selector evidence must remain research-only"
+              )
+          if handoff.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "selector evidence cannot close source coverage"
+              )
+
+          files = {
+              "trace_sha256": Path(
+                  "inputs/direct-market-quality-trace.jsonl"
+              ),
+              "candidate_series_sha256": Path(
+                  "inputs/direct-market-candidate-series.jsonl"
+              ),
+              "market_quality_report_sha256": Path(
+                  "inputs/direct-market-quality-report.json"
+              ),
+          }
+          for field, path in files.items():
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != handoff.get(field):
+                  raise SystemExit(
+                      f"selector evidence final file SHA drift: {field}"
+                  )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+          PY
+
+      - name: Freeze active-quote-liquidity selector semantics
+        id: freeze
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.direct_selector import (
+              build_direct_selector_freeze,
+          )
+
+          handoff_path = Path(
+              "inputs/direct-market-quality-evidence-handoff.json"
+          )
+          handoff = json.loads(handoff_path.read_text())
+          descriptor = build_direct_selector_freeze(
+              handoff,
+              evidence_run_id=int(os.environ["EVIDENCE_RUN_ID"]),
+              evidence_artifact_digest=os.environ[
+                  "EXPECTED_ARTIFACT_DIGEST"
+              ],
+              evidence_handoff_sha256=os.environ[
+                  "EXPECTED_HANDOFF_SHA256"
+              ],
+          )
+          if descriptor["selection_rule_frozen"] is not True:
+              raise SystemExit("selector freeze descriptor is not frozen")
+          if descriptor["source_coverage_complete"] is not False:
+              raise SystemExit(
+                  "selector freeze cannot close direct source coverage"
+              )
+
+          out = Path(
+              "artifacts/direct-market-selector-freeze.json"
+          )
+          out.write_text(
+              json.dumps(descriptor, indent=2, sort_keys=True) + "\n"
+          )
+          digest = hashlib.sha256(out.read_bytes()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"descriptor_sha256={digest}\n")
+          print(json.dumps(descriptor, sort_keys=True))
+          PY
+
+      - name: Upload selector freeze
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-selector-freeze
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish selector-freeze identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          DESCRIPTOR_SHA256: ${{ steps.freeze.outputs.descriptor_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${DESCRIPTOR_SHA256}"
+          {
+            echo "## Direct market selector freeze"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-direct-market-selector-freeze"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- descriptor_sha256: ${DESCRIPTOR_SHA256}"
+            echo "- selector_version: active-quote-liquidity-causal-v1"
+            echo "- selection_rule_frozen: true"
+            echo "- source_coverage_complete: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

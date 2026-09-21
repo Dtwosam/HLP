@@ -151,7 +151,15 @@ Implemented foundation:
   in addition to all upstream run/plan/quote/point identities, so any later
   selector-freeze decision can be tied to the exact evidence that was reviewed.
   It has not yet produced empirical evidence because the required upstream
-  direct-market backfill artifacts still need to be executed;
+  direct-market backfill artifacts still need to be executed. An explicit
+  dispatch-only selector-freeze gate is now prepared on top of that v2
+  evidence contract. It requires a human-triggered approval plus the exact
+  evidence run, artifact digest and handoff SHA; it rechecks the final trace,
+  candidate-series and report hashes, requires real competing usable snapshots,
+  and can freeze only `active-quote-liquidity-causal-v1` with stable market-id
+  tie-breaking and selected-pool-only volume. The resulting descriptor keeps
+  `source_coverage_complete=false`, so selector policy cannot substitute for
+  the still-required direct DEX historical backfills;
 - direct-market launch-origin attribution is now progressive and fail-closed.
   Exact address matches can immediately mark a market as originating from a
   known launch source, but unmatched markets remain `unattributed` until every
