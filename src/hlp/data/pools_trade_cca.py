@@ -19,7 +19,7 @@ CCA_ORIENTATIONS = frozenset({"quote_per_token", "token_per_quote"})
 
 
 def cca_price_candidates(clearing_price_x96: int) -> dict[str, Decimal]:
-    """Return both possible human-unit Q96 orientations."""
+    """Return quote-per-token under both possible Q96 interpretations."""
     raw = int(clearing_price_x96)
     if raw <= 0:
         raise ValueError("CCA clearing_price_x96 must be positive")
@@ -40,10 +40,7 @@ def cca_quote_per_token(
     if orientation not in CCA_ORIENTATIONS:
         raise ValueError(f"invalid CCA price orientation: {orientation!r}")
     candidates = cca_price_candidates(clearing_price_x96)
-    if orientation == "quote_per_token":
-        return candidates["quote_per_token"]
-    # The event value is token-per-quote, so invert it to quote-per-token.
-    return Decimal(1) / candidates["token_per_quote"]
+    return candidates[orientation]
 
 
 def infer_cca_price_orientation(
@@ -56,23 +53,9 @@ def infer_cca_price_orientation(
     if migrated <= 0:
         raise ValueError("migrated quote-per-token must be positive")
 
-    raw = int(clearing_price_x96)
-    candidates = cca_price_candidates(raw)
-    quote_if_direct = candidates["quote_per_token"]
-    quote_if_inverse = Decimal(1) / candidates["token_per_quote"]
-    # Keep the names tied to how the stored Q96 is interpreted, even though
-    # both outputs below are expressed as quote-per-token.
-    direct_error = abs(quote_if_direct / migrated - Decimal(1))
-    inverse_value = candidates["token_per_quote"]
-    inverse_as_quote = Decimal(1) / inverse_value
-    inverse_error = abs(inverse_as_quote / migrated - Decimal(1))
-
-    # Algebraically quote_if_direct and inverse_as_quote are equal if the
-    # candidate definitions above are both converted back to quote/token.
-    # What migration evidence actually distinguishes is whether raw/Q96 or
-    # Q96/raw itself is the quote-per-token value.
-    direct_quote = Decimal(raw) / Q96
-    inverse_quote = Q96 / Decimal(raw)
+    candidates = cca_price_candidates(clearing_price_x96)
+    direct_quote = candidates["quote_per_token"]
+    inverse_quote = candidates["token_per_quote"]
     direct_error = abs(direct_quote / migrated - Decimal(1))
     inverse_error = abs(inverse_quote / migrated - Decimal(1))
 
