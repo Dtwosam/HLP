@@ -96,6 +96,13 @@ from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
     reconstruct_staggered_chainlink_usd_tapes,
 )
+from hlp.data.market_quality import (
+    build_candidate_canonical_market_series,
+    build_causal_market_quality_trace,
+    summarize_candidate_canonical_market_series,
+    summarize_causal_market_quality_trace,
+    summarize_market_competition,
+)
 from hlp.data.phase2_coverage import apply_phase2_source_coverage_report
 from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.pools_fun_registry import build_pools_fun_registry
@@ -5208,6 +5215,63 @@ def cmd_pons_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_phase2_market_quality_audit(
+    args: argparse.Namespace,
+) -> int:
+    """Build causal multi-market research evidence from priced market tapes."""
+    rows = []
+    for path in args.points:
+        rows.extend(_load_jsonl(path))
+    if not rows:
+        raise SystemExit("market-quality audit received no market points")
+
+    trace = build_causal_market_quality_trace(rows)
+    candidate = build_candidate_canonical_market_series(rows)
+    competition = summarize_market_competition(rows)
+    trace_summary = summarize_causal_market_quality_trace(trace)
+    candidate_summary = summarize_candidate_canonical_market_series(
+        candidate
+    )
+
+    trace_manifest = write_jsonl_snapshot(
+        trace,
+        output=Path(args.trace_out),
+        provenance={
+            "source": "phase2_market_quality_causal_trace",
+            "input_points": [str(path) for path in args.points],
+            "selection_rule_frozen": False,
+        },
+    )
+    candidate_manifest = write_jsonl_snapshot(
+        candidate,
+        output=Path(args.candidate_out),
+        provenance={
+            "source": "phase2_candidate_canonical_market_series",
+            "input_points": [str(path) for path in args.points],
+            "selection_rule_frozen": False,
+            "cross_pool_volume_double_counting_allowed": False,
+        },
+    )
+
+    report = {
+        "version": "phase2-market-quality-audit-v1",
+        "selection_rule_frozen": False,
+        "input_points": len(rows),
+        "competition": competition,
+        "causal_trace": trace_summary,
+        "candidate_canonical_series": candidate_summary,
+        "trace_sha256": trace_manifest["sha256"],
+        "candidate_sha256": candidate_manifest["sha256"],
+    }
+    out = Path(args.report_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
 def cmd_phase2_apply_source_coverage(
     args: argparse.Namespace,
 ) -> int:
@@ -6112,6 +6176,22 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--from-block", type=int, required=True)
     scan.add_argument("--to-block", type=int, required=True)
     scan.set_defaults(func=cmd_pons_scan)
+
+    phase2_market_quality = sub.add_parser(
+        "phase2-market-quality-audit"
+    )
+    phase2_market_quality.add_argument(
+        "--points",
+        action="append",
+        required=True,
+        help="priced market-point JSONL; repeat for multiple tapes",
+    )
+    phase2_market_quality.add_argument("--trace-out", required=True)
+    phase2_market_quality.add_argument("--candidate-out", required=True)
+    phase2_market_quality.add_argument("--report-out", required=True)
+    phase2_market_quality.set_defaults(
+        func=cmd_phase2_market_quality_audit
+    )
 
     phase2_apply_coverage = sub.add_parser(
         "phase2-apply-source-coverage"
