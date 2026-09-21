@@ -165,7 +165,10 @@ Implemented foundation:
   complete source, and emits a proposed updated ledger plus validation evidence
   without writing or committing the canonical coverage ledger. The underlying
   apply helper now also rejects any attempt to drift a frozen
-  `required_start_block` or rewrite an already-complete source;
+  `required_start_block` or rewrite an already-complete source. The prepared
+  pools.fun coverage workflow now publishes the exact run ID, artifact digest,
+  report path and report SHA needed to feed that promotion handoff without
+  reconstructing identities by hand;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;

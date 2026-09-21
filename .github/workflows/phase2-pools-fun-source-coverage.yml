@@ -337,6 +337,7 @@ jobs:
           path: inputs/price
           merge-multiple: true
       - name: Validate and merge pools.fun market-cap coverage
+        id: merge
         run: |
           mkdir -p artifacts
           python - <<'PY'
@@ -630,23 +631,50 @@ jobs:
               raise SystemExit(
                   "pools.fun alone must not close Phase-2 source coverage"
               )
-          Path(
-              "artifacts/pools-fun-source-coverage-report.json"
-          ).write_text(
+          report_text = (
               json.dumps(report, indent=2, sort_keys=True) + "\n"
           )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/pools-fun-source-coverage-report.json"
+          ).write_text(report_text)
           Path(
               "artifacts/pools-fun-source-coverage-validation.json"
           ).write_text(
               json.dumps(validation, indent=2, sort_keys=True) + "\n"
           )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
           print(json.dumps({
               "coverage_report": report,
+              "coverage_report_sha256": report_sha,
               "validation": validation,
           }, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Upload source coverage evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: phase2-pools-fun-source-coverage
           path: artifacts/
           if-no-files-found: error
+      - name: Publish coverage-promotion inputs
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.merge.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## pools.fun coverage promotion"
+            echo
+            echo "- coverage_run_id: ${GITHUB_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-pools-fun-source-coverage"
+            echo "- expected_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: pools-fun-source-coverage-report.json"
+            echo "- expected_report_sha256: ${REPORT_SHA256}"
+            echo "- expected_source_id: pools_fun"
+          } >> "${GITHUB_STEP_SUMMARY}"

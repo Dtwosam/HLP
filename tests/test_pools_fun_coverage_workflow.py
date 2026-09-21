@@ -40,3 +40,23 @@ def test_pools_fun_coverage_requires_fully_priced_complete_population():
     assert "merged point accounting drift" in text
     assert '"continuous": True' in text
     assert '"missing_ranges": []' in text
+
+def test_pools_fun_coverage_publishes_exact_promotion_handoff():
+    text = WORKFLOW.read_text()
+
+    assert "id: merge" in text
+    assert "report_sha256=" in text
+    assert "id: upload" in text
+    assert "steps.upload.outputs.artifact-digest" in text
+    assert "coverage_run_id: ${GITHUB_RUN_ID}" in text
+    assert (
+        "coverage_artifact_name: phase2-pools-fun-source-coverage"
+        in text
+    )
+    assert (
+        "coverage_report_path: pools-fun-source-coverage-report.json"
+        in text
+    )
+    assert "expected_report_sha256: ${REPORT_SHA256}" in text
+    assert "expected_source_id: pools_fun" in text
+
