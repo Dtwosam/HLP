@@ -249,7 +249,13 @@ Implemented foundation:
   addresses against exact address-based direct-DEX registries, verifies token
   and quote identity, records Initialize-vs-graduation order, and leaves
   unmatched pools unresolved. PoolId-only V4 rows are never inferred from the
-  address-valued graduation field;
+  address-valued graduation field. A dispatch-only **256-shard** full-history
+  Flap Portal backfill is now prepared from required start **4,180,724** through
+  snapshot **54,486,035**. It validates continuous shard coverage and builds one
+  global chronological event-sourced registry across the full tape, so quote,
+  curve, DEX-preference and graduation changes cannot be finalized independently
+  inside shards. It emits an immutable aggregate event SHA plus launch/graduation
+  registry evidence but deliberately keeps `source_coverage_complete=false`;
 - NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
   unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
   mint/burn surface. The registry is read from exact launch-block state, every

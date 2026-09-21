@@ -15,14 +15,22 @@ def _order(row: FlapEvent) -> tuple[int, int, int]:
     )
 
 
-def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
-    """Build per-token launch/config records from a chronological Portal tape.
+def build_flap_launch_registry_ordered(
+    events: Iterable[FlapEvent],
+) -> list[dict]:
+    """Build registry from an already chronological Portal event stream.
 
-    Configuration is event-sourced rather than fetched from current state, so
-    later Portal upgrades cannot rewrite historical launch parameters.
+    The ordered variant is intentionally streaming-friendly for the Phase-2
+    chain-wide backfill. It rejects ordering drift instead of sorting the full
+    history in memory.
     """
     states: dict[str, dict] = {}
-    for event in sorted(list(events), key=_order):
+    previous_order = None
+    for event in events:
+        order = _order(event)
+        if previous_order is not None and order < previous_order:
+            raise ValueError("Flap event stream is not chronological")
+        previous_order = order
         token = event.token.lower()
         if event.event_type == "token_created":
             if token in states:
@@ -127,3 +135,14 @@ def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
     output = list(states.values())
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
     return output
+
+
+def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
+    """Build per-token launch/config records from an arbitrary event iterable.
+
+    Configuration is event-sourced rather than fetched from current state, so
+    later Portal upgrades cannot rewrite historical launch parameters.
+    """
+    return build_flap_launch_registry_ordered(
+        sorted(list(events), key=_order)
+    )

@@ -1,4 +1,7 @@
-from hlp.data.flap_registry import build_flap_launch_registry
+from hlp.data.flap_registry import (
+    build_flap_launch_registry,
+    build_flap_launch_registry_ordered,
+)
 from hlp.data.types import FlapEvent
 
 
@@ -95,4 +98,34 @@ def test_flap_registry_rejects_duplicate_graduation():
     ]
     with pytest.raises(ValueError, match="duplicate Flap LaunchedToDEX"):
         build_flap_launch_registry(rows)
+
+
+def test_ordered_flap_registry_rejects_chronology_drift():
+    import pytest
+
+    rows = [
+        event("token_created", logi=2, actor="0x" + "22" * 20),
+        event("quote_set", logi=1, actor=ZERO),
+    ]
+    with pytest.raises(ValueError, match="not chronological"):
+        build_flap_launch_registry_ordered(rows)
+
+
+def test_ordered_flap_registry_matches_sorting_wrapper():
+    rows = [
+        event("quote_set", logi=2, actor=ZERO),
+        event("token_created", logi=0, actor="0x" + "22" * 20),
+        event("curve_set_v2", logi=1, value=1, value2=2, amount=3),
+    ]
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            row.block_number,
+            -1 if row.transaction_index is None else row.transaction_index,
+            row.log_index,
+        ),
+    )
+    assert build_flap_launch_registry_ordered(ordered) == (
+        build_flap_launch_registry(rows)
+    )
 
