@@ -15,6 +15,7 @@ from hlp.config import (
     DEFAULT_RPC_URL,
     SOLIDRPC_PUBLIC_RPC_URL,
     SOLIDRPC_AUTH_RPC_URL,
+    SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
     ROBINHOOD_USDG,
     ROBINHOOD_WETH,
     UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
@@ -142,6 +143,7 @@ from hlp.data.reconstruct import (
     v3_quote_price_at_block,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
+from hlp.data.sparse_quote_usd import build_sparse_v3_quote_points
 from hlp.data.sharded_tape import iter_sharded_jsonl
 from hlp.data.universe import build_v1_market_cap_points, summarize_v1_market_caps
 from hlp.data.transition import summarize_v2_transition_continuity
@@ -698,23 +700,26 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
     rpc = _archive_rpc(args)
     rpc.assert_robinhood()
     started = time.monotonic()
-    initial_weth_usd = v3_quote_price_at_block(
+    target_events = [*initializes, *swaps]
+    if not target_events:
+        raise SystemExit(
+            "pools.fun has no V3 Initialize/Swap events to price"
+        )
+    anchor_window_size = args.chunk_size
+    if rpc.route_label == "solidrpc_keyless_public":
+        anchor_window_size = min(
+            anchor_window_size,
+            SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+        )
+    anchors = build_sparse_v3_quote_points(
         rpc,
+        target_events,
         token=ROBINHOOD_WETH,
         quote_token=ROBINHOOD_USDG,
         pool=args.usd_anchor_pool,
-        block=args.from_block - 1,
+        window_size=anchor_window_size,
     )
-    anchors = list(reconstruct_v3_price_points(
-        rpc,
-        token=ROBINHOOD_WETH,
-        quote_token=ROBINHOOD_USDG,
-        pool=args.usd_anchor_pool,
-        from_block=args.from_block,
-        to_block=args.to_block,
-        chunk_size=args.chunk_size,
-        min_chunk_size=args.min_chunk_size,
-    ))
+    initial_weth_usd = Decimal(anchors[0]["quote_per_token"])
     quote_tokens = {row["quote_token"].lower() for row in registry}
     quote_decimals = {
         ROBINHOOD_WETH.lower(): 18,
@@ -748,6 +753,8 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
             "from_block": args.from_block,
             "to_block": args.to_block,
             "usd_anchor_pool": args.usd_anchor_pool.lower(),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
             "market_cap_math": "raw_quote_per_raw_token * supply_raw / 10**quote_decimals",
         },
     )
@@ -770,6 +777,11 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
         "tokens_priced": sum(row["priced_points"] > 0 for row in summary),
         "tokens_crossed_100k": sum(bool(row["crossed_100k"]) for row in summary),
         "initial_weth_usd": str(initial_weth_usd),
+        "sparse_anchor_points": len(anchors),
+        "sparse_anchor_windows": len({
+            row["window_from_block"] for row in anchors
+        }),
+        "anchor_window_size": anchor_window_size,
         "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "rpc_route": rpc.route_label,
