@@ -336,14 +336,8 @@ jobs:
               raise SystemExit("Doppler merged launch bytes changed")
 
           state_rows = [
-              states[token]
-              for token in sorted(
-                  states,
-                  key=lambda token: (
-                      int(states[token]["state_block"]),
-                      token,
-                  ),
-              )
+              states[normalize_address(row["asset"])]
+              for row in launch_rows
           ]
           merged_state = write_jsonl_snapshot(
               state_rows,
