@@ -229,9 +229,12 @@ Implemented foundation:
   and reads ERC-20 totalSupply/decimals at the exact Initialize block. The
   original TokenDistributed amount is retained separately while the canonical
   supply seed becomes Initialize-block-end totalSupply, ready for causal
-  mint/burn replay. It remains `source_coverage_complete=false` until the
-  shared V4 Swap, supply-delta and quote surfaces are replayed and fully
-  priced;
+  mint/burn replay. A source-specific bounded market-window command now
+  synthesizes each frozen Initialize, filters shared V4 swaps, replays the
+  complete mint/burn tape causally, and samples WETH/USD or Chainlink only at
+  target event orders. Each shard remains
+  `source_coverage_complete=false` until the full population is merged and
+  validated;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
