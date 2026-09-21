@@ -33,6 +33,7 @@ from hlp.config import (
     POOLS_TRADE_LAUNCHER_ORIGINAL,
     POOLS_FUN_FACTORY,
     NOXA_LAUNCH_FACTORY,
+    DOPPLER_AIRLOCK,
     FLAP_PORTAL,
     HOOD_FUN_CURRENT,
     TRENCH_MANAGER,
@@ -44,6 +45,10 @@ from hlp.protocols.noxa import (
     decode_noxa_launch,
 )
 from hlp.protocols.noxa_state import read_noxa_launched_token
+from hlp.protocols.doppler import (
+    CREATE_TOPIC as DOPPLER_CREATE_TOPIC,
+    decode_doppler_launch,
+)
 from hlp.protocols.uniswap import (
     PONS_V2_POOL_REGISTERED_TOPIC,
     V3_POOL_CREATED_TOPIC,
@@ -829,6 +834,99 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
 
 
 
+
+
+def cmd_rpc_doppler_launch_window(args: argparse.Namespace) -> int:
+    """Acquire Doppler Airlock launches plus exact launch-block ERC-20 state."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    if args.to_block < args.from_block:
+        raise SystemExit("to-block must be >= from-block")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=DOPPLER_AIRLOCK,
+        topics=[DOPPLER_CREATE_TOPIC],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+    launches = [decode_doppler_launch(row) for row in raw]
+    seen_assets: set[str] = set()
+    state_rows = []
+    for launch in launches:
+        asset = normalize_address(launch.asset)
+        if asset in seen_assets:
+            raise SystemExit(f"duplicate Doppler Airlock asset: {asset}")
+        seen_assets.add(asset)
+        static = read_erc20_static(
+            rpc,
+            asset,
+            block=int(launch.block_number),
+        )
+        if int(static.total_supply) <= 0:
+            raise SystemExit(
+                f"Doppler launch has non-positive supply: {asset}"
+            )
+        decimals = int(static.decimals)
+        if decimals < 0 or decimals > 255:
+            raise SystemExit(
+                f"Doppler launch has invalid decimals: {asset}"
+            )
+        state_rows.append({
+            "token": asset,
+            "state_block": int(launch.block_number),
+            "token_decimals": decimals,
+            "supply_raw": int(static.total_supply),
+        })
+
+    launch_manifest = write_jsonl_snapshot(
+        launches,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "protocol": "doppler_airlock_create",
+            "airlock": DOPPLER_AIRLOCK.lower(),
+            "event_topic0": DOPPLER_CREATE_TOPIC,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initial_chunk_size": args.chunk_size,
+            "min_chunk_size": args.min_chunk_size,
+        },
+    )
+    state_manifest = write_jsonl_snapshot(
+        state_rows,
+        output=Path(args.state_out),
+        provenance={
+            "source": "doppler_launch_block_erc20_state",
+            "chain_id": 4663,
+            "airlock": DOPPLER_AIRLOCK.lower(),
+            "launches_sha256": launch_manifest["sha256"],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "state_semantics": (
+                "ERC20 decimals/totalSupply at exact Airlock Create block"
+            ),
+        },
+    )
+    print(json.dumps({
+        "launches": launch_manifest,
+        "launch_states": state_manifest,
+        "assets": len(launches),
+        "numeraires": sorted({
+            normalize_address(row.numeraire)
+            for row in launches
+        }),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
 
 
 def cmd_rpc_noxa_registry_window(args: argparse.Namespace) -> int:
@@ -8271,6 +8369,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+    doppler_launch = sub.add_parser("rpc-doppler-launch-window")
+    doppler_launch.add_argument("--from-block", type=int, required=True)
+    doppler_launch.add_argument("--to-block", type=int, required=True)
+    doppler_launch.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    doppler_launch.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    doppler_launch.add_argument("--out", required=True)
+    doppler_launch.add_argument("--state-out", required=True)
+    doppler_launch.set_defaults(func=cmd_rpc_doppler_launch_window)
 
     noxa_registry = sub.add_parser("rpc-noxa-registry-window")
     noxa_registry.add_argument("--from-block", type=int, required=True)
