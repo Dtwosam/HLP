@@ -96,6 +96,8 @@ from hlp.data.oracles import (
     reconstruct_chainlink_usd_tapes,
     reconstruct_staggered_chainlink_usd_tapes,
 )
+from hlp.data.phase2_coverage import apply_phase2_source_coverage_report
+from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.pools_fun_registry import build_pools_fun_registry
 from hlp.data.pools_trade_registry import build_pools_trade_instant_registry
 from hlp.data.pools_trade_v4 import (
@@ -4957,6 +4959,43 @@ def cmd_pons_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_phase2_apply_source_coverage(
+    args: argparse.Namespace,
+) -> int:
+    """Validate and apply one immutable Phase-2 source coverage report."""
+    ledger_path = Path(args.ledger)
+    report_path = Path(args.report)
+    ledger = json.loads(ledger_path.read_text())
+    report = json.loads(report_path.read_text())
+    updated, validation = apply_phase2_source_coverage_report(
+        ledger,
+        build_phase2_source_inventory(),
+        report,
+    )
+
+    out = Path(args.out)
+    validation_out = Path(args.validation_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    validation_out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(updated, indent=2, sort_keys=True) + "\n"
+    )
+    validation_out.write_text(
+        json.dumps(validation, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps({
+        "source_id": report["source_id"],
+        "coverage_status": report["coverage_status"],
+        "ledger_out": str(out),
+        "validation_out": str(validation_out),
+        "complete_source_ids": validation["complete_source_ids"],
+        "phase2_universe_coverage_complete": (
+            validation["phase2_universe_coverage_complete"]
+        ),
+    }, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hlp")
     parser.add_argument("--rpc-url", default=DEFAULT_RPC_URL)
@@ -5729,6 +5768,20 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--from-block", type=int, required=True)
     scan.add_argument("--to-block", type=int, required=True)
     scan.set_defaults(func=cmd_pons_scan)
+
+    phase2_apply_coverage = sub.add_parser(
+        "phase2-apply-source-coverage"
+    )
+    phase2_apply_coverage.add_argument("--ledger", required=True)
+    phase2_apply_coverage.add_argument("--report", required=True)
+    phase2_apply_coverage.add_argument("--out", required=True)
+    phase2_apply_coverage.add_argument(
+        "--validation-out",
+        required=True,
+    )
+    phase2_apply_coverage.set_defaults(
+        func=cmd_phase2_apply_source_coverage
+    )
 
     return parser
 
