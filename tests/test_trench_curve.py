@@ -140,3 +140,39 @@ def test_trench_market_cap_respects_non18_decimals():
     assert Decimal(rows[0]["quote_per_token"]) == Decimal("2")
     assert Decimal(rows[0]["market_cap_quote"]) == Decimal("4000000")
 
+
+def test_trench_sync_rejects_snapshot_after_recorded_limit_reach():
+    limited_registry = [{
+        **REGISTRY[0],
+        "limit_reach_block": 10,
+        "limit_reach_transaction_index": 1,
+        "limit_reach_log_index": 9,
+    }]
+    with pytest.raises(ValueError, match="follows recorded LimitReach"):
+        list(
+            build_trench_curve_market_cap_points(
+                [sync()],
+                limited_registry,
+                [],
+                initial_weth_usd=Decimal("2000"),
+            )
+        )
+
+
+def test_trench_sync_allows_snapshot_before_recorded_limit_reach():
+    limited_registry = [{
+        **REGISTRY[0],
+        "limit_reach_block": 10,
+        "limit_reach_transaction_index": 3,
+        "limit_reach_log_index": 0,
+    }]
+    rows = list(
+        build_trench_curve_market_cap_points(
+            [sync()],
+            limited_registry,
+            [],
+            initial_weth_usd=Decimal("2000"),
+        )
+    )
+    assert len(rows) == 1
+
