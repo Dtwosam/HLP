@@ -73,6 +73,22 @@ def build_trench_curve_market_cap_points(
             raise ValueError(
                 f"trench.today Sync precedes recorded launch: {token}"
             )
+        if launch.get("limit_reach_block") is not None:
+            if launch.get("limit_reach_log_index") is None:
+                raise ValueError(
+                    f"trench.today registry missing LimitReach order: {token}"
+                )
+            limit_order = (
+                int(launch["limit_reach_block"]),
+                -1
+                if launch.get("limit_reach_transaction_index") is None
+                else int(launch["limit_reach_transaction_index"]),
+                int(launch["limit_reach_log_index"]),
+            )
+            if order > limit_order:
+                raise ValueError(
+                    f"trench.today Sync follows recorded LimitReach: {token}"
+                )
         if event.virtual_quote_raw is None or event.virtual_token_raw is None:
             raise ValueError(f"trench.today Sync missing virtual reserves: {token}")
         if event.virtual_quote_raw <= 0 or event.virtual_token_raw <= 0:
