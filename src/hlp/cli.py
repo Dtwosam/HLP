@@ -54,10 +54,12 @@ from hlp.protocols.uniswap import (
 )
 from hlp.data.blockscout import BlockscoutClient
 from hlp.data.direct_markets import (
+    build_direct_market_competition_cohort,
     build_v3_direct_market_registry,
     build_v4_direct_market_registry,
     select_v3_direct_market_candidates,
     select_v4_direct_market_candidates,
+    summarize_direct_market_competition_cohort,
     summarize_direct_market_registry,
 )
 from hlp.data.direct_quotes import (
@@ -873,6 +875,47 @@ def _sha256_file(path: str) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
+
+
+
+def cmd_phase2_direct_market_competition_cohort(
+    args: argparse.Namespace,
+) -> int:
+    """Freeze the real multi-market research cohort without selecting markets."""
+    rows = []
+    input_sha256 = {}
+    for path in args.registry:
+        rows.extend(_load_jsonl(path))
+        input_sha256[Path(path).name] = _sha256_file(path)
+    cohort = build_direct_market_competition_cohort(
+        rows,
+        min_markets=args.min_markets,
+    )
+    manifest = write_jsonl_snapshot(
+        cohort,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_direct_market_competition_cohort",
+            "chain_id": 4663,
+            "registries": [Path(path).name for path in args.registry],
+            "registry_sha256": dict(sorted(input_sha256.items())),
+            "min_markets": args.min_markets,
+            "canonical_market_selection_complete": False,
+        },
+    )
+    report = {
+        "version": "phase2-direct-market-competition-v1",
+        **summarize_direct_market_competition_cohort(cohort),
+        "min_markets": args.min_markets,
+        "cohort_sha256": manifest["sha256"],
+        "registry_sha256": dict(sorted(input_sha256.items())),
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
 
 
 
@@ -6513,6 +6556,21 @@ def build_parser() -> argparse.ArgumentParser:
     v4_swap.add_argument("--out", required=True)
     v4_swap.set_defaults(
         func=cmd_rpc_v4_swap_window
+    )
+
+    direct_competition = sub.add_parser(
+        "phase2-direct-market-competition-cohort"
+    )
+    direct_competition.add_argument(
+        "--registry", action="append", required=True
+    )
+    direct_competition.add_argument(
+        "--min-markets", type=int, default=2
+    )
+    direct_competition.add_argument("--out", required=True)
+    direct_competition.add_argument("--summary-out", required=True)
+    direct_competition.set_defaults(
+        func=cmd_phase2_direct_market_competition_cohort
     )
 
     direct_quotes = sub.add_parser(
