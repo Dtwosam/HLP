@@ -34,6 +34,7 @@ def event(kind, *, vq, vt, logi=0):
 
 REGISTRY = [{
     "token": TOKEN,
+    "generation": "current",
     "supply_raw": 1_000_000_000 * 10**18,
 }]
 
@@ -74,3 +75,27 @@ def test_hood_fun_summary_flags_100k():
         initial_weth_usd=Decimal("2000"),
     )
     assert summarize_hood_fun_curve_market_caps(rows)[0]["crossed_100k"] is True
+
+
+
+def test_hood_fun_curve_preserves_generation_provenance():
+    registry = [{
+        "token": TOKEN,
+        "generation": "previous",
+        "supply_raw": 1_000_000_000 * 10**18,
+    }]
+    rows = build_hood_fun_curve_market_cap_points(
+        [
+            event(
+                "token_created",
+                vq=2_810_000_000_000_000_000,
+                vt=1_145_000_000 * 10**18,
+            )
+        ],
+        registry,
+        [],
+        initial_weth_usd=Decimal("2000"),
+    )
+    assert rows[0]["generation"] == "previous"
+    summary = summarize_hood_fun_curve_market_caps(rows)
+    assert summary[0]["generation"] == "previous"
