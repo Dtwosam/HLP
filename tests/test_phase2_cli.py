@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_direct_quote_registry,
     cmd_phase2_direct_v3_registry,
     cmd_phase2_direct_v4_registry,
     cmd_phase2_market_quality_audit,
@@ -299,6 +300,107 @@ def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
     assert len(row["pool_id"]) == 66
 
 
+
+
+
+
+def test_phase2_direct_quote_registry_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-quote-registry",
+        "--registry-out", "quotes.jsonl",
+        "--decimals-out", "decimals.json",
+        "--feed-out", "feeds.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.registry_out == "quotes.jsonl"
+    assert args.decimals_out == "decimals.json"
+    assert args.feed_out == "feeds.jsonl"
+
+
+def test_phase2_direct_quote_registry_command(
+    monkeypatch,
+    tmp_path,
+):
+    quote = "0x" + "11" * 20
+    missing = "0x" + "12" * 20
+    feed = "0x" + "22" * 20
+
+    class FakeAssets:
+        url = "https://assets.example"
+        requests_made = 1
+        bytes_received = 100
+
+    class FakeDirectory:
+        url = "https://directory.example"
+        requests_made = 1
+        bytes_received = 200
+        last_sha256 = "ab" * 32
+
+    monkeypatch.setattr(
+        "hlp.cli.RobinhoodAssetsClient",
+        lambda **kwargs: FakeAssets(),
+    )
+    monkeypatch.setattr(
+        "hlp.cli.ChainlinkDirectoryClient",
+        lambda **kwargs: FakeDirectory(),
+    )
+    monkeypatch.setattr(
+        "hlp.cli.build_direct_quote_registry_from_clients",
+        lambda assets, directory: [
+            {
+                "quote_token": quote,
+                "symbol": "TEST",
+                "quote_decimals": 18,
+                "pricing_status": "priced_chainlink_stock_token",
+                "feed": feed,
+                "secondary_feed": None,
+                "heartbeat_seconds": 86400,
+                "directory_name": "Robinhood TEST / USD",
+                "directory_path": "robinhood-test-usd",
+            },
+            {
+                "quote_token": missing,
+                "symbol": "MISS",
+                "quote_decimals": 8,
+                "pricing_status": "missing_chainlink_feed",
+                "feed": None,
+                "secondary_feed": None,
+                "heartbeat_seconds": None,
+                "directory_name": None,
+                "directory_path": None,
+            },
+        ],
+    )
+
+    registry = tmp_path / "quotes.jsonl"
+    decimals = tmp_path / "decimals.json"
+    feeds = tmp_path / "feeds.jsonl"
+    summary = tmp_path / "summary.json"
+    args = SimpleNamespace(
+        timeout=1.0,
+        attempts=1,
+        registry_out=str(registry),
+        decimals_out=str(decimals),
+        feed_out=str(feeds),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_direct_quote_registry(args) == 0
+
+    assert json.loads(decimals.read_text()) == {quote: 18}
+    feed_row = json.loads(feeds.read_text().strip())
+    assert feed_row["quote_token"] == quote
+    assert feed_row["feed"] == feed
+
+    report = json.loads(summary.read_text())
+    assert report["registry_rows"] == 2
+    assert report["priceable_quotes"] == 1
+    assert report["chainlink_feed_quotes"] == 1
+    assert report["pricing_status_counts"] == {
+        "missing_chainlink_feed": 1,
+        "priced_chainlink_stock_token": 1,
+    }
+    assert report["chainlink_directory_sha256"] == "ab" * 32
 
 
 
