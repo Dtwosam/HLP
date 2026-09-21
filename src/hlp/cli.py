@@ -62,6 +62,13 @@ from hlp.data.direct_markets import (
     summarize_direct_market_competition_cohort,
     summarize_direct_market_registry,
 )
+from hlp.data.direct_evidence import (
+    build_direct_market_evidence_plan,
+    filter_direct_market_events,
+    filter_direct_market_registry,
+    filter_direct_supply_deltas,
+    summarize_direct_market_evidence_plan,
+)
 from hlp.data.direct_quotes import (
     DIRECT_PRICEABLE_STATUSES,
     build_direct_quote_registry_from_clients,
@@ -956,6 +963,144 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+
+
+
+
+def cmd_phase2_direct_market_evidence_plan(
+    args: argparse.Namespace,
+) -> int:
+    """Build a bounded chronology-spanning real-market evidence plan."""
+    cohort = _load_jsonl(args.cohort)
+    plan = build_direct_market_evidence_plan(
+        cohort,
+        sample_size=args.sample_size,
+        window_blocks=args.window_blocks,
+        snapshot_head_block=args.snapshot_head,
+    )
+    manifest = write_jsonl_snapshot(
+        plan,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_direct_market_evidence_plan",
+            "chain_id": 4663,
+            "cohort": Path(args.cohort).name,
+            "cohort_sha256": _sha256_file(args.cohort),
+            "sample_size": args.sample_size,
+            "window_blocks": args.window_blocks,
+            "snapshot_head_block": args.snapshot_head,
+            "selector_freeze_ready": False,
+        },
+    )
+    report = {
+        "version": "phase2-direct-market-evidence-plan-v1",
+        **summarize_direct_market_evidence_plan(plan),
+        "requested_sample_size": args.sample_size,
+        "window_blocks": args.window_blocks,
+        "snapshot_head_block": args.snapshot_head,
+        "cohort_sha256": _sha256_file(args.cohort),
+        "plan_sha256": manifest["sha256"],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_direct_evidence_filter(
+    args: argparse.Namespace,
+) -> int:
+    """Materialize a compact SHA-bound evidence input from full direct tapes."""
+    plan = _load_jsonl(args.plan)
+    if not plan:
+        raise SystemExit("direct evidence plan is empty")
+
+    input_sha256 = _event_tape_sha256(
+        file_path=args.input,
+        aggregate_manifest=args.input_manifest,
+        label=f"direct evidence {args.kind}",
+    )
+
+    if args.kind == "registry":
+        if not args.input or args.input_manifest or args.input_shard_dir:
+            raise SystemExit(
+                "direct evidence registry filtering requires one --input file"
+            )
+        rows = filter_direct_market_registry(
+            _iter_jsonl(args.input),
+            plan,
+        )
+    elif args.kind in {"v3-events", "v4-events"}:
+        market_field = "pool" if args.kind == "v3-events" else "pool_id"
+        market_kind = "v3_pool" if args.kind == "v3-events" else "v4_pool_id"
+        market_ids = {
+            str(market["market_id"]).lower()
+            for item in plan
+            for market in item.get("markets", [])
+            if str(market.get("market_kind")) == market_kind
+        }
+        source = _iter_filtered_event_tape(
+            file_path=args.input,
+            shard_dir=args.input_shard_dir,
+            aggregate_manifest=args.input_manifest,
+            label=f"direct evidence {args.kind}",
+            field=market_field,
+            values=market_ids,
+        )
+        rows = filter_direct_market_events(
+            source,
+            plan,
+            market_field=market_field,
+        )
+    elif args.kind == "supply":
+        tokens = {
+            normalize_address(str(row["token"]))
+            for row in plan
+        }
+        source = _iter_filtered_event_tape(
+            file_path=args.input,
+            shard_dir=args.input_shard_dir,
+            aggregate_manifest=args.input_manifest,
+            label="direct evidence supply",
+            field="token",
+            values=tokens,
+        )
+        rows = filter_direct_supply_deltas(source, plan)
+    else:
+        raise ValueError(f"unsupported direct evidence kind: {args.kind}")
+
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_direct_market_evidence_filter",
+            "chain_id": 4663,
+            "kind": args.kind,
+            "plan": Path(args.plan).name,
+            "plan_sha256": _sha256_file(args.plan),
+            "input": _event_tape_source_name(
+                file_path=args.input,
+                aggregate_manifest=args.input_manifest,
+            ),
+            "input_sha256": input_sha256,
+            "selector_freeze_ready": False,
+        },
+    )
+    report = {
+        "version": "phase2-direct-market-evidence-filter-v1",
+        "kind": args.kind,
+        "records": manifest["records"],
+        "output_sha256": manifest["sha256"],
+        "plan_sha256": _sha256_file(args.plan),
+        "input_sha256": input_sha256,
+        "selector_freeze_ready": False,
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
 
 
 
@@ -6772,6 +6917,40 @@ def build_parser() -> argparse.ArgumentParser:
     v4_swap.add_argument("--out", required=True)
     v4_swap.set_defaults(
         func=cmd_rpc_v4_swap_window
+    )
+
+    direct_evidence_plan = sub.add_parser(
+        "phase2-direct-market-evidence-plan"
+    )
+    direct_evidence_plan.add_argument("--cohort", required=True)
+    direct_evidence_plan.add_argument("--sample-size", type=int, required=True)
+    direct_evidence_plan.add_argument("--window-blocks", type=int, required=True)
+    direct_evidence_plan.add_argument("--snapshot-head", type=int, required=True)
+    direct_evidence_plan.add_argument("--out", required=True)
+    direct_evidence_plan.add_argument("--summary-out", required=True)
+    direct_evidence_plan.set_defaults(
+        func=cmd_phase2_direct_market_evidence_plan
+    )
+
+    direct_evidence_filter = sub.add_parser(
+        "phase2-direct-evidence-filter"
+    )
+    direct_evidence_filter.add_argument("--plan", required=True)
+    direct_evidence_filter.add_argument(
+        "--kind",
+        choices=("registry", "v3-events", "v4-events", "supply"),
+        required=True,
+    )
+    direct_evidence_input = direct_evidence_filter.add_mutually_exclusive_group(
+        required=True
+    )
+    direct_evidence_input.add_argument("--input")
+    direct_evidence_input.add_argument("--input-manifest")
+    direct_evidence_filter.add_argument("--input-shard-dir")
+    direct_evidence_filter.add_argument("--out", required=True)
+    direct_evidence_filter.add_argument("--summary-out", required=True)
+    direct_evidence_filter.set_defaults(
+        func=cmd_phase2_direct_evidence_filter
     )
 
     direct_competition = sub.add_parser(
