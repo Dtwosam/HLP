@@ -8,6 +8,7 @@ from hlp.cli import (
     cmd_phase2_direct_evidence_filter,
     cmd_phase2_direct_market_competition_cohort,
     cmd_phase2_direct_market_evidence_plan,
+    cmd_phase2_direct_origin_attribution,
     cmd_phase2_direct_quote_registry,
     cmd_phase2_direct_v3_market_cap_window,
     cmd_phase2_direct_v3_registry,
@@ -507,6 +508,135 @@ def _evidence_cohort_row():
         ],
         "canonical_market_selection_complete": False,
     }
+
+
+
+def test_phase2_direct_origin_attribution_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-origin-attribution",
+        "--market-registry", "direct.jsonl",
+        "--launch-registry", "pons_v1=pons.jsonl",
+        "--out", "attributed.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.market_registry == ["direct.jsonl"]
+    assert args.launch_registry == ["pons_v1=pons.jsonl"]
+    assert args.coverage_ledger == ".github/phase2-source-coverage.json"
+
+
+def test_phase2_direct_origin_attribution_command(
+    monkeypatch,
+    tmp_path,
+):
+    token = "0x" + "11" * 20
+    market = tmp_path / "direct.jsonl"
+    pons = tmp_path / "pons.jsonl"
+    ledger = tmp_path / "coverage.json"
+    out = tmp_path / "attributed.jsonl"
+    summary = tmp_path / "summary.json"
+
+    _write_jsonl(market, [{
+        "source_id": "direct_uniswap_v3",
+        "venue": "uniswap_v3",
+        "token": token,
+        "pool": "0x" + "22" * 20,
+    }])
+    _write_jsonl(pons, [{"token": token}])
+    ledger.write_text(json.dumps({
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            {
+                "source_id": "pons_v1",
+                "source_readiness": "phase1_proven",
+                "coverage_status": "complete",
+                "required_start_block": 1,
+                "first_block": 1,
+                "last_block": 100,
+                "continuous": True,
+                "missing_ranges": [],
+                "tokens_discovered": 1,
+                "price_points": 1,
+                "priced_points": 1,
+                "observed_volume_usd": None,
+                "provenance_sha256": "ab" * 32,
+                "blocking_reason": None,
+            },
+            {
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": 2,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+            {
+                "source_id": "direct_uniswap_v3",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": 1,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+        ],
+    }))
+    monkeypatch.setattr(
+        "hlp.cli.build_phase2_source_inventory",
+        lambda: [
+            {
+                "source_id": "pons_v1",
+                "source_kind": "launchpad",
+                "readiness": "phase1_proven",
+            },
+            {
+                "source_id": "noxa",
+                "source_kind": "launchpad",
+                "readiness": "adapter_ready",
+            },
+            {
+                "source_id": "direct_uniswap_v3",
+                "source_kind": "direct_dex",
+                "readiness": "adapter_ready",
+            },
+        ],
+    )
+
+    args = SimpleNamespace(
+        market_registry=[str(market)],
+        launch_registry=[f"pons_v1={pons}"],
+        coverage_ledger=str(ledger),
+        out=str(out),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_direct_origin_attribution(args) == 0
+
+    row = json.loads(out.read_text().strip())
+    assert row["origin_classification"] == "known_launch_source"
+    assert row["launch_source_ids"] == ["pons_v1"]
+
+    report = json.loads(summary.read_text())
+    assert report["launch_source_coverage_complete"] is False
+    assert report["absence_from_launch_registries_is_conclusive"] is False
+    assert report["missing_launch_registry_source_ids"] == ["noxa"]
+    assert report["attributed_registry_sha256"]
+
 
 
 def test_phase2_direct_market_evidence_plan_command(tmp_path):
