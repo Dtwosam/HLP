@@ -1073,7 +1073,7 @@ def cmd_phase2_direct_quote_registry(args: argparse.Namespace) -> int:
 
 
 def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
-    """Build a fail-closed direct-V3 candidate registry with exact state."""
+    """Build direct-V3 candidates with block-end supply seeds at Initialize blocks."""
     pool_created_rows = [
         V3PoolCreated(**row)
         for row in _load_jsonl(args.pool_created)
@@ -1134,7 +1134,7 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
         states,
         output=Path(args.state_out),
         provenance={
-            "source": "direct_v3_exact_initialize_block_erc20_state",
+            "source": "direct_v3_initialize_block_end_erc20_state",
             "chain_id": 4663,
             "source_id": args.source_id,
             "factory": normalize_address(args.factory),
@@ -1144,7 +1144,7 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
             "initialize_input_sha256": initialize_sha256,
             "quote_decimals_input": Path(args.quote_decimals).name,
             "quote_decimals_sha256": quote_sha256,
-            "state_semantics": "exact_initialize_block",
+            "state_semantics": "initialize_block_end",
             "rpc_route": rpc.route_label,
         },
     )
@@ -1172,7 +1172,7 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
             "quote_decimals_sha256": quote_sha256,
             "erc20_state_sha256": state_manifest["sha256"],
             "supported_quote_rule": "exactly_one_side_in_explicit_allowlist",
-            "state_semantics": "exact_initialize_block",
+            "state_semantics": "initialize_block_end",
         },
     )
 
@@ -1185,7 +1185,7 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
         "shared_initialize_rows": len(initialize_rows),
         "supported_quote_candidate_markets": len(candidates),
         "matched_initialized_candidate_markets": len(matched_initializes),
-        "exact_state_reads": len(states),
+        "initialize_block_end_state_reads": len(states),
         "pool_created_input_sha256": created_sha256,
         "initialize_input_sha256": initialize_sha256,
         "quote_decimals_sha256": quote_sha256,
@@ -1196,8 +1196,11 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
         "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+        "supply_seed_semantics": "initialize_block_end_total_supply",
+        "event_time_supply_complete": False,
         "source_coverage_complete": False,
         "remaining_steps": [
+            "complete mint/burn supply delta reconstruction",
             "market event reconstruction",
             "empirical multi-pool selector freeze",
             "complete launch-origin attribution",
@@ -1214,7 +1217,7 @@ def cmd_phase2_direct_v3_registry(args: argparse.Namespace) -> int:
 
 
 def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
-    """Build a fail-closed direct-V4 candidate registry with exact state."""
+    """Build direct-V4 candidates with block-end supply seeds at Initialize blocks."""
     initialize_rows = [
         V4PoolInitialized(**row)
         for row in _load_jsonl(args.initialize)
@@ -1256,7 +1259,7 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
         states,
         output=Path(args.state_out),
         provenance={
-            "source": "direct_v4_exact_initialize_block_erc20_state",
+            "source": "direct_v4_initialize_block_end_erc20_state",
             "chain_id": 4663,
             "source_id": args.source_id,
             "pool_manager": normalize_address(args.pool_manager),
@@ -1264,7 +1267,7 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
             "initialize_input_sha256": input_sha256,
             "quote_decimals_input": Path(args.quote_decimals).name,
             "quote_decimals_sha256": quote_sha256,
-            "state_semantics": "exact_initialize_block",
+            "state_semantics": "initialize_block_end",
             "rpc_route": rpc.route_label,
         },
     )
@@ -1290,7 +1293,7 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
             "quote_decimals_sha256": quote_sha256,
             "erc20_state_sha256": state_manifest["sha256"],
             "supported_quote_rule": "exactly_one_side_in_explicit_allowlist",
-            "state_semantics": "exact_initialize_block",
+            "state_semantics": "initialize_block_end",
         },
     )
 
@@ -1301,7 +1304,7 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
         "pool_manager": normalize_address(args.pool_manager),
         "initialize_rows": len(initialize_rows),
         "supported_quote_candidate_markets": len(candidates),
-        "exact_state_reads": len(states),
+        "initialize_block_end_state_reads": len(states),
         "initialize_input_sha256": input_sha256,
         "quote_decimals_sha256": quote_sha256,
         "state_sha256": state_manifest["sha256"],
@@ -1311,8 +1314,11 @@ def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
         "requests_made": rpc.requests_made,
         "response_bytes_received": rpc.response_bytes_received,
         "elapsed_seconds": round(time.monotonic() - started, 3),
+        "supply_seed_semantics": "initialize_block_end_total_supply",
+        "event_time_supply_complete": False,
         "source_coverage_complete": False,
         "remaining_steps": [
+            "complete mint/burn supply delta reconstruction",
             "market event reconstruction",
             "empirical multi-pool selector freeze",
             "complete launch-origin attribution",
