@@ -1293,6 +1293,229 @@ def cmd_rpc_v4_swap_window(
     return 0
 
 
+def _phase2_direct_market_cap_window(
+    args: argparse.Namespace,
+    *,
+    version: str,
+) -> int:
+    if args.from_block <= 0 or args.to_block < args.from_block:
+        raise SystemExit("direct market window has invalid block bounds")
+
+    registry = _load_jsonl(args.registry)
+    if not registry:
+        raise SystemExit("direct market registry is empty")
+    source_ids = {str(row.get("source_id") or "") for row in registry}
+    venues = {str(row.get("venue") or "") for row in registry}
+    if len(source_ids) != 1 or "" in source_ids:
+        raise SystemExit("direct market registry must contain one source_id")
+    if len(venues) != 1 or "" in venues:
+        raise SystemExit("direct market registry must contain one venue")
+    source_id = next(iter(source_ids))
+    venue = next(iter(venues))
+    quote_decimals = _direct_registry_quote_decimals(registry)
+
+    if version == "v3":
+        market_field = "pool"
+        market_ids = {
+            normalize_address(str(row["pool"]))
+            for row in registry
+        }
+    elif version == "v4":
+        market_field = "pool_id"
+        market_ids = {
+            str(row["pool_id"]).lower()
+            for row in registry
+        }
+    else:
+        raise ValueError(f"unsupported direct market version: {version}")
+
+    initializes = [
+        row
+        for row in _load_jsonl(args.initializes)
+        if str(row.get(market_field) or "").lower() in market_ids
+        and args.from_block <= int(row["block_number"]) <= args.to_block
+    ]
+    swaps = [
+        row
+        for row in _iter_filtered_event_tape(
+            file_path=args.swaps,
+            shard_dir=args.swaps_shard_dir,
+            aggregate_manifest=args.swaps_manifest,
+            label=f"direct {version} swaps",
+            field=market_field,
+            values=market_ids,
+        )
+        if args.from_block <= int(row["block_number"]) <= args.to_block
+    ]
+    target_events = [*initializes, *swaps]
+
+    swap_sha256 = _event_tape_sha256(
+        file_path=args.swaps,
+        aggregate_manifest=args.swaps_manifest,
+        label=f"direct {version} swaps",
+    )
+    common_provenance = {
+        "chain_id": 4663,
+        "source_id": source_id,
+        "venue": venue,
+        "registry": Path(args.registry).name,
+        "registry_sha256": _sha256_file(args.registry),
+        "initializes": Path(args.initializes).name,
+        "initializes_sha256": _sha256_file(args.initializes),
+        "swaps": _event_tape_source_name(
+            file_path=args.swaps,
+            aggregate_manifest=args.swaps_manifest,
+        ),
+        "swaps_sha256": swap_sha256,
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "market_selection_rule_frozen": False,
+        "threshold_summary_emitted": False,
+    }
+
+    if not target_events:
+        manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance={
+                **common_provenance,
+                "source": f"derived_direct_{version}_market_window",
+                "usd_anchor_mode": "not_required_empty_window",
+            },
+        )
+        report = {
+            "version": f"phase2-direct-{version}-market-window-v1",
+            "source_id": source_id,
+            "venue": venue,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "registry_markets": len(registry),
+            "initialize_events": 0,
+            "swap_events": 0,
+            "market_cap_points": 0,
+            "priced_points": 0,
+            "quality_ready_points": 0,
+            "points_sha256": manifest["sha256"],
+            "market_selection_rule_frozen": False,
+            "threshold_summary_emitted": False,
+            "rpc_route": None,
+            "requests_made": 0,
+            "response_bytes_received": 0,
+        }
+    else:
+        initial_quote_usd, quote_usd_updates = _load_quote_usd_inputs(args)
+        rpc = _archive_rpc(args)
+        rpc.assert_robinhood()
+        started = time.monotonic()
+        initial_weth_usd, anchors, anchor_window_size = (
+            _sparse_weth_usd_anchors(
+                rpc,
+                target_events,
+                pool=args.usd_anchor_pool,
+                chunk_size=args.chunk_size,
+                fallback_block=args.from_block - 1,
+            )
+        )
+
+        if version == "v3":
+            points = build_v3_launchpad_market_cap_points(
+                registry,
+                initializes,
+                swaps,
+                anchors,
+                initial_weth_usd=initial_weth_usd,
+                quote_decimals=quote_decimals,
+                initial_quote_usd=initial_quote_usd,
+                quote_usd_updates=quote_usd_updates,
+                allow_registry_initialization=True,
+            )
+        else:
+            points = build_v4_launchpad_market_cap_points(
+                registry,
+                initializes,
+                swaps,
+                anchors,
+                initial_weth_usd=initial_weth_usd,
+                quote_decimals=quote_decimals,
+                initial_quote_usd=initial_quote_usd,
+                quote_usd_updates=quote_usd_updates,
+                allow_registry_initialization=True,
+            )
+
+        for row in points:
+            row["source_id"] = source_id
+
+        manifest = write_jsonl_snapshot(
+            points,
+            output=Path(args.out),
+            provenance={
+                **common_provenance,
+                "source": f"derived_direct_{version}_market_window",
+                "usd_anchor_pool": normalize_address(args.usd_anchor_pool),
+                "usd_anchor_mode": "sparse_v3_state_and_swaps",
+                "usd_anchor_window_size": anchor_window_size,
+                "market_cap_math": (
+                    "raw_quote_per_raw_token * supply_raw / "
+                    "10**quote_decimals"
+                ),
+            },
+        )
+        priced = sum(
+            row.get("market_cap_proxy_usd") is not None
+            for row in points
+        )
+        quality_ready = sum(
+            row.get("market_cap_proxy_usd") is not None
+            and row.get("active_quote_liquidity_usd") is not None
+            for row in points
+        )
+        competition = summarize_market_competition(points)
+        report = {
+            "version": f"phase2-direct-{version}-market-window-v1",
+            "source_id": source_id,
+            "venue": venue,
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "registry_markets": len(registry),
+            "initialize_events": len(initializes),
+            "swap_events": len(swaps),
+            "market_cap_points": len(points),
+            "priced_points": priced,
+            "quality_ready_points": quality_ready,
+            "points_sha256": manifest["sha256"],
+            "competition": competition,
+            "sparse_anchor_points": len(anchors),
+            "anchor_window_size": anchor_window_size,
+            "initial_weth_usd": str(initial_weth_usd),
+            "market_selection_rule_frozen": False,
+            "threshold_summary_emitted": False,
+            "rpc_route": rpc.route_label,
+            "requests_made": rpc.requests_made,
+            "response_bytes_received": rpc.response_bytes_received,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }
+
+    out = Path(args.report_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def cmd_phase2_direct_v3_market_cap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Build one direct-V3 market-point window without preselecting a pool."""
+    return _phase2_direct_market_cap_window(args, version="v3")
+
+
+def cmd_phase2_direct_v4_market_cap_window(
+    args: argparse.Namespace,
+) -> int:
+    """Build one direct-V4 market-point window without preselecting a pool."""
+    return _phase2_direct_market_cap_window(args, version="v4")
+
+
 def cmd_rpc_pools_fun_v3_tape(args: argparse.Namespace) -> int:
     """Acquire shared V3 Initialize/Swap tape for pools.fun pools."""
     registry = _load_jsonl(args.registry)
