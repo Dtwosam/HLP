@@ -692,6 +692,92 @@ def cmd_rpc_pools_fun_registry_window(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_v3_pool_created_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire a generic V3 factory PoolCreated tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = [
+        decode_v3_pool_created(log)
+        for log in rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=args.factory,
+            topics=[V3_POOL_CREATED_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "uniswap_v3_pool_created",
+            "factory": args.factory.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V3_POOL_CREATED_TOPIC,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "pools_created": manifest["records"],
+        "factory": args.factory.lower(),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
+def cmd_rpc_v4_initialize_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire a generic V4 PoolManager Initialize tape."""
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    rows = [
+        decode_v4_pool_initialized(log)
+        for log in rpc.iter_logs_chunked(
+            args.from_block,
+            args.to_block,
+            address=args.pool_manager,
+            topics=[V4_INITIALIZE_TOPIC],
+            chunk_size=args.chunk_size,
+            min_chunk_size=args.min_chunk_size,
+        )
+    ]
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "evm_json_rpc",
+            "chain_id": 4663,
+            "event": "uniswap_v4_initialize",
+            "pool_manager": args.pool_manager.lower(),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "event_topic0": V4_INITIALIZE_TOPIC,
+            "rpc_route": rpc.route_label,
+        },
+    )
+    print(json.dumps({
+        "pools_initialized": manifest["records"],
+        "pool_manager": args.pool_manager.lower(),
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_pools_fun_v3_tape(args: argparse.Namespace) -> int:
     """Acquire shared V3 Initialize/Swap tape for pools.fun pools."""
     registry = _load_jsonl(args.registry)
@@ -5528,6 +5614,43 @@ def build_parser() -> argparse.ArgumentParser:
     pools_fun_registry.add_argument("--min-chunk-size", type=int, default=1)
     pools_fun_registry.add_argument("--out", required=True)
     pools_fun_registry.set_defaults(func=cmd_rpc_pools_fun_registry_window)
+
+    v3_pool_created = sub.add_parser(
+        "rpc-v3-pool-created-window"
+    )
+    v3_pool_created.add_argument("--factory", required=True)
+    v3_pool_created.add_argument("--from-block", type=int, required=True)
+    v3_pool_created.add_argument("--to-block", type=int, required=True)
+    v3_pool_created.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    v3_pool_created.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    v3_pool_created.add_argument("--out", required=True)
+    v3_pool_created.set_defaults(
+        func=cmd_rpc_v3_pool_created_window
+    )
+
+    v4_initialize = sub.add_parser(
+        "rpc-v4-initialize-window"
+    )
+    v4_initialize.add_argument(
+        "--pool-manager",
+        default=UNISWAP_V4_POOL_MANAGER,
+    )
+    v4_initialize.add_argument("--from-block", type=int, required=True)
+    v4_initialize.add_argument("--to-block", type=int, required=True)
+    v4_initialize.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    v4_initialize.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    v4_initialize.add_argument("--out", required=True)
+    v4_initialize.set_defaults(
+        func=cmd_rpc_v4_initialize_window
+    )
 
     pools_fun_v3 = sub.add_parser("rpc-pools-fun-v3-tape")
     pools_fun_v3.add_argument("--registry", required=True)
