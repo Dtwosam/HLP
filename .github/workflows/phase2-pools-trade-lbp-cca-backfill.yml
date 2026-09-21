@@ -1,0 +1,864 @@
+name: phase2-pools-trade-lbp-cca-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-pools-trade-lbp-registry-backfill run ID
+        required: true
+        type: string
+      supply_delta_run_id:
+        description: Successful phase2-direct-supply-delta-backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-pools-trade-lbp-cca-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '6222785'
+  SHARED_SUPPLY_START_BLOCK: '8930'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      SUPPLY_DELTA_RUN_ID: ${{ inputs.supply_delta_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-registry
+          path: inputs/registry
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-supply-delta-manifest
+          path: inputs/supply-manifest
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.supply_delta_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-supply-delta-*
+          path: inputs/supply-shards
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.supply_delta_run_id }}
+
+      - name: Validate upstream identities and filter LBP supply deltas
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              ROBINHOOD_USDG,
+              ROBINHOOD_WETH,
+              normalize_address,
+          )
+          from hlp.data.direct_quotes import ZERO_ADDRESS
+          from hlp.data.pools_trade_cca_orientation import (
+              FROZEN_CCA_ORIENTATION,
+              validate_pools_trade_cca_orientation,
+          )
+          from hlp.data.reconstruct import event_order
+          from hlp.data.sharded_tape import validate_shard_block_coverage
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          supply_start = int(os.environ["SHARED_SUPPLY_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+
+          registry_path = Path(
+              "inputs/registry/pools-trade-lbp-registry.jsonl"
+          )
+          registry_summary = json.loads(
+              Path(
+                  "inputs/registry/"
+                  "pools-trade-lbp-registry-summary.json"
+              ).read_text()
+          )
+          if registry_summary["version"] != (
+              "phase2-pools-trade-lbp-registry-v1"
+          ):
+              raise SystemExit("pools.trade LBP registry version drift")
+          if registry_summary["source_id"] != "pools_trade_lbp":
+              raise SystemExit("pools.trade LBP registry source drift")
+          if int(registry_summary["required_start_block"]) != start:
+              raise SystemExit("pools.trade LBP required start drift")
+          if int(registry_summary["snapshot_head_block"]) != head:
+              raise SystemExit("pools.trade LBP registry snapshot drift")
+          if registry_summary["continuous_initializer_scan"] is not True:
+              raise SystemExit("pools.trade LBP initializer scan incomplete")
+          if registry_summary["missing_ranges"]:
+              raise SystemExit("pools.trade LBP registry has missing ranges")
+          if registry_summary["source_coverage_complete"] is not False:
+              raise SystemExit(
+                  "pools.trade LBP registry cannot claim source coverage"
+              )
+          registry_sha = hashlib.sha256(
+              registry_path.read_bytes()
+          ).hexdigest()
+          if registry_sha != registry_summary["registry_sha256"]:
+              raise SystemExit("pools.trade LBP registry SHA drift")
+          registry = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          if len(registry) != int(registry_summary["tokens_discovered"]):
+              raise SystemExit("pools.trade LBP registry population drift")
+          tokens = {
+              normalize_address(row["token"])
+              for row in registry
+          }
+          initializers = {
+              normalize_address(row["initializer"])
+              for row in registry
+          }
+          if len(tokens) != len(registry):
+              raise SystemExit("pools.trade LBP registry repeats token")
+          if len(initializers) != len(registry):
+              raise SystemExit("pools.trade LBP registry repeats initializer")
+
+          quote_summary = json.loads(
+              Path(
+                  "inputs/quotes/direct-quote-summary.json"
+              ).read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          decimals_path = Path(
+              "inputs/quotes/direct-quote-decimals.json"
+          )
+          feeds_path = Path(
+              "inputs/quotes/direct-quote-feeds.jsonl"
+          )
+          if hashlib.sha256(decimals_path.read_bytes()).hexdigest() != (
+              quote_summary["decimals_sha256"]
+          ):
+              raise SystemExit("LBP quote decimals SHA drift")
+          if hashlib.sha256(feeds_path.read_bytes()).hexdigest() != (
+              quote_summary["feed_specs_sha256"]
+          ):
+              raise SystemExit("LBP quote feed SHA drift")
+          decimals = {
+              normalize_address(key): int(value)
+              for key, value in json.loads(
+                  decimals_path.read_text()
+              ).items()
+          }
+          feed_tokens = {
+              normalize_address(json.loads(line)["quote_token"])
+              for line in feeds_path.read_text().splitlines()
+              if line.strip()
+          }
+          builtins = {
+              normalize_address(ZERO_ADDRESS),
+              normalize_address(ROBINHOOD_WETH),
+              normalize_address(ROBINHOOD_USDG),
+          }
+          quotes = {
+              normalize_address(row["quote_token"])
+              for row in registry
+          }
+          missing_decimals = sorted(quotes - set(decimals))
+          if missing_decimals:
+              raise SystemExit(
+                  "pools.trade LBP quotes lack canonical decimals: "
+                  + ", ".join(missing_decimals)
+              )
+          missing_feeds = sorted(quotes - builtins - feed_tokens)
+          if missing_feeds:
+              raise SystemExit(
+                  "pools.trade LBP quotes lack canonical USD feeds: "
+                  + ", ".join(missing_feeds)
+              )
+
+          orientation_path = Path(
+              ".github/phase2-pools-trade-cca-orientation.json"
+          )
+          orientation = validate_pools_trade_cca_orientation(
+              json.loads(orientation_path.read_text())
+          )
+          if orientation["orientation"] != FROZEN_CCA_ORIENTATION:
+              raise SystemExit("pools.trade LBP CCA orientation drift")
+
+          supply_virtual = json.loads(
+              Path(
+                  "inputs/supply-manifest/"
+                  "direct-supply-delta-sharded.manifest.json"
+              ).read_text()
+          )
+          supply_summary = json.loads(
+              Path(
+                  "inputs/supply-manifest/"
+                  "direct-supply-delta-summary.json"
+              ).read_text()
+          )
+          prov = supply_virtual.get("provenance") or {}
+          if int(prov["from_block"]) != supply_start:
+              raise SystemExit("shared supply-delta start drift")
+          if int(prov["to_block"]) != head:
+              raise SystemExit("shared supply-delta snapshot drift")
+          if supply_summary["version"] != "phase2-direct-supply-delta-v1":
+              raise SystemExit("shared supply-delta version drift")
+          if supply_summary["supply_delta_sha256"] != supply_virtual["sha256"]:
+              raise SystemExit("shared supply-delta aggregate SHA drift")
+
+          expected = {
+              row["file"]: row
+              for row in prov.get("shards", [])
+          }
+          files = sorted(
+              Path("inputs/supply-shards").glob(
+                  "direct-supply-delta-*.jsonl"
+              )
+          )
+          if len(files) != count or len(expected) != count:
+              raise SystemExit("shared supply shard population changed")
+          coverage = []
+          filtered = []
+          seen = set()
+          for path in files:
+              expected_row = expected.get(path.name)
+              if expected_row is None:
+                  raise SystemExit(
+                      f"unexpected shared supply shard: {path.name}"
+                  )
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              local_prov = manifest.get("provenance") or {}
+              blob = path.read_bytes()
+              digest = hashlib.sha256(blob).hexdigest()
+              if digest != manifest["sha256"]:
+                  raise SystemExit(
+                      f"{path.name}: shared supply SHA drift"
+                  )
+              if digest != expected_row["sha256"]:
+                  raise SystemExit(
+                      f"{path.name}: supply manifest SHA drift"
+                  )
+              records = sum(
+                  1 for line in blob.splitlines() if line.strip()
+              )
+              if records != int(manifest["records"]):
+                  raise SystemExit(
+                      f"{path.name}: supply record drift"
+                  )
+              coverage.append({
+                  "from_block": int(local_prov["from_block"]),
+                  "to_block": int(local_prov["to_block"]),
+                  "file": path.name,
+                  "records": records,
+                  "sha256": digest,
+              })
+              for raw in blob.splitlines():
+                  if not raw.strip():
+                      continue
+                  row = json.loads(raw)
+                  token = normalize_address(row["token"])
+                  if token not in tokens:
+                      continue
+                  key = (
+                      token,
+                      str(row["transaction_hash"]).lower(),
+                      int(row["log_index"]),
+                  )
+                  if key in seen:
+                      raise SystemExit(
+                          "duplicate filtered LBP supply delta"
+                      )
+                  seen.add(key)
+                  row["token"] = token
+                  filtered.append(row)
+
+          validate_shard_block_coverage(
+              coverage,
+              start_block=supply_start,
+              end_block=head,
+          )
+          filtered.sort(
+              key=lambda row: (
+                  event_order(row),
+                  row["token"],
+              )
+          )
+          supply_manifest = write_jsonl_snapshot(
+              filtered,
+              output=Path(
+                  "artifacts/pools-trade-lbp-supply-deltas.jsonl"
+              ),
+              provenance={
+                  "source": "filtered_shared_supply_delta",
+                  "chain_id": 4663,
+                  "source_id": "pools_trade_lbp",
+                  "shared_supply_sha256": supply_virtual["sha256"],
+                  "tokens": len(tokens),
+                  "from_block": supply_start,
+                  "to_block": head,
+              },
+          )
+
+          for source, destination in (
+              (
+                  registry_path,
+                  Path("artifacts/pools-trade-lbp-registry.jsonl"),
+              ),
+              (
+                  decimals_path,
+                  Path("artifacts/direct-quote-decimals.json"),
+              ),
+              (
+                  feeds_path,
+                  Path("artifacts/direct-quote-feeds.jsonl"),
+              ),
+              (
+                  orientation_path,
+                  Path(
+                      "artifacts/"
+                      "phase2-pools-trade-cca-orientation.json"
+                  ),
+              ),
+          ):
+              destination.write_bytes(source.read_bytes())
+
+          setup = {
+              "version": "phase2-pools-trade-lbp-cca-setup-v1",
+              "source_id": "pools_trade_lbp",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "supply_delta_run_id": int(
+                  os.environ["SUPPLY_DELTA_RUN_ID"]
+              ),
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "registry_sha256": registry_sha,
+              "filtered_supply_sha256": supply_manifest["sha256"],
+              "shared_supply_sha256": supply_virtual["sha256"],
+              "quote_decimals_sha256": quote_summary["decimals_sha256"],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "orientation": orientation["orientation"],
+              "orientation_evidence_sha256": hashlib.sha256(
+                  orientation_path.read_bytes()
+              ).hexdigest(),
+              "tokens_discovered": len(tokens),
+              "source_coverage_complete": False,
+          }
+          Path(
+              "artifacts/pools-trade-lbp-cca-setup.json"
+          ).write_text(
+              json.dumps(setup, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(setup, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-cca-setup
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  shard:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-cca-setup
+          path: inputs
+      - id: bounds
+        name: Compute exact CCA shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty LBP CCA shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          PY
+      - name: Acquire complete CCA topic shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pools-trade-lbp-cca-window \
+            --registry inputs/pools-trade-lbp-registry.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/lbp-cca-events-${SHARD}.jsonl"
+
+      - name: Price CCA shard causally
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-pools-trade-lbp-cca-market-window \
+            --registry inputs/pools-trade-lbp-registry.jsonl \
+            --events "artifacts/lbp-cca-events-${SHARD}.jsonl" \
+            --supply-deltas inputs/pools-trade-lbp-supply-deltas.jsonl \
+            --orientation-evidence \
+              inputs/phase2-pools-trade-cca-orientation.json \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --quote-decimals inputs/direct-quote-decimals.json \
+            --quote-feeds inputs/direct-quote-feeds.jsonl \
+            --out "artifacts/lbp-cca-points-${SHARD}.jsonl" \
+            --summary-out "artifacts/lbp-cca-summary-${SHARD}.jsonl" \
+            --report-out "artifacts/lbp-cca-report-${SHARD}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-cca-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [setup, shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      SUPPLY_DELTA_RUN_ID: ${{ inputs.supply_delta_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-cca-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-trade-lbp-cca-*
+          path: inputs/shards
+          merge-multiple: true
+      - name: Validate and merge complete CCA phase
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.pools_trade_cca import (
+              merge_cca_market_cap_summaries,
+          )
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs/shards")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+          setup = json.loads(
+              Path(
+                  "inputs/setup/pools-trade-lbp-cca-setup.json"
+              ).read_text()
+          )
+          registry_path = Path(
+              "inputs/setup/pools-trade-lbp-registry.jsonl"
+          )
+          if hashlib.sha256(registry_path.read_bytes()).hexdigest() != (
+              setup["registry_sha256"]
+          ):
+              raise SystemExit("LBP CCA setup registry SHA drift")
+          registry = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          registry_tokens = {
+              row["token"].lower()
+              for row in registry
+          }
+
+          event_files = sorted(root.glob("lbp-cca-events-*.jsonl"))
+          point_files = sorted(root.glob("lbp-cca-points-*.jsonl"))
+          summary_files = sorted(root.glob("lbp-cca-summary-*.jsonl"))
+          report_files = sorted(root.glob("lbp-cca-report-*.json"))
+          if not (
+              len(event_files)
+              == len(point_files)
+              == len(summary_files)
+              == len(report_files)
+              == count
+          ):
+              raise SystemExit(
+                  "LBP CCA shard artifact count changed: "
+                  f"events={len(event_files)} points={len(point_files)} "
+                  f"summaries={len(summary_files)} "
+                  f"reports={len(report_files)} expected={count}"
+              )
+
+          event_digest = hashlib.sha256()
+          point_digest = hashlib.sha256()
+          event_total = 0
+          point_total = 0
+          priced_total = 0
+          event_shards = []
+          point_shards = []
+          summary_rows = []
+          for event_path in event_files:
+              suffix = event_path.stem.rsplit("-", 1)[-1]
+              point_path = root / f"lbp-cca-points-{suffix}.jsonl"
+              summary_path = root / f"lbp-cca-summary-{suffix}.jsonl"
+              report_path = root / f"lbp-cca-report-{suffix}.json"
+
+              event_manifest = json.loads(
+                  event_path.with_suffix(
+                      event_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              point_manifest = json.loads(
+                  point_path.with_suffix(
+                      point_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              summary_manifest = json.loads(
+                  summary_path.with_suffix(
+                      summary_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              report = json.loads(report_path.read_text())
+              event_prov = event_manifest.get("provenance") or {}
+              point_prov = point_manifest.get("provenance") or {}
+              lo = int(event_prov["from_block"])
+              hi = int(event_prov["to_block"])
+              if event_prov.get("source") != "pools_trade_lbp_cca_topic_scan":
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA event source drift"
+                  )
+              if event_prov.get("address_filter") is not None:
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA scan unexpectedly address-filtered"
+                  )
+              if (
+                  int(point_prov["from_block"]) != lo
+                  or int(point_prov["to_block"]) != hi
+                  or int(report["from_block"]) != lo
+                  or int(report["to_block"]) != hi
+              ):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA shard range drift"
+                  )
+              if report["source_coverage_complete"] is not False:
+                  raise SystemExit(
+                      f"{suffix}: CCA shard cannot close source coverage"
+                  )
+              if report["orientation"] != "quote_per_token":
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA orientation drift"
+                  )
+              if int(report["unpriced_points"]) != 0:
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA shard has unpriced points"
+                  )
+
+              event_blob = event_path.read_bytes()
+              point_blob = point_path.read_bytes()
+              event_sha = hashlib.sha256(event_blob).hexdigest()
+              point_sha = hashlib.sha256(point_blob).hexdigest()
+              if event_sha != event_manifest["sha256"]:
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA event SHA drift"
+                  )
+              if point_sha != point_manifest["sha256"]:
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA point SHA drift"
+                  )
+              if point_sha != report["points_sha256"]:
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA report point SHA drift"
+                  )
+              if (
+                  summary_manifest["sha256"]
+                  != report["summary_sha256"]
+              ):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA report summary SHA drift"
+                  )
+
+              event_records = sum(
+                  1 for raw in event_blob.splitlines() if raw.strip()
+              )
+              point_records = sum(
+                  1 for raw in point_blob.splitlines() if raw.strip()
+              )
+              if event_records != int(event_manifest["records"]):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA event record drift"
+                  )
+              if point_records != int(point_manifest["records"]):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA point record drift"
+                  )
+              if point_records != int(report["market_cap_points"]):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA point accounting drift"
+                  )
+              if event_records != int(report["cca_events"]):
+                  raise SystemExit(
+                      f"{suffix}: LBP CCA event accounting drift"
+                  )
+
+              event_digest.update(event_blob)
+              point_digest.update(point_blob)
+              event_total += event_records
+              point_total += point_records
+              priced_total += int(report["priced_points"])
+              event_shards.append({
+                  "file": event_path.name,
+                  "records": event_records,
+                  "sha256": event_sha,
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+              point_shards.append({
+                  "file": point_path.name,
+                  "records": point_records,
+                  "sha256": point_sha,
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+              summary_rows.extend(
+                  json.loads(line)
+                  for line in summary_path.read_text().splitlines()
+                  if line.strip()
+              )
+
+          event_shards = validate_shard_block_coverage(
+              event_shards,
+              start_block=start,
+              end_block=head,
+          )
+          point_shards = validate_shard_block_coverage(
+              point_shards,
+              start_block=start,
+              end_block=head,
+          )
+          event_virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/lbp-cca-events-sharded.manifest.json"
+              ),
+              path_name="pools-trade-lbp-cca-events.jsonl",
+              records=event_total,
+              sha256=event_digest.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_pools_trade_lbp_cca_events",
+                  "chain_id": 4663,
+                  "from_block": start,
+                  "to_block": head,
+                  "shards": event_shards,
+              },
+          )
+          point_virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/lbp-cca-points-sharded.manifest.json"
+              ),
+              path_name="pools-trade-lbp-cca-points.jsonl",
+              records=point_total,
+              sha256=point_digest.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_pools_trade_lbp_cca_points",
+                  "chain_id": 4663,
+                  "from_block": start,
+                  "to_block": head,
+                  "orientation": "quote_per_token",
+                  "shards": point_shards,
+              },
+          )
+
+          merged_summary = merge_cca_market_cap_summaries(
+              summary_rows
+          )
+          summary_manifest = write_jsonl_snapshot(
+              merged_summary,
+              output=Path(
+                  "artifacts/pools-trade-lbp-cca-summary.jsonl"
+              ),
+              provenance={
+                  "source": "phase2_pools_trade_lbp_cca_summary",
+                  "chain_id": 4663,
+                  "market_points_sha256": point_virtual["sha256"],
+                  "orientation": "quote_per_token",
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+          summary_tokens = {
+              row["token"].lower()
+              for row in merged_summary
+          }
+          if summary_tokens != registry_tokens:
+              missing = sorted(registry_tokens - summary_tokens)
+              extra = sorted(summary_tokens - registry_tokens)
+              raise SystemExit(
+                  "LBP CCA summary does not cover registry exactly: "
+                  f"missing={missing[:20]} extra={extra[:20]}"
+              )
+          if any(
+              int(row["price_points"]) <= 0
+              or int(row["priced_points"]) != int(row["price_points"])
+              for row in merged_summary
+          ):
+              raise SystemExit(
+                  "LBP CCA merged summary has missing/unpriced history"
+              )
+          if point_total != priced_total:
+              raise SystemExit(
+                  "LBP CCA aggregate priced-point accounting drift"
+              )
+
+          report = {
+              "version": "phase2-pools-trade-lbp-cca-backfill-v1",
+              "source_id": "pools_trade_lbp",
+              "phase": "cca",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_topic_scan": True,
+              "missing_ranges": [],
+              "shards": count,
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "supply_delta_run_id": int(
+                  os.environ["SUPPLY_DELTA_RUN_ID"]
+              ),
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "registry_sha256": setup["registry_sha256"],
+              "shared_supply_sha256": setup["shared_supply_sha256"],
+              "filtered_supply_sha256": setup[
+                  "filtered_supply_sha256"
+              ],
+              "quote_decimals_sha256": setup[
+                  "quote_decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": setup[
+                  "quote_feed_specs_sha256"
+              ],
+              "orientation_evidence_sha256": setup[
+                  "orientation_evidence_sha256"
+              ],
+              "orientation": "quote_per_token",
+              "tokens_discovered": len(registry_tokens),
+              "cca_events": event_total,
+              "cca_events_sha256": event_virtual["sha256"],
+              "price_points": point_total,
+              "priced_points": priced_total,
+              "market_points_sha256": point_virtual["sha256"],
+              "token_summary_sha256": summary_manifest["sha256"],
+              "tokens_crossed_100k": sum(
+                  bool(row["crossed_100k"])
+                  for row in merged_summary
+              ),
+              "cca_phase_coverage_complete": True,
+              "source_coverage_complete": False,
+              "blocking_reason": (
+                  "migrated V4 lifecycle still must be reconstructed "
+                  "and merged before pools_trade_lbp can close"
+              ),
+          }
+          Path(
+              "artifacts/pools-trade-lbp-cca-backfill-report.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-cca-coverage
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

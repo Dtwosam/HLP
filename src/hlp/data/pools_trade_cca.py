@@ -368,3 +368,104 @@ def summarize_cca_market_caps(
         output.append(row)
     output.sort(key=lambda row: row["token"])
     return output
+
+def merge_cca_market_cap_summaries(
+    rows: Iterable[dict],
+) -> list[dict]:
+    """Merge deterministic per-window CCA token summaries."""
+    merged: dict[str, dict] = {}
+    for raw in rows:
+        row = dict(raw)
+        token = str(row.get("token") or "").lower()
+        if not token:
+            raise ValueError("CCA summary row has no token")
+        initializer = str(row.get("initializer") or "").lower()
+        quote = str(row.get("quote_token") or "").lower()
+        orientation = str(row.get("orientation") or "")
+        points = int(row.get("price_points", 0))
+        priced = int(row.get("priced_points", 0))
+        if points < 0 or priced < 0 or priced > points:
+            raise ValueError(
+                f"invalid CCA summary point counts: {token}"
+            )
+
+        current = merged.get(token)
+        if current is None:
+            current = {
+                "token": token,
+                "venue": "pools.trade",
+                "phase": "cca",
+                "initializer": initializer,
+                "quote_token": quote,
+                "orientation": orientation,
+                "price_points": 0,
+                "priced_points": 0,
+                "pricing_statuses": set(),
+                "max_market_cap_proxy_usd": None,
+                "max_market_cap_block": None,
+                "crossed_100k": False,
+            }
+            merged[token] = current
+        elif (
+            current["initializer"] != initializer
+            or current["quote_token"] != quote
+            or current["orientation"] != orientation
+        ):
+            raise ValueError(
+                f"CCA summary identity drift across windows: {token}"
+            )
+
+        current["price_points"] += points
+        current["priced_points"] += priced
+        current["pricing_statuses"].update(
+            str(status)
+            for status in row.get("pricing_statuses", [])
+            if str(status)
+        )
+        current["crossed_100k"] = (
+            current["crossed_100k"]
+            or bool(row.get("crossed_100k", False))
+        )
+
+        raw_max = row.get("max_market_cap_proxy_usd")
+        if raw_max is None:
+            if priced > 0:
+                raise ValueError(
+                    f"priced CCA summary row has no maximum: {token}"
+                )
+            continue
+        value = Decimal(str(raw_max))
+        block = row.get("max_market_cap_block")
+        if value < 0 or block is None:
+            raise ValueError(
+                f"invalid CCA summary maximum: {token}"
+            )
+        block = int(block)
+        prior = current["max_market_cap_proxy_usd"]
+        prior_block = current["max_market_cap_block"]
+        if (
+            prior is None
+            or value > prior
+            or (value == prior and block < int(prior_block))
+        ):
+            current["max_market_cap_proxy_usd"] = value
+            current["max_market_cap_block"] = block
+
+    output = []
+    for current in merged.values():
+        row = dict(current)
+        row["pricing_statuses"] = sorted(row["pricing_statuses"])
+        maximum = row["max_market_cap_proxy_usd"]
+        if maximum is not None:
+            row["max_market_cap_proxy_usd"] = str(maximum)
+        if row["crossed_100k"] and (
+            maximum is None or maximum < Decimal("100000")
+        ):
+            raise ValueError(
+                "CCA threshold flag contradicts merged maximum: "
+                f"{row['token']}"
+            )
+        output.append(row)
+    output.sort(key=lambda row: row["token"])
+    return output
+

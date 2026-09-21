@@ -8,6 +8,7 @@ from hlp.data.pools_trade_cca import (
     build_cca_quote_price_points,
     cca_quote_per_token,
     infer_cca_price_orientation,
+    merge_cca_market_cap_summaries,
     summarize_cca_market_caps,
 )
 from hlp.data.types import CcaPriceEvent
@@ -232,4 +233,69 @@ def test_cca_market_caps_replay_initializer_seed_supply_deltas():
 
     assert rows[0]["supply_raw"] == 900_000_000 * 10**18
     assert Decimal(rows[0]["market_cap_quote"]) == Decimal("900000000")
+
+
+def test_merge_cca_market_cap_summaries_combines_windows():
+    rows = merge_cca_market_cap_summaries([
+        {
+            "token": TOKEN,
+            "initializer": AUCTION,
+            "quote_token": QUOTE,
+            "orientation": "quote_per_token",
+            "price_points": 2,
+            "priced_points": 2,
+            "pricing_statuses": ["priced_weth_usdg"],
+            "max_market_cap_proxy_usd": "90000",
+            "max_market_cap_block": 100,
+            "crossed_100k": False,
+        },
+        {
+            "token": TOKEN,
+            "initializer": AUCTION,
+            "quote_token": QUOTE,
+            "orientation": "quote_per_token",
+            "price_points": 3,
+            "priced_points": 3,
+            "pricing_statuses": ["priced_weth_usdg"],
+            "max_market_cap_proxy_usd": "150000",
+            "max_market_cap_block": 120,
+            "crossed_100k": True,
+        },
+    ])
+
+    assert rows[0]["price_points"] == 5
+    assert rows[0]["priced_points"] == 5
+    assert rows[0]["crossed_100k"] is True
+    assert rows[0]["max_market_cap_proxy_usd"] == "150000"
+    assert rows[0]["max_market_cap_block"] == 120
+
+
+def test_merge_cca_market_cap_summaries_rejects_identity_drift():
+    with pytest.raises(ValueError, match="identity drift"):
+        merge_cca_market_cap_summaries([
+            {
+                "token": TOKEN,
+                "initializer": AUCTION,
+                "quote_token": QUOTE,
+                "orientation": "quote_per_token",
+                "price_points": 1,
+                "priced_points": 1,
+                "pricing_statuses": ["priced_weth_usdg"],
+                "max_market_cap_proxy_usd": "1",
+                "max_market_cap_block": 100,
+                "crossed_100k": False,
+            },
+            {
+                "token": TOKEN,
+                "initializer": "0x" + "55" * 20,
+                "quote_token": QUOTE,
+                "orientation": "quote_per_token",
+                "price_points": 1,
+                "priced_points": 1,
+                "pricing_statuses": ["priced_weth_usdg"],
+                "max_market_cap_proxy_usd": "2",
+                "max_market_cap_block": 101,
+                "crossed_100k": False,
+            },
+        ])
 

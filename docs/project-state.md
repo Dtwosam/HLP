@@ -255,9 +255,14 @@ Implemented foundation:
   chain-wide CCA acquisition now also has a topic-only bounded command that
   scans the two frozen CCA topic0 values globally and filters matched
   initializer addresses against the immutable LBP registry, avoiding giant
-  address-list filters while preserving the complete topic surface. The
-  chain-wide sharded workflow and optional migrated-V4 lifecycle merge still
-  have to be built/executed before LBP coverage can close;
+  address-list filters while preserving the complete topic surface. A
+  dispatch-only **128-shard** CCA backfill is now prepared against exact LBP
+  registry, shared supply-delta and canonical quote runs. It validates
+  continuous topic coverage, requires every registry token to have fully priced
+  CCA history, and emits a merged CCA phase report with
+  `cca_phase_coverage_complete=true` while explicitly keeping
+  `source_coverage_complete=false`. The optional migrated-V4 lifecycle merge
+  still has to be built/executed before LBP coverage can close;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
