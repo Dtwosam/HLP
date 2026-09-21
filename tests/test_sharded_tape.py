@@ -8,6 +8,7 @@ from hlp.data.sharded_tape import (
     iter_sharded_jsonl,
     iter_sharded_jsonl_matching_field_values,
     iter_validated_jsonl_matching_field_values,
+    validate_shard_block_coverage,
     write_virtual_jsonl_manifest,
 )
 from hlp.data.snapshot import write_jsonl_snapshot
@@ -219,4 +220,51 @@ def test_filtered_single_file_reader_validates_full_snapshot(tmp_path):
                 field="pool",
                 values={"0xbbb"},
             )
+        )
+
+
+
+def test_validate_shard_block_coverage_accepts_exact_unsorted_ranges():
+    rows = validate_shard_block_coverage(
+        [
+            {"from_block": 20, "to_block": 29, "id": "b"},
+            {"from_block": 10, "to_block": 19, "id": "a"},
+            {"from_block": 30, "to_block": 30, "id": "c"},
+        ],
+        start_block=10,
+        end_block=30,
+    )
+    assert [row["id"] for row in rows] == ["a", "b", "c"]
+
+
+def test_validate_shard_block_coverage_rejects_gap():
+    with pytest.raises(ValueError, match="gap"):
+        validate_shard_block_coverage(
+            [
+                {"from_block": 10, "to_block": 19},
+                {"from_block": 21, "to_block": 30},
+            ],
+            start_block=10,
+            end_block=30,
+        )
+
+
+def test_validate_shard_block_coverage_rejects_overlap():
+    with pytest.raises(ValueError, match="overlaps|repeats"):
+        validate_shard_block_coverage(
+            [
+                {"from_block": 10, "to_block": 20},
+                {"from_block": 20, "to_block": 30},
+            ],
+            start_block=10,
+            end_block=30,
+        )
+
+
+def test_validate_shard_block_coverage_rejects_end_overshoot():
+    with pytest.raises(ValueError, match="exceeds"):
+        validate_shard_block_coverage(
+            [{"from_block": 10, "to_block": 31}],
+            start_block=10,
+            end_block=30,
         )
