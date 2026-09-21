@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: phase2-hoodfun-legacy-compatibility-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   SNAPSHOT_HEAD: '54486035'
@@ -84,35 +84,67 @@ jobs:
           counts = Counter()
           first_samples = {}
           decoded = 0
-          last_scanned_block = first - 1
           chunks_scanned = 0
-          for lo in range(first, end + 1, chunk):
-              hi = min(end, lo + chunk - 1)
-              chunks_scanned += 1
-              rows = rpc.get_logs(
-                  lo,
-                  hi,
-                  address=HOOD_FUN_PREVIOUS,
-                  topics=[list(HOOD_FUN_CURVE_TOPICS)],
+          sampled_ranges = []
+
+          lifetime = end - first + 1
+          probe_span = 20_000
+          anchors = [
+              first,
+              first + lifetime // 4,
+              first + lifetime // 2,
+              first + (3 * lifetime) // 4,
+              max(first, end - probe_span + 1),
+          ]
+          windows = []
+          for anchor in anchors:
+              lo = min(
+                  max(first, anchor),
+                  max(first, end - probe_span + 1),
               )
-              last_scanned_block = hi
-              for raw in rows:
-                  row = decode_hood_fun_event(
-                      raw,
-                      contract=HOOD_FUN_PREVIOUS,
+              hi = min(end, lo + probe_span - 1)
+              pair = (lo, hi)
+              if pair not in windows:
+                  windows.append(pair)
+
+          for probe_lo, probe_hi in windows:
+              observed_before = decoded
+              for lo in range(probe_lo, probe_hi + 1, chunk):
+                  hi = min(probe_hi, lo + chunk - 1)
+                  chunks_scanned += 1
+                  rows = rpc.get_logs(
+                      lo,
+                      hi,
+                      address=HOOD_FUN_PREVIOUS,
+                      topics=[list(HOOD_FUN_CURVE_TOPICS)],
                   )
-                  counts[row.event_type] += 1
-                  decoded += 1
-                  first_samples.setdefault(
-                      row.event_type,
-                      {
-                          "block_number": row.block_number,
-                          "transaction_hash": row.transaction_hash,
-                          "transaction_index": row.transaction_index,
-                          "log_index": row.log_index,
-                          "token": row.token,
-                      },
-                  )
+                  for raw in rows:
+                      row = decode_hood_fun_event(
+                          raw,
+                          contract=HOOD_FUN_PREVIOUS,
+                      )
+                      counts[row.event_type] += 1
+                      decoded += 1
+                      first_samples.setdefault(
+                          row.event_type,
+                          {
+                              "block_number": row.block_number,
+                              "transaction_hash": row.transaction_hash,
+                              "transaction_index": row.transaction_index,
+                              "log_index": row.log_index,
+                              "token": row.token,
+                          },
+                      )
+                  if (
+                      counts["token_created"] > 0
+                      and counts["trade"] > 0
+                  ):
+                      break
+              sampled_ranges.append({
+                  "from_block": probe_lo,
+                  "to_block": probe_hi,
+                  "decoded_events": decoded - observed_before,
+              })
               if (
                   counts["token_created"] > 0
                   and counts["trade"] > 0
@@ -128,9 +160,10 @@ jobs:
               "contract": HOOD_FUN_PREVIOUS.lower(),
               "first_code_block": first,
               "probe_limit_block": end,
-              "last_scanned_block": last_scanned_block,
-              "probe_blocks_scanned": (
-                  last_scanned_block - first + 1
+              "sampled_ranges": sampled_ranges,
+              "probe_blocks_scanned": sum(
+                  row["to_block"] - row["from_block"] + 1
+                  for row in sampled_ranges
               ),
               "chunks_scanned": chunks_scanned,
               "known_topics": {
