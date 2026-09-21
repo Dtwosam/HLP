@@ -4,9 +4,11 @@ import pytest
 
 from hlp.data.pools_trade_cca import (
     Q96,
+    build_cca_market_cap_points,
     build_cca_quote_price_points,
     cca_quote_per_token,
     infer_cca_price_orientation,
+    summarize_cca_market_caps,
 )
 from hlp.data.types import CcaPriceEvent
 
@@ -84,3 +86,86 @@ def test_build_cca_price_points_rejects_duplicate_event_order():
             [event(raw), event(raw)],
             orientation="quote_per_token",
         )
+
+
+
+TOKEN = "0x" + "22" * 20
+QUOTE = "0x" + "00" * 20
+
+
+def registry():
+    return [{
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "token": TOKEN,
+        "quote_token": QUOTE,
+        "supply_raw": 1_000_000_000 * 10**18,
+        "initializer": AUCTION,
+    }]
+
+
+def test_build_cca_market_caps_uses_raw_unit_supply_formula():
+    raw = int(Q96 / Decimal(2))
+    rows = build_cca_market_cap_points(
+        registry(),
+        [event(raw)],
+        [],
+        orientation="quote_per_token",
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["token"] == TOKEN
+    assert rows[0]["quote_token"] == QUOTE
+    assert Decimal(rows[0]["raw_quote_per_raw_token"]) == (
+        Decimal(raw) / Q96
+    )
+    assert Decimal(rows[0]["market_cap_quote"]) == (
+        Decimal(raw) / Q96 * Decimal("1000000000")
+    )
+    assert rows[0]["pricing_status"] == "priced_weth_usdg"
+    assert Decimal(rows[0]["market_cap_proxy_usd"]) == (
+        Decimal(rows[0]["market_cap_quote"]) * Decimal("2000")
+    )
+
+
+def test_build_cca_market_caps_fails_closed_without_registry():
+    raw = int(Q96)
+    with pytest.raises(ValueError, match="missing launch registry"):
+        build_cca_market_cap_points(
+            [],
+            [event(raw)],
+            [],
+            orientation="quote_per_token",
+            initial_weth_usd=Decimal("2000"),
+            quote_decimals={QUOTE: 18},
+        )
+
+
+def test_cca_summary_preserves_unpriced_points_and_threshold():
+    rows = [
+        {
+            "token": TOKEN,
+            "initializer": AUCTION,
+            "quote_token": QUOTE,
+            "orientation": "quote_per_token",
+            "block_number": 100,
+            "pricing_status": "unsupported_quote",
+            "market_cap_proxy_usd": None,
+        },
+        {
+            "token": TOKEN,
+            "initializer": AUCTION,
+            "quote_token": QUOTE,
+            "orientation": "quote_per_token",
+            "block_number": 101,
+            "pricing_status": "priced_weth_usdg",
+            "market_cap_proxy_usd": "150000",
+        },
+    ]
+    summary = summarize_cca_market_caps(rows)
+    assert summary[0]["price_points"] == 2
+    assert summary[0]["priced_points"] == 1
+    assert summary[0]["crossed_100k"] is True
+    assert summary[0]["max_market_cap_block"] == 101
