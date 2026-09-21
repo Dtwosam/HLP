@@ -4,6 +4,8 @@ from hlp.data.direct_markets import (
     attribute_direct_market_origins,
     build_v3_direct_market_registry,
     build_v4_direct_market_registry,
+    select_v3_direct_market_candidates,
+    select_v4_direct_market_candidates,
     summarize_direct_market_registry,
 )
 from hlp.data.types import V3PoolCreated, V3PoolInitialized, V4PoolInitialized
@@ -72,6 +74,70 @@ def v4_init(currency0=TOKEN, currency1=QUOTE):
         transaction_index=2,
         log_index=3,
     )
+
+
+
+def test_v3_candidate_filter_requires_exactly_one_supported_quote_side():
+    rows = select_v3_direct_market_candidates(
+        [
+            v3_created(),
+            V3PoolCreated(
+                factory=FACTORY,
+                token0=QUOTE,
+                token1=OTHER,
+                fee=500,
+                tick_spacing=10,
+                pool="0x" + "77" * 20,
+                block_number=11,
+                transaction_hash="0x" + "04" * 32,
+                transaction_index=1,
+                log_index=4,
+            ),
+        ],
+        factory=FACTORY,
+        quote_decimals={QUOTE: 18, OTHER: 6},
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["pool"] == POOL
+    assert rows[0]["token"] == TOKEN
+    assert rows[0]["quote_token"] == QUOTE
+    assert rows[0]["quote_decimals"] == 18
+
+
+def test_v4_candidate_filter_exposes_exact_state_read_coordinates():
+    rows = select_v4_direct_market_candidates(
+        [v4_init()],
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18},
+    )
+
+    assert rows == [{
+        "token": TOKEN,
+        "quote_token": QUOTE,
+        "quote_decimals": 18,
+        "pool_id": POOL_ID,
+        "pool_manager": MANAGER,
+        "currency0": TOKEN,
+        "currency1": QUOTE,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "hooks": HOOK,
+        "initialize_block": 20,
+        "initialize_transaction_hash": "0x" + "03" * 32,
+        "initialize_transaction_index": 2,
+        "initialize_log_index": 3,
+        "initial_sqrt_price_x96": 2**96,
+        "initial_tick": 0,
+    }]
+
+
+def test_v4_candidate_filter_skips_quote_quote_without_state_reads():
+    assert select_v4_direct_market_candidates(
+        [v4_init(QUOTE, OTHER)],
+        pool_manager=MANAGER,
+        quote_decimals={QUOTE: 18, OTHER: 6},
+    ) == []
 
 
 def test_v3_discovers_exactly_one_supported_quote_side():
