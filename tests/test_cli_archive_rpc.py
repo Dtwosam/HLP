@@ -11,6 +11,7 @@ from hlp.cli import (
     cmd_rpc_pons_transfer_tape,
     cmd_rpc_pools_fun_market_cap_window,
     cmd_rpc_v3_pool_created_window,
+    cmd_rpc_v3_swap_window,
     cmd_rpc_v4_initialize_window,
     cmd_rpc_v4_swap_window,
     cmd_rpc_pools_trade_market_cap_window,
@@ -19,6 +20,7 @@ from hlp.cli import (
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
 from hlp.protocols.uniswap import (
     V3_POOL_CREATED_TOPIC,
+    V3_SWAP_TOPIC,
     V4_INITIALIZE_TOPIC,
     V4_SWAP_TOPIC,
 )
@@ -973,7 +975,7 @@ class _FakeDiscoveryRpc:
         from_block,
         to_block,
         *,
-        address,
+        address=None,
         topics,
         chunk_size,
         min_chunk_size,
@@ -1032,6 +1034,67 @@ def test_generic_v3_pool_created_window_is_factory_scoped(
     assert snapshots[0]["provenance"]["factory"] == parsed.factory
     assert snapshots[0]["provenance"]["from_block"] == 10
     assert snapshots[0]["provenance"]["to_block"] == 20
+
+
+
+
+def test_shared_v3_swap_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "rpc-v3-swap-window",
+        "--from-block", "30",
+        "--to-block", "40",
+        "--out", "swaps.jsonl",
+    ])
+    assert args.from_block == 30
+    assert args.to_block == 40
+    assert args.out == "swaps.jsonl"
+
+
+def test_generic_v3_swap_window_is_shared_topic_scan(
+    monkeypatch,
+    tmp_path,
+):
+    rpc = _FakeDiscoveryRpc()
+    monkeypatch.setattr("hlp.cli._archive_rpc", lambda args: rpc)
+    monkeypatch.setattr(
+        "hlp.cli.decode_v3_swap",
+        lambda log: {"pool": "0x" + "22" * 20},
+    )
+    snapshots = []
+
+    def fake_snapshot(rows, *, output, provenance):
+        snapshots.append({
+            "rows": list(rows),
+            "output": str(output),
+            "provenance": provenance,
+        })
+        return {
+            "records": len(snapshots[-1]["rows"]),
+            "sha256": "ef" * 32,
+        }
+
+    monkeypatch.setattr("hlp.cli.write_jsonl_snapshot", fake_snapshot)
+    out = tmp_path / "swaps.jsonl"
+    parsed = SimpleNamespace(
+        from_block=30,
+        to_block=40,
+        chunk_size=200,
+        min_chunk_size=25,
+        out=str(out),
+    )
+
+    assert cmd_rpc_v3_swap_window(parsed) == 0
+    assert rpc.calls == [{
+        "from_block": 30,
+        "to_block": 40,
+        "address": None,
+        "topics": [V3_SWAP_TOPIC],
+        "chunk_size": 200,
+        "min_chunk_size": 25,
+    }]
+    assert snapshots[0]["provenance"]["address_filter"] is None
+    assert snapshots[0]["provenance"]["shared_direct_v3_surface"] is True
 
 
 
