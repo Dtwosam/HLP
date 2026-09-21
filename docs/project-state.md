@@ -358,7 +358,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   exact token/quote V3/V4 candidate, and records before/same-block/same-
   transaction/after timing without choosing a canonical handoff. It emits
   SHA-bound candidate evidence with `handoff_rule_frozen=false` and
-  `source_coverage_complete=false`; no trench source coverage is claimed yet;
+  `source_coverage_complete=false`. A separate dispatch-only freeze gate is
+  now prepared on top of that exact evidence. It will freeze
+  `trench-limit-same-transaction-after-v1` only if **every** LimitReach token
+  has exactly one direct market Initialize later in the exact same transaction;
+  unmatched or multiply qualifying tokens fail closed. The resulting selected
+  handoff registry remains `source_coverage_complete=false` and is intended to
+  gate the later post-limit market replay; no trench source coverage is claimed
+  until real evidence satisfies the rule and the selected markets are fully
+  replayed/priced;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material

@@ -1,7 +1,9 @@
 import pytest
 
 from hlp.data.trench_lifecycle import (
+    TRENCH_HANDOFF_RULE_VERSION,
     build_trench_limit_market_candidates,
+    freeze_trench_limit_market_handoffs,
     summarize_trench_limit_market_candidates,
 )
 
@@ -96,3 +98,88 @@ def test_trench_limit_candidates_reject_non_direct_market():
     }
     with pytest.raises(ValueError, match="not direct_dex"):
         build_trench_limit_market_candidates([launch()], [bad])
+
+
+def test_freeze_trench_handoff_selects_unique_same_transaction_market():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                source_id="direct_uniswap_v3",
+                pool="0x" + "22" * 20,
+                block=99,
+                tx_hash="0x" + "cc" * 32,
+                tx_index=1,
+                log_index=2,
+            ),
+            market(
+                source_id="direct_sushiswap_v3",
+                pool="0x" + "33" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=9,
+            ),
+        ],
+    )
+
+    selected, summary = freeze_trench_limit_market_handoffs(rows)
+
+    assert len(selected) == 1
+    assert selected[0]["market_source_id"] == "direct_sushiswap_v3"
+    assert selected[0]["market_id"] == "0x" + "33" * 20
+    assert (
+        selected[0]["handoff_rule_version"]
+        == TRENCH_HANDOFF_RULE_VERSION
+    )
+    assert selected[0]["handoff_rule_frozen"] is True
+    assert selected[0]["source_coverage_complete"] is False
+    assert summary["all_limit_reach_tokens_resolved"] is True
+    assert summary["selected_handoffs"] == 1
+    assert summary["handoff_rule_frozen"] is True
+    assert summary["source_coverage_complete"] is False
+
+
+def test_freeze_trench_handoff_rejects_missing_same_transaction_market():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                block=101,
+                tx_hash="0x" + "bb" * 32,
+                tx_index=1,
+                log_index=2,
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not uniquely same-transaction"):
+        freeze_trench_limit_market_handoffs(rows)
+
+
+def test_freeze_trench_handoff_rejects_ambiguous_same_transaction_markets():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                source_id="direct_uniswap_v3",
+                pool="0x" + "22" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=9,
+            ),
+            market(
+                source_id="direct_sushiswap_v3",
+                pool="0x" + "33" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=10,
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not uniquely same-transaction"):
+        freeze_trench_limit_market_handoffs(rows)
+

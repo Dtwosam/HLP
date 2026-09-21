@@ -255,3 +255,161 @@ def summarize_trench_limit_market_candidates(
         "handoff_rule_frozen": False,
         "source_coverage_complete": False,
     }
+
+
+TRENCH_HANDOFF_RULE_VERSION = "trench-limit-same-transaction-after-v1"
+
+
+def freeze_trench_limit_market_handoffs(
+    rows: Iterable[Mapping[str, object]],
+) -> tuple[list[dict], dict]:
+    """Freeze only an unambiguous same-transaction post-LimitReach handoff.
+
+    The rule is intentionally strict and empirical. Every LimitReach token must
+    have exactly one matching direct market initialized later in the exact same
+    transaction. Pre-existing or later unrelated markets may remain in the
+    evidence set, but they cannot be selected. Missing or multiple qualifying
+    markets fail closed instead of guessing.
+    """
+    data = [dict(row) for row in rows]
+    if not data:
+        raise ValueError("trench handoff freeze has no candidate evidence")
+
+    by_token: dict[str, list[dict]] = defaultdict(list)
+    for row in data:
+        if str(row.get("source_id") or "") != "trench_today":
+            raise ValueError("trench handoff evidence source changed")
+        if row.get("handoff_rule_frozen") is not False:
+            raise ValueError(
+                "trench handoff evidence must remain unfrozen before decision"
+            )
+        if row.get("source_coverage_complete") is not False:
+            raise ValueError(
+                "trench handoff evidence cannot claim source coverage"
+            )
+        token = normalize_address(str(row["token"]))
+        by_token[token].append(row)
+
+    selected: list[dict] = []
+    for token, token_rows in sorted(by_token.items()):
+        declared_counts = {
+            int(row.get("candidate_count_for_token", -1))
+            for row in token_rows
+        }
+        if len(declared_counts) != 1 or min(declared_counts) < 0:
+            raise ValueError(
+                f"trench candidate count drift for token: {token}"
+            )
+
+        qualifying = []
+        for row in token_rows:
+            if row.get("candidate_status") != "matching_direct_market":
+                continue
+            if row.get("same_transaction") is not True:
+                continue
+            if row.get("same_block") is not True:
+                raise ValueError(
+                    f"trench same-transaction candidate not same-block: {token}"
+                )
+            if row.get("initialize_order_relation") != "after_limit":
+                continue
+
+            limit_order = _order(
+                row["limit_reach_block"],
+                row.get("limit_reach_transaction_index"),
+                row["limit_reach_log_index"],
+            )
+            initialize_order = _order(
+                row["market_initialize_block"],
+                row.get("market_initialize_transaction_index"),
+                row["market_initialize_log_index"],
+            )
+            limit_tx = str(
+                row.get("limit_reach_transaction_hash") or ""
+            ).lower()
+            init_tx = str(
+                row.get("market_initialize_transaction_hash") or ""
+            ).lower()
+            if not limit_tx or init_tx != limit_tx:
+                raise ValueError(
+                    f"trench same-transaction hash drift: {token}"
+                )
+            if initialize_order <= limit_order:
+                raise ValueError(
+                    f"trench handoff Initialize is not after LimitReach: {token}"
+                )
+            qualifying.append(row)
+
+        if len(qualifying) != 1:
+            raise ValueError(
+                "trench handoff is not uniquely same-transaction after "
+                f"LimitReach: {token} candidates={len(qualifying)}"
+            )
+
+        row = qualifying[0]
+        selected.append({
+            "source_id": "trench_today",
+            "token": token,
+            "curve_quote_token": normalize_address(
+                str(row["curve_quote_token"])
+            ),
+            "dex_quote_token": normalize_address(
+                str(row["dex_quote_token"])
+            ),
+            "limit_reach_block": int(row["limit_reach_block"]),
+            "limit_reach_transaction_hash": str(
+                row["limit_reach_transaction_hash"]
+            ).lower(),
+            "limit_reach_transaction_index": row.get(
+                "limit_reach_transaction_index"
+            ),
+            "limit_reach_log_index": int(row["limit_reach_log_index"]),
+            "market_source_id": str(row["market_source_id"]),
+            "market_venue": str(row["market_venue"]),
+            "market_kind": str(row["market_kind"]),
+            "market_id": str(row["market_id"]).lower(),
+            "market_quote_token": normalize_address(
+                str(row["market_quote_token"])
+            ),
+            "market_initialize_block": int(
+                row["market_initialize_block"]
+            ),
+            "market_initialize_transaction_hash": str(
+                row["market_initialize_transaction_hash"]
+            ).lower(),
+            "market_initialize_transaction_index": row.get(
+                "market_initialize_transaction_index"
+            ),
+            "market_initialize_log_index": int(
+                row["market_initialize_log_index"]
+            ),
+            "handoff_rule_version": TRENCH_HANDOFF_RULE_VERSION,
+            "handoff_rule_frozen": True,
+            "selection_reason": (
+                "unique direct market initialized after LimitReach "
+                "in the exact same transaction"
+            ),
+            "source_coverage_complete": False,
+        })
+
+    summary = {
+        "handoff_rule_version": TRENCH_HANDOFF_RULE_VERSION,
+        "handoff_rule_frozen": True,
+        "limit_reach_tokens": len(by_token),
+        "selected_handoffs": len(selected),
+        "candidate_rows_examined": len(data),
+        "selected_market_source_ids": sorted({
+            row["market_source_id"] for row in selected
+        }),
+        "selected_market_venues": sorted({
+            row["market_venue"] for row in selected
+        }),
+        "all_limit_reach_tokens_resolved": (
+            len(selected) == len(by_token)
+        ),
+        "source_coverage_complete": False,
+    }
+    if not summary["all_limit_reach_tokens_resolved"]:
+        raise ValueError("trench handoff freeze left unresolved tokens")
+    return selected, summary
+
