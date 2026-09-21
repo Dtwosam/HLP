@@ -148,7 +148,10 @@ jobs:
               logs = {}
               for job in jobs:
                   job_id = int(job["id"])
-                  if job.get("status") != "completed":
+                  if (
+                      job.get("status") != "completed"
+                      or job.get("conclusion") == "skipped"
+                  ):
                       continue
                   try:
                       logs[job_id] = fetch_github_actions_job_log(
