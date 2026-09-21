@@ -1,0 +1,164 @@
+name: phase2-pools-trade-lbp-pool-init-search
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-lbp-pool-init-search.yml'
+      - 'src/hlp/protocols/uniswap.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-lbp-pool-init-search-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOKEN: '0x89e71858d3c13c0ea1d135edc9fccb32740c9dbc'
+  POOL_ID: '0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f'
+  CREATED_BLOCK: '30001146'
+  MIGRATION_BLOCK: '30145704'
+  SEARCH_AFTER_MIGRATION: '250000'
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Search exact V4 pool id initialization
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.uniswap import (
+              V4_INITIALIZE_TOPIC,
+              decode_v4_pool_initialized,
+              v4_pool_id,
+          )
+
+          token = os.environ["TOKEN"].lower()
+          pool_id = os.environ["POOL_ID"].lower()
+          created = int(os.environ["CREATED_BLOCK"])
+          migration = int(os.environ["MIGRATION_BLOCK"])
+          search_after = int(os.environ["SEARCH_AFTER_MIGRATION"])
+          end = migration + search_after
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          chunk = (
+              50_000
+              if key
+              else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          )
+
+          found = None
+          chunks_scanned = 0
+          last_scanned_block = created - 1
+          for lo in range(created, end + 1, chunk):
+              hi = min(end, lo + chunk - 1)
+              chunks_scanned += 1
+              rows = rpc.get_logs(
+                  lo,
+                  hi,
+                  address=UNISWAP_V4_POOL_MANAGER,
+                  topics=[V4_INITIALIZE_TOPIC, pool_id],
+              )
+              last_scanned_block = hi
+              if not rows:
+                  continue
+              if len(rows) != 1:
+                  raise SystemExit(
+                      "multiple V4 Initialize events for exact pool id"
+                  )
+              row = decode_v4_pool_initialized(rows[0])
+              derived = v4_pool_id(
+                  currency0=row.currency0,
+                  currency1=row.currency1,
+                  fee=row.fee,
+                  tick_spacing=row.tick_spacing,
+                  hooks=row.hooks,
+              )
+              if derived != pool_id or row.pool_id.lower() != pool_id:
+                  raise SystemExit("V4 pool id derivation drift")
+              if token not in {
+                  row.currency0.lower(),
+                  row.currency1.lower(),
+              }:
+                  raise SystemExit("derived LBP pool does not contain token")
+              found = {
+                  "pool_id": row.pool_id,
+                  "currency0": row.currency0,
+                  "currency1": row.currency1,
+                  "fee": row.fee,
+                  "tick_spacing": row.tick_spacing,
+                  "hooks": row.hooks,
+                  "sqrt_price_x96": row.sqrt_price_x96,
+                  "tick": row.tick,
+                  "block_number": row.block_number,
+                  "transaction_hash": row.transaction_hash,
+                  "transaction_index": row.transaction_index,
+                  "log_index": row.log_index,
+              }
+              break
+
+          report = {
+              "chain_id": 4663,
+              "token": token,
+              "pool_id": pool_id,
+              "created_block": created,
+              "migration_block_parameter": migration,
+              "search_from_block": created,
+              "search_to_block": end,
+              "last_scanned_block": last_scanned_block,
+              "chunks_scanned": chunks_scanned,
+              "initialize_found": found is not None,
+              "initialize": found,
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          Path(
+              "artifacts/pools-trade-lbp-pool-init-search.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-pool-init-search
+          path: artifacts/
+          if-no-files-found: error
