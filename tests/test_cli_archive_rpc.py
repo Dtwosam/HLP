@@ -19,6 +19,7 @@ from hlp.cli import (
     cmd_rpc_v2_v4_tape,
 )
 from hlp.config import SOLIDRPC_AUTH_RPC_URL, SOLIDRPC_PUBLIC_RPC_URL
+from hlp.protocols.erc20 import TRANSFER_TOPIC
 from hlp.protocols.uniswap import (
     V3_POOL_CREATED_TOPIC,
     V3_SWAP_TOPIC,
