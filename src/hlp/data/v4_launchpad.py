@@ -36,6 +36,7 @@ def build_v4_launchpad_market_cap_points(
     quote_decimals: dict[str, int],
     initial_quote_usd: dict[str, Decimal] | None = None,
     quote_usd_updates: Iterable[dict] = (),
+    allow_registry_initialization: bool = False,
 ) -> list[dict]:
     getcontext().prec = max(getcontext().prec, 80)
     registry = {
@@ -75,7 +76,25 @@ def build_v4_launchpad_market_cap_points(
         if event["_kind"] == "v4_initialize":
             initialized.add(pool_id)
         elif pool_id not in initialized:
-            raise ValueError(f"V4 swap precedes Initialize: {pool_id}")
+            if not allow_registry_initialization:
+                raise ValueError(f"V4 swap precedes Initialize: {pool_id}")
+            raw_block = launch.get("initialize_block")
+            raw_log = launch.get("initialize_log_index")
+            if raw_block is None or raw_log is None:
+                raise ValueError(
+                    f"V4 registry lacks Initialize order: {pool_id}"
+                )
+            raw_tx = launch.get("initialize_transaction_index")
+            initialize_order = (
+                int(raw_block),
+                -1 if raw_tx is None else int(raw_tx),
+                int(raw_log),
+            )
+            if event_order(event) <= initialize_order:
+                raise ValueError(
+                    f"V4 swap does not follow recorded Initialize: {pool_id}"
+                )
+            initialized.add(pool_id)
 
         c0 = launch["currency0"].lower()
         c1 = launch["currency1"].lower()
