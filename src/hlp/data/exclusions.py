@@ -175,3 +175,49 @@ def classify_excluded_asset(
 ) -> dict | None:
     """Return exclusion provenance for an exact address match, else None."""
     return exclusion_map(registry_rows).get(normalize_address(address))
+
+
+def apply_phase2_exclusions(
+    universe_rows: Iterable[Mapping[str, object]],
+    registry_rows: Iterable[Mapping[str, object]],
+    *,
+    address_field: str = "token",
+) -> list[dict]:
+    """Annotate threshold evidence with deterministic Phase-2 universe status.
+
+    Existing threshold/price evidence is preserved. Exclusion changes only the
+    Phase-2 membership status and adds exact address-level provenance.
+    """
+    registry = exclusion_map(registry_rows)
+    output: list[dict] = []
+
+    for raw in universe_rows:
+        if address_field not in raw:
+            raise ValueError(
+                f"universe row has no address field {address_field!r}"
+            )
+        address = normalize_address(str(raw[address_field]))
+        threshold_status = str(raw.get("eligibility_status") or "")
+        if threshold_status not in {"eligible", "ineligible", "unknown"}:
+            raise ValueError(
+                "universe row has invalid threshold eligibility status: "
+                f"{threshold_status!r}"
+            )
+
+        row = dict(raw)
+        row[address_field] = address
+        exclusion = registry.get(address)
+        row["excluded"] = exclusion is not None
+        if exclusion is None:
+            row["phase2_universe_status"] = threshold_status
+            row["exclusion_category"] = None
+            row["exclusion_source"] = None
+            row["exclusion_reason"] = None
+        else:
+            row["phase2_universe_status"] = "excluded"
+            row["exclusion_category"] = exclusion["category"]
+            row["exclusion_source"] = exclusion["source"]
+            row["exclusion_reason"] = exclusion["reason"]
+        output.append(row)
+
+    return output
