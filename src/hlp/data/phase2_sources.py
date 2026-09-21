@@ -120,12 +120,16 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": _addresses(POOLS_TRADE_LBP_STRATEGY),
             "trading_contracts": _addresses(UNISWAP_V4_POOL_MANAGER),
             "market_phases": ["lbp", "uniswap_v4"],
-            "readiness": "registry_ready",
+            "readiness": "decoder_ready",
             "implementation_evidence": [
                 "hlp.protocols.pools_trade_lbp",
                 "hlp.data.pools_trade_registry",
+                "hlp.data.types.CcaPriceEvent",
             ],
-            "blocking_gap": "LBP price-path reconstruction and migration lifecycle",
+            "blocking_gap": (
+                "CCA clearing-price orientation/market-cap reconstruction "
+                "and migration stitching"
+            ),
         },
         {
             "source_id": "doppler",
