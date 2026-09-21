@@ -1061,5 +1061,5 @@ jobs:
             echo "- expected_artifact_digest: $ARTIFACT_DIGEST"
             echo "- coverage_report_path: pools-trade-instant-source-coverage-report.json"
             echo "- expected_report_sha256: $REPORT_SHA256"
-            echo "- expected_source_id: doppler"
+            echo "- expected_source_id: pools_trade_instant"
           } >> "$GITHUB_STEP_SUMMARY"
