@@ -1,0 +1,629 @@
+name: phase2-trench-curve-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-trench-registry-backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-trench-curve-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '5773155'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-trench-registry-merged
+          path: inputs/registry
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - id: matrix
+        name: Freeze 256 shard indexes
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "shards="
+                  + json.dumps(list(range(int(os.environ["SHARD_COUNT"]))))
+                  + "\n"
+              )
+          PY
+      - name: Validate registry and canonical quote ownership
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              ROBINHOOD_USDG,
+              ROBINHOOD_WETH,
+              normalize_address,
+          )
+          from hlp.data.direct_quotes import ZERO_ADDRESS
+
+          registry_path = Path("inputs/registry/trench-registry.jsonl")
+          summary_path = Path(
+              "inputs/registry/trench-registry-summary.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          if summary["version"] != "phase2-trench-registry-v1":
+              raise SystemExit("trench.today registry version drift")
+          if summary["source_id"] != "trench_today":
+              raise SystemExit("trench.today registry source drift")
+          if summary["required_start_block"] != int(
+              os.environ["REQUIRED_START_BLOCK"]
+          ):
+              raise SystemExit("trench.today required start drift")
+          if summary["snapshot_head_block"] != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("trench.today registry snapshot drift")
+          if summary["continuous_event_scan"] is not True:
+              raise SystemExit(
+                  "trench.today registry scan is not continuous"
+              )
+          if summary["missing_ranges"]:
+              raise SystemExit("trench.today registry has missing ranges")
+          if hashlib.sha256(registry_path.read_bytes()).hexdigest() != (
+              summary["registry_sha256"]
+          ):
+              raise SystemExit("trench.today registry SHA drift")
+
+          quote_summary_path = Path(
+              "inputs/quotes/direct-quote-summary.json"
+          )
+          quote_summary = json.loads(quote_summary_path.read_text())
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          decimals_path = Path(
+              "inputs/quotes/direct-quote-decimals.json"
+          )
+          feed_path = Path(
+              "inputs/quotes/direct-quote-feeds.jsonl"
+          )
+          if hashlib.sha256(decimals_path.read_bytes()).hexdigest() != (
+              quote_summary["decimals_sha256"]
+          ):
+              raise SystemExit("direct quote decimals SHA drift")
+          if hashlib.sha256(feed_path.read_bytes()).hexdigest() != (
+              quote_summary["feed_specs_sha256"]
+          ):
+              raise SystemExit("direct quote feed SHA drift")
+
+          decimals = {
+              normalize_address(key): int(value)
+              for key, value in json.loads(
+                  decimals_path.read_text()
+              ).items()
+          }
+          feeds = {
+              normalize_address(json.loads(line)["quote_token"])
+              for line in feed_path.read_text().splitlines()
+              if line.strip()
+          }
+          builtins = {
+              normalize_address(ZERO_ADDRESS),
+              normalize_address(ROBINHOOD_WETH),
+              normalize_address(ROBINHOOD_USDG),
+          }
+          registry = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          quotes = {
+              normalize_address(row["quote_token"])
+              for row in registry
+          }
+          missing_decimals = sorted(quotes - set(decimals))
+          if missing_decimals:
+              raise SystemExit(
+                  "trench.today quote assets lack canonical decimals: "
+                  + ", ".join(missing_decimals)
+              )
+          missing_feeds = sorted(quotes - builtins - feeds)
+          if missing_feeds:
+              raise SystemExit(
+                  "trench.today quote assets lack canonical USD feeds: "
+                  + ", ".join(missing_feeds)
+              )
+
+          for source, target in (
+              (
+                  registry_path,
+                  Path("artifacts/trench-registry.jsonl"),
+              ),
+              (
+                  summary_path,
+                  Path("artifacts/trench-registry-summary.json"),
+              ),
+              (
+                  decimals_path,
+                  Path("artifacts/direct-quote-decimals.json"),
+              ),
+              (
+                  feed_path,
+                  Path("artifacts/direct-quote-feeds.jsonl"),
+              ),
+              (
+                  quote_summary_path,
+                  Path("artifacts/direct-quote-summary.json"),
+              ),
+          ):
+              target.write_bytes(source.read_bytes())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-curve-coverage-setup
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  price:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.setup.outputs.shards) }}
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-trench-curve-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-trench-registry-${{ matrix.shard }}
+          path: inputs/events
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - id: shard
+        name: Validate exact trench.today event shard
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          index = int(os.environ["SHARD_INDEX"])
+          path = Path("inputs/events") / (
+              f"trench-events-{index:03d}.jsonl"
+          )
+          manifest = json.loads(
+              path.with_suffix(
+                  path.suffix + ".manifest.json"
+              ).read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("protocol") != (
+              "trench_today_shared_curve_tape"
+          ):
+              raise SystemExit("trench.today event protocol drift")
+          if int(provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit("trench.today event chain drift")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != manifest["sha256"]:
+              raise SystemExit("trench.today event shard SHA drift")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"from_block={int(provenance['from_block'])}\n"
+              )
+              handle.write(
+                  f"to_block={int(provenance['to_block'])}\n"
+              )
+              handle.write(f"event_sha256={digest}\n")
+          PY
+      - name: Price trench.today curve shard causally
+        env:
+          FROM_BLOCK: ${{ steps.shard.outputs.from_block }}
+          TO_BLOCK: ${{ steps.shard.outputs.to_block }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-trench-curve-market-cap-window \
+            --events "inputs/events/trench-events-${SHARD}.jsonl" \
+            --registry inputs/setup/trench-registry.jsonl \
+            --quote-decimals inputs/setup/direct-quote-decimals.json \
+            --quote-feeds inputs/setup/direct-quote-feeds.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/trench-curve-points-${SHARD}.jsonl" \
+            --summary-out "artifacts/trench-curve-summary-${SHARD}.jsonl"
+      - name: Require fully priced trench.today shard
+        env:
+          EVENT_SHA256: ${{ steps.shard.outputs.event_sha256 }}
+          FROM_BLOCK: ${{ steps.shard.outputs.from_block }}
+          TO_BLOCK: ${{ steps.shard.outputs.to_block }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          index = int(os.environ["SHARD_INDEX"])
+          suffix = f"{index:03d}"
+          points = Path(
+              f"artifacts/trench-curve-points-{suffix}.jsonl"
+          )
+          summary = Path(
+              f"artifacts/trench-curve-summary-{suffix}.jsonl"
+          )
+          point_manifest = json.loads(
+              points.with_suffix(
+                  points.suffix + ".manifest.json"
+              ).read_text()
+          )
+          summary_manifest = json.loads(
+              summary.with_suffix(
+                  summary.suffix + ".manifest.json"
+              ).read_text()
+          )
+          if hashlib.sha256(points.read_bytes()).hexdigest() != (
+              point_manifest["sha256"]
+          ):
+              raise SystemExit("trench.today point SHA drift")
+          if hashlib.sha256(summary.read_bytes()).hexdigest() != (
+              summary_manifest["sha256"]
+          ):
+              raise SystemExit("trench.today summary SHA drift")
+          rows = [
+              json.loads(line)
+              for line in summary.read_text().splitlines()
+              if line.strip()
+          ]
+          price_points = sum(
+              int(row["price_points"]) for row in rows
+          )
+          priced_points = sum(
+              int(row["priced_points"]) for row in rows
+          )
+          if priced_points != price_points:
+              raise SystemExit(
+                  f"trench.today shard has unpriced points: {suffix}"
+              )
+          report = {
+              "shard": index,
+              "from_block": int(os.environ["FROM_BLOCK"]),
+              "to_block": int(os.environ["TO_BLOCK"]),
+              "event_sha256": os.environ["EVENT_SHA256"],
+              "points": int(point_manifest["records"]),
+              "priced_points": priced_points,
+              "points_sha256": point_manifest["sha256"],
+              "summary_sha256": summary_manifest["sha256"],
+              "source_coverage_complete": False,
+          }
+          Path(
+              f"artifacts/trench-curve-report-{suffix}.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-curve-price-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [setup, price]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-trench-curve-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-trench-curve-price-*
+          path: inputs/price
+          merge-multiple: true
+      - id: merge
+        name: Validate and merge trench.today curve coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.trench_coverage import (
+              validate_trench_curve_coverage_report,
+          )
+          from hlp.data.trench_curve import (
+              summarize_trench_curve_market_caps,
+          )
+
+          root = Path("inputs/price")
+          count = int(os.environ["SHARD_COUNT"])
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          point_files = sorted(
+              root.glob("trench-curve-points-*.jsonl")
+          )
+          report_files = sorted(
+              root.glob("trench-curve-report-*.json")
+          )
+          if len(point_files) != count or len(report_files) != count:
+              raise SystemExit(
+                  "trench.today curve shard artifact count changed: "
+                  f"points={len(point_files)} "
+                  f"reports={len(report_files)} expected={count}"
+              )
+
+          aggregate = hashlib.sha256()
+          total_points = 0
+          total_priced = 0
+          shards = []
+
+          def point_rows():
+              nonlocal total_points, total_priced
+              for path in point_files:
+                  suffix = path.stem.rsplit("-", 1)[-1]
+                  report = json.loads(
+                      (
+                          root
+                          / f"trench-curve-report-{suffix}.json"
+                      ).read_text()
+                  )
+                  manifest = json.loads(
+                      path.with_suffix(
+                          path.suffix + ".manifest.json"
+                      ).read_text()
+                  )
+                  digest = hashlib.sha256(
+                      path.read_bytes()
+                  ).hexdigest()
+                  if digest != manifest["sha256"]:
+                      raise SystemExit(
+                          f"trench.today point SHA drift: {suffix}"
+                      )
+                  if digest != report["points_sha256"]:
+                      raise SystemExit(
+                          "trench.today report point SHA drift: "
+                          f"{suffix}"
+                      )
+                  if int(report["priced_points"]) != int(
+                      report["points"]
+                  ):
+                      raise SystemExit(
+                          "trench.today shard is not fully priced: "
+                          f"{suffix}"
+                      )
+                  shards.append({
+                      "file": path.name,
+                      "records": int(manifest["records"]),
+                      "sha256": digest,
+                      "from_block": int(report["from_block"]),
+                      "to_block": int(report["to_block"]),
+                  })
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          aggregate.update(raw)
+                          if not raw.strip():
+                              continue
+                          row = json.loads(raw)
+                          total_points += 1
+                          if row["market_cap_proxy_usd"] is not None:
+                              total_priced += 1
+                          yield row
+
+          global_summary = summarize_trench_curve_market_caps(
+              point_rows()
+          )
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          if total_priced != total_points:
+              raise SystemExit(
+                  "trench.today merged curve has unpriced points"
+              )
+
+          points_manifest = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/trench-curve-points.manifest.json"
+              ),
+              path_name="trench-curve-points.jsonl",
+              records=total_points,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_trench_today_curve_points",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "registry_run_id": int(
+                      os.environ["REGISTRY_RUN_ID"]
+                  ),
+                  "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+                  "shards": shards,
+              },
+          )
+          summary_manifest = write_jsonl_snapshot(
+              global_summary,
+              output=Path("artifacts/trench-curve-summary.jsonl"),
+              provenance={
+                  "source": "phase2_trench_today_curve_summary",
+                  "chain_id": 4663,
+                  "curve_points_sha256": points_manifest["sha256"],
+                  "eligibility_threshold_usd": "100000",
+              },
+          )
+
+          registry_summary = json.loads(
+              Path(
+                  "inputs/setup/trench-registry-summary.json"
+              ).read_text()
+          )
+          quote_summary = json.loads(
+              Path(
+                  "inputs/setup/direct-quote-summary.json"
+              ).read_text()
+          )
+          tokens = int(registry_summary["tokens_discovered"])
+          limited = int(registry_summary["limit_reach_tokens"])
+          report = {
+              "version": "phase2-trench-curve-coverage-v1",
+              "source_id": "trench_today",
+              "coverage_segment": "bonding_curve",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_event_scan": True,
+              "missing_ranges": [],
+              "tokens_discovered": tokens,
+              "tokens_with_syncs": len(global_summary),
+              "limit_reach_tokens": limited,
+              "curve_price_points": total_points,
+              "curve_priced_points": total_priced,
+              "curve_tokens_crossed_100k": sum(
+                  bool(row["crossed_100k"])
+                  for row in global_summary
+              ),
+              "event_tape_sha256": registry_summary[
+                  "event_tape_sha256"
+              ],
+              "registry_sha256": registry_summary[
+                  "registry_sha256"
+              ],
+              "quote_decimals_sha256": quote_summary[
+                  "decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "curve_points_sha256": points_manifest["sha256"],
+              "curve_summary_sha256": summary_manifest["sha256"],
+              "blocking_reason": (
+                  "post_limit_dex_lifecycle_unresolved"
+                  if limited else None
+              ),
+              "source_coverage_complete": False,
+          }
+          validated = validate_trench_curve_coverage_report(
+              report,
+              required_start_block=start,
+              snapshot_head_block=head,
+          )
+          report_text = (
+              json.dumps(validated, indent=2, sort_keys=True) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/trench-curve-coverage-report.json"
+          ).write_text(report_text)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "coverage_report": validated,
+              "coverage_report_sha256": report_sha,
+          }, sort_keys=True))
+          PY
+      - name: Upload trench.today curve coverage evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-curve-coverage
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish next-stage handoff
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.merge.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_DIGEST"
+          test -n "$REPORT_SHA256"
+          {
+            echo "## trench.today curve coverage handoff"
+            echo
+            echo "- curve_run_id: ${GITHUB_RUN_ID}"
+            echo "- curve_artifact_name: phase2-trench-curve-coverage"
+            echo "- expected_curve_artifact_digest: $ARTIFACT_DIGEST"
+            echo "- curve_report_path: trench-curve-coverage-report.json"
+            echo "- expected_curve_report_sha256: $REPORT_SHA256"
+            echo "- source_coverage_complete: false"
+          } >> "$GITHUB_STEP_SUMMARY"
