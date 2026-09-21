@@ -53,3 +53,27 @@ def test_v4_swap_requires_initialize():
             quote_decimals={QUOTE:18},
             initial_quote_usd={QUOTE:Decimal("2")},
         )
+
+
+
+def test_v4_swap_emits_comparable_active_quote_liquidity():
+    init = point(txi=1, logi=0)
+    swap = {
+        **point(txi=2, logi=0),
+        "liquidity": 1_000 * 10**18,
+    }
+    rows = build_v4_launchpad_market_cap_points(
+        REGISTRY,
+        [init],
+        [swap],
+        [],
+        initial_weth_usd=Decimal("2000"),
+        quote_decimals={QUOTE: 18},
+        initial_quote_usd={QUOTE: Decimal("2")},
+    )
+
+    assert rows[0]["active_quote_liquidity_usd"] is None
+    assert rows[1]["market_id"] == POOL_ID
+    assert rows[1]["quote_decimals"] == 18
+    assert rows[1]["token_is_currency0"] is True
+    assert Decimal(rows[1]["active_quote_liquidity_usd"]) == Decimal("2000")
