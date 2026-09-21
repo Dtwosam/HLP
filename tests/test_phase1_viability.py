@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from hlp.data.phase1_viability import (
@@ -270,4 +272,23 @@ def test_phase1_plan_rejects_missing_accounting_run():
 
     with pytest.raises(ValueError, match="missing accounting runs"):
         project_phase1_acquisition_plan(plans, rows)
+
+def test_viability_measurement_accepts_normalized_recovered_evidence_path():
+    workflow = Path(
+        ".github/workflows/phase1-pons-viability-route-measurement.yml"
+    ).read_text()
+
+    assert (
+        "phase1-pons-post-eligibility-ready-replay-one-shot.yml"
+        in workflow
+    )
+    assert "recovered_evidence_paths" in workflow
+    assert (
+        "viability measurement recovered evidence is not marked recovered"
+        in workflow
+    )
+    assert (
+        "viability measurement normal evidence routing changed"
+        in workflow
+    )
 

@@ -190,12 +190,17 @@ jobs:
               raise SystemExit(
                   "viability measurement evidence run is not successful"
               )
-          allowed_paths = {
+          normal_evidence_path = (
               ".github/workflows/"
-              "phase1-pons-post-eligibility-evidence-one-shot.yml",
+              "phase1-pons-post-eligibility-evidence-one-shot.yml"
+          )
+          recovered_evidence_paths = {
               ".github/workflows/"
               "phase1-pons-recovered-completion-one-shot.yml",
+              ".github/workflows/"
+              "phase1-pons-post-eligibility-ready-replay-one-shot.yml",
           }
+          allowed_paths = {normal_evidence_path, *recovered_evidence_paths}
           observed_path = str(run.get("path") or "").split("@", 1)[0]
           if observed_path not in allowed_paths:
               raise SystemExit(
@@ -385,16 +390,39 @@ jobs:
               raise SystemExit(
                   "viability measurement evidence representative count changed"
               )
-          for field in (
-              "lifecycle_run_id",
-              "v1_v3_run_id",
-              "v2_v4_run_id",
-          ):
-              if int(report.get(field, 0)) <= 0:
+          routing = {
+              field: int(report.get(field, 0))
+              for field in (
+                  "lifecycle_run_id",
+                  "v1_v3_run_id",
+                  "v2_v4_run_id",
+              )
+          }
+          for field, run_id in routing.items():
+              if run_id <= 0:
                   raise SystemExit(
                       "viability measurement evidence routing is invalid: "
                       f"{field}"
                   )
+          recovery_mode = report.get("recovery_mode")
+          if not isinstance(recovery_mode, bool):
+              raise SystemExit(
+                  "viability measurement evidence recovery mode must be boolean"
+              )
+          if observed_path == normal_evidence_path:
+              if recovery_mode:
+                  raise SystemExit(
+                      "viability measurement normal evidence is marked recovered"
+                  )
+              if set(routing.values()) != {source_run_id}:
+                  raise SystemExit(
+                      "viability measurement normal evidence routing changed"
+                  )
+          elif not recovery_mode:
+              raise SystemExit(
+                  "viability measurement recovered evidence is not marked "
+                  "recovered"
+              )
 
           hashes = {}
           for field in (

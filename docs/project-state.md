@@ -2140,3 +2140,19 @@ normalized ready replay, and both recovered evidence paths require
 normalized recovered handoff and rejection if that same workflow attempts to
 masquerade as normal evidence.
 
+After viability generation 1 was armed to normalized evidence run
+**35576917452**, a final pre-RPC integration check found that the reusable
+`phase1-pons-viability-route-measurement` preflight still admitted only the
+original evidence and recovered-completion workflow paths. The outer guarded
+route already admitted the normalized ready replay, so the first route would
+have failed between guard and measurement without issuing RPC.
+
+The inner measurement preflight now admits
+`phase1-pons-post-eligibility-ready-replay-one-shot.yml` and independently
+enforces the same recovery-mode boundary: normal evidence must be
+`recovery_mode=false` with lifecycle/V1-V3/V2-V4 all routed to source run
+**33982556591**; either recovered path must be `recovery_mode=true`.
+This is a provenance-only repair before any viability route measurement; route
+geometry, request scope, concurrency, work-block floors and acceptance criteria
+are unchanged.
+
