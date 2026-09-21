@@ -274,7 +274,15 @@ Implemented foundation:
   not-yet-available markets, reconstructs the pool price causally at the exact
   LaunchedToDEX order, and merges curve plus post-graduation summaries across
   the full launch population. A dedicated market-window CLI prices that
-  graduation snapshot plus only later V3 swaps;
+  graduation snapshot plus only later V3 swaps. A final dispatch-only Flap
+  source-coverage workflow is now prepared: it binds the exact accepted curve
+  artifact, requires every LaunchedToDEX pool to resolve to an address-based
+  Uniswap/Sushi V3 market already available at graduation, filters the shared
+  V3 Swap surface at exact lifecycle order, and requires one causal graduation
+  snapshot plus fully priced later swaps. It merges curve and V3 summaries for
+  every launched token and only then validates a proposed canonical
+  `coverage_status=complete` row in memory and publishes promotion metadata;
+  it never mutates the canonical ledger;
 - NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
   unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
   mint/burn surface. The registry is read from exact launch-block state, every

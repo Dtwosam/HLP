@@ -209,6 +209,7 @@ jobs:
                   "direct_sushiswap_v3",
                   "pools_fun",
                   "noxa",
+                  "flap",
               ],
               "remaining_steps": [
                   "candidate-pool filtering",

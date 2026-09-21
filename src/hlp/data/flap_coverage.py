@@ -130,3 +130,132 @@ def validate_flap_curve_coverage_report(
         ),
         "source_coverage_complete": False,
     }
+
+
+
+FLAP_SOURCE_COVERAGE_VERSION = "phase2-flap-source-coverage-v1"
+
+
+def validate_flap_source_coverage_report(
+    report: Mapping[str, object],
+    *,
+    required_start_block: int,
+    snapshot_head_block: int,
+) -> dict:
+    """Validate a full curve-plus-post-graduation Flap coverage report."""
+    if str(report.get("version") or "") != FLAP_SOURCE_COVERAGE_VERSION:
+        raise ValueError("Flap source coverage version changed")
+    if str(report.get("source_id") or "") != "flap":
+        raise ValueError("Flap source coverage source changed")
+    if str(report.get("source_readiness") or "") != "adapter_ready":
+        raise ValueError("Flap source coverage readiness changed")
+    if str(report.get("coverage_status") or "") != "complete":
+        raise ValueError("Flap source coverage is not complete")
+
+    required = _nonnegative(
+        report.get("required_start_block"),
+        field="required_start_block",
+    )
+    first = _nonnegative(report.get("first_block"), field="first_block")
+    last = _nonnegative(report.get("last_block"), field="last_block")
+    snapshot = _nonnegative(
+        report.get("snapshot_head_block"),
+        field="snapshot_head_block",
+    )
+    if required != int(required_start_block) or first != required:
+        raise ValueError("Flap source coverage start changed")
+    if snapshot != int(snapshot_head_block) or last != snapshot:
+        raise ValueError("Flap source coverage does not reach snapshot")
+    if report.get("continuous") is not True:
+        raise ValueError("Flap source coverage is not continuous")
+    missing = report.get("missing_ranges")
+    if not isinstance(missing, list) or missing:
+        raise ValueError("Flap source coverage has missing ranges")
+
+    tokens = _nonnegative(
+        report.get("tokens_discovered"),
+        field="tokens_discovered",
+    )
+    lifecycle_tokens = _nonnegative(
+        report.get("lifecycle_tokens_with_points"),
+        field="lifecycle_tokens_with_points",
+    )
+    graduated = _nonnegative(
+        report.get("graduated_tokens"),
+        field="graduated_tokens",
+    )
+    snapshots = _nonnegative(
+        report.get("graduation_snapshots"),
+        field="graduation_snapshots",
+    )
+    curve_points = _nonnegative(
+        report.get("curve_price_points"),
+        field="curve_price_points",
+    )
+    v3_points = _nonnegative(
+        report.get("v3_price_points"),
+        field="v3_price_points",
+    )
+    points = _nonnegative(
+        report.get("price_points"),
+        field="price_points",
+    )
+    priced = _nonnegative(
+        report.get("priced_points"),
+        field="priced_points",
+    )
+    if tokens <= 0:
+        raise ValueError("Flap source coverage has no launches")
+    if lifecycle_tokens != tokens:
+        raise ValueError(
+            "Flap source coverage does not price every launch"
+        )
+    if snapshots != graduated:
+        raise ValueError(
+            "Flap source coverage graduation snapshot count changed"
+        )
+    if curve_points + v3_points != points:
+        raise ValueError("Flap source coverage point accounting drift")
+    if priced != points:
+        raise ValueError("Flap source coverage has unpriced points")
+    if report.get("blocking_reason") is not None:
+        raise ValueError(
+            "complete Flap source coverage cannot retain blocking_reason"
+        )
+
+    hashes = {}
+    for field in (
+        "provenance_sha256",
+        "event_tape_sha256",
+        "registry_sha256",
+        "curve_report_sha256",
+        "curve_points_sha256",
+        "graduation_registry_sha256",
+        "v3_points_sha256",
+        "final_summary_sha256",
+    ):
+        hashes[field] = _sha256(report.get(field), field=field)
+
+    return {
+        "version": FLAP_SOURCE_COVERAGE_VERSION,
+        "source_id": "flap",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "complete",
+        "required_start_block": required,
+        "first_block": first,
+        "last_block": last,
+        "continuous": True,
+        "missing_ranges": [],
+        "tokens_discovered": tokens,
+        "lifecycle_tokens_with_points": lifecycle_tokens,
+        "graduated_tokens": graduated,
+        "graduation_snapshots": snapshots,
+        "curve_price_points": curve_points,
+        "v3_price_points": v3_points,
+        "price_points": points,
+        "priced_points": priced,
+        "observed_volume_usd": report.get("observed_volume_usd"),
+        **hashes,
+        "blocking_reason": None,
+        "snapshot_head_block": snapshot,
+    }
