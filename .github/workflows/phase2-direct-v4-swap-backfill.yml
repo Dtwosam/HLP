@@ -1,0 +1,232 @@
+name: phase2-direct-v4-swap-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-direct-v4-swap-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  POOL_MANAGER: '0x8366a39cc670b4001a1121b8f6a443a643e40951'
+  REQUIRED_START_BLOCK: '9070'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact shared V4 Swap shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(f"empty shared V4 swap shard {index}: {lo}..{hi}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": index, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire shared V4 Swap shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v4-swap-window \
+            --pool-manager "$POOL_MANAGER" \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/direct-v4-swap-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-v4-swap-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  manifest:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-v4-swap-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate shared V4 Swap shards
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+
+          root = Path("inputs")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+          manager = os.environ["POOL_MANAGER"].lower()
+          files = sorted(root.glob("direct-v4-swap-*.jsonl"))
+          if len(files) != count:
+              raise SystemExit(
+                  f"expected {count} shared V4 swap shards, found {len(files)}"
+              )
+
+          aggregate = hashlib.sha256()
+          total = 0
+          shards = []
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(path.suffix + ".manifest.json").read_text()
+              )
+              provenance = manifest.get("provenance") or {}
+              if provenance.get("event") != "uniswap_v4_swap":
+                  raise SystemExit("shared V4 swap event identity drift")
+              if provenance.get("pool_manager", "").lower() != manager:
+                  raise SystemExit("shared V4 swap manager drift")
+              if provenance.get("shared_v4_surface") is not True:
+                  raise SystemExit("shared V4 swap provenance drift")
+
+              local = hashlib.sha256()
+              records = 0
+              previous = None
+              with path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate.update(raw)
+                      local.update(raw)
+                      if not raw.strip():
+                          continue
+                      records += 1
+                      row = json.loads(raw)
+                      order = (
+                          int(row["block_number"]),
+                          -1 if row.get("transaction_index") is None
+                          else int(row["transaction_index"]),
+                          int(row["log_index"]),
+                          row["pool_id"].lower(),
+                      )
+                      if previous is not None and order < previous:
+                          raise SystemExit(
+                              f"V4 swap shard not chronological: {path.name}"
+                          )
+                      previous = order
+              if records != int(manifest["records"]):
+                  raise SystemExit("shared V4 swap shard record drift")
+              if local.hexdigest() != manifest["sha256"]:
+                  raise SystemExit("shared V4 swap shard SHA drift")
+              total += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": manifest["sha256"],
+                  "from_block": int(provenance["from_block"]),
+                  "to_block": int(provenance["to_block"]),
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/direct-v4-swap-sharded.manifest.json"
+              ),
+              path_name="direct-v4-swap.jsonl",
+              records=total,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "shared_uniswap_v4_swap_topic_scan",
+                  "chain_id": 4663,
+                  "pool_manager": manager,
+                  "from_block": start,
+                  "to_block": head,
+                  "shards": shards,
+              },
+          )
+          summary = {
+              "version": "phase2-direct-v4-swap-discovery-v1",
+              "surface_id": "shared_direct_v4_swap",
+              "chain_id": 4663,
+              "pool_manager": manager,
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_event_scan": True,
+              "missing_ranges": [],
+              "shards": count,
+              "swap_events": total,
+              "swap_sha256": virtual["sha256"],
+              "storage_mode": "sharded_artifacts",
+              "source_coverage_complete": False,
+              "consumers": [
+                  "direct_uniswap_v4",
+                  "pools_trade_instant",
+                  "pools_trade_lbp",
+                  "doppler",
+              ],
+              "remaining_steps": [
+                  "candidate-pool filtering",
+                  "USD market-path reconstruction",
+                  "empirical multi-pool selector freeze",
+                  "complete launch-origin attribution",
+              ],
+          }
+          Path("artifacts/direct-v4-swap-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-v4-swap-manifest
+          path: artifacts/
+          if-no-files-found: error
