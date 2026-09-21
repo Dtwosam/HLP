@@ -37,7 +37,7 @@
     {
       "source_id": "pools_fun",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 33570152,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -53,7 +53,7 @@
     {
       "source_id": "pools_trade_instant",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 3338007,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -69,7 +69,7 @@
     {
       "source_id": "pools_trade_lbp",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 6222785,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -85,7 +85,7 @@
     {
       "source_id": "doppler",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 646829,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -101,7 +101,7 @@
     {
       "source_id": "flap",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 4180724,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -117,7 +117,7 @@
     {
       "source_id": "trench_today",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 5773155,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -133,7 +133,7 @@
     {
       "source_id": "hood_fun_current",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 5611265,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -149,7 +149,7 @@
     {
       "source_id": "hood_fun_previous",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 1676992,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -165,7 +165,7 @@
     {
       "source_id": "noxa",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 61688,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -181,7 +181,7 @@
     {
       "source_id": "direct_uniswap_v3",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 8930,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -197,7 +197,7 @@
     {
       "source_id": "direct_uniswap_v4",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 9070,
       "first_block": null,
       "last_block": null,
       "continuous": null,
@@ -213,7 +213,7 @@
     {
       "source_id": "direct_sushiswap_v3",
       "coverage_status": "not_started",
-      "required_start_block": null,
+      "required_start_block": 6292626,
       "first_block": null,
       "last_block": null,
       "continuous": null,
