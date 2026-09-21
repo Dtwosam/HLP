@@ -804,12 +804,27 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
         },
     )
     incomplete_quotes = sum(row["quote_token"] is None for row in rows)
+    graduated = [
+        row for row in rows if row["graduation_block"] is not None
+    ]
     print(
         json.dumps(
             {
                 **manifest,
                 "tokens": len(rows),
                 "tokens_missing_quote_event": incomplete_quotes,
+                "graduated_tokens": len(graduated),
+                "graduation_pools": len({
+                    row["graduation_pool"] for row in graduated
+                }),
+                "graduations_missing_dex_id": sum(
+                    row["graduation_dex_id"] is None
+                    for row in graduated
+                ),
+                "graduations_missing_quote": sum(
+                    row["graduation_quote_token"] is None
+                    for row in graduated
+                ),
             },
             sort_keys=True,
         )

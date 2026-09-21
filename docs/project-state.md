@@ -231,6 +231,11 @@ Implemented foundation:
   market-cap CLIs can now consume the canonical quote-feed registry and sample
   Chainlink/USD only at the causal trade/Sync orders that need non-WETH quotes;
   sparse quote ownership cannot be mixed with pre-materialized oracle tapes.
+  Flap's persistent registry now also freezes each LaunchedToDEX handoff at
+  event time: pool, migrated token/quote amounts, quote asset, DEX preference,
+  LP-fee profile, migrator and token version are retained separately from any
+  later configuration changes. This makes post-curve lifecycle joins
+  deterministic without treating the bonding curve as the full lifecycle.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 

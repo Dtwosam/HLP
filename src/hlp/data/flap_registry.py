@@ -54,6 +54,18 @@ def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
                 "migrator_type": None,
                 "dex_id": None,
                 "lp_fee_profile": None,
+                "graduation_block": None,
+                "graduation_transaction_hash": None,
+                "graduation_transaction_index": None,
+                "graduation_log_index": None,
+                "graduation_pool": None,
+                "graduation_token_amount_raw": None,
+                "graduation_quote_amount_raw": None,
+                "graduation_quote_token": None,
+                "graduation_dex_id": None,
+                "graduation_lp_fee_profile": None,
+                "graduation_migrator_type": None,
+                "graduation_token_version": None,
                 "supply_raw": 1_000_000_000 * 10**18,
                 "token_decimals": 18,
             }
@@ -90,6 +102,27 @@ def build_flap_launch_registry(events: Iterable[FlapEvent]) -> list[dict]:
         elif event.event_type == "dex_preference_set":
             state["dex_id"] = event.value_raw
             state["lp_fee_profile"] = event.value2_raw
+        elif event.event_type == "launched_to_dex":
+            if event.pool is None:
+                raise ValueError(
+                    f"Flap launched_to_dex missing pool: {token}"
+                )
+            if state["graduation_block"] is not None:
+                raise ValueError(
+                    f"duplicate Flap LaunchedToDEX: {token}"
+                )
+            state["graduation_block"] = event.block_number
+            state["graduation_transaction_hash"] = event.transaction_hash
+            state["graduation_transaction_index"] = event.transaction_index
+            state["graduation_log_index"] = event.log_index
+            state["graduation_pool"] = event.pool.lower()
+            state["graduation_token_amount_raw"] = event.amount_raw
+            state["graduation_quote_amount_raw"] = event.quote_amount_raw
+            state["graduation_quote_token"] = state["quote_token"]
+            state["graduation_dex_id"] = state["dex_id"]
+            state["graduation_lp_fee_profile"] = state["lp_fee_profile"]
+            state["graduation_migrator_type"] = state["migrator_type"]
+            state["graduation_token_version"] = state["token_version"]
 
     output = list(states.values())
     output.sort(key=lambda row: (row["launch_block"], row["token"]))
