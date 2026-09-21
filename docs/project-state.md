@@ -259,7 +259,14 @@ Implemented foundation:
   global chronological event-sourced registry across the full tape, so quote,
   curve, DEX-preference and graduation changes cannot be finalized independently
   inside shards. It emits an immutable aggregate event SHA plus launch/graduation
-  registry evidence but deliberately keeps `source_coverage_complete=false`;
+  registry evidence but deliberately keeps `source_coverage_complete=false`.
+  A second dispatch-only **256-shard** Flap curve-coverage workflow is now
+  prepared against that exact registry run plus the canonical direct-quote
+  registry. It validates every historical quote asset against the causal feed
+  allowlist, requires every bonding-curve price point to be priced, merges one
+  deterministic curve summary, and emits a SHA-bound next-stage handoff. It
+  remains non-final by construction until every LaunchedToDEX lifecycle is
+  joined and priced after graduation;
 - NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
   unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
   mint/burn surface. The registry is read from exact launch-block state, every
