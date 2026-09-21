@@ -406,6 +406,32 @@ def apply_phase2_source_coverage_report(
             )
         replacement[field] = report[field]
 
+    current_row = next(
+        dict(row)
+        for row in ledger["sources"]
+        if str(row.get("source_id") or "") == source_id
+    )
+    if (
+        replacement["required_start_block"]
+        != current_row.get("required_start_block")
+    ):
+        raise ValueError(
+            "coverage report required start drift: "
+            f"{source_id} {replacement['required_start_block']!r} "
+            f"!= {current_row.get('required_start_block')!r}"
+        )
+
+    if str(current_row.get("coverage_status") or "") == "complete":
+        current_canonical = {
+            field: current_row.get(field)
+            for field in _COVERAGE_LEDGER_ROW_FIELDS
+        }
+        if replacement != current_canonical:
+            raise ValueError(
+                "coverage report cannot rewrite completed source: "
+                f"{source_id}"
+            )
+
     updated = {
         **dict(ledger),
         "sources": [

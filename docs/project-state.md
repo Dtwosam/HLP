@@ -158,6 +158,14 @@ Implemented foundation:
   It validates the proposed `complete` row against the canonical coverage
   contract in memory but **does not mutate the coverage ledger**. This is
   prepared execution logic, not completed historical evidence;
+- source coverage promotion now has a generic fail-closed handoff. A
+  dispatch-only workflow accepts only an exact upstream run/artifact plus
+  GitHub artifact digest, exact report SHA-256 and expected source ID. It
+  requires the report to validate as `complete`, preserves every already
+  complete source, and emits a proposed updated ledger plus validation evidence
+  without writing or committing the canonical coverage ledger. The underlying
+  apply helper now also rejects any attempt to drift a frozen
+  `required_start_block` or rewrite an already-complete source;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;

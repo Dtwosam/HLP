@@ -312,7 +312,7 @@ def test_apply_source_coverage_report_replaces_only_target_row():
                 "source_id": "noxa",
                 "source_readiness": "adapter_ready",
                 "coverage_status": "not_started",
-                "required_start_block": None,
+                "required_start_block": 20,
                 "first_block": None,
                 "last_block": None,
                 "continuous": None,
@@ -392,6 +392,72 @@ def test_apply_source_coverage_report_rejects_snapshot_drift():
             report,
         )
 
+
+
+def test_apply_source_coverage_report_rejects_required_start_drift():
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            complete("pons_v1"),
+            {
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": 20,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+        ],
+    }
+    report = {
+        **ledger["sources"][1],
+        "coverage_status": "complete",
+        "required_start_block": 19,
+        "first_block": 19,
+        "last_block": 100,
+        "continuous": True,
+        "tokens_discovered": 1,
+        "price_points": 1,
+        "priced_points": 1,
+        "provenance_sha256": "cd" * 32,
+        "snapshot_head_block": 100,
+    }
+    with pytest.raises(ValueError, match="required start drift"):
+        apply_phase2_source_coverage_report(
+            ledger,
+            INVENTORY,
+            report,
+        )
+
+
+def test_apply_source_coverage_report_cannot_rewrite_completed_source():
+    current = complete("noxa")
+    current["blocking_reason"] = None
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [complete("pons_v1"), current],
+    }
+    report = {
+        **current,
+        "tokens_discovered": 6,
+        "snapshot_head_block": 100,
+    }
+    with pytest.raises(ValueError, match="cannot rewrite completed source"):
+        apply_phase2_source_coverage_report(
+            ledger,
+            INVENTORY,
+            report,
+        )
 
 
 def test_apply_source_boundaries_fills_start_without_claiming_coverage():
