@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/phase2-pools-trade-cca-migration-audit.yml'
       - 'src/hlp/protocols/pools_trade_lbp.py'
+      - 'src/hlp/protocols/pools_trade.py'
 
 permissions:
   contents: read
@@ -51,8 +52,13 @@ jobs:
               UNISWAP_V4_POOL_MANAGER,
           )
           from hlp.data.rpc import RpcClient
+          from hlp.protocols.pools_trade import (
+              TOKEN_LAUNCHED_TOPIC,
+              decode_pools_trade_token_launched,
+          )
           from hlp.protocols.pools_trade_lbp import (
               CCA_PRICE_TOPICS,
+              POOLS_TRADE_LBP_STRATEGY,
               decode_pools_trade_cca_price_event,
           )
           from hlp.protocols.uniswap import (
@@ -63,7 +69,6 @@ jobs:
           getcontext().prec = 80
           Q96 = Decimal(2) ** 96
           Q192 = Decimal(2) ** 192
-          ZERO = "0x" + "00" * 20
 
           initializer = os.environ["INITIALIZER"].lower()
           token = os.environ["TOKEN"].lower()
@@ -130,9 +135,45 @@ jobs:
                   "no CCA price event found before migration"
               )
 
+          migration_lo = max(created, migration - 2_000)
+          migration_hi = migration + 2_000
+          launched_matches = []
+          lbp_strategy = POOLS_TRADE_LBP_STRATEGY.lower()
+          for part_lo in range(
+              migration_lo,
+              migration_hi + 1,
+              chunk,
+          ):
+              part_hi = min(
+                  migration_hi,
+                  part_lo + chunk - 1,
+              )
+              for raw in rpc.get_logs(
+                  part_lo,
+                  part_hi,
+                  address=lbp_strategy,
+                  topics=[TOKEN_LAUNCHED_TOPIC],
+              ):
+                  row = decode_pools_trade_token_launched(
+                      raw,
+                      allowed_strategies={lbp_strategy},
+                  )
+                  if row.token.lower() == token:
+                      launched_matches.append(row)
+
+          if len(launched_matches) != 1:
+              raise SystemExit(
+                  "expected exactly one LBP TokenLaunched for token, "
+                  f"found {len(launched_matches)}"
+              )
+          launched = launched_matches[0]
+
           v4_matches = []
-          v4_lo = max(0, migration - 400)
-          v4_hi = migration + 400
+          v4_lo = max(
+              0,
+              min(migration, launched.block_number) - 400,
+          )
+          v4_hi = max(migration, launched.block_number) + 400
           for part_lo in range(v4_lo, v4_hi + 1, chunk):
               part_hi = min(v4_hi, part_lo + chunk - 1)
               for raw in rpc.get_logs(
@@ -142,19 +183,25 @@ jobs:
                   topics=[V4_INITIALIZE_TOPIC],
               ):
                   row = decode_v4_pool_initialized(raw)
-                  currencies = {
-                      row.currency0.lower(),
-                      row.currency1.lower(),
-                  }
-                  if currencies == {token, ZERO}:
+                  if row.pool_id.lower() == launched.pool_id.lower():
                       v4_matches.append(row)
 
           if len(v4_matches) != 1:
               raise SystemExit(
-                  "expected exactly one matching V4 initialization, "
-                  f"found {len(v4_matches)}"
+                  "expected exactly one V4 initialization for emitted "
+                  f"pool_id {launched.pool_id}, found {len(v4_matches)}"
               )
           v4 = v4_matches[0]
+          if (
+              v4.currency0.lower() != launched.currency0.lower()
+              or v4.currency1.lower() != launched.currency1.lower()
+              or int(v4.fee) != int(launched.fee)
+              or int(v4.tick_spacing) != int(launched.tick_spacing)
+              or v4.hooks.lower() != launched.hooks.lower()
+          ):
+              raise SystemExit(
+                  "LBP TokenLaunched PoolKey disagrees with V4 Initialize"
+              )
           token_is_currency0 = v4.currency0.lower() == token
           ratio1_per_0 = (
               Decimal(v4.sqrt_price_x96) ** 2 / Q192
@@ -205,6 +252,20 @@ jobs:
                   "transaction_hash": latest.transaction_hash,
                   "transaction_index": latest.transaction_index,
                   "log_index": latest.log_index,
+              },
+              "token_launched": {
+                  "strategy": launched.strategy,
+                  "pool_id": launched.pool_id,
+                  "token": launched.token,
+                  "currency0": launched.currency0,
+                  "currency1": launched.currency1,
+                  "fee": launched.fee,
+                  "tick_spacing": launched.tick_spacing,
+                  "hooks": launched.hooks,
+                  "block_number": launched.block_number,
+                  "transaction_hash": launched.transaction_hash,
+                  "transaction_index": launched.transaction_index,
+                  "log_index": launched.log_index,
               },
               "v4_initialize": {
                   "pool_id": v4.pool_id,
