@@ -10,7 +10,7 @@
     "weth_usdg_anchor": 35595464031,
     "stock_oracle": 35596248795,
     "quote_v3_fallback": 35597714687,
-    "quote_v4_fallback": 0
+    "quote_v4_fallback": 35598500896
   },
   "validation_generation": 8
 }
