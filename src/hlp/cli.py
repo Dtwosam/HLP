@@ -4617,6 +4617,17 @@ def cmd_pools_trade_lbp_registry(
             "created_tape": Path(args.created).name,
             "distributed_tape": Path(args.distributed).name,
             "initializer_tape": Path(args.initializers).name,
+            "state_tape": (
+                Path(args.states).name if args.states else None
+            ),
+            "state_tape_sha256": (
+                _sha256_file(args.states) if args.states else None
+            ),
+            "supply_semantics": (
+                "initializer-block-end totalSupply"
+                if args.states
+                else "provisional TokenDistributed amount"
+            ),
         },
     )
     print(json.dumps({

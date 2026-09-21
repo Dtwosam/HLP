@@ -239,12 +239,16 @@ Implemented foundation:
   proposed `pools_trade_instant=complete` row in memory, and publishes exact
   promotion metadata without mutating the canonical ledger. This remains
   prepared execution logic, not completed evidence;
-- pools.trade LBP registry reconstruction is being hardened for full-history
-  use: initializer acquisition can now freeze ERC-20 totalSupply/decimals at
-  each exact InitializerCreated block, and the registry can replace provisional
-  TokenDistributed supply with that block-end chain state while retaining the
-  distribution amount separately. This prepares causal supply replay without
-  claiming LBP source coverage;
+- pools.trade LBP now has a prepared chain-wide registry path. A
+  dispatch-only **256-shard** workflow scans InitializerCreated continuously
+  from required start **6,222,785** through snapshot **54,486,035**, freezes
+  ERC-20 totalSupply/decimals at every exact initializer block, binds the exact
+  shared launcher TokenCreated/TokenDistributed history, and builds one
+  deterministic state-backed LBP registry with unique token/initializer/derived
+  PoolId identities. TokenDistributed amount is retained separately while
+  initializer-block-end totalSupply becomes the supply seed. The handoff remains
+  `source_coverage_complete=false`; CCA and optional migrated-V4 histories
+  still have to be reconstructed and priced;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
