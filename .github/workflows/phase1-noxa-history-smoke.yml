@@ -1,13 +1,6 @@
 name: phase1-noxa-history-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-noxa-history-smoke.yml'
-      - 'src/hlp/protocols/noxa.py'
-      - 'src/hlp/protocols/noxa_state.py'
   workflow_dispatch:
 
 permissions:

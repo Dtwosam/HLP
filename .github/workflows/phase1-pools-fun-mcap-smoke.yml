@@ -1,14 +1,6 @@
 name: phase1-pools-fun-mcap-smoke
 
 on:
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/workflows/phase1-pools-fun-mcap-smoke.yml'
-      - 'src/hlp/data/pools_fun_registry.py'
-      - 'src/hlp/data/v3_launchpad.py'
-      - 'src/hlp/protocols/uniswap.py'
   workflow_dispatch:
 
 permissions:
