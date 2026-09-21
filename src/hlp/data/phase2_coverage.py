@@ -480,18 +480,9 @@ def apply_phase2_source_boundaries(
             raise ValueError(
                 f"boundary report repeats source: {source_id}"
             )
-        reported_readiness = str(
-            raw.get("source_readiness") or ""
-        )
-        expected_readiness = str(
-            inventory_by_id[source_id].get("readiness") or ""
-        )
-        if reported_readiness != expected_readiness:
-            raise ValueError(
-                "boundary report readiness drift: "
-                f"{source_id} {reported_readiness!r} "
-                f"!= {expected_readiness!r}"
-            )
+        # Deployment boundaries are immutable chain evidence. Adapter
+        # readiness is intentionally not part of the boundary identity because
+        # it may advance after the first-code proof was frozen.
         start = int(raw.get("required_start_block", -1))
         if start < 0 or start > snapshot:
             raise ValueError(
