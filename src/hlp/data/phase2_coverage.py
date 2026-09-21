@@ -14,6 +14,7 @@ from typing import Iterable, Mapping
 COVERAGE_STATUSES = frozenset(
     {"not_started", "partial", "complete", "blocked"}
 )
+PHASE2_COVERAGE_LEDGER_VERSION = "phase2-source-coverage-v1"
 
 
 def _nonnegative_int(value: object, *, field: str) -> int:
@@ -255,3 +256,62 @@ def validate_phase2_source_coverage(
             and len(complete_sources) == len(inventory)
         ),
     }
+
+
+
+def validate_phase2_coverage_ledger(
+    ledger: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+) -> dict:
+    """Validate the versioned repository coverage ledger.
+
+    The ledger must contain one row for every source, even if that source has
+    not started. This makes omissions explicit rather than silently dropping a
+    material venue from the Phase-2 completion gate.
+    """
+    version = str(ledger.get("version") or "")
+    if version != PHASE2_COVERAGE_LEDGER_VERSION:
+        raise ValueError(
+            "Phase-2 coverage ledger version changed: "
+            f"{version!r}"
+        )
+    snapshot = _nonnegative_int(
+        ledger.get("snapshot_head_block"),
+        field="snapshot_head_block",
+    )
+    raw_sources = ledger.get("sources")
+    if not isinstance(raw_sources, list):
+        raise ValueError("Phase-2 coverage ledger sources must be a list")
+
+    inventory_rows = [dict(row) for row in source_inventory]
+    inventory_ids = {
+        str(row.get("source_id") or "")
+        for row in inventory_rows
+    }
+    if "" in inventory_ids:
+        raise ValueError("source inventory contains empty source id")
+
+    ledger_ids = [
+        str(row.get("source_id") or "")
+        for row in raw_sources
+        if isinstance(row, Mapping)
+    ]
+    if len(ledger_ids) != len(raw_sources):
+        raise ValueError("Phase-2 coverage ledger contains a non-object row")
+    if len(ledger_ids) != len(set(ledger_ids)):
+        raise ValueError("Phase-2 coverage ledger repeats a source id")
+    if set(ledger_ids) != inventory_ids:
+        missing = sorted(inventory_ids - set(ledger_ids))
+        extra = sorted(set(ledger_ids) - inventory_ids)
+        raise ValueError(
+            "Phase-2 coverage ledger source contract mismatch: "
+            f"missing={missing} extra={extra}"
+        )
+
+    report = validate_phase2_source_coverage(
+        inventory_rows,
+        raw_sources,
+        snapshot_head_block=snapshot,
+    )
+    report["version"] = version
+    return report
