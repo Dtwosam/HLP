@@ -92,6 +92,7 @@ from hlp.data.hood_fun_curve import (
 from hlp.data.hood_fun_registry import build_hood_fun_launch_registry
 from hlp.data.flap_curve import (
     build_flap_curve_market_cap_points,
+    flap_registry_state_before,
     summarize_flap_curve_market_caps,
 )
 from hlp.data.flap_registry import build_flap_launch_registry
@@ -409,6 +410,8 @@ def _sparse_chainlink_launchpad_points(
             f"{label} quote feed registry is missing: "
             + ", ".join(missing)
         )
+    if not sparse_targets:
+        return []
     return build_sparse_chainlink_usd_points(
         rpc,
         sparse_targets,
@@ -435,37 +438,10 @@ def _causal_flap_trade_quote_targets(
         else rows[0].transaction_index,
         rows[0].log_index,
     )
-    seen_launches = set()
-    quote_by_token = {}
-
-    for raw in launch_registry:
-        token = normalize_address(str(raw["token"]))
-        launch_block = raw.get("launch_block")
-        launch_log = raw.get("launch_log_index")
-        if launch_block is not None and launch_log is not None:
-            launch_order = (
-                int(launch_block),
-                -1
-                if raw.get("launch_transaction_index") is None
-                else int(raw["launch_transaction_index"]),
-                int(launch_log),
-            )
-            if launch_order < first_order:
-                seen_launches.add(token)
-
-        quote = raw.get("quote_token")
-        quote_block = raw.get("quote_set_block")
-        quote_log = raw.get("quote_set_log_index")
-        if quote and quote_block is not None and quote_log is not None:
-            quote_order = (
-                int(quote_block),
-                -1
-                if raw.get("quote_set_transaction_index") is None
-                else int(raw["quote_set_transaction_index"]),
-                int(quote_log),
-            )
-            if quote_order < first_order:
-                quote_by_token[token] = normalize_address(str(quote))
+    seen_launches, quote_by_token = flap_registry_state_before(
+        launch_registry,
+        first_order,
+    )
 
     targets = []
     for event in rows:

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from hlp.data.flap_curve import (
     build_flap_curve_market_cap_points,
+    flap_registry_state_before,
     summarize_flap_curve_market_caps,
 )
 from hlp.data.types import FlapEvent
@@ -133,5 +134,57 @@ def test_flap_curve_bootstraps_only_pre_window_registry_state():
     )
     assert len(rows) == 1
     assert rows[0]["quote_token"] == quote
+    assert rows[0]["market_cap_proxy_usd"] == "2000000000"
+
+
+def test_flap_curve_bootstraps_historical_quote_not_future_final_quote():
+    quote_a = "0x" + "33" * 20
+    quote_b = "0x" + "44" * 20
+    trade = event("token_bought", txi=2, logi=0, price=10**18)
+    registry = [{
+        "token": TOKEN,
+        "quote_token": quote_b,
+        "launch_block": 9,
+        "launch_transaction_index": 1,
+        "launch_log_index": 0,
+        "quote_set_block": 11,
+        "quote_set_transaction_index": 1,
+        "quote_set_log_index": 0,
+        "quote_history": [
+            {
+                "quote_token": quote_a,
+                "block_number": 9,
+                "transaction_index": 1,
+                "log_index": 1,
+            },
+            {
+                "quote_token": quote_b,
+                "block_number": 11,
+                "transaction_index": 1,
+                "log_index": 0,
+            },
+        ],
+    }]
+
+    launches, quotes = flap_registry_state_before(
+        registry,
+        (10, 2, 0),
+    )
+    assert TOKEN in launches
+    assert quotes[TOKEN] == quote_a
+
+    rows = list(
+        build_flap_curve_market_cap_points(
+            [trade],
+            [],
+            initial_weth_usd=Decimal("2000"),
+            initial_quote_usd={
+                quote_a: Decimal("2"),
+                quote_b: Decimal("3"),
+            },
+            launch_registry=registry,
+        )
+    )
+    assert rows[0]["quote_token"] == quote_a
     assert rows[0]["market_cap_proxy_usd"] == "2000000000"
 

@@ -48,6 +48,7 @@ def build_flap_launch_registry_ordered(
                 "launch_transaction_index": event.transaction_index,
                 "launch_log_index": event.log_index,
                 "quote_token": None,
+                "quote_history": [],
                 "quote_set_block": None,
                 "quote_set_transaction_index": None,
                 "quote_set_log_index": None,
@@ -88,10 +89,17 @@ def build_flap_launch_registry_ordered(
         if event.event_type == "quote_set":
             if event.actor is None:
                 raise ValueError(f"Flap quote_set missing quote token: {token}")
-            state["quote_token"] = event.actor.lower()
+            quote_token = event.actor.lower()
+            state["quote_token"] = quote_token
             state["quote_set_block"] = event.block_number
             state["quote_set_transaction_index"] = event.transaction_index
             state["quote_set_log_index"] = event.log_index
+            state["quote_history"].append({
+                "quote_token": quote_token,
+                "block_number": event.block_number,
+                "transaction_index": event.transaction_index,
+                "log_index": event.log_index,
+            })
         elif event.event_type == "curve_set":
             state["curve_kind"] = "legacy"
             state["curve_address"] = event.actor

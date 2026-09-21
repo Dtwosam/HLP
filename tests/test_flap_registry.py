@@ -129,3 +129,30 @@ def test_ordered_flap_registry_matches_sorting_wrapper():
         build_flap_launch_registry(rows)
     )
 
+
+def test_flap_registry_preserves_quote_history():
+    quote_a = "0x" + "33" * 20
+    quote_b = "0x" + "44" * 20
+    rows = build_flap_launch_registry([
+        event("token_created", logi=0, actor="0x" + "22" * 20),
+        event("quote_set", logi=1, actor=quote_a),
+        event("quote_set", logi=3, actor=quote_b),
+    ])
+
+    row = rows[0]
+    assert row["quote_token"] == quote_b
+    assert row["quote_history"] == [
+        {
+            "quote_token": quote_a,
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 1,
+        },
+        {
+            "quote_token": quote_b,
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 3,
+        },
+    ]
+

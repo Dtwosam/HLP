@@ -21,6 +21,70 @@ def _order(row: FlapEvent) -> tuple[int, int, int]:
     )
 
 
+def flap_registry_state_before(
+    launch_registry: Iterable[dict],
+    order: tuple[int, int, int],
+) -> tuple[set[str], dict[str, str]]:
+    """Return launch and quote state strictly observable before an order."""
+    seen_launches: set[str] = set()
+    quote_by_token: dict[str, str] = {}
+
+    for raw in launch_registry:
+        row = dict(raw)
+        token = str(row["token"]).lower()
+        launch_block = row.get("launch_block")
+        launch_log = row.get("launch_log_index")
+        if launch_block is not None and launch_log is not None:
+            launch_order = (
+                int(launch_block),
+                -1
+                if row.get("launch_transaction_index") is None
+                else int(row["launch_transaction_index"]),
+                int(launch_log),
+            )
+            if launch_order < order:
+                seen_launches.add(token)
+
+        history = row.get("quote_history")
+        if isinstance(history, list):
+            latest = None
+            for raw_quote in history:
+                quote = dict(raw_quote)
+                quote_order = (
+                    int(quote["block_number"]),
+                    -1
+                    if quote.get("transaction_index") is None
+                    else int(quote["transaction_index"]),
+                    int(quote["log_index"]),
+                )
+                if quote_order < order and (
+                    latest is None or quote_order > latest[0]
+                ):
+                    latest = (
+                        quote_order,
+                        str(quote["quote_token"]).lower(),
+                    )
+            if latest is not None:
+                quote_by_token[token] = latest[1]
+            continue
+
+        quote_token = row.get("quote_token")
+        quote_block = row.get("quote_set_block")
+        quote_log = row.get("quote_set_log_index")
+        if quote_token and quote_block is not None and quote_log is not None:
+            quote_order = (
+                int(quote_block),
+                -1
+                if row.get("quote_set_transaction_index") is None
+                else int(row["quote_set_transaction_index"]),
+                int(quote_log),
+            )
+            if quote_order < order:
+                quote_by_token[token] = str(quote_token).lower()
+
+    return seen_launches, quote_by_token
+
+
 def build_flap_curve_market_cap_points(
     events: Iterable[FlapEvent],
     weth_usd_anchor_points: Iterable[dict],
@@ -57,38 +121,10 @@ def build_flap_curve_market_cap_points(
     quote_by_token: dict[str, str] = {}
     seen_launches: set[str] = set()
     if first_order is not None:
-        for row in registry_rows:
-            token = row["token"].lower()
-            launch_block = row.get("launch_block")
-            launch_log = row.get("launch_log_index")
-            if launch_block is not None and launch_log is not None:
-                launch_order = (
-                    int(launch_block),
-                    -1
-                    if row.get("launch_transaction_index") is None
-                    else int(row["launch_transaction_index"]),
-                    int(launch_log),
-                )
-                if launch_order < first_order:
-                    seen_launches.add(token)
-
-            quote_token = row.get("quote_token")
-            quote_block = row.get("quote_set_block")
-            quote_log = row.get("quote_set_log_index")
-            if (
-                quote_token
-                and quote_block is not None
-                and quote_log is not None
-            ):
-                quote_order = (
-                    int(quote_block),
-                    -1
-                    if row.get("quote_set_transaction_index") is None
-                    else int(row["quote_set_transaction_index"]),
-                    int(quote_log),
-                )
-                if quote_order < first_order:
-                    quote_by_token[token] = quote_token.lower()
+        seen_launches, quote_by_token = flap_registry_state_before(
+            registry_rows,
+            first_order,
+        )
     for event in rows:
         order = _order(event)
         timeline.advance_to(order)
