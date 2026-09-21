@@ -139,6 +139,25 @@ Implemented foundation:
   `source_coverage_complete=false`, and no threshold/universe labels are
   emitted. It has not yet produced empirical evidence because the required
   upstream direct-market backfill artifacts still need to be executed;
+- direct-market launch-origin attribution is now progressive and fail-closed.
+  Exact address matches can immediately mark a market as originating from a
+  known launch source, but unmatched markets remain `unattributed` until every
+  launchpad population is coverage-complete and supplied. A dispatch-only
+  Pons attribution workflow is prepared against the exact accepted V1/V2
+  lifecycle artifact IDs/SHA values; it can remove known Pons overlap from
+  direct-market research without treating the remaining unmatched markets as
+  proven direct launches;
+- pools.fun now has a prepared full Phase-2 coverage path that reuses the shared
+  V3 Initialize/Swap surface instead of issuing a second chain-wide Swap crawl.
+  The launch registry is joined to every exact Sushi V3 Initialize, the shared
+  V3 Swap shards are filtered by registered pool, each shard is priced with the
+  canonical direct quote allowlist plus sparse WETH/USD and Chainlink sampling,
+  and all **128** point shards are merged into a proposed canonical
+  `pools_fun` coverage report. The workflow requires every registry token to
+  have at least one price point and requires `priced_points == price_points`.
+  It validates the proposed `complete` row against the canonical coverage
+  contract in memory but **does not mutate the coverage ledger**. This is
+  prepared execution logic, not completed historical evidence;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;
