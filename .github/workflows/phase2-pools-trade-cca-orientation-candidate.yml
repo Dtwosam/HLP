@@ -1,0 +1,292 @@
+name: phase2-pools-trade-cca-orientation-candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-cca-orientation-candidate.yml'
+      - 'src/hlp/data/pools_trade_cca.py'
+      - 'src/hlp/protocols/pools_trade_lbp.py'
+      - 'src/hlp/protocols/uniswap.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-cca-orientation-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INITIALIZER: '0x3f555c266afd8ca3bbd2b0ee9669620d90d82068'
+  TOKEN: '0xfa122922aa97eaa5932b1843d5d83fd8d4ae247e'
+  CURRENCY: '0xe934e36a439c94017b64a3fece66af12099abf50'
+  POOL_ID: '0xb73f54dd220e63eeef2d28a3fceb4035d0d163a6b13d3851190e253113a151eb'
+  CREATED_BLOCK: '30493016'
+  MIGRATION_BLOCK: '30493793'
+  SEARCH_TO_BLOCK: '30498793'
+  POOL_FEE: '10000'
+  POOL_TICK_SPACING: '200'
+  POOL_HOOK: '0x0000000000000000000000000000000000000000'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit exact successful-LBP orientation candidate
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from decimal import Decimal, getcontext
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.pools_trade_cca import (
+              infer_cca_price_orientation,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.pools_trade_lbp import (
+              CCA_PRICE_TOPICS,
+              decode_pools_trade_cca_price_event,
+          )
+          from hlp.protocols.uniswap import (
+              V4_INITIALIZE_TOPIC,
+              decode_v4_pool_initialized,
+              v4_pool_id,
+          )
+
+          getcontext().prec = 80
+          Q192 = Decimal(2) ** 192
+
+          initializer = os.environ["INITIALIZER"].lower()
+          token = os.environ["TOKEN"].lower()
+          currency = os.environ["CURRENCY"].lower()
+          pool_id = os.environ["POOL_ID"].lower()
+          created = int(os.environ["CREATED_BLOCK"])
+          migration = int(os.environ["MIGRATION_BLOCK"])
+          search_to = int(os.environ["SEARCH_TO_BLOCK"])
+          fee = int(os.environ["POOL_FEE"])
+          spacing = int(os.environ["POOL_TICK_SPACING"])
+          hook = os.environ["POOL_HOOK"].lower()
+
+          c0, c1 = sorted(
+              (token, currency),
+              key=lambda value: int(value, 16),
+          )
+          derived = v4_pool_id(
+              currency0=c0,
+              currency1=c1,
+              fee=fee,
+              tick_spacing=spacing,
+              hooks=hook,
+          )
+          if derived != pool_id:
+              raise SystemExit("frozen candidate PoolId changed")
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = (
+                  SOLIDRPC_AUTH_RPC_URL
+                  if key else SOLIDRPC_PUBLIC_RPC_URL
+              )
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          chunk = (
+              50_000
+              if key
+              else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          )
+
+          initializes = []
+          for lo in range(created, search_to + 1, chunk):
+              hi = min(search_to, lo + chunk - 1)
+              for raw in rpc.get_logs(
+                  lo,
+                  hi,
+                  address=UNISWAP_V4_POOL_MANAGER,
+                  topics=[V4_INITIALIZE_TOPIC, pool_id],
+              ):
+                  row = decode_v4_pool_initialized(raw)
+                  if row.pool_id.lower() != pool_id:
+                      raise SystemExit("candidate V4 PoolId drift")
+                  if (
+                      row.currency0.lower() != c0
+                      or row.currency1.lower() != c1
+                      or int(row.fee) != fee
+                      or int(row.tick_spacing) != spacing
+                      or row.hooks.lower() != hook
+                  ):
+                      raise SystemExit(
+                          "candidate V4 Initialize PoolKey drift"
+                      )
+                  initializes.append(row)
+          if len(initializes) > 1:
+              raise SystemExit(
+                  f"multiple Initialize rows for candidate: {len(initializes)}"
+              )
+
+          initialize = initializes[0] if initializes else None
+          cca_events = []
+          if initialize is not None:
+              for lo in range(
+                  created,
+                  initialize.block_number + 1,
+                  chunk,
+              ):
+                  hi = min(
+                      initialize.block_number,
+                      lo + chunk - 1,
+                  )
+                  for raw in rpc.get_logs(
+                      lo,
+                      hi,
+                      address=initializer,
+                      topics=[list(CCA_PRICE_TOPICS)],
+                  ):
+                      row = decode_pools_trade_cca_price_event(raw)
+                      order = (
+                          row.block_number,
+                          -1
+                          if row.transaction_index is None
+                          else row.transaction_index,
+                          row.log_index,
+                      )
+                      init_order = (
+                          initialize.block_number,
+                          -1
+                          if initialize.transaction_index is None
+                          else initialize.transaction_index,
+                          initialize.log_index,
+                      )
+                      if order <= init_order:
+                          cca_events.append(row)
+              cca_events.sort(
+                  key=lambda row: (
+                      row.block_number,
+                      -1
+                      if row.transaction_index is None
+                      else row.transaction_index,
+                      row.log_index,
+                  )
+              )
+
+          orientation = None
+          if initialize is not None and cca_events:
+              latest = cca_events[-1]
+              token_is_currency0 = (
+                  initialize.currency0.lower() == token
+              )
+              ratio1_per_0 = (
+                  Decimal(initialize.sqrt_price_x96) ** 2 / Q192
+              )
+              v4_raw_quote_per_token = (
+                  ratio1_per_0
+                  if token_is_currency0
+                  else Decimal(1) / ratio1_per_0
+              )
+              inferred = infer_cca_price_orientation(
+                  latest.clearing_price_x96,
+                  migrated_quote_per_token=v4_raw_quote_per_token,
+              )
+              orientation = {
+                  "latest_cca": {
+                      "event_type": latest.event_type,
+                      "checkpoint_block": latest.checkpoint_block,
+                      "clearing_price_x96": (
+                          latest.clearing_price_x96
+                      ),
+                      "cumulative_mps": latest.cumulative_mps,
+                      "block_number": latest.block_number,
+                      "transaction_hash": latest.transaction_hash,
+                      "transaction_index": latest.transaction_index,
+                      "log_index": latest.log_index,
+                  },
+                  "v4_raw_quote_per_token": str(
+                      v4_raw_quote_per_token
+                  ),
+                  "block_gap": (
+                      initialize.block_number - latest.block_number
+                  ),
+                  "inference": {
+                      field: (
+                          str(value)
+                          if isinstance(value, Decimal)
+                          else value
+                      )
+                      for field, value in inferred.items()
+                  },
+              }
+
+          report = {
+              "version": "phase2-cca-orientation-candidate-v1",
+              "chain_id": 4663,
+              "initializer": initializer,
+              "token": token,
+              "currency": currency,
+              "pool_id": pool_id,
+              "created_block": created,
+              "migration_block_parameter": migration,
+              "search_to_block": search_to,
+              "initialize_found": initialize is not None,
+              "initialize": (
+                  None
+                  if initialize is None
+                  else {
+                      "pool_id": initialize.pool_id,
+                      "currency0": initialize.currency0,
+                      "currency1": initialize.currency1,
+                      "fee": initialize.fee,
+                      "tick_spacing": initialize.tick_spacing,
+                      "hooks": initialize.hooks,
+                      "sqrt_price_x96": initialize.sqrt_price_x96,
+                      "tick": initialize.tick,
+                      "block_number": initialize.block_number,
+                      "transaction_hash": initialize.transaction_hash,
+                      "transaction_index": (
+                          initialize.transaction_index
+                      ),
+                      "log_index": initialize.log_index,
+                  }
+              ),
+              "cca_price_events_before_initialize": len(cca_events),
+              "orientation_comparison": orientation,
+              "orientation_frozen": False,
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": rpc.route_label,
+          }
+          Path(
+              "artifacts/pools-trade-cca-orientation-candidate.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-cca-orientation-candidate
+          path: artifacts/
+          if-no-files-found: error
