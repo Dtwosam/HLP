@@ -5,6 +5,7 @@ import pytest
 
 from hlp.data.phase2_coverage import (
     PHASE2_COVERAGE_LEDGER_VERSION,
+    apply_phase2_source_coverage_report,
     validate_phase2_coverage_ledger,
     validate_phase2_source_coverage,
 )
@@ -295,4 +296,96 @@ def test_complete_coverage_rejects_unpriced_points():
             INVENTORY,
             [row],
             snapshot_head_block=100,
+        )
+
+
+
+def test_apply_source_coverage_report_replaces_only_target_row():
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            complete("pons_v1"),
+            {
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": None,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+        ],
+    }
+    report = {
+        "source_id": "noxa",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "complete",
+        "required_start_block": 20,
+        "first_block": 20,
+        "last_block": 100,
+        "continuous": True,
+        "missing_ranges": [],
+        "tokens_discovered": 3,
+        "price_points": 9,
+        "priced_points": 9,
+        "observed_volume_usd": None,
+        "provenance_sha256": "cd" * 32,
+        "blocking_reason": None,
+        "snapshot_head_block": 100,
+        "extra_audit_field": "preserved-outside-ledger-only",
+    }
+    updated, validation = apply_phase2_source_coverage_report(
+        ledger,
+        INVENTORY,
+        report,
+    )
+
+    rows = {row["source_id"]: row for row in updated["sources"]}
+    assert rows["pons_v1"] == ledger["sources"][0]
+    assert rows["noxa"]["coverage_status"] == "complete"
+    assert "extra_audit_field" not in rows["noxa"]
+    assert validation["phase2_universe_coverage_complete"] is True
+
+
+def test_apply_source_coverage_report_rejects_snapshot_drift():
+    ledger = {
+        "version": PHASE2_COVERAGE_LEDGER_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            complete("pons_v1"),
+            {
+                "source_id": "noxa",
+                "source_readiness": "adapter_ready",
+                "coverage_status": "not_started",
+                "required_start_block": None,
+                "first_block": None,
+                "last_block": None,
+                "continuous": None,
+                "missing_ranges": [],
+                "tokens_discovered": 0,
+                "price_points": 0,
+                "priced_points": 0,
+                "observed_volume_usd": None,
+                "provenance_sha256": None,
+                "blocking_reason": None,
+            },
+        ],
+    }
+    report = {
+        **ledger["sources"][1],
+        "snapshot_head_block": 99,
+    }
+    with pytest.raises(ValueError, match="snapshot drift"):
+        apply_phase2_source_coverage_report(
+            ledger,
+            INVENTORY,
+            report,
         )
