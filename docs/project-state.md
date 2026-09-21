@@ -236,6 +236,11 @@ Implemented foundation:
   LP-fee profile, migrator and token version are retained separately from any
   later configuration changes. This makes post-curve lifecycle joins
   deterministic without treating the bonding curve as the full lifecycle.
+  An evidence-only Flap graduation-market join now matches those frozen pool
+  addresses against exact address-based direct-DEX registries, verifies token
+  and quote identity, records Initialize-vs-graduation order, and leaves
+  unmatched pools unresolved. PoolId-only V4 rows are never inferred from the
+  address-valued graduation field.
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 

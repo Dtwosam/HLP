@@ -89,6 +89,10 @@ from hlp.data.flap_curve import (
     summarize_flap_curve_market_caps,
 )
 from hlp.data.flap_registry import build_flap_launch_registry
+from hlp.data.flap_lifecycle import (
+    build_flap_graduation_market_handoffs,
+    summarize_flap_graduation_market_handoffs,
+)
 from hlp.data.oracle_registry import resolve_stock_quote_feed_specs
 from hlp.data.quote_registry import (
     CHAINLINK_PRICED_STATUSES,
@@ -833,6 +837,51 @@ def cmd_flap_registry(args: argparse.Namespace) -> int:
 
 
 
+
+
+def cmd_phase2_flap_graduation_markets(
+    args: argparse.Namespace,
+) -> int:
+    """Join Flap graduation pools to exact address-based direct markets."""
+    registry = _load_jsonl(args.registry)
+    market_rows = []
+    market_sources = []
+    for path in args.market_registry:
+        market_rows.extend(_load_jsonl(path))
+        market_sources.append({
+            "file": Path(path).name,
+            "sha256": _sha256_file(path),
+        })
+
+    rows = build_flap_graduation_market_handoffs(
+        registry,
+        market_rows,
+    )
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "flap_launched_to_dex_exact_market_join",
+            "chain_id": 4663,
+            "flap_registry": Path(args.registry).name,
+            "flap_registry_sha256": _sha256_file(args.registry),
+            "market_registries": market_sources,
+            "v4_pool_id_inference_used": False,
+        },
+    )
+    summary = summarize_flap_graduation_market_handoffs(rows)
+    summary.update({
+        "source_id": "flap",
+        "handoff_sha256": manifest["sha256"],
+        "source_coverage_complete": False,
+    })
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(summary, sort_keys=True))
+    return 0
 
 
 def cmd_rpc_pools_fun_registry_window(args: argparse.Namespace) -> int:
@@ -7528,6 +7577,23 @@ def build_parser() -> argparse.ArgumentParser:
     flap_registry.add_argument("--out", required=True)
     flap_registry.set_defaults(func=cmd_flap_registry)
 
+    flap_graduation_markets = sub.add_parser(
+        "phase2-flap-graduation-markets"
+    )
+    flap_graduation_markets.add_argument("--registry", required=True)
+    flap_graduation_markets.add_argument(
+        "--market-registry",
+        action="append",
+        required=True,
+    )
+    flap_graduation_markets.add_argument("--out", required=True)
+    flap_graduation_markets.add_argument(
+        "--summary-out",
+        required=True,
+    )
+    flap_graduation_markets.set_defaults(
+        func=cmd_phase2_flap_graduation_markets
+    )
 
 
 
