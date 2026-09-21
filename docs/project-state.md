@@ -155,7 +155,14 @@ Implemented foundation:
   Pons attribution workflow is prepared against the exact accepted V1/V2
   lifecycle artifact IDs/SHA values; it can remove known Pons overlap from
   direct-market research without treating the remaining unmatched markets as
-  proven direct launches;
+  proven direct launches. Once a later attribution artifact proves every
+  launchpad population complete and supplied, a new dispatch-only conclusive
+  direct-launch workflow can materialize only the unmatched direct markets.
+  It binds the exact attribution run/artifact, attributed-registry SHA and
+  attribution-report SHA, emits a versioned population/handoff, and explicitly
+  keeps `selector_freeze_ready=false` and
+  `source_coverage_complete=false`; this separates launch-origin closure from
+  the still-pending empirical multi-pool selector freeze;
 - pools.fun now has a prepared full Phase-2 coverage path that reuses the shared
   V3 Initialize/Swap surface instead of issuing a second chain-wide Swap crawl.
   The launch registry is joined to every exact Sushi V3 Initialize, the shared

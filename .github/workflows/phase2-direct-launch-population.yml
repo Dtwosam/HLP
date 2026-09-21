@@ -1,0 +1,334 @@
+name: phase2-direct-launch-population
+
+on:
+  workflow_dispatch:
+    inputs:
+      attribution_run_id:
+        description: Exact upstream run containing conclusive direct-origin attribution
+        required: true
+        type: string
+      attribution_artifact_name:
+        description: Exact upstream attribution artifact name
+        required: true
+        type: string
+      expected_artifact_digest:
+        description: Exact GitHub artifact digest (sha256:...)
+        required: true
+        type: string
+      attributed_registry_path:
+        description: Relative attributed-registry JSONL path inside the artifact
+        required: true
+        type: string
+      expected_attributed_registry_sha256:
+        description: Exact SHA-256 of the attributed registry JSONL
+        required: true
+        type: string
+      attribution_report_path:
+        description: Relative attribution summary JSON path inside the artifact
+        required: true
+        type: string
+      expected_attribution_report_sha256:
+        description: Exact SHA-256 of the attribution summary JSON
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-direct-launch-population-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ATTRIBUTION_RUN_ID: ${{ inputs.attribution_run_id }}
+      ATTRIBUTION_ARTIFACT_NAME: ${{ inputs.attribution_artifact_name }}
+      EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
+      ATTRIBUTED_REGISTRY_PATH: ${{ inputs.attributed_registry_path }}
+      EXPECTED_ATTRIBUTED_REGISTRY_SHA256: ${{ inputs.expected_attributed_registry_sha256 }}
+      ATTRIBUTION_REPORT_PATH: ${{ inputs.attribution_report_path }}
+      EXPECTED_ATTRIBUTION_REPORT_SHA256: ${{ inputs.expected_attribution_report_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify exact attribution artifact
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${ATTRIBUTION_RUN_ID}/artifacts?name=${ATTRIBUTION_ARTIFACT_NAME}" \
+            > /tmp/direct-attribution-artifacts.json
+          python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(open("/tmp/direct-attribution-artifacts.json"))
+          name = os.environ["ATTRIBUTION_ARTIFACT_NAME"]
+          matches = [
+              row
+              for row in payload.get("artifacts", [])
+              if row.get("name") == name
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one attribution artifact named "
+                  f"{name!r}; found {len(matches)}"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit("direct attribution artifact is expired")
+          actual = str(artifact.get("digest") or "").lower()
+          expected = os.environ["EXPECTED_ARTIFACT_DIGEST"].lower()
+          if not expected.startswith("sha256:"):
+              raise SystemExit(
+                  "expected_artifact_digest must use sha256:<hex>"
+              )
+          if actual != expected:
+              raise SystemExit(
+                  f"attribution artifact digest drift: {actual} != {expected}"
+              )
+          PY
+
+      - name: Download exact attribution artifact
+        run: |
+          set -euo pipefail
+          mkdir -p inputs
+          gh run download "${ATTRIBUTION_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${ATTRIBUTION_ARTIFACT_NAME}" \
+            --dir inputs
+
+      - name: Verify exact attribution inputs
+        id: inputs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          root = Path("inputs").resolve()
+
+          def checked_path(env_name, sha_env_name, label):
+              relative = Path(os.environ[env_name])
+              if relative.is_absolute():
+                  raise SystemExit(f"{label} path must be relative")
+              path = (root / relative).resolve()
+              if root not in path.parents:
+                  raise SystemExit(f"{label} path escapes artifact root")
+              if not path.is_file():
+                  raise SystemExit(
+                      f"{label} file not found: {relative.as_posix()}"
+                  )
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              expected = os.environ[sha_env_name].lower()
+              if expected.startswith("sha256:"):
+                  expected = expected.split(":", 1)[1]
+              if len(expected) != 64:
+                  raise SystemExit(
+                      f"{label} expected SHA must be 64 hex chars"
+                  )
+              try:
+                  int(expected, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} expected SHA must be hexadecimal"
+                  ) from exc
+              if actual != expected:
+                  raise SystemExit(
+                      f"{label} SHA drift: {actual} != {expected}"
+                  )
+              return path, actual
+
+          attributed, attributed_sha = checked_path(
+              "ATTRIBUTED_REGISTRY_PATH",
+              "EXPECTED_ATTRIBUTED_REGISTRY_SHA256",
+              "attributed registry",
+          )
+          report, report_sha = checked_path(
+              "ATTRIBUTION_REPORT_PATH",
+              "EXPECTED_ATTRIBUTION_REPORT_SHA256",
+              "attribution report",
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"attributed_registry={attributed}\n")
+              handle.write(f"attribution_report={report}\n")
+              handle.write(f"attributed_registry_sha256={attributed_sha}\n")
+              handle.write(f"attribution_report_sha256={report_sha}\n")
+          PY
+
+      - name: Build conclusive direct-launch population
+        env:
+          ATTRIBUTED_REGISTRY: ${{ steps.inputs.outputs.attributed_registry }}
+          ATTRIBUTION_REPORT: ${{ steps.inputs.outputs.attribution_report }}
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-launch-population \
+            --attributed-registry "${ATTRIBUTED_REGISTRY}" \
+            --attribution-report "${ATTRIBUTION_REPORT}" \
+            --out artifacts/direct-launch-population.jsonl \
+            --summary-out artifacts/direct-launch-population-summary.json
+
+      - name: Validate non-freezing direct-launch handoff
+        id: validate
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          population = Path("artifacts/direct-launch-population.jsonl")
+          manifest = Path(
+              "artifacts/direct-launch-population.jsonl.manifest.json"
+          )
+          summary_path = Path(
+              "artifacts/direct-launch-population-summary.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          manifest_data = json.loads(manifest.read_text())
+
+          if summary.get("direct_launch_population_conclusive") is not True:
+              raise SystemExit(
+                  "direct launch population is not conclusive"
+              )
+          if summary.get("launch_source_coverage_complete") is not True:
+              raise SystemExit(
+                  "launch-source coverage is not complete"
+              )
+          if summary.get(
+              "absence_from_launch_registries_is_conclusive"
+          ) is not True:
+              raise SystemExit(
+                  "launch-registry absence is not conclusive"
+              )
+          if summary.get("selector_freeze_ready") is not False:
+              raise SystemExit(
+                  "direct launch population cannot freeze selector"
+              )
+          if summary.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "direct launch population cannot close source coverage"
+              )
+
+          population_sha = hashlib.sha256(
+              population.read_bytes()
+          ).hexdigest()
+          if population_sha != manifest_data.get("sha256"):
+              raise SystemExit(
+                  "direct launch population manifest SHA drift"
+              )
+          if population_sha != summary.get(
+              "direct_launch_population_sha256"
+          ):
+              raise SystemExit(
+                  "direct launch population summary SHA drift"
+              )
+
+          expected_attributed = os.environ[
+              "EXPECTED_ATTRIBUTED_REGISTRY_SHA256"
+          ].lower().removeprefix("sha256:")
+          expected_report = os.environ[
+              "EXPECTED_ATTRIBUTION_REPORT_SHA256"
+          ].lower().removeprefix("sha256:")
+          if summary.get(
+              "attributed_registry_sha256"
+          ) != expected_attributed:
+              raise SystemExit(
+                  "direct launch attributed-registry provenance drift"
+              )
+          if summary.get(
+              "attribution_report_sha256"
+          ) != expected_report:
+              raise SystemExit(
+                  "direct launch attribution-report provenance drift"
+              )
+
+          handoff = {
+              "version": "phase2-direct-launch-population-handoff-v1",
+              "chain_id": 4663,
+              "base_commit": os.environ["GITHUB_SHA"],
+              "attribution_run_id": int(
+                  os.environ["ATTRIBUTION_RUN_ID"]
+              ),
+              "attribution_artifact_name": os.environ[
+                  "ATTRIBUTION_ARTIFACT_NAME"
+              ],
+              "attribution_artifact_digest": os.environ[
+                  "EXPECTED_ARTIFACT_DIGEST"
+              ].lower(),
+              "attributed_registry_path": os.environ[
+                  "ATTRIBUTED_REGISTRY_PATH"
+              ],
+              "attributed_registry_sha256": expected_attributed,
+              "attribution_report_path": os.environ[
+                  "ATTRIBUTION_REPORT_PATH"
+              ],
+              "attribution_report_sha256": expected_report,
+              "direct_launch_population_sha256": population_sha,
+              "direct_launch_candidate_markets": int(
+                  summary["direct_launch_candidate_markets"]
+              ),
+              "direct_launch_candidate_tokens": int(
+                  summary["direct_launch_candidate_tokens"]
+              ),
+              "direct_launch_population_conclusive": True,
+              "selector_freeze_ready": False,
+              "source_coverage_complete": False,
+          }
+          handoff_path = Path(
+              "artifacts/direct-launch-population-handoff.json"
+          )
+          handoff_path.write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_sha = hashlib.sha256(
+              handoff_path.read_bytes()
+          ).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"population_sha256={population_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+
+      - name: Upload direct-launch population
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-launch-population
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish downstream identities
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          POPULATION_SHA256: ${{ steps.validate.outputs.population_sha256 }}
+          HANDOFF_SHA256: ${{ steps.validate.outputs.handoff_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${POPULATION_SHA256}"
+          test -n "${HANDOFF_SHA256}"
+          {
+            echo "## Conclusive direct-launch population"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-direct-launch-population"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- population_sha256: ${POPULATION_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- selector_freeze_ready: false"
+            echo "- source_coverage_complete: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
