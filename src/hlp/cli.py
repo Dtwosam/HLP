@@ -53,6 +53,11 @@ from hlp.protocols.uniswap import (
     decode_v4_swap,
 )
 from hlp.data.blockscout import BlockscoutClient
+from hlp.data.direct_markets import (
+    build_v4_direct_market_registry,
+    select_v4_direct_market_candidates,
+    summarize_direct_market_registry,
+)
 from hlp.data.chainlink_directory import ChainlinkDirectoryClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.hood_fun_curve import (
@@ -172,6 +177,7 @@ from hlp.data.types import (
     PoolsTradeTokenDistributed,
     PoolsTradeTokenLaunched,
     TrenchEvent,
+    V4PoolInitialized,
 )
 from hlp.data.v3_launchpad import (
     build_v3_launchpad_market_cap_points,
@@ -775,6 +781,151 @@ def cmd_rpc_v4_initialize_window(
         "rpc_route": rpc.route_label,
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
+    return 0
+
+
+def _direct_quote_decimals(path: str) -> dict[str, int]:
+    """Load an explicit address->decimals quote allowlist."""
+    payload = json.loads(Path(path).read_text())
+    if not isinstance(payload, dict) or not payload:
+        raise SystemExit(
+            "direct DEX quote-decimals input must be a non-empty JSON object"
+        )
+    output: dict[str, int] = {}
+    for raw_address, raw_decimals in payload.items():
+        address = normalize_address(str(raw_address))
+        decimals = int(raw_decimals)
+        if decimals < 0 or decimals > 255:
+            raise SystemExit(
+                f"invalid direct DEX quote decimals for {address}: {decimals}"
+            )
+        if address in output:
+            raise SystemExit(
+                f"duplicate direct DEX supported quote: {address}"
+            )
+        output[address] = decimals
+    return output
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cmd_phase2_direct_v4_registry(args: argparse.Namespace) -> int:
+    """Build a fail-closed direct-V4 candidate registry with exact state."""
+    initialize_rows = [
+        V4PoolInitialized(**row)
+        for row in _load_jsonl(args.initialize)
+    ]
+    if not initialize_rows:
+        raise SystemExit("direct V4 Initialize tape is empty")
+
+    quote_decimals = _direct_quote_decimals(args.quote_decimals)
+    candidates = select_v4_direct_market_candidates(
+        initialize_rows,
+        pool_manager=args.pool_manager,
+        quote_decimals=quote_decimals,
+    )
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    states = []
+    seen_state_reads: set[tuple[str, int]] = set()
+    for candidate in candidates:
+        key = (
+            candidate["token"],
+            int(candidate["initialize_block"]),
+        )
+        if key in seen_state_reads:
+            continue
+        seen_state_reads.add(key)
+        states.append(
+            read_erc20_static(
+                rpc,
+                candidate["token"],
+                block=int(candidate["initialize_block"]),
+            )
+        )
+
+    input_sha256 = _sha256_file(args.initialize)
+    quote_sha256 = _sha256_file(args.quote_decimals)
+    state_manifest = write_jsonl_snapshot(
+        states,
+        output=Path(args.state_out),
+        provenance={
+            "source": "direct_v4_exact_initialize_block_erc20_state",
+            "chain_id": 4663,
+            "source_id": args.source_id,
+            "pool_manager": normalize_address(args.pool_manager),
+            "initialize_input": Path(args.initialize).name,
+            "initialize_input_sha256": input_sha256,
+            "quote_decimals_input": Path(args.quote_decimals).name,
+            "quote_decimals_sha256": quote_sha256,
+            "state_semantics": "exact_initialize_block",
+            "rpc_route": rpc.route_label,
+        },
+    )
+
+    registry = build_v4_direct_market_registry(
+        initialize_rows,
+        states,
+        source_id=args.source_id,
+        venue=args.venue,
+        pool_manager=args.pool_manager,
+        quote_decimals=quote_decimals,
+    )
+    registry_manifest = write_jsonl_snapshot(
+        registry,
+        output=Path(args.registry_out),
+        provenance={
+            "source": "phase2_direct_v4_candidate_registry",
+            "chain_id": 4663,
+            "source_id": args.source_id,
+            "venue": args.venue,
+            "pool_manager": normalize_address(args.pool_manager),
+            "initialize_input_sha256": input_sha256,
+            "quote_decimals_sha256": quote_sha256,
+            "erc20_state_sha256": state_manifest["sha256"],
+            "supported_quote_rule": "exactly_one_side_in_explicit_allowlist",
+            "state_semantics": "exact_initialize_block",
+        },
+    )
+
+    report = {
+        "version": "phase2-direct-v4-registry-v1",
+        "source_id": args.source_id,
+        "venue": args.venue,
+        "pool_manager": normalize_address(args.pool_manager),
+        "initialize_rows": len(initialize_rows),
+        "supported_quote_candidate_markets": len(candidates),
+        "exact_state_reads": len(states),
+        "initialize_input_sha256": input_sha256,
+        "quote_decimals_sha256": quote_sha256,
+        "state_sha256": state_manifest["sha256"],
+        "registry_sha256": registry_manifest["sha256"],
+        "registry": summarize_direct_market_registry(registry),
+        "rpc_route": rpc.route_label,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_coverage_complete": False,
+        "remaining_steps": [
+            "market event reconstruction",
+            "empirical multi-pool selector freeze",
+            "complete launch-origin attribution",
+        ],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 
@@ -5650,6 +5801,28 @@ def build_parser() -> argparse.ArgumentParser:
     v4_initialize.add_argument("--out", required=True)
     v4_initialize.set_defaults(
         func=cmd_rpc_v4_initialize_window
+    )
+
+    direct_v4_registry = sub.add_parser(
+        "phase2-direct-v4-registry"
+    )
+    direct_v4_registry.add_argument("--initialize", required=True)
+    direct_v4_registry.add_argument("--quote-decimals", required=True)
+    direct_v4_registry.add_argument(
+        "--source-id", default="direct_uniswap_v4"
+    )
+    direct_v4_registry.add_argument(
+        "--venue", default="uniswap_v4"
+    )
+    direct_v4_registry.add_argument(
+        "--pool-manager",
+        default=UNISWAP_V4_POOL_MANAGER,
+    )
+    direct_v4_registry.add_argument("--state-out", required=True)
+    direct_v4_registry.add_argument("--registry-out", required=True)
+    direct_v4_registry.add_argument("--summary-out", required=True)
+    direct_v4_registry.set_defaults(
+        func=cmd_phase2_direct_v4_registry
     )
 
     pools_fun_v3 = sub.add_parser("rpc-pools-fun-v3-tape")
