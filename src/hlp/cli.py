@@ -287,8 +287,10 @@ from hlp.protocols.pools_trade import (
     decode_pools_trade_token_launched,
 )
 from hlp.protocols.pools_trade_lbp import (
+    CCA_PRICE_TOPICS as POOLS_TRADE_CCA_PRICE_TOPICS,
     INITIALIZER_CREATED_TOPIC as POOLS_TRADE_LBP_INITIALIZER_CREATED_TOPIC,
     POOLS_TRADE_LBP_STRATEGY,
+    decode_pools_trade_cca_price_event,
     decode_pools_trade_lbp_initializer_created,
 )
 from hlp.protocols.pons import (
@@ -4737,6 +4739,112 @@ def cmd_rpc_pools_trade_registry_window(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def cmd_rpc_pools_trade_lbp_cca_window(
+    args: argparse.Namespace,
+) -> int:
+    """Acquire one complete topic-filtered pools.trade LBP CCA shard."""
+    if args.from_block < 0:
+        raise SystemExit("from-block must be >= 0")
+    if args.to_block < args.from_block:
+        raise SystemExit("to-block must be >= from-block")
+
+    registry = _load_jsonl(args.registry)
+    if not registry:
+        raise SystemExit("pools.trade LBP registry is empty")
+
+    by_initializer = {}
+    for raw in registry:
+        row = dict(raw)
+        if str(row.get("launch_kind") or "") != "crowd_lbp":
+            raise SystemExit("pools.trade LBP registry launch kind changed")
+        initializer = normalize_address(str(row["initializer"]))
+        if initializer in by_initializer:
+            raise SystemExit(
+                f"pools.trade LBP registry repeats initializer: {initializer}"
+            )
+        by_initializer[initializer] = row
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    raw_logs = rpc.iter_logs_chunked(
+        args.from_block,
+        args.to_block,
+        address=None,
+        topics=[list(POOLS_TRADE_CCA_PRICE_TOPICS)],
+        chunk_size=args.chunk_size,
+        min_chunk_size=args.min_chunk_size,
+    )
+
+    matched = []
+    global_topic_events = 0
+    ignored_topic_events = 0
+    previous_order = None
+    for raw in raw_logs:
+        global_topic_events += 1
+        initializer = normalize_address(raw.address)
+        launch = by_initializer.get(initializer)
+        if launch is None:
+            ignored_topic_events += 1
+            continue
+
+        event = decode_pools_trade_cca_price_event(raw)
+        order = (
+            int(event.block_number),
+            -1 if event.transaction_index is None
+            else int(event.transaction_index),
+            int(event.log_index),
+        )
+        launch_order = (
+            int(launch["initializer_block"]),
+            -1
+            if launch.get("initializer_transaction_index") is None
+            else int(launch["initializer_transaction_index"]),
+            int(launch["initializer_log_index"]),
+        )
+        if order <= launch_order:
+            raise SystemExit(
+                "pools.trade LBP CCA event does not follow initializer: "
+                f"{initializer}"
+            )
+        if previous_order is not None and order < previous_order:
+            raise SystemExit(
+                "pools.trade LBP CCA shard is not chronological"
+            )
+        previous_order = order
+        matched.append(event)
+
+    manifest = write_jsonl_snapshot(
+        matched,
+        output=Path(args.out),
+        provenance={
+            "source": "pools_trade_lbp_cca_topic_scan",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "registered_initializers": len(by_initializer),
+            "address_filter": None,
+            "event_topic0_or": list(POOLS_TRADE_CCA_PRICE_TOPICS),
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "global_topic_events": global_topic_events,
+            "ignored_non_registry_topic_events": ignored_topic_events,
+        },
+    )
+    print(json.dumps({
+        **manifest,
+        "registered_initializers": len(by_initializer),
+        "global_topic_events": global_topic_events,
+        "matched_cca_events": len(matched),
+        "ignored_non_registry_topic_events": ignored_topic_events,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
     return 0
 
 
@@ -9708,6 +9816,27 @@ def build_parser() -> argparse.ArgumentParser:
     pools_trade_instant_market.add_argument("--report-out", required=True)
     pools_trade_instant_market.set_defaults(
         func=cmd_phase2_pools_trade_instant_market_window
+    )
+
+    pools_trade_lbp_cca = sub.add_parser(
+        "rpc-pools-trade-lbp-cca-window"
+    )
+    pools_trade_lbp_cca.add_argument("--registry", required=True)
+    pools_trade_lbp_cca.add_argument(
+        "--from-block", type=int, required=True
+    )
+    pools_trade_lbp_cca.add_argument(
+        "--to-block", type=int, required=True
+    )
+    pools_trade_lbp_cca.add_argument(
+        "--chunk-size", type=int, default=100_000
+    )
+    pools_trade_lbp_cca.add_argument(
+        "--min-chunk-size", type=int, default=1
+    )
+    pools_trade_lbp_cca.add_argument("--out", required=True)
+    pools_trade_lbp_cca.set_defaults(
+        func=cmd_rpc_pools_trade_lbp_cca_window
     )
 
     pools_trade_lbp_cca_market = sub.add_parser(

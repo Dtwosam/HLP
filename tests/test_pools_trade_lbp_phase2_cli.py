@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_pools_trade_lbp_cca_market_window,
+    cmd_rpc_pools_trade_lbp_cca_window,
     cmd_rpc_pools_trade_lbp_initializer_tape,
 )
-from hlp.data.types import PoolsTradeLbpInitializerCreated
+from hlp.data.types import (
+    CcaPriceEvent,
+    PoolsTradeLbpInitializerCreated,
+)
 from hlp.protocols.erc20 import Erc20StaticState
 
 
@@ -320,4 +324,100 @@ def test_lbp_cca_empty_window_needs_no_rpc(
     assert cmd_phase2_pools_trade_lbp_cca_market_window(args) == 0
     report = json.loads(report_path.read_text())
     assert report["empty_window"] is True
+
+
+def test_lbp_cca_window_parser():
+    args = build_parser().parse_args([
+        "rpc-pools-trade-lbp-cca-window",
+        "--registry", "registry.jsonl",
+        "--from-block", "10",
+        "--to-block", "20",
+        "--out", "cca.jsonl",
+    ])
+    assert args.registry == "registry.jsonl"
+    assert args.out == "cca.jsonl"
+
+
+def test_lbp_cca_window_filters_global_topic_surface(
+    monkeypatch,
+    tmp_path,
+):
+    known = "0x" + "22" * 20
+    unknown = "0x" + "33" * 20
+    zero = "0x" + "00" * 20
+    registry_path = tmp_path / "registry.jsonl"
+    output_path = tmp_path / "cca.jsonl"
+    _write_jsonl(registry_path, [{
+        "venue": "pools.trade",
+        "launch_kind": "crowd_lbp",
+        "token": TOKEN,
+        "quote_token": zero,
+        "supply_raw": 1000,
+        "initializer": known,
+        "initializer_block": 10,
+        "initializer_transaction_hash": "0x" + "aa" * 32,
+        "initializer_transaction_index": 1,
+        "initializer_log_index": 1,
+        "migration_block": 20,
+        "pool_id": "0x" + "44" * 32,
+    }])
+
+    class ScanRpc:
+        route_label = "test_archive"
+        requests_made = 1
+        response_bytes_received = 10
+
+        def assert_robinhood(self):
+            return None
+
+        def iter_logs_chunked(self, *args, **kwargs):
+            assert kwargs["address"] is None
+            assert kwargs["topics"]
+            return [
+                SimpleNamespace(address=unknown),
+                SimpleNamespace(address=known),
+            ]
+
+    monkeypatch.setattr(
+        "hlp.cli._archive_rpc",
+        lambda args: ScanRpc(),
+    )
+    monkeypatch.setattr(
+        "hlp.cli.decode_pools_trade_cca_price_event",
+        lambda raw: CcaPriceEvent(
+            auction=known,
+            event_type="checkpoint",
+            checkpoint_block=12,
+            clearing_price_x96=2**96,
+            cumulative_mps=1,
+            block_number=12,
+            transaction_hash="0x" + "bb" * 32,
+            transaction_index=1,
+            log_index=0,
+        ),
+    )
+
+    args = SimpleNamespace(
+        registry=str(registry_path),
+        from_block=10,
+        to_block=20,
+        chunk_size=200,
+        min_chunk_size=25,
+        out=str(output_path),
+    )
+    assert cmd_rpc_pools_trade_lbp_cca_window(args) == 0
+    rows = [
+        json.loads(line)
+        for line in output_path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["auction"] == known
+    manifest = json.loads(
+        (tmp_path / "cca.jsonl.manifest.json").read_text()
+    )
+    provenance = manifest["provenance"]
+    assert provenance["address_filter"] is None
+    assert provenance["global_topic_events"] == 2
+    assert provenance["ignored_non_registry_topic_events"] == 1
 
