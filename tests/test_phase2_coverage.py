@@ -189,8 +189,8 @@ def test_versioned_coverage_ledger_requires_every_inventory_source_row():
     )
     assert report["version"] == PHASE2_COVERAGE_LEDGER_VERSION
     assert report["all_sources_reported"] is True
-    assert report["coverage_status_counts"]["complete"] == 2
-    assert report["complete_source_ids"] == ["pons_v1", "pons_v2"]
+    assert report["coverage_status_counts"]["complete"] == 1
+    assert report["complete_source_ids"] == ["pons_v1"]
     assert report["phase2_universe_coverage_complete"] is False
 
 
@@ -221,6 +221,8 @@ def test_repository_phase2_coverage_ledger_matches_source_inventory():
     assert report["inventory_sources"] == 14
     assert report["reported_sources"] == 14
     assert report["all_sources_reported"] is True
+    assert report["coverage_status_counts"]["complete"] == 2
+    assert report["complete_source_ids"] == ["pons_v1", "pons_v2"]
     assert report["phase2_universe_coverage_complete"] is False
 
 
