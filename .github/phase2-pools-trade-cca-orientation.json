@@ -17,7 +17,7 @@
   "cca_checkpoint": {
     "event_type": "checkpoint",
     "checkpoint_block": 30493792,
-    "clearing_price_x96": 7.962430332683566e+24,
+    "clearing_price_x96": "7962430332683565928151168",
     "cumulative_mps": 10000000,
     "block_number": 30493816,
     "transaction_hash": "0x852ffd74de9b83a70d95635f45d181f4c8d0ed8d99dbbc78d4464e70bf2b22e3",
