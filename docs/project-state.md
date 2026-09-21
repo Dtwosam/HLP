@@ -219,6 +219,14 @@ Implemented foundation:
   enumeration alone. This is explicitly a lower bound: downstream pool/trade
   tapes, retries, quote/USD reconstruction, state calls and any address-filter
   splitting are excluded.
+- pools.trade Instant now has a prepared chain-wide launch-registry path.
+  A dispatch-only **256-shard** workflow scans all frozen InstantLaunchStrategy
+  contracts continuously from required start **3,338,007** through snapshot
+  **54,486,035**, binds the exact shared launcher TokenCreated/TokenDistributed
+  run, merges the complete TokenLaunched tape, and builds one deterministic
+  Instant V4 registry with unique token/PoolId identities. It remains
+  `source_coverage_complete=false` until the registered pools are joined to
+  the shared V4 Initialize/Swap and supply/quote surfaces and fully priced;
 - pools.trade LBP migration probing is now fail-closed. Run **35625298189**
   searched the exact derived PoolId
   `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
