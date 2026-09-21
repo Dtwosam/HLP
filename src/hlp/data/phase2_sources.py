@@ -120,19 +120,21 @@ def build_phase2_source_inventory() -> list[dict]:
             "launch_contracts": _addresses(POOLS_TRADE_LBP_STRATEGY),
             "trading_contracts": _addresses(UNISWAP_V4_POOL_MANAGER),
             "market_phases": ["lbp", "uniswap_v4"],
-            "readiness": "decoder_ready",
+            "readiness": "adapter_ready",
             "implementation_evidence": [
                 "hlp.protocols.pools_trade_lbp",
                 "hlp.data.pools_trade_registry",
                 "hlp.data.pools_trade_cca",
+                "hlp.data.pools_trade_cca_orientation",
+                "hlp.data.pools_trade_lbp",
                 "hlp.data.pools_trade_lbp_evidence",
                 "hlp.data.pools_trade_lbp_search",
                 "hlp.data.pools_trade_lbp_success",
+                "hlp.data.pools_trade_v4",
                 "hlp.data.types.CcaPriceEvent",
             ],
             "blocking_gap": (
-                "successful-auction CCA orientation freeze and "
-                "post-auction V4 handoff evidence"
+                "complete historical CCA and migrated V4 backfill"
             ),
         },
         {
