@@ -129,7 +129,10 @@ from hlp.data.market_quality import (
 )
 from hlp.data.phase2_coverage import apply_phase2_source_coverage_report
 from hlp.data.phase2_sources import build_phase2_source_inventory
-from hlp.data.pools_fun_registry import build_pools_fun_registry
+from hlp.data.pools_fun_registry import (
+    attach_pools_fun_initializations,
+    build_pools_fun_registry,
+)
 from hlp.data.pools_trade_registry import (
     build_pools_trade_instant_registry,
     build_pools_trade_lbp_registry,
@@ -206,6 +209,7 @@ from hlp.data.types import (
 )
 from hlp.data.v3_launchpad import (
     build_v3_launchpad_market_cap_points,
+    merge_v3_launchpad_market_cap_summaries,
     summarize_v3_launchpad_market_caps,
 )
 from hlp.data.v4_launchpad import (
@@ -728,6 +732,404 @@ def cmd_rpc_pools_fun_registry_window(args: argparse.Namespace) -> int:
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }, sort_keys=True))
     return 0
+
+
+
+def cmd_phase2_v3_registry_event_filter(
+    args: argparse.Namespace,
+) -> int:
+    """Filter one shared V3 event tape to exact registry pool addresses."""
+    registry = _load_jsonl(args.registry)
+    pool_floor: dict[str, int] = {}
+    for row in registry:
+        pool = normalize_address(str(row["pool"]))
+        raw_floor = row.get("launch_block", row.get("initialize_block"))
+        if raw_floor is None:
+            raise SystemExit(
+                f"V3 registry row has no launch/Initialize block: {pool}"
+            )
+        floor = int(raw_floor)
+        prior = pool_floor.get(pool)
+        if prior is not None and prior != floor:
+            raise SystemExit(f"V3 registry repeats pool with drift: {pool}")
+        pool_floor[pool] = floor
+    if not pool_floor:
+        raise SystemExit("V3 event filter registry contains no pools")
+
+    source_sha256 = _event_tape_sha256(
+        file_path=args.input,
+        aggregate_manifest=args.input_manifest,
+        label="V3 registry event filter",
+    )
+    source = _iter_filtered_event_tape(
+        file_path=args.input,
+        shard_dir=args.input_shard_dir,
+        aggregate_manifest=args.input_manifest,
+        label="V3 registry event filter",
+        field="pool",
+        values=pool_floor,
+    )
+
+    matched_pools: set[str] = set()
+    seen: set[tuple[str, tuple[int, int, int]]] = set()
+    previous = None
+
+    def checked():
+        nonlocal previous
+        for raw in source:
+            row = dict(raw)
+            pool = normalize_address(str(row["pool"]))
+            block = int(row["block_number"])
+            if block < pool_floor[pool]:
+                raise ValueError(
+                    f"V3 event predates registry lifecycle: {pool}"
+                )
+            order = event_order(row)
+            key = (pool, order)
+            if key in seen:
+                raise ValueError(
+                    f"duplicate V3 registry event: {pool} {order}"
+                )
+            seen.add(key)
+            stable = (*order, pool)
+            if previous is not None and stable < previous:
+                raise ValueError("filtered V3 event tape is not chronological")
+            previous = stable
+            matched_pools.add(pool)
+            yield row
+
+    manifest = write_jsonl_snapshot(
+        checked(),
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_v3_registry_event_filter",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "input": _event_tape_source_name(
+                file_path=args.input,
+                aggregate_manifest=args.input_manifest,
+            ),
+            "input_sha256": source_sha256,
+            "registry_pools": len(pool_floor),
+        },
+    )
+    report = {
+        "version": "phase2-v3-registry-event-filter-v1",
+        "registry_pools": len(pool_floor),
+        "matched_pools": len(matched_pools),
+        "records": manifest["records"],
+        "registry_sha256": _sha256_file(args.registry),
+        "input_sha256": source_sha256,
+        "output_sha256": manifest["sha256"],
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def cmd_pools_fun_initialized_registry(args: argparse.Namespace) -> int:
+    """Join the complete pools.fun registry to exact shared V3 Initialize."""
+    registry = _load_jsonl(args.registry)
+    initializes = _load_jsonl(args.initializes)
+    rows = attach_pools_fun_initializations(registry, initializes)
+    manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.out),
+        provenance={
+            "source": "phase2_pools_fun_initialized_registry",
+            "chain_id": 4663,
+            "registry": Path(args.registry).name,
+            "registry_sha256": _sha256_file(args.registry),
+            "initializes": Path(args.initializes).name,
+            "initializes_sha256": _sha256_file(args.initializes),
+            "initialize_join_required_for_every_pool": True,
+        },
+    )
+    report = {
+        "version": "phase2-pools-fun-initialized-registry-v1",
+        "tokens": len(rows),
+        "pools": len({row["pool"] for row in rows}),
+        "quote_tokens": sorted({
+            row["quote_token"] for row in rows
+        }),
+        "registry_sha256": _sha256_file(args.registry),
+        "initializes_sha256": _sha256_file(args.initializes),
+        "initialized_registry_sha256": manifest["sha256"],
+        "all_pools_initialized": len(rows) == len(registry),
+        "source_coverage_complete": False,
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def _pools_fun_registry_initializes(
+    registry: list[dict],
+    *,
+    from_block: int,
+    to_block: int,
+) -> list[dict]:
+    rows = []
+    for launch in registry:
+        block = int(launch["initialize_block"])
+        if block < from_block or block > to_block:
+            continue
+        rows.append({
+            "pool": normalize_address(str(launch["pool"])),
+            "sqrt_price_x96": int(launch["initial_sqrt_price_x96"]),
+            "tick": int(launch["initial_tick"]),
+            "block_number": block,
+            "transaction_hash": str(
+                launch["initialize_transaction_hash"]
+            ).lower(),
+            "transaction_index": launch.get(
+                "initialize_transaction_index"
+            ),
+            "log_index": int(launch["initialize_log_index"]),
+        })
+    rows.sort(key=event_order)
+    return rows
+
+
+def cmd_phase2_pools_fun_market_window(
+    args: argparse.Namespace,
+) -> int:
+    """Reconstruct one bounded pools.fun market-cap shard from shared V3 data."""
+    if args.from_block <= 0:
+        raise SystemExit("from-block must be > 0")
+    if args.to_block < args.from_block:
+        raise SystemExit("to-block must be >= from-block")
+
+    registry = _load_jsonl(args.registry)
+    if not registry:
+        raise SystemExit("pools.fun initialized registry is empty")
+    by_pool = {
+        normalize_address(str(row["pool"])): row
+        for row in registry
+    }
+    if len(by_pool) != len(registry):
+        raise SystemExit("pools.fun initialized registry repeats pool")
+
+    initializes = _pools_fun_registry_initializes(
+        registry,
+        from_block=args.from_block,
+        to_block=args.to_block,
+    )
+    swaps = []
+    for raw in _iter_jsonl(args.swaps):
+        row = dict(raw)
+        pool = normalize_address(str(row["pool"]))
+        if pool not in by_pool:
+            raise SystemExit(
+                f"pools.fun swap tape contains unknown pool: {pool}"
+            )
+        block = int(row["block_number"])
+        if block < args.from_block or block > args.to_block:
+            raise SystemExit(
+                f"pools.fun swap outside requested window: {block}"
+            )
+        swaps.append(row)
+    swaps.sort(key=event_order)
+    target_events = [*initializes, *swaps]
+    target_events.sort(key=event_order)
+
+    quote_decimals = _direct_quote_decimals(args.quote_decimals)
+    quote_by_pool = {
+        pool: normalize_address(str(row["quote_token"]))
+        for pool, row in by_pool.items()
+    }
+    required_quotes = {
+        quote_by_pool[normalize_address(str(row["pool"]))]
+        for row in target_events
+    }
+    missing_decimals = sorted(required_quotes - set(quote_decimals))
+    if missing_decimals:
+        raise SystemExit(
+            "pools.fun quote allowlist is missing: "
+            + ", ".join(missing_decimals)
+        )
+
+    point_provenance = {
+        "source": "phase2_pools_fun_v3_market_window",
+        "chain_id": 4663,
+        "source_id": "pools_fun",
+        "registry": Path(args.registry).name,
+        "registry_sha256": _sha256_file(args.registry),
+        "swaps": Path(args.swaps).name,
+        "swaps_sha256": _sha256_file(args.swaps),
+        "quote_decimals": Path(args.quote_decimals).name,
+        "quote_decimals_sha256": _sha256_file(args.quote_decimals),
+        "quote_feeds": Path(args.quote_feeds).name,
+        "quote_feeds_sha256": _sha256_file(args.quote_feeds),
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "fixed_supply": True,
+        "market_cap_math": (
+            "raw_quote_per_raw_token * supply_raw / 10**quote_decimals"
+        ),
+    }
+
+    if not target_events:
+        point_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.out),
+            provenance=point_provenance,
+        )
+        summary_manifest = write_jsonl_snapshot(
+            [],
+            output=Path(args.summary_out),
+            provenance={
+                "source": "phase2_pools_fun_v3_market_window_summary",
+                "market_cap_points_sha256": point_manifest["sha256"],
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+            },
+        )
+        report = {
+            "version": "phase2-pools-fun-market-window-v1",
+            "source_id": "pools_fun",
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "initialize_events": 0,
+            "swap_events": 0,
+            "market_cap_points": 0,
+            "priced_points": 0,
+            "unpriced_points": 0,
+            "tokens_with_price_points": 0,
+            "points_sha256": point_manifest["sha256"],
+            "summary_sha256": summary_manifest["sha256"],
+            "source_coverage_complete": False,
+            "empty_window": True,
+        }
+        Path(args.report_out).write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    initial_weth_usd, anchors, anchor_window_size = (
+        _sparse_weth_usd_anchors(
+            rpc,
+            target_events,
+            pool=args.usd_anchor_pool,
+            chunk_size=args.chunk_size,
+            fallback_block=args.from_block - 1,
+        )
+    )
+
+    feed_specs = _load_jsonl(args.quote_feeds)
+    feed_tokens = {
+        normalize_address(str(row["quote_token"]))
+        for row in feed_specs
+    }
+    built_in_quotes = {
+        "0x" + "00" * 20,
+        ROBINHOOD_WETH.lower(),
+        ROBINHOOD_USDG.lower(),
+    }
+    sparse_targets = []
+    required_feed_quotes = set()
+    for event in target_events:
+        quote = quote_by_pool[
+            normalize_address(str(event["pool"]))
+        ]
+        if quote in built_in_quotes:
+            continue
+        required_feed_quotes.add(quote)
+        sparse_targets.append({
+            **event,
+            "quote_token": quote,
+        })
+    missing_feeds = sorted(required_feed_quotes - feed_tokens)
+    if missing_feeds:
+        raise SystemExit(
+            "pools.fun quote feed registry is missing: "
+            + ", ".join(missing_feeds)
+        )
+    sparse_chainlink_points = build_sparse_chainlink_usd_points(
+        rpc,
+        sparse_targets,
+        feed_specs=feed_specs,
+        window_size=anchor_window_size,
+    )
+
+    points = build_v3_launchpad_market_cap_points(
+        registry,
+        initializes,
+        swaps,
+        anchors,
+        initial_weth_usd=initial_weth_usd,
+        quote_decimals=quote_decimals,
+        initial_quote_usd={},
+        quote_usd_updates=iter(sparse_chainlink_points),
+        allow_registry_initialization=True,
+    )
+    points = [
+        {**row, "source_id": "pools_fun"}
+        for row in points
+    ]
+    point_manifest = write_jsonl_snapshot(
+        points,
+        output=Path(args.out),
+        provenance={
+            **point_provenance,
+            "usd_anchor_pool": normalize_address(args.usd_anchor_pool),
+            "usd_anchor_mode": "sparse_v3_state_and_swaps",
+            "usd_anchor_window_size": anchor_window_size,
+            "sparse_chainlink_mode": "state_and_answer_updates",
+        },
+    )
+    summary = summarize_v3_launchpad_market_caps(points)
+    summary_manifest = write_jsonl_snapshot(
+        summary,
+        output=Path(args.summary_out),
+        provenance={
+            "source": "phase2_pools_fun_v3_market_window_summary",
+            "market_cap_points_sha256": point_manifest["sha256"],
+            "from_block": args.from_block,
+            "to_block": args.to_block,
+            "eligibility_threshold_usd": "100000",
+        },
+    )
+    priced = sum(int(row["priced_points"]) for row in summary)
+    total = sum(int(row["price_points"]) for row in summary)
+    report = {
+        "version": "phase2-pools-fun-market-window-v1",
+        "source_id": "pools_fun",
+        "from_block": args.from_block,
+        "to_block": args.to_block,
+        "initialize_events": len(initializes),
+        "swap_events": len(swaps),
+        "market_cap_points": len(points),
+        "priced_points": priced,
+        "unpriced_points": total - priced,
+        "tokens_with_price_points": len(summary),
+        "points_sha256": point_manifest["sha256"],
+        "summary_sha256": summary_manifest["sha256"],
+        "sparse_anchor_points": len(anchors),
+        "sparse_chainlink_points": len(sparse_chainlink_points),
+        "anchor_window_size": anchor_window_size,
+        "requests_made": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_coverage_complete": False,
+        "empty_window": False,
+    }
+    Path(args.report_out).write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
 
 
 def cmd_rpc_v3_pool_created_window(
@@ -2085,7 +2487,7 @@ def cmd_rpc_pools_fun_market_cap_window(args: argparse.Namespace) -> int:
     quote_tokens = {row["quote_token"].lower() for row in registry}
     quote_decimals = {
         ROBINHOOD_WETH.lower(): 18,
-        ROBINHOOD_USDG.lower(): 18,
+        ROBINHOOD_USDG.lower(): 6,
     }
     for quote in sorted(quote_tokens):
         if quote not in quote_decimals:
