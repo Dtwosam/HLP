@@ -2173,3 +2173,13 @@ eligible/representative/viability inputs, and accounting-to-viability
 projection. Exact artifact-ID selection, retry cleanup and duplicate-equivalence
 checks are unchanged; only extraction layout changed.
 
+First guarded viability route run **35577869981** passed the outer recovered
+evidence guard, then failed in the inner artifact-only measurement preflight
+before RPC with `NameError: observed_path is not defined`. The first heredoc
+had validated the evidence workflow path, but the second heredoc reused that
+local variable without carrying it across step scope. The measurement workflow
+now publishes the validated path as a step output, passes it through
+`EVIDENCE_WORKFLOW_PATH`, and revalidates the allowed normal/recovered path
+set before applying recovery-mode routing rules. No route measurement RPC was
+issued by the failed run and the `pons_registry` ledger slot remains zero.
+
