@@ -1357,6 +1357,17 @@ def _phase2_direct_market_cap_window(
     venue = next(iter(venues))
     quote_decimals = _direct_registry_quote_decimals(registry)
 
+    registry_tokens = {
+        normalize_address(str(row["token"]))
+        for row in registry
+    }
+    supply_deltas = [
+        row
+        for row in _load_jsonl(args.supply_deltas)
+        if normalize_address(str(row["token"])) in registry_tokens
+        and int(row["block_number"]) <= args.to_block
+    ]
+
     if version == "v3":
         market_field = "pool"
         market_ids = {
@@ -1405,6 +1416,12 @@ def _phase2_direct_market_cap_window(
         "registry_sha256": _sha256_file(args.registry),
         "initializes": Path(args.initializes).name,
         "initializes_sha256": _sha256_file(args.initializes),
+        "supply_deltas": Path(args.supply_deltas).name,
+        "supply_deltas_sha256": _sha256_file(args.supply_deltas),
+        "supply_semantics": (
+            "initialize-block-end totalSupply corrected to event order "
+            "and advanced by complete mint/burn Transfer deltas"
+        ),
         "swaps": _event_tape_source_name(
             file_path=args.swaps,
             aggregate_manifest=args.swaps_manifest,
@@ -1471,6 +1488,7 @@ def _phase2_direct_market_cap_window(
                 initial_quote_usd=initial_quote_usd,
                 quote_usd_updates=quote_usd_updates,
                 allow_registry_initialization=True,
+                supply_delta_rows=supply_deltas,
             )
         else:
             points = build_v4_launchpad_market_cap_points(
@@ -1483,6 +1501,7 @@ def _phase2_direct_market_cap_window(
                 initial_quote_usd=initial_quote_usd,
                 quote_usd_updates=quote_usd_updates,
                 allow_registry_initialization=True,
+                supply_delta_rows=supply_deltas,
             )
 
         for row in points:
@@ -6627,6 +6646,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     direct_v3_market.add_argument("--registry", required=True)
     direct_v3_market.add_argument("--initializes", required=True)
+    direct_v3_market.add_argument("--supply-deltas", required=True)
     direct_v3_swaps = direct_v3_market.add_mutually_exclusive_group(
         required=True
     )
@@ -6656,6 +6676,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     direct_v4_market.add_argument("--registry", required=True)
     direct_v4_market.add_argument("--initializes", required=True)
+    direct_v4_market.add_argument("--supply-deltas", required=True)
     direct_v4_swaps = direct_v4_market.add_mutually_exclusive_group(
         required=True
     )
