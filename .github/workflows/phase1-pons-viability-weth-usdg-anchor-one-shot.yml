@@ -1,4 +1,5 @@
 name: phase1-pons-viability-weth-usdg-anchor-one-shot
+# validation-generation: 1
 run-name: phase1 viability weth_usdg_anchor ${{ github.sha }}
 
 on:
