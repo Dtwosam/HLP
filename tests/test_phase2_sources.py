@@ -82,6 +82,9 @@ def test_pools_trade_lbp_price_surface_is_decoded_before_reconstruction():
     assert "hlp.data.types.CcaPriceEvent" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_cca" in lbp["implementation_evidence"]
     assert "hlp.data.pools_trade_lbp_evidence" in lbp["implementation_evidence"]
+    assert "hlp.data.pools_trade_lbp_search" in lbp["implementation_evidence"]
+    assert "hlp.data.pools_trade_lbp_success" in lbp["implementation_evidence"]
+    assert "successful-auction" in lbp["blocking_gap"]
     assert "orientation freeze" in lbp["blocking_gap"]
     assert "V4 handoff evidence" in lbp["blocking_gap"]
 
