@@ -368,3 +368,166 @@ def summarize_causal_market_quality_trace(
         ),
         "selection_rule_frozen": False,
     }
+
+
+
+MARKET_SELECTION_CANDIDATE_VERSION = (
+    "active-quote-liquidity-causal-v1-candidate"
+)
+
+
+def build_candidate_canonical_market_series(
+    rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Build a causal single-market candidate series without freezing policy.
+
+    A usable market state must have both market-cap proxy and active quote-side
+    USD liquidity. At each event, the deepest latest-observed market wins, with
+    stable market_id tie-breaking. A canonical candidate point is emitted only
+    when the selected market itself updates or leadership switches to the event
+    market. Non-selected pool events therefore cannot double-count volume.
+    """
+    ordered = [dict(row) for row in rows]
+    ordered.sort(key=_market_event_order)
+
+    latest: dict[str, dict[str, dict]] = {}
+    selected: dict[str, str] = {}
+    seen_events: set[tuple[str, tuple[int, int, int, str]]] = set()
+    output: list[dict] = []
+
+    for row in ordered:
+        token = str(row.get("token") or "").lower()
+        market_id = str(row.get("market_id") or "").lower()
+        if not token or not market_id:
+            raise ValueError(
+                "canonical market candidate event lacks token/market_id"
+            )
+        order = _market_event_order(row)
+        event_key = (token, order)
+        if event_key in seen_events:
+            raise ValueError(
+                f"duplicate canonical market candidate event: "
+                f"{token} {order}"
+            )
+        seen_events.add(event_key)
+
+        raw_depth = row.get("active_quote_liquidity_usd")
+        raw_mcap = row.get("market_cap_proxy_usd")
+        usable_update = raw_depth is not None and raw_mcap is not None
+        if usable_update:
+            depth = Decimal(str(raw_depth))
+            mcap = Decimal(str(raw_mcap))
+            if depth < 0:
+                raise ValueError(
+                    f"negative active quote liquidity: {market_id}"
+                )
+            if mcap < 0:
+                raise ValueError(
+                    f"negative market cap proxy: {market_id}"
+                )
+            state = dict(row)
+            state["token"] = token
+            state["market_id"] = market_id
+            state["active_quote_liquidity_usd"] = str(depth)
+            state["market_cap_proxy_usd"] = str(mcap)
+            latest.setdefault(token, {})[market_id] = state
+
+        current = list(latest.get(token, {}).values())
+        if not current:
+            continue
+        ranked = rank_market_quality_snapshot(current)
+        winner = ranked[0]
+        winner_id = winner["market_id"]
+        previous = selected.get(token)
+        switched = previous is not None and previous != winner_id
+
+        should_emit = usable_update and market_id == winner_id
+        if switched and market_id != winner_id:
+            raise ValueError(
+                "canonical market leadership changed without winner update"
+            )
+        selected[token] = winner_id
+        if not should_emit:
+            continue
+
+        winner_order = _market_event_order(winner)
+        if winner_order != order:
+            raise ValueError(
+                "canonical market candidate would emit stale winner state"
+            )
+
+        item = dict(winner)
+        item.update({
+            "selection_policy_candidate_version": (
+                MARKET_SELECTION_CANDIDATE_VERSION
+            ),
+            "selection_rule_frozen": False,
+            "selected_market_id": winner_id,
+            "selection_event_market_id": market_id,
+            "selected_active_quote_liquidity_usd": (
+                winner["active_quote_liquidity_usd"]
+            ),
+            "leadership_switched": switched,
+            "canonical_volume_eligible": True,
+            "selection_reason": (
+                "highest_causal_active_quote_liquidity_usd"
+            ),
+            "observed_markets": len(ranked),
+            "ranked_market_ids": [
+                candidate["market_id"] for candidate in ranked
+            ],
+        })
+        output.append(item)
+
+    return output
+
+
+def summarize_candidate_canonical_market_series(
+    rows: Iterable[Mapping[str, object]],
+) -> dict:
+    """Summarize candidate canonical output without freezing the selector."""
+    data = [dict(row) for row in rows]
+    tokens: set[str] = set()
+    markets: set[str] = set()
+    switches = 0
+
+    for row in data:
+        if row.get("selection_rule_frozen") is not False:
+            raise ValueError(
+                "candidate canonical series unexpectedly freezes selection"
+            )
+        if (
+            str(row.get("selection_policy_candidate_version") or "")
+            != MARKET_SELECTION_CANDIDATE_VERSION
+        ):
+            raise ValueError(
+                "candidate canonical series policy version changed"
+            )
+        if row.get("canonical_volume_eligible") is not True:
+            raise ValueError(
+                "candidate canonical series contains non-selected volume"
+            )
+        token = str(row.get("token") or "").lower()
+        market = str(row.get("selected_market_id") or "").lower()
+        event_market = str(
+            row.get("selection_event_market_id") or ""
+        ).lower()
+        if not token or not market or market != event_market:
+            raise ValueError(
+                "candidate canonical series market identity changed"
+            )
+        tokens.add(token)
+        markets.add(market)
+        switches += bool(row.get("leadership_switched"))
+
+    return {
+        "points": len(data),
+        "tokens": len(tokens),
+        "selected_markets": len(markets),
+        "leadership_switches": switches,
+        "selection_policy_candidate_version": (
+            MARKET_SELECTION_CANDIDATE_VERSION
+        ),
+        "selection_rule_frozen": False,
+        "cross_pool_volume_double_counting_allowed": False,
+    }
