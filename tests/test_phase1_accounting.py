@@ -293,3 +293,45 @@ def test_phase1_summary_marks_invalid_runtime_incomplete_accounting():
     assert result["runs_with_invalid_job_runtimes"] == [4]
     assert result["all_job_runtimes_valid"] is False
     assert result["accounting_complete"] is False
+
+
+def test_summarize_action_run_ignores_skipped_job_without_log_or_runtime():
+    run = {
+        "id": 128,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    jobs = [
+        {
+            "id": 10,
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-21T12:00:00Z",
+            "completed_at": "2026-09-21T12:00:05Z",
+        },
+        {
+            "id": 11,
+            "status": "completed",
+            "conclusion": "skipped",
+            "started_at": "2026-09-21T12:00:05Z",
+            "completed_at": "2026-09-21T12:00:04Z",
+            "steps": [],
+            "runner_id": None,
+        },
+    ]
+
+    result = summarize_action_run(
+        run,
+        jobs,
+        [],
+        {10: '{"requests_made": 1}\n'},
+    )
+
+    assert result["completed_jobs"] == 1
+    assert result["skipped_jobs"] == 1
+    assert result["skipped_job_ids"] == [11]
+    assert result["missing_completed_job_logs"] == 0
+    assert result["invalid_job_runtimes"] == 0
+    assert result["job_runtime_seconds"] == 5
+    assert result["all_completed_job_logs_available"] is True
+    assert result["all_job_runtimes_valid"] is True
