@@ -13,6 +13,10 @@ ROBINHOOD_CHAIN_ID = 4663
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
 SOLIDRPC_PUBLIC_RPC_URL = "https://rpc.solidrpc.io/public/evm/4663"
 SOLIDRPC_AUTH_RPC_URL = "https://rpc.solidrpc.io/evm/4663"
+# Re-verified from the keyless endpoint on 2026-09-21. The provider
+# currently caps filtered eth_getLogs requests at 200 blocks and explicitly
+# recommends a free API key for wider ranges.
+SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP = 200
 DEFAULT_SEQUENCER_WS_URL = "wss://feed.mainnet.chain.robinhood.com"
 NODEFLARE_PUBLIC_RPC_URL = "https://rpc.nodeflare.app/robinhood/public"
 
