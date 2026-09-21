@@ -6,6 +6,7 @@ from hlp.data.market_quality import (
     active_quote_liquidity_usd,
     build_causal_market_quality_trace,
     rank_market_quality_snapshot,
+    summarize_causal_market_quality_trace,
     summarize_market_competition,
 )
 
@@ -227,3 +228,81 @@ def test_causal_trace_rejects_duplicate_event_identity():
     )
     with pytest.raises(ValueError, match="duplicate market-quality event"):
         build_causal_market_quality_trace([event, event])
+
+
+
+def test_trace_summary_counts_candidate_switches_and_dispersion():
+    trace = [
+        {
+            "token": TOKEN,
+            "event_market_id": "0xaaa",
+            "block_number": 10,
+            "transaction_index": 1,
+            "log_index": 0,
+            "observed_markets": 1,
+            "candidate_market_id": "0xaaa",
+            "market_cap_dispersion_multiple": "1",
+            "selection_rule_frozen": False,
+        },
+        {
+            "token": TOKEN,
+            "event_market_id": "0xbbb",
+            "block_number": 11,
+            "transaction_index": 1,
+            "log_index": 0,
+            "observed_markets": 2,
+            "candidate_market_id": "0xaaa",
+            "market_cap_dispersion_multiple": "2",
+            "selection_rule_frozen": False,
+        },
+        {
+            "token": TOKEN,
+            "event_market_id": "0xbbb",
+            "block_number": 12,
+            "transaction_index": 1,
+            "log_index": 0,
+            "observed_markets": 2,
+            "candidate_market_id": "0xbbb",
+            "market_cap_dispersion_multiple": "4",
+            "selection_rule_frozen": False,
+        },
+    ]
+
+    report = summarize_causal_market_quality_trace(trace)
+
+    assert report["snapshots"] == 3
+    assert report["tokens"] == 1
+    assert report["multi_market_snapshots"] == 2
+    assert report["candidate_switches"] == 1
+    assert report["tokens_with_candidate_switches"] == 1
+    assert report["candidate_switches_by_token"] == {TOKEN: 1}
+    assert report["candidate_snapshots_by_market"] == {
+        "0xaaa": 2,
+        "0xbbb": 1,
+    }
+    assert Decimal(
+        report["median_market_cap_dispersion_multiple"]
+    ) == Decimal("3")
+    assert Decimal(
+        report["max_market_cap_dispersion_multiple"]
+    ) == Decimal("4")
+    assert report["selection_rule_frozen"] is False
+
+
+def test_trace_summary_rejects_accidental_selector_freeze():
+    with pytest.raises(ValueError, match="unexpectedly freezes"):
+        summarize_causal_market_quality_trace(
+            [
+                {
+                    "token": TOKEN,
+                    "event_market_id": "0xaaa",
+                    "block_number": 10,
+                    "transaction_index": 1,
+                    "log_index": 0,
+                    "observed_markets": 1,
+                    "candidate_market_id": "0xaaa",
+                    "market_cap_dispersion_multiple": "1",
+                    "selection_rule_frozen": True,
+                }
+            ]
+        )
