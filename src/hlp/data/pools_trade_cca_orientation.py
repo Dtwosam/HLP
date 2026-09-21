@@ -179,17 +179,40 @@ def validate_pools_trade_cca_orientation(
     )
     if max_error <= 0:
         raise ValueError("pools.trade CCA max error threshold invalid")
-    if direct != inferred["direct_quote_per_token"]:
-        raise ValueError("pools.trade CCA direct price evidence changed")
-    if direct_error != inferred["direct_relative_error"]:
-        raise ValueError("pools.trade CCA direct error evidence changed")
-    if inverse_error != inferred["inverse_relative_error"]:
-        raise ValueError("pools.trade CCA inverse error evidence changed")
-    if direct_error > max_error:
+    recomputed_direct = inferred["direct_quote_per_token"]
+    recomputed_direct_error = inferred["direct_relative_error"]
+    recomputed_inverse_error = inferred["inverse_relative_error"]
+
+    price_evidence_error = abs(
+        direct / recomputed_direct - Decimal(1)
+    )
+    if price_evidence_error > max_error:
+        raise ValueError(
+            "pools.trade CCA direct price evidence exceeds error threshold"
+        )
+    direct_error_evidence_error = abs(
+        direct_error - recomputed_direct_error
+    )
+    if direct_error_evidence_error > max_error:
+        raise ValueError(
+            "pools.trade CCA direct error evidence exceeds error threshold"
+        )
+    inverse_error_evidence_error = abs(
+        inverse_error - recomputed_inverse_error
+    )
+    inverse_error_scale = max(
+        Decimal(1),
+        abs(recomputed_inverse_error),
+    )
+    if inverse_error_evidence_error / inverse_error_scale > max_error:
+        raise ValueError(
+            "pools.trade CCA inverse error evidence exceeds error threshold"
+        )
+    if recomputed_direct_error > max_error:
         raise ValueError(
             "pools.trade CCA direct orientation exceeds error threshold"
         )
-    if inverse_error <= direct_error:
+    if recomputed_inverse_error <= recomputed_direct_error:
         raise ValueError(
             "pools.trade CCA inverse orientation is not worse"
         )
