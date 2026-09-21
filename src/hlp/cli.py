@@ -60,6 +60,12 @@ from hlp.data.direct_markets import (
     select_v4_direct_market_candidates,
     summarize_direct_market_registry,
 )
+from hlp.data.direct_quotes import (
+    DIRECT_PRICEABLE_STATUSES,
+    build_direct_quote_registry_from_clients,
+    direct_quote_decimals,
+    direct_quote_feed_specs,
+)
 from hlp.data.chainlink_directory import ChainlinkDirectoryClient
 from hlp.data.hoodexplorer import HoodExplorerClient
 from hlp.data.hood_fun_curve import (
@@ -860,6 +866,81 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+
+
+def cmd_phase2_direct_quote_registry(args: argparse.Namespace) -> int:
+    """Freeze address-level supported quote identity for direct DEX discovery."""
+    assets_client = RobinhoodAssetsClient(
+        timeout=args.timeout,
+        attempts=args.attempts,
+    )
+    directory_client = ChainlinkDirectoryClient(
+        timeout=args.timeout,
+        attempts=args.attempts,
+    )
+    rows = build_direct_quote_registry_from_clients(
+        assets_client,
+        directory_client,
+    )
+    decimals = direct_quote_decimals(rows)
+    feeds = direct_quote_feed_specs(rows)
+
+    registry_manifest = write_jsonl_snapshot(
+        rows,
+        output=Path(args.registry_out),
+        provenance={
+            "source": "official_robinhood_assets_plus_chainlink_directory",
+            "chain_id": 4663,
+            "robinhood_assets_url": assets_client.url,
+            "chainlink_directory_url": directory_client.url,
+            "chainlink_directory_sha256": directory_client.last_sha256,
+            "priceable_statuses": sorted(DIRECT_PRICEABLE_STATUSES),
+        },
+    )
+    feed_manifest = write_jsonl_snapshot(
+        feeds,
+        output=Path(args.feed_out),
+        provenance={
+            "source": "phase2_direct_quote_registry_chainlink_feeds",
+            "chain_id": 4663,
+            "registry_sha256": registry_manifest["sha256"],
+            "chainlink_directory_sha256": directory_client.last_sha256,
+        },
+    )
+    decimals_path = Path(args.decimals_out)
+    decimals_path.parent.mkdir(parents=True, exist_ok=True)
+    decimals_path.write_text(
+        json.dumps(decimals, indent=2, sort_keys=True) + "\n"
+    )
+    decimals_sha256 = _sha256_file(args.decimals_out)
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row["pricing_status"])
+        counts[status] = counts.get(status, 0) + 1
+    report = {
+        "version": "phase2-direct-quotes-v1",
+        "chain_id": 4663,
+        "registry_rows": len(rows),
+        "priceable_quotes": len(decimals),
+        "chainlink_feed_quotes": len(feeds),
+        "pricing_status_counts": dict(sorted(counts.items())),
+        "registry_sha256": registry_manifest["sha256"],
+        "decimals_sha256": decimals_sha256,
+        "feed_specs_sha256": feed_manifest["sha256"],
+        "chainlink_directory_sha256": directory_client.last_sha256,
+        "robinhood_assets_requests": assets_client.requests_made,
+        "robinhood_assets_bytes": assets_client.bytes_received,
+        "chainlink_directory_requests": directory_client.requests_made,
+        "chainlink_directory_bytes": directory_client.bytes_received,
+    }
+    out = Path(args.summary_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(report, sort_keys=True))
+    return 0
 
 
 
@@ -6130,6 +6211,17 @@ def build_parser() -> argparse.ArgumentParser:
     v4_swap.add_argument("--out", required=True)
     v4_swap.set_defaults(
         func=cmd_rpc_v4_swap_window
+    )
+
+    direct_quotes = sub.add_parser(
+        "phase2-direct-quote-registry"
+    )
+    direct_quotes.add_argument("--registry-out", required=True)
+    direct_quotes.add_argument("--decimals-out", required=True)
+    direct_quotes.add_argument("--feed-out", required=True)
+    direct_quotes.add_argument("--summary-out", required=True)
+    direct_quotes.set_defaults(
+        func=cmd_phase2_direct_quote_registry
     )
 
     direct_v3_registry = sub.add_parser(
