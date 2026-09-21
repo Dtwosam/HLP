@@ -235,9 +235,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   generation now has a dispatch-only, fail-closed coverage proposal path with
   source-specific validation, canonical ledger validation and exact promotion
   handoff metadata. The previous deployment's core TokenCreated/Trade surface
-  is proven compatible with the shared adapter, but its reserve/supply pricing
-  semantics still require an explicit legacy proof before reusing current
-  generation market-cap reconstruction;
+  is proven compatible with the shared adapter. A bounded dispatch-only legacy
+  semantic-proof workflow is now prepared from the frozen TokenCreated sample
+  through the end of the previous deployment: it requires launch-block ERC-20
+  supply/decimals to match the derived 80/20 registry and sequential decoded
+  virtual reserves to conserve across launch-linked trades. That evidence has
+  not yet been executed/frozen, so previous-generation full coverage remains
+  blocked until the semantic proof passes;
 - empirical freeze of the causal active-quote-liquidity multi-pool selector
   using real competing V3/V4/Sushi market tapes;
 - complete historical backfills and coverage manifests for every material
