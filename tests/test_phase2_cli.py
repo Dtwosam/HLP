@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from hlp.cli import (
     build_parser,
     cmd_phase2_apply_source_coverage,
+    cmd_phase2_direct_market_competition_cohort,
     cmd_phase2_direct_quote_registry,
     cmd_phase2_direct_v3_market_cap_window,
     cmd_phase2_direct_v3_registry,
@@ -304,6 +305,67 @@ def test_pools_trade_lbp_registry_derives_pool_id_from_reused_tapes(
 
 
 
+
+
+
+
+def test_phase2_direct_market_competition_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "phase2-direct-market-competition-cohort",
+        "--registry", "v3.jsonl",
+        "--registry", "v4.jsonl",
+        "--out", "cohort.jsonl",
+        "--summary-out", "summary.json",
+    ])
+    assert args.registry == ["v3.jsonl", "v4.jsonl"]
+    assert args.min_markets == 2
+
+
+def test_phase2_direct_market_competition_command(tmp_path):
+    token = "0x" + "11" * 20
+    quote = "0x" + "22" * 20
+    v3 = tmp_path / "v3.jsonl"
+    v4 = tmp_path / "v4.jsonl"
+    out = tmp_path / "cohort.jsonl"
+    summary = tmp_path / "summary.json"
+
+    _write_jsonl(v3, [{
+        "source_id": "direct_uniswap_v3",
+        "venue": "uniswap_v3",
+        "token": token,
+        "quote_token": quote,
+        "quote_decimals": 18,
+        "pool": "0x" + "33" * 20,
+        "initialize_block": 10,
+    }])
+    _write_jsonl(v4, [{
+        "source_id": "direct_uniswap_v4",
+        "venue": "uniswap_v4",
+        "token": token,
+        "quote_token": quote,
+        "quote_decimals": 18,
+        "pool_id": "0x" + "44" * 32,
+        "initialize_block": 20,
+    }])
+
+    args = SimpleNamespace(
+        registry=[str(v3), str(v4)],
+        min_markets=2,
+        out=str(out),
+        summary_out=str(summary),
+    )
+    assert cmd_phase2_direct_market_competition_cohort(args) == 0
+
+    row = json.loads(out.read_text().strip())
+    assert row["token"] == token
+    assert row["market_count"] == 2
+    assert row["canonical_market_selection_complete"] is False
+
+    report = json.loads(summary.read_text())
+    assert report["tokens"] == 1
+    assert report["markets"] == 2
+    assert report["canonical_market_selection_complete"] is False
 
 
 
