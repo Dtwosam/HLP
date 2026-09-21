@@ -1,6 +1,9 @@
 import pytest
 
-from hlp.data.noxa_registry import (\n    attach_noxa_initializations,\n    build_noxa_launch_registry,\n)
+from hlp.data.noxa_registry import (
+    attach_noxa_initializations,
+    build_noxa_launch_registry,
+)
 from hlp.data.types import InstantV3Launch, NoxaLaunchedToken
 
 
@@ -108,14 +111,14 @@ def test_attach_noxa_initializations_requires_exact_pool():
             "pool": POOL,
             "sqrt_price_x96": 2**96,
             "tick": 0,
-            "block_number": 20,
+            "block_number": 100,
             "transaction_hash": "0x" + "03" * 32,
             "transaction_index": 2,
             "log_index": 4,
         }],
     )
     assert len(initialized) == 1
-    assert initialized[0]["initialize_block"] == 20
+    assert initialized[0]["initialize_block"] == 100
     assert initialized[0]["initial_sqrt_price_x96"] == 2**96
 
 
@@ -128,4 +131,24 @@ def test_attach_noxa_initializations_rejects_missing_pool():
 
     with pytest.raises(ValueError, match="missing V3 Initialize"):
         attach_noxa_initializations(rows, [])
+
+
+def test_attach_noxa_initializations_rejects_same_block_prelaunch_order():
+    rows = build_noxa_launch_registry(
+        [launch()],
+        [state()],
+    )
+    with pytest.raises(ValueError, match="Initialize precedes launch order"):
+        attach_noxa_initializations(
+            rows,
+            [{
+                "pool": POOL,
+                "sqrt_price_x96": 2**96,
+                "tick": 0,
+                "block_number": 100,
+                "transaction_hash": "0x" + "03" * 32,
+                "transaction_index": 0,
+                "log_index": 1,
+            }],
+        )
 

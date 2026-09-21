@@ -152,12 +152,25 @@ def attach_noxa_initializations(
     for row in registry:
         pool = normalize_address(str(row["pool"]))
         init = initializes[pool]
-        launch_block = int(row["launch_block"])
-        initialize_block = int(init["block_number"])
-        if initialize_block < launch_block:
+        launch_order = (
+            int(row["launch_block"]),
+            -1
+            if row.get("launch_transaction_index") is None
+            else int(row["launch_transaction_index"]),
+            int(row["launch_log_index"]),
+        )
+        initialize_order = (
+            int(init["block_number"]),
+            -1
+            if init.get("transaction_index") is None
+            else int(init["transaction_index"]),
+            int(init["log_index"]),
+        )
+        if initialize_order < launch_order:
             raise ValueError(
-                f"NOXA Initialize predates launch block: {pool}"
+                f"NOXA Initialize precedes launch order: {pool}"
             )
+        initialize_block = initialize_order[0]
         item = dict(row)
         item.update({
             "initialize_block": initialize_block,
