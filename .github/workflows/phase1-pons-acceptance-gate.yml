@@ -318,6 +318,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          merge-multiple: true
           path: eligible
           run-id: ${{ inputs.eligible_universe_run_id }}
           github-token: ${{ github.token }}
@@ -331,6 +332,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          merge-multiple: true
           path: eligible
           run-id: ${{ inputs.eligible_universe_run_id }}
           github-token: ${{ github.token }}
@@ -342,6 +344,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.eligible_artifact_id }}
+          merge-multiple: true
           path: eligible
           run-id: ${{ inputs.eligible_universe_run_id }}
           github-token: ${{ github.token }}
@@ -350,6 +353,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          merge-multiple: true
           path: representative
           run-id: ${{ inputs.representative_validation_run_id }}
           github-token: ${{ github.token }}
@@ -363,6 +367,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          merge-multiple: true
           path: representative
           run-id: ${{ inputs.representative_validation_run_id }}
           github-token: ${{ github.token }}
@@ -374,6 +379,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.representative_artifact_id }}
+          merge-multiple: true
           path: representative
           run-id: ${{ inputs.representative_validation_run_id }}
           github-token: ${{ github.token }}
@@ -382,6 +388,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          merge-multiple: true
           path: viability
           run-id: ${{ inputs.viability_projection_run_id }}
           github-token: ${{ github.token }}
@@ -395,6 +402,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          merge-multiple: true
           path: viability
           run-id: ${{ inputs.viability_projection_run_id }}
           github-token: ${{ github.token }}
@@ -406,6 +414,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.provenance.outputs.viability_artifact_id }}
+          merge-multiple: true
           path: viability
           run-id: ${{ inputs.viability_projection_run_id }}
           github-token: ${{ github.token }}
