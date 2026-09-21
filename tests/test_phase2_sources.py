@@ -80,8 +80,10 @@ def test_pools_trade_lbp_price_surface_is_decoded_before_reconstruction():
     assert lbp["readiness"] == "decoder_ready"
     assert "hlp.data.pools_trade_registry" in lbp["implementation_evidence"]
     assert "hlp.data.types.CcaPriceEvent" in lbp["implementation_evidence"]
-    assert "clearing-price orientation" in lbp["blocking_gap"]
-    assert "migration stitching" in lbp["blocking_gap"]
+    assert "hlp.data.pools_trade_cca" in lbp["implementation_evidence"]
+    assert "hlp.data.pools_trade_lbp_evidence" in lbp["implementation_evidence"]
+    assert "orientation freeze" in lbp["blocking_gap"]
+    assert "V4 handoff evidence" in lbp["blocking_gap"]
 
 
 
