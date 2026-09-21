@@ -1272,15 +1272,26 @@ def cmd_phase2_v3_registry_event_filter(
 ) -> int:
     """Filter one shared V3 event tape to exact registry pool addresses."""
     registry = _load_jsonl(args.registry)
-    pool_floor: dict[str, int] = {}
+    pool_floor: dict[str, tuple[int, int, int]] = {}
     for row in registry:
         pool = normalize_address(str(row["pool"]))
-        raw_floor = row.get("launch_block", row.get("initialize_block"))
-        if raw_floor is None:
+        prefix = None
+        for candidate in ("lifecycle", "launch", "initialize"):
+            if row.get(f"{candidate}_block") is not None:
+                prefix = candidate
+                break
+        if prefix is None:
             raise SystemExit(
-                f"V3 registry row has no launch/Initialize block: {pool}"
+                f"V3 registry row has no lifecycle/launch/Initialize block: "
+                f"{pool}"
             )
-        floor = int(raw_floor)
+        raw_tx = row.get(f"{prefix}_transaction_index")
+        raw_log = row.get(f"{prefix}_log_index")
+        floor = (
+            int(row[f"{prefix}_block"]),
+            -1 if raw_tx is None else int(raw_tx),
+            -1 if raw_log is None else int(raw_log),
+        )
         prior = pool_floor.get(pool)
         if prior is not None and prior != floor:
             raise SystemExit(f"V3 registry repeats pool with drift: {pool}")
@@ -1311,12 +1322,11 @@ def cmd_phase2_v3_registry_event_filter(
         for raw in source:
             row = dict(raw)
             pool = normalize_address(str(row["pool"]))
-            block = int(row["block_number"])
-            if block < pool_floor[pool]:
+            order = event_order(row)
+            if order < pool_floor[pool]:
                 raise ValueError(
                     f"V3 event predates registry lifecycle: {pool}"
                 )
-            order = event_order(row)
             key = (pool, order)
             if key in seen:
                 raise ValueError(

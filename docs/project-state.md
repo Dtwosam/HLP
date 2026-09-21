@@ -240,6 +240,9 @@ Implemented foundation:
   market-cap CLIs can now consume the canonical quote-feed registry and sample
   Chainlink/USD only at the causal trade/Sync orders that need non-WETH quotes;
   sparse quote ownership cannot be mixed with pre-materialized oracle tapes.
+  The shared V3 registry-event filter now enforces lifecycle floors at full
+  block/transaction/log order, not block number alone, so same-block swaps
+  occurring before a launch or handoff cannot leak into launchpad history.
   Flap's persistent registry now retains the full chronological TokenQuoteSet
   history rather than only the final quote. Sharded curve replay and sparse
   Chainlink target selection share one pre-window state helper, so a later

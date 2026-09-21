@@ -245,3 +245,45 @@ def test_pools_fun_market_window_reuses_sparse_weth_anchor(
     assert payload["market_cap_points"] == 2
     assert payload["unpriced_points"] == 0
     assert payload["source_coverage_complete"] is False
+
+
+def test_v3_registry_event_filter_rejects_same_block_prelaunch_event(
+    tmp_path,
+):
+    registry = tmp_path / "registry.jsonl"
+    events = tmp_path / "events.jsonl"
+    out = tmp_path / "filtered.jsonl"
+    summary = tmp_path / "summary.json"
+    write_jsonl(registry, [launch_registry_row()])
+    write_jsonl(events, [
+        {
+            "pool": POOL,
+            "block_number": 10,
+            "transaction_hash": "0x" + "01" * 32,
+            "transaction_index": 1,
+            "log_index": 1,
+        },
+        {
+            "pool": POOL,
+            "block_number": 10,
+            "transaction_hash": "0x" + "02" * 32,
+            "transaction_index": 1,
+            "log_index": 3,
+        },
+    ])
+
+    args = SimpleNamespace(
+        registry=str(registry),
+        input=str(events),
+        input_manifest=None,
+        input_shard_dir=None,
+        out=str(out),
+        summary_out=str(summary),
+    )
+    try:
+        cmd_phase2_v3_registry_event_filter(args)
+    except ValueError as exc:
+        assert "predates registry lifecycle" in str(exc)
+    else:
+        raise AssertionError("pre-launch same-block event was accepted")
+
