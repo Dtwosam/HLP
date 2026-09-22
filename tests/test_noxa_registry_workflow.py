@@ -16,7 +16,9 @@ def test_noxa_registry_backfill_is_dispatch_only_and_full_range():
     assert "SNAPSHOT_HEAD: '54486035'" in text
     assert "SHARD_COUNT: '256'" in text
     assert "rpc-noxa-registry-window" in text
-    assert "CHUNK=200" in text
+    assert "ROBINHOOD_ARCHIVE_RPC_API_KEY is required" in text
+    assert "CHUNK=50000" in text
+    assert "CHUNK=200" not in text
 
 
 def test_noxa_registry_backfill_validates_state_and_continuity():
