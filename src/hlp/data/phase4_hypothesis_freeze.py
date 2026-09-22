@@ -278,6 +278,16 @@ def build_phase4_hypothesis_freeze(
     method = str(plan.get("multiple_testing_method") or "")
     if method not in SUPPORTED_MULTIPLE_TESTING_METHODS:
         raise ValueError("Phase-4 multiple-testing method is unsupported")
+    try:
+        permutation_trials = int(plan.get("permutation_trials"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Phase-4 permutation trial count is invalid"
+        ) from exc
+    if permutation_trials < 1000 or permutation_trials > 100000:
+        raise ValueError(
+            "Phase-4 permutation trials must be between 1000 and 100000"
+        )
     alpha = _decimal(
         plan.get("false_discovery_rate_alpha"),
         label="Phase-4 false-discovery-rate alpha",
@@ -362,6 +372,7 @@ def build_phase4_hypothesis_freeze(
         "version": PHASE4_HYPOTHESIS_PLAN_VERSION,
         "multiple_testing_method": method,
         "false_discovery_rate_alpha": _text(alpha),
+        "permutation_trials": permutation_trials,
         "hypotheses": frozen,
     }
     dispositions = [
@@ -397,6 +408,12 @@ def build_phase4_hypothesis_freeze(
         "validation_hypotheses": len(frozen),
         "multiple_testing_method": method,
         "false_discovery_rate_alpha": _text(alpha),
+        "permutation_trials": permutation_trials,
+        "permutation_seed_rule": (
+            "sha256(validation_rows_sha256+hypothesis_plan_sha256+"
+            "hypothesis_id)"
+        ),
+        "permutation_test_two_sided": True,
         "selection_manual": True,
         "automatic_feature_ranking_used": False,
         "all_feature_dispositions_logged": True,
@@ -491,6 +508,9 @@ def build_phase4_hypothesis_freeze_handoff(
         "false_discovery_rate_alpha": str(
             row["false_discovery_rate_alpha"]
         ),
+        "permutation_trials": int(row["permutation_trials"]),
+        "permutation_seed_rule": str(row["permutation_seed_rule"]),
+        "permutation_test_two_sided": True,
         "selection_manual": True,
         "automatic_feature_ranking_used": False,
         "all_feature_dispositions_logged": True,
