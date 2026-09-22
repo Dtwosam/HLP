@@ -9,6 +9,7 @@ from hlp.data.phase2_coverage_promotion import (
     build_phase2_pools_fun_promotion_review_handoff,
     validate_phase2_coverage_ledger_commit,
     validate_phase2_pools_fun_promotion_review_receipt,
+    validate_phase2_pools_fun_promotion_proposal_receipt,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
 
@@ -292,3 +293,74 @@ def test_pools_fun_promotion_review_receipt_validates_generated_inputs():
         "pools_fun"
     )
     assert report["promotion_dispatched"] is False
+
+
+
+def promotion_proposal_receipt():
+    return {
+        "version": "phase2-pools-fun-promotion-proposal-v1",
+        "promotion_proposal_control_run_id": 401,
+        "promotion_review_run_id": 402,
+        "promotion_review_artifact_digest": "sha256:" + "11" * 32,
+        "node_dispatch_control_run_id": 403,
+        "promotion_run_id": 404,
+        "promotion_artifact_digest": "sha256:" + "22" * 32,
+        "promotion_handoff_sha256": "33" * 32,
+        "proposed_ledger_sha256": "44" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "source_id": "pools_fun",
+        "promotion_workflow": "phase2-source-coverage-promotion.yml",
+        "complete_source_ids_before": ["pons_v1", "pons_v2"],
+        "complete_source_ids_after": ["pons_v1", "pons_v2", "pools_fun"],
+        "phase2_universe_coverage_complete": False,
+        "ledger_commit_generated_inputs": {
+            "promotion_run_id": "404",
+            "expected_artifact_digest": "sha256:" + "22" * 32,
+            "expected_handoff_sha256": "33" * 32,
+            "expected_proposed_ledger_sha256": "44" * 32,
+            "expected_source_id": "pools_fun",
+        },
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def test_pools_fun_proposal_receipt_exposes_commit_inputs_without_approval():
+    report = validate_phase2_pools_fun_promotion_proposal_receipt(
+        promotion_proposal_receipt()
+    )
+
+    assert report["promotion_run_id"] == 404
+    assert report["ledger_commit_generated_inputs"]["expected_source_id"] == (
+        "pools_fun"
+    )
+    assert report["ledger_commit_approval_value_supplied"] is False
+    assert report["canonical_coverage_ledger_mutated"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("proposal_created", False, "proposal proof"),
+        ("proposal_validated", False, "validation proof"),
+        ("ledger_commit_authorized", True, "authorizes"),
+        (
+            "ledger_commit_approval_value_supplied",
+            True,
+            "already supplies",
+        ),
+    ],
+)
+def test_pools_fun_proposal_receipt_rejects_authorization_drift(
+    field,
+    value,
+    match,
+):
+    row = promotion_proposal_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_pools_fun_promotion_proposal_receipt(row)

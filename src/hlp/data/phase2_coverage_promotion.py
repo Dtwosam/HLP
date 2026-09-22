@@ -386,3 +386,123 @@ def validate_phase2_pools_fun_promotion_review_receipt(
         "canonical_coverage_ledger_mutated": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+PHASE2_POOLS_FUN_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-pools-fun-promotion-proposal-v1"
+)
+
+
+def validate_phase2_pools_fun_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate proposal-only handoff before explicit canonical-ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_POOLS_FUN_PROMOTION_PROPOSAL_VERSION
+    ):
+        raise ValueError("pools.fun promotion proposal receipt version changed")
+
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="pools.fun promotion proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="pools.fun promotion review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="pools.fun promotion dispatcher control run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="pools.fun promotion run ID",
+    )
+
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="pools.fun promotion review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="pools.fun promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="pools.fun promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="pools.fun proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="pools.fun proposal base ledger",
+    )
+
+    if row.get("source_id") != "pools_fun":
+        raise ValueError("pools.fun proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("pools.fun proposal workflow identity drift")
+    if row.get("proposal_created") is not True:
+        raise ValueError("pools.fun proposal receipt lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("pools.fun proposal receipt lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("pools.fun proposal unexpectedly mutates ledger")
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError("pools.fun proposal unexpectedly authorizes ledger commit")
+    if str(row.get("ledger_commit_approval_input") or "") != (
+        "apply_proposed_ledger"
+    ):
+        raise ValueError("pools.fun proposal ledger approval input drift")
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError("pools.fun proposal already supplies ledger approval")
+
+    generated = row.get("ledger_commit_generated_inputs")
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "pools_fun",
+    }
+    if not isinstance(generated, Mapping) or dict(generated) != expected_generated:
+        raise ValueError("pools.fun proposal ledger-commit input drift")
+
+    complete_before = [
+        str(value) for value in row.get("complete_source_ids_before") or []
+    ]
+    complete_after = [
+        str(value) for value in row.get("complete_source_ids_after") or []
+    ]
+    if complete_before != ["pons_v1", "pons_v2"]:
+        raise ValueError("pools.fun proposal before-set drift")
+    if complete_after != ["pons_v1", "pons_v2", "pools_fun"]:
+        raise ValueError("pools.fun proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("pools.fun proposal unexpectedly closes Phase 2")
+
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "pools_fun",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
