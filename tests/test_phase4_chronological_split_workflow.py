@@ -45,7 +45,7 @@ def test_phase4_split_keeps_final_test_out_of_discovery_artifact():
     assert "name: phase4-validation-slice" in text
     assert "name: phase4-final-test-slice" in text
     discovery_upload = text.split(
-        "name: phase4-chronological-split",
+        "- name: Upload discovery-safe Phase-4 split bundle",
         1,
     )[1].split(
         "- name: Upload Phase-4 validation slice",
