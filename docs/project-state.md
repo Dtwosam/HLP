@@ -483,9 +483,19 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   remains draft and unmerged. The read-only
   `phase2-default-branch-dispatch-readiness` workflow now compares the actual
   default-branch workflow directory against the execution DAG and separately
-  reports first-wave and full-DAG dispatch readiness. Promoting workflow files
-  to `main` enables execution; it does **not** claim Phase-2 data coverage or
-  any later checkpoint;
+  reports first-wave and full-DAG dispatch readiness. Its live result against
+  the current default branch is **0/42 required workflows present**,
+  `phase2_first_wave_dispatch_ready=false`, and
+  `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
+  **#25** now provides the non-invasive bootstrap option: it is based directly
+  on `main`, contains exactly **42 manual Phase-2 workflow files plus one
+  safety note**, is clean/mergeable, and carries no source code or coverage
+  ledger mutation. All 42 bootstrap workflows were audited as manual-only
+  (`workflow_dispatch` present; no `push`/`pull_request` triggers).
+  After that workflow surface is merged, execution can target
+  `phase1/data-acquisition-spike` without merging the full 764-file project
+  PR first. Promoting workflow files to `main` enables execution; it does
+  **not** claim Phase-2 data coverage or any later checkpoint;
 
 - the canonical coverage ledger remains **2/14 complete**. A deterministic
   execution DAG is now prepared in `phase2_coverage_execution.py` plus the
