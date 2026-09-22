@@ -561,23 +561,35 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
 - complete historical backfills and coverage manifests for every material
   source population;
 - only after those are complete: empirical first-major-dump research, detector
-  freeze, and continuous comeback outcome labels. The research-only path
-  primitive is now implemented in `phase2_dump_research.py`: it refuses
-  non-frozen universes, derives causal trailing-peak/drawdown geometry from
-  market-cap paths only, and evaluates only explicitly supplied
-  peak/drawdown/rebound candidate specs. It deliberately emits
-  `candidate_selected=false`, `dump_threshold_frozen=false`, and
-  `outcome_labels_computed=false`; a later rally cannot rewrite an already
-  confirmed candidate event. The frozen-universe research path is now bound
-  separately in `phase2_research_paths.py`: all launchpad lifecycles remain
-  distinct, the three direct DEX populations collapse exactly once into the
-  selector-frozen canonical tape, eligible-token source membership must match
-  the frozen universe, exact duplicate events must agree on market cap, and the
-  normalized path is SHA-bound before dump geometry is computed. Missing
-  transaction indexes remain valid and sort before known same-block indexes,
-  matching existing canonical adapter semantics. This is plumbing for the
-  post-14/14 study, not a shortcut around the coverage gate or an empirically
-  frozen dump rule.
+  freeze, and continuous comeback outcome labels. That post-14/14 architecture
+  is now wired end to end but remains execution-gated by the genuine frozen
+  universe. Research rehydration starts from exact frozen-universe source
+  handoffs, preserves the 11 launchpad histories separately, collapses the
+  three direct DEX populations exactly once after the frozen multi-pool
+  selector, validates full historical tape bytes before filtering to eligible
+  tokens, and supports simple, composite, and exact Pons replay materializers.
+  The normalized canonical research path is SHA-bound in
+  `phase2_research_paths.py`. `phase2_dump_research.py` then builds streaming
+  price-path-only trailing-peak/drawdown geometry and evaluates only explicitly
+  supplied peak/drawdown/rebound candidates. Candidate research and structural
+  diagnostics remain outcome-blind and cannot select or freeze a detector.
+  Candidate events now preserve exact block/transaction/log positions for peak,
+  threshold crossing, trough and live confirmation so same-block ordering is
+  retained. A separate dispatch-only detector-freeze workflow accepts an
+  explicit candidate ID, verifies the exact candidate-research and diagnostics
+  handoffs, and only then emits `candidate_selected=true`,
+  `dump_threshold_frozen=true` and
+  `phase2_dump_detector_frozen=true`; it contains no outcome labels and has
+  no automatic ranking/winner path. `phase2_outcomes.py` and the
+  `phase2-outcome-labels` workflow are prepared behind that frozen detector:
+  post-dump magnitude is measured from the retrospective trough/base, live
+  timing and adverse excursion are measured from the confirmation event, the
+  continuous maximum post-dump multiple is retained alongside 2x/3x/5x/10x
+  milestone timing and maximum forward market cap, and tokens without a
+  confirmed first dump remain not outcome-eligible rather than being silently
+  labeled failures. These are guarded workflows only; they do not bypass the
+  still-required real 14/14 coverage completion or empirically choose a dump
+  rule before those artifacts exist.
 
 
 ### Live/current chain access
