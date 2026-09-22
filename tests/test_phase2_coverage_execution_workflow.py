@@ -64,3 +64,16 @@ def test_phase2_execution_plan_emits_real_workflow_dispatch_inputs():
     assert "workflow_text_by_name" in text
     assert "dispatchable_input_plans" in text
     assert "dispatch input plans emitted" in text
+
+
+
+def test_phase2_execution_plan_rejects_stale_run_lineage():
+    text = WORKFLOW.read_text()
+
+    assert '["git", "rev-parse", "HEAD"]' in text
+    assert "/compare/" in text
+    assert "changed_paths_since_run" in text
+    assert "lineage_status" in text
+    assert "current_head_sha=current_head" in text
+    assert "all_runs_current_or_ledger_only_ancestors" in text
+    assert "canonical-ledger-only ancestor" in text
