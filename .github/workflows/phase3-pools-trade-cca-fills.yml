@@ -331,6 +331,7 @@ jobs:
           from pathlib import Path
 
           from hlp.data.pools_trade_cca_bids import (
+              build_phase3_cca_fill_handoff,
               reconcile_cca_bid_fills,
           )
           from hlp.data.phase3_trade_adapters import (
@@ -612,6 +613,20 @@ jobs:
                   "artifacts/phase3-pools-trade-cca-fill-summary.json"
               ).read_bytes()
           ).hexdigest()
+          handoff = build_phase3_cca_fill_handoff(
+              summary,
+              summary_sha256=summary_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-pools-trade-cca-fill-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(
                   f"canonical_trade_rows_sha256="
@@ -621,6 +636,7 @@ jobs:
                   f"finalized_fills_sha256={fill_manifest['sha256']}\n"
               )
               handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
               handle.write(
                   f"canonical_trade_rows="
                   f"{canonical_manifest['records']}\n"
@@ -635,12 +651,27 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Upload compact CCA fill handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fills-handoff
+          path: |
+            artifacts/pools-trade-lbp-canonical-trades.jsonl.manifest.json
+            artifacts/pools-trade-cca-finalized-fills.jsonl.manifest.json
+            artifacts/phase3-pools-trade-cca-fill-summary.json
+            artifacts/phase3-pools-trade-cca-fill-handoff.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Publish CCA fill identity
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           CANONICAL_SHA: ${{ steps.merge.outputs.canonical_trade_rows_sha256 }}
           FILLS_SHA: ${{ steps.merge.outputs.finalized_fills_sha256 }}
           SUMMARY_SHA: ${{ steps.merge.outputs.summary_sha256 }}
+          HANDOFF_SHA: ${{ steps.merge.outputs.handoff_sha256 }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
           ROWS: ${{ steps.merge.outputs.canonical_trade_rows }}
         run: |
           set -euo pipefail
@@ -653,6 +684,9 @@ jobs:
             echo "- canonical_trade_rows_sha256: ${CANONICAL_SHA}"
             echo "- finalized_fills_sha256: ${FILLS_SHA}"
             echo "- summary_sha256: ${SUMMARY_SHA}"
+            echo "- handoff_artifact_name: phase3-pools-trade-cca-fills-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA}"
             echo "- canonical_trade_rows: ${ROWS}"
             echo "- wallet_identity_kind: cca_bid_owner"
             echo "- historical_event_scan_complete: true"

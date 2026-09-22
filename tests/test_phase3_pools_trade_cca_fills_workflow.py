@@ -37,3 +37,13 @@ def test_cca_fill_backfill_is_fail_closed_not_source_complete():
     assert "phase2-outcome-labels" not in text
     assert "git push" not in text
     assert "contents: write" not in text
+
+
+
+def test_cca_fill_backfill_publishes_compact_handoff():
+    text = WORKFLOW.read_text()
+
+    assert "build_phase3_cca_fill_handoff" in text
+    assert "phase3-pools-trade-cca-fill-handoff.json" in text
+    assert "phase3-pools-trade-cca-fills-handoff" in text
+    assert "handoff_sha256" in text
