@@ -6,6 +6,7 @@ from hlp.data.phase2_first_wave import (
     PHASE2_FIRST_WAVE_LAUNCH_VERSION,
     PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS,
     PHASE2_FIRST_WAVE_NODE_IDS,
+    validate_phase2_archive_fanout_launch,
     validate_phase2_first_wave_completion,
     validate_phase2_first_wave_launch,
 )
@@ -195,3 +196,71 @@ def test_first_wave_rejects_existing_execution_credit_or_extra_dispatch_node():
     })
     with pytest.raises(ValueError, match="exactly the two"):
         validate_phase2_first_wave_launch(execution, dispatch)
+
+
+
+def fanout_plans():
+    execution = {
+        "canonical_complete_source_ids": ["pons_v1", "pons_v2"],
+        "complete_sources": 2,
+        "incomplete_sources": 12,
+        "phase2_universe_coverage_complete": False,
+        "completed_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
+        "ready_to_dispatch_node_ids": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+    }
+    dispatch = {
+        "run_id_inputs_generated_from_verified_receipts": True,
+        "non_run_inputs_left_explicit": True,
+        "workflow_dispatch_performed": False,
+        "nodes": [
+            {
+                "node_id": node_id,
+                "workflow": f"{node_id.replace(':', '-')}.yml",
+                "status": "ready_to_dispatch",
+                "run_id_inputs": {},
+                "remaining_manual_inputs": [],
+                "all_dispatch_input_names": [],
+                "requires_archive_secret": True,
+                "requires_explicit_approval": False,
+            }
+            for node_id in PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ],
+    }
+    return execution, dispatch
+
+
+def test_archive_fanout_accepts_exact_zero_input_post_first_wave_state():
+    execution, dispatch = fanout_plans()
+    report = validate_phase2_archive_fanout_launch(
+        execution,
+        dispatch,
+    )
+
+    assert report["fanout_nodes"] == 13
+    assert report["manual_inputs_required"] is False
+    assert report["approval_gated_nodes_present"] is False
+    assert report["canonical_ledger_write_authorized"] is False
+    assert report["archive_fanout_launch_authorized"] is True
+
+
+def test_archive_fanout_rejects_ready_set_drift():
+    execution, dispatch = fanout_plans()
+    execution["ready_to_dispatch_node_ids"].remove(
+        "shared:v3_initialize"
+    )
+    with pytest.raises(ValueError, match="ready-node set drift"):
+        validate_phase2_archive_fanout_launch(execution, dispatch)
+
+
+def test_archive_fanout_rejects_manual_input_or_secret_drift():
+    execution, dispatch = fanout_plans()
+    dispatch["nodes"][0]["remaining_manual_inputs"] = ["unexpected"]
+    with pytest.raises(ValueError, match="manual inputs"):
+        validate_phase2_archive_fanout_launch(execution, dispatch)
+
+    execution, dispatch = fanout_plans()
+    dispatch["nodes"][0]["requires_archive_secret"] = False
+    with pytest.raises(ValueError, match="lost archive-secret gate"):
+        validate_phase2_archive_fanout_launch(execution, dispatch)

@@ -280,3 +280,136 @@ def validate_phase2_first_wave_completion(
         "canonical_coverage_sources_unchanged": True,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def validate_phase2_archive_fanout_launch(
+    execution_plan: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Validate the exact post-first-wave zero-input archive fan-out."""
+
+    execution = dict(execution_plan)
+    dispatch = dict(dispatch_plan)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 archive fan-out requires the exact Pons-only "
+            "canonical completion set"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 archive fan-out requires exactly 2 complete sources"
+        )
+    if int(execution.get("incomplete_sources", -1)) != 12:
+        raise ValueError(
+            "Phase-2 archive fan-out requires exactly 12 incomplete sources"
+        )
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError(
+            "Phase-2 archive fan-out must precede universe completion"
+        )
+
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    if not isinstance(completed, list) or not isinstance(ready, list):
+        raise ValueError(
+            "Phase-2 archive fan-out plan lacks node-state lists"
+        )
+    if sorted(completed) != sorted(PHASE2_FIRST_WAVE_NODE_IDS):
+        raise ValueError(
+            "Phase-2 archive fan-out requires exactly the two credited "
+            f"first-wave nodes: {sorted(completed)}"
+        )
+    if sorted(ready) != sorted(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS):
+        raise ValueError(
+            "Phase-2 archive fan-out ready-node set drift: "
+            f"{sorted(ready)}"
+        )
+
+    if dispatch.get("run_id_inputs_generated_from_verified_receipts") is not True:
+        raise ValueError(
+            "Phase-2 archive fan-out lacks verified dependency run inputs"
+        )
+    if dispatch.get("non_run_inputs_left_explicit") is not True:
+        raise ValueError(
+            "Phase-2 archive fan-out hides unresolved manual inputs"
+        )
+    if dispatch.get("workflow_dispatch_performed") is not False:
+        raise ValueError(
+            "Phase-2 archive fan-out dispatch plan already claims dispatch"
+        )
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError("Phase-2 archive fan-out dispatch rows are missing")
+    by_id = {
+        str(row.get("node_id") or ""): dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS):
+        raise ValueError(
+            "Phase-2 archive fan-out dispatch plan must contain exactly the "
+            f"13 expected nodes: {sorted(by_id)}"
+        )
+
+    validated = []
+    for node_id in PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS:
+        row = by_id[node_id]
+        if str(row.get("status") or "") != "ready_to_dispatch":
+            raise ValueError(
+                f"Phase-2 archive fan-out node is not ready: {node_id}"
+            )
+        if row.get("requires_explicit_approval") is not False:
+            raise ValueError(
+                f"Phase-2 archive fan-out node requires approval: {node_id}"
+            )
+        if row.get("requires_archive_secret") is not True:
+            raise ValueError(
+                f"Phase-2 archive fan-out node lost archive-secret gate: "
+                f"{node_id}"
+            )
+        if dict(row.get("run_id_inputs") or {}):
+            raise ValueError(
+                f"Phase-2 archive fan-out node unexpectedly has run inputs: "
+                f"{node_id}"
+            )
+        if list(row.get("remaining_manual_inputs") or []):
+            raise ValueError(
+                f"Phase-2 archive fan-out node unexpectedly has manual "
+                f"inputs: {node_id}"
+            )
+        if list(row.get("all_dispatch_input_names") or []):
+            raise ValueError(
+                f"Phase-2 archive fan-out target workflow unexpectedly has "
+                f"dispatch inputs: {node_id}"
+            )
+        workflow = str(row.get("workflow") or "")
+        if not workflow.endswith(".yml"):
+            raise ValueError(
+                f"Phase-2 archive fan-out workflow identity invalid: "
+                f"{node_id}"
+            )
+        validated.append({
+            "node_id": node_id,
+            "workflow": workflow,
+            "requires_archive_secret": True,
+        })
+
+    return {
+        "version": "phase2-archive-fanout-launch-v1",
+        "complete_sources": 2,
+        "incomplete_sources": 12,
+        "credited_first_wave_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
+        "archive_fanout_node_ids": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+        "archive_fanout_nodes": validated,
+        "fanout_nodes": len(validated),
+        "manual_inputs_required": False,
+        "approval_gated_nodes_present": False,
+        "canonical_ledger_write_authorized": False,
+        "archive_fanout_launch_authorized": True,
+    }
