@@ -73,3 +73,14 @@ def test_first_wave_launcher_reconciles_dispatch_attempt_and_final_receipt():
     assert "attempt_file_sha256=hashlib.sha256(" in text
     assert "lacks " in text
     assert "attempt/final evidence" in text
+
+
+
+def test_first_wave_launcher_publishes_immutable_handoff_identity():
+    text = WORKFLOW.read_text()
+
+    assert '"first_wave_control_run_id": int(' in text
+    assert 'os.environ["GITHUB_RUN_ID"]' in text
+    assert "id: upload" in text
+    assert "steps.upload.outputs.artifact-digest" in text
+    assert "first_wave_artifact_digest: ${FIRST_WAVE_ARTIFACT_DIGEST}" in text
