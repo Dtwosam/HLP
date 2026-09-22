@@ -60,3 +60,27 @@ def test_node_dispatch_receipt_records_control_run_identity():
     assert '"node_dispatch_control_run_id": int(' in text
     assert 'os.environ["GITHUB_RUN_ID"]' in text
     assert "node_dispatch_control_run_id: ${GITHUB_RUN_ID}" in text
+
+
+
+def test_node_dispatch_workflow_blocks_same_planner_node_duplicates():
+    text = WORKFLOW.read_text()
+
+    assert "validate_phase2_node_dispatch_attempt" in text
+    assert "validate_phase2_node_dispatch_receipt" in text
+    assert "actions/artifacts?" in text
+    assert "name=phase2-execution-node-dispatch" in text
+    assert "prior same-planner/node dispatch identity drift" in text
+    assert "Phase-2 node was already dispatched from this planner" in text
+    assert "refresh the planner before retrying" in text
+
+
+def test_node_dispatch_workflow_persists_attempt_before_target_verification():
+    text = WORKFLOW.read_text()
+
+    assert "phase2-execution-node-dispatch-attempt-v1" in text
+    assert "target_run_identity_verified" in text
+    assert "phase2-execution-node-dispatch-attempt.json" in text
+    assert "dispatch_attempt_sha256" in text
+    assert "if: always()" in text
+    assert "if-no-files-found: warn" in text
