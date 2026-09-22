@@ -64,6 +64,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import hashlib
           import json
           import os
           import subprocess
@@ -193,14 +194,17 @@ jobs:
               json.dumps(verified, indent=2, sort_keys=True) + "\n"
           )
 
-          ledger = json.loads(
-              Path(".github/phase2-source-coverage.json").read_text()
-          )
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_bytes = ledger_path.read_bytes()
+          ledger_sha256 = hashlib.sha256(ledger_bytes).hexdigest()
+          ledger = json.loads(ledger_bytes)
           plan = build_phase2_coverage_execution_plan(
               ledger,
               build_phase2_source_inventory(),
               completed_node_ids=verified["completed_node_ids"],
           )
+          plan["canonical_coverage_ledger_sha256"] = ledger_sha256
+          plan["planner_head_sha"] = current_head
           output = Path(
               "artifacts/phase2-coverage-execution-plan.json"
           )
@@ -276,6 +280,8 @@ jobs:
           print(json.dumps({
               "complete_sources": plan["complete_sources"],
               "incomplete_sources": plan["incomplete_sources"],
+              "canonical_coverage_ledger_sha256": ledger_sha256,
+              "planner_head_sha": current_head,
               "ready_to_dispatch_node_ids": ready,
               "ready_requiring_archive_secret_node_ids": ready_secret,
               "ready_without_archive_secret_node_ids": ready_public,
