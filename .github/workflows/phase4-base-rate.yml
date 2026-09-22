@@ -1,0 +1,344 @@
+name: phase4-base-rate
+
+on:
+  workflow_dispatch:
+    inputs:
+      discovery_entry_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-discovery-entry
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-base-rate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DISCOVERY_ENTRY_HANDOFF_JSON: ${{ inputs.discovery_entry_handoff_json }}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: base_rate
+        name: Build Phase-4 population base-rate report
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase4_base_rate import (
+              build_phase4_base_rate_handoff,
+              build_phase4_base_rate_report,
+          )
+          from hlp.data.phase4_discovery_entry import (
+              build_phase4_discovery_entry_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor():
+              try:
+                  value = json.loads(
+                      os.environ["DISCOVERY_ENTRY_HANDOFF_JSON"]
+                  )
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(
+                      "Phase-4 discovery-entry descriptor must be an object"
+                  )
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry run_id is invalid"
+                  ) from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry handoff_sha256 is invalid"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry digest/SHA is not hexadecimal"
+                  ) from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label="Phase-4 discovery entry",
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"Phase-4 discovery entry: {exc}"
+                  ) from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          run_id, digest, expected_handoff_sha = descriptor()
+          root = Path("inputs/discovery-entry")
+          download_named(
+              run_id,
+              "phase4-discovery-entry",
+              root,
+              digest,
+          )
+
+          rows_path = find_unique(
+              root,
+              "phase4-discovery-entry.jsonl",
+          )
+          manifest_path = find_unique(
+              root,
+              "phase4-discovery-entry.jsonl.manifest.json",
+          )
+          manifest = json.loads(manifest_path.read_text())
+          summary_path = find_unique(
+              root,
+              "phase4-discovery-entry-summary.json",
+          )
+          summary = json.loads(summary_path.read_text())
+          summary_sha = sha256_path(summary_path)
+          handoff_path = find_unique(
+              root,
+              "phase4-discovery-entry-handoff.json",
+          )
+          handoff_sha = sha256_path(handoff_path)
+          if handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-4 discovery-entry handoff SHA drift"
+              )
+          handoff = json.loads(handoff_path.read_text())
+          rebuilt = build_phase4_discovery_entry_handoff(
+              summary,
+              discovery_summary_sha256=summary_sha,
+              phase2_dataset_handoff_sha256=summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              feature_store_handoff_sha256=summary[
+                  "feature_store_handoff_sha256"
+              ],
+              feature_coverage_handoff_sha256=summary[
+                  "feature_coverage_handoff_sha256"
+              ],
+              feature_entry_handoff_sha256=summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt != handoff:
+              raise SystemExit(
+                  "Phase-4 discovery-entry handoff content drift"
+              )
+          if manifest.get("sha256") != handoff["discovery_rows_sha256"]:
+              raise SystemExit(
+                  "Phase-4 discovery-entry manifest SHA drift"
+              )
+          if int(manifest.get("records", -1)) != int(
+              handoff["discovery_subjects"]
+          ):
+              raise SystemExit(
+                  "Phase-4 discovery-entry subject count drift"
+              )
+
+          report = build_phase4_base_rate_report(
+              iter_validated_jsonl(rows_path, manifest_path),
+              discovery_entry_handoff=handoff,
+          )
+          report.update({
+              "discovery_entry_run_id": run_id,
+              "discovery_entry_handoff_sha256": handoff_sha,
+          })
+          report_path = Path(
+              "artifacts/phase4-base-rate-report.json"
+          )
+          report_text = json.dumps(
+              report,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(report_text.encode()).hexdigest()
+
+          output_handoff = build_phase4_base_rate_handoff(
+              report,
+              report_sha256=report_sha,
+              discovery_entry_handoff_sha256=handoff_sha,
+          )
+          output_handoff_path = Path(
+              "artifacts/phase4-base-rate-handoff.json"
+          )
+          output_handoff_text = json.dumps(
+              output_handoff,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          output_handoff_path.write_text(output_handoff_text)
+          output_handoff_sha = hashlib.sha256(
+              output_handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+              handle.write(
+                  f"handoff_sha256={output_handoff_sha}\n"
+              )
+              handle.write(
+                  f"subjects={report['discovery_subjects']}\n"
+              )
+              handle.write(
+                  f"positives={report['comeback_5x_tokens']}\n"
+              )
+              handle.write(
+                  f"base_rate={report['comeback_5x_base_rate']}\n"
+              )
+          print(json.dumps({
+              "base_rate_report_sha256": report_sha,
+              "discovery_subjects": report["discovery_subjects"],
+              "comeback_5x_tokens": report["comeback_5x_tokens"],
+              "comeback_5x_base_rate": report["comeback_5x_base_rate"],
+              "winner_failure_frequencies_reported": True,
+              "feature_relationships_tested": False,
+              "signal_promoted": False,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-4 base-rate report
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-base-rate
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 base-rate identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.base_rate.outputs.report_sha256 }}
+          HANDOFF_SHA256: ${{ steps.base_rate.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.base_rate.outputs.subjects }}
+          POSITIVES: ${{ steps.base_rate.outputs.positives }}
+          BASE_RATE: ${{ steps.base_rate.outputs.base_rate }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 base-rate report"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-base-rate"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- report_sha256: ${REPORT_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- discovery_subjects: ${SUBJECTS}"
+            echo "- comeback_5x_tokens: ${POSITIVES}"
+            echo "- comeback_5x_base_rate: ${BASE_RATE}"
+            echo "- winner_failure_frequencies_reported: true"
+            echo "- continuous_outcome_distribution_reported: true"
+            echo "- feature_relationships_tested: false"
+            echo "- signal_promoted: false"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
