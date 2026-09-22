@@ -23,6 +23,7 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-after-post-fanout-wave-completion.yml",
     "phase2-pre-selector-wave-launch.yml",
     "phase2-pre-selector-wave-completion.yml",
+    "phase2-direct-selector-approval-handoff.yml",
     "phase2-archive-fanout-launch.yml",
     "phase2-archive-fanout-completion.yml",
     "phase2-post-fanout-wave-launch.yml",
