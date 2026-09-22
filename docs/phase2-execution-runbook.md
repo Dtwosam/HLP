@@ -256,7 +256,116 @@ The launcher stops immediately after the nine targets are created. It does not
 wait for them, promote coverage, approve the direct-market selector or write
 the canonical ledger.
 
-## 6. Coverage proposal and promotion
+## 6. Complete the nine-node wave and launch the seven-node wave
+
+After all nine targets from `phase2-post-fanout-wave-launch` succeed, run
+`phase2-post-fanout-wave-completion` with its exact launch run ID/artifact
+digest and `confirm_completion_refresh=true`.
+
+The completion collector must reconcile the original 15 dispatcher receipts
+plus the nine new dispatcher receipts: **24 total**. Its refreshed planner then
+holds `promote:pools_fun` and exposes exactly seven generated-input nodes:
+
+- Doppler source coverage;
+- Flap source coverage;
+- pools.trade Instant source coverage;
+- pools.trade LBP CCA derivation;
+- trench LimitReach-to-market evidence;
+- the direct-market competition cohort;
+- direct-origin attribution.
+
+Launch those seven with `phase2-after-post-fanout-wave-launch`, then after
+their real target runs succeed, close the stage with
+`phase2-after-post-fanout-wave-completion`. The refreshed planner must consume
+**31** dispatcher control receipts and expose exactly four automatic nodes while
+still holding `promote:pools_fun`.
+
+## 7. Run the four-node pre-selector wave
+
+Run `phase2-pre-selector-wave-launch` from the exact seven-node completion
+handoff. It dispatches only:
+
+- direct selector-quality evidence;
+- direct-launch population;
+- pools.trade LBP source coverage;
+- trench handoff freeze.
+
+After those four real targets succeed, run
+`phase2-pre-selector-wave-completion`. The planner must now consume exactly
+**35** dispatcher control receipts and expose three distinct classes:
+
+- ordinary generated-input work: `coverage:trench_today`;
+- operator-held promotion: `promote:pools_fun`;
+- explicit approval gate: `shared:direct_selector_freeze`.
+
+No workflow at this stage may infer selector approval from successful evidence.
+
+## 8. Review and explicitly approve the direct selector
+
+First run `phase2-direct-selector-approval-handoff` with the exact
+pre-selector completion run/artifact. This workflow is read-only. It validates
+the selector-quality evidence, its final-file hashes and the planner gate, then
+publishes the exact freeze inputs:
+
+- evidence run ID;
+- evidence artifact digest;
+- evidence handoff SHA-256.
+
+It explicitly leaves `freeze_active_quote_liquidity_causal_v1` unset.
+
+After reviewing the evidence, the human approval path is
+`phase2-direct-selector-approved-freeze`. Supply:
+
+- the exact selector-approval-handoff run ID;
+- its exact artifact digest;
+- `approve_freeze=true`.
+
+That workflow is the only orchestration layer allowed to turn the review into
+the frozen `active-quote-liquidity-causal-v1` selector. It validates the
+resulting descriptor, preserves `source_coverage_complete=false`, and refreshes
+the planner. The expected post-freeze boundary is **36 completed execution
+nodes**, no remaining selector approval node, exactly two automatic nodes
+(`shared:direct_source_population` and `coverage:trench_today`) and the
+still-held pools.fun promotion.
+
+## 9. Complete the post-selector two-node wave
+
+Run `phase2-post-selector-wave-launch` from the immutable approved-freeze
+handoff. It dispatches only direct-source population and trench.today coverage
+through the duplicate-safe dispatcher and stops before either target finishes.
+
+After both real target runs succeed, run
+`phase2-post-selector-wave-completion`. The collector combines **35 prior + 2
+new = 37** dispatcher receipts plus the approved selector run and refreshes the
+planner. Exactly three automatic nodes must then be ready:
+
+- `coverage:direct_uniswap_v3`;
+- `coverage:direct_sushiswap_v3`;
+- `coverage:direct_uniswap_v4`.
+
+`promote:pools_fun` remains held for operator review.
+
+## 10. Complete direct DEX coverage and stop at the promotion frontier
+
+Run `phase2-direct-coverage-wave-launch` from the exact post-selector
+completion handoff. It dispatches the three direct DEX coverage nodes and stops
+before their targets finish.
+
+After all three real target runs succeed, run
+`phase2-direct-coverage-wave-completion`. The resulting planner must prove:
+
+- **41 completed execution nodes**;
+- **40 duplicate-safe dispatcher control receipts**;
+- the approved direct selector still bound to its exact evidence;
+- zero automatic acquisition nodes remaining;
+- zero outstanding selector approval nodes;
+- only `promote:pools_fun` ready.
+
+This is the end of the automatic acquisition/derivation path. The canonical
+source-coverage ledger is still **2/14** here. Do not interpret successful
+coverage workflows as canonical source acceptance.
+
+## 11. Coverage proposal and promotion
 
 When a source-coverage node succeeds, refresh the planner with its dispatcher
 receipt. The corresponding `promote:<source_id>` node becomes ready.
@@ -268,7 +377,7 @@ promotion because it does not mutate the canonical ledger.
 A successful promotion emits a SHA-bound proposed replacement ledger; it does
 not update `.github/phase2-source-coverage.json`.
 
-## 7. Canonical ledger commit — explicit stop
+## 12. Canonical ledger commit — explicit stop
 
 `ledger_commit:<source_id>` is deliberately **not** dispatchable through
 `phase2-execution-node-dispatch`.
@@ -293,7 +402,7 @@ After a successful canonical ledger commit, **rerun the planner**. Never reuse
 a pre-commit planner artifact. Earlier dependency target runs can remain valid
 because the planner explicitly permits canonical-ledger-only branch drift.
 
-## 8. Direct-market selector — explicit stop
+## 13. Direct-market selector — explicit stop
 
 `shared:direct_selector_freeze` is also excluded from the generic node
 dispatcher because it requires explicit research approval.
@@ -304,7 +413,7 @@ selector. Do not infer approval from a successful evidence workflow.
 After the approved selector-freeze run succeeds, feed its run identity back
 through the normal planner receipt path.
 
-## 9. Repeat until 14/14
+## 14. Repeat until 14/14
 
 Continue the cycle:
 

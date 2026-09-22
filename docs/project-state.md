@@ -486,21 +486,21 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   reports first-wave and full-DAG dispatch readiness. It now hashes each
   required workflow's complete `workflow_dispatch` block, so a stale or
   incompatible default-branch interface cannot pass on filename alone. Its live
-  result against the current default branch is **0/47 required workflows
+  result against the current default branch is **0/58 required workflows
   present**, **0 incompatible present interfaces**,
   `phase2_first_wave_dispatch_ready=false`, and
   `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
   **#25** provides the non-invasive bootstrap option: it is based directly on
-  `main`, contains exactly **47 manual Phase-2 workflow files plus one safety
-  note**, and carries no source code or coverage-ledger mutation. **46/47**
+  `main`, contains exactly **58 manual Phase-2 workflow files plus one safety
+  note**, and carries no source code or coverage-ledger mutation. **57/58**
   bootstrap workflows are byte-for-byte identical to the current compatibility
   target; the planner copy differs only by removing its automatic branch/PR
-  triggers while preserving the exact manual-dispatch interface. All 47
+  triggers while preserving the exact manual-dispatch interface. All 58
   bootstrap workflows are manual-only on that branch
   (`workflow_dispatch` present; no `push`/`pull_request` triggers). The
-  machine compatibility gate has now passed on the full **47/47** surface with
-  bootstrap HEAD `347e7011` and workflow-surface SHA-256
-  `0aa8e4f6d590f5fe5ed0642e8c8aa1bcaced7063a9c3130d32b04ebe812a70df`;
+  machine compatibility gate has now passed on the full **58/58** workflow surface with
+  workflow-surface SHA-256
+  `70c15facad012c81aa4edc6f49862d038bbac92e24eb5f80b65c37dd95e80807`;
   there were zero content or manual-interface mismatches.
   After that workflow surface is merged, execution can target
   `phase1/data-acquisition-spike` without merging the full 764-file project
@@ -593,7 +593,46 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   through the duplicate-safe dispatcher using planner-generated dependency run
   IDs, reconciles every attempt/final receipt pair and records the nine target
   run IDs. It does not launch the hood.fun promotion, wait for target
-  completion, approve the selector or mutate the canonical ledger.
+  completion, approve the selector or mutate the canonical ledger. The matching
+  completion collector verifies all nine real targets and regenerates the
+  planner from **24** dispatcher receipts. That boundary exposes exactly seven
+  generated-input nodes: Doppler, Flap and pools.trade Instant coverage,
+  pools.trade LBP CCA derivation, trench direct-market evidence, the direct
+  competition cohort and direct-origin attribution. The
+  `phase2-after-post-fanout-wave-launch` / completion pair dispatches and
+  verifies those seven, producing a **31-receipt** planner whose next automatic
+  set is exactly four nodes: direct selector-quality evidence, direct-launch
+  population, pools.trade LBP coverage and trench handoff freeze.
+
+  A separate four-node `phase2-pre-selector-wave-launch` / completion pair
+  carries that planner to the explicit selector boundary. After those four real
+  targets succeed, the planner has **35** duplicate-safe dispatcher receipts,
+  keeps `promote:pools_fun` operator-held, exposes trench.today coverage as a
+  normal generated-input node, and marks only
+  `shared:direct_selector_freeze` as awaiting explicit approval. The
+  read-only `phase2-direct-selector-approval-handoff` validates the exact
+  real-market quality evidence and publishes the immutable selector inputs but
+  deliberately leaves the freeze boolean unset. The separate
+  `phase2-direct-selector-approved-freeze` workflow requires a future human
+  `approve_freeze=true`, binds that approval to the exact review handoff and
+  evidence, verifies the frozen
+  `active-quote-liquidity-causal-v1` descriptor, and refreshes the planner.
+  No selector decision is inferred from research evidence alone.
+
+  After an approved selector freeze, the planner has **36** completed execution
+  nodes and exposes exactly two generated-input nodes:
+  `shared:direct_source_population` and `coverage:trench_today`. The
+  `phase2-post-selector-wave-launch` / completion pair verifies those two real
+  targets, combines **37** dispatcher receipts plus the approved selector run,
+  and exposes exactly the three direct DEX coverage nodes. The final automatic
+  `phase2-direct-coverage-wave-launch` / completion pair verifies those three
+  histories and freezes the **promotion frontier**: **41 completed execution
+  nodes**, **40 dispatcher receipts**, zero remaining automatic acquisition
+  nodes, zero selector approvals, and only `promote:pools_fun` ready. The
+  canonical coverage ledger is still intentionally **2/14** at that boundary;
+  source coverage is not accepted until each serialized promotion and explicit
+  ledger commit advances the canonical ledger.
+
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
