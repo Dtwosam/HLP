@@ -34,9 +34,12 @@ The project does not begin with assumptions such as “holders must rise” or �
 
 ## Current phase
 
-Phase 1 — Historical/Live Data Acquisition Spike.
+Phase 2 — Chain-Wide Universe & Outcome Dataset.
 
-Phase 0 source-of-truth and free-data viability passed. The current gate is to
-finish the complete causal Pons >=$100k universe and prove the required
-historical acquisition/reconstruction path remains reproducible at $0 before
-Phase 2 dataset construction begins.
+Phase 1 data viability is accepted at checkpoint
+`hlp-v1-phase1-data-viability` (canonical acceptance run **35601191874** on
+2026-09-21). The current execution gate is the real 14-source Phase-2 coverage,
+frozen universe/detector, and immutable outcome dataset. Guarded Phase-3
+feature-store and early Phase-4 discovery plumbing may be prepared in code, but
+neither later checkpoint is claimed until its required upstream artifacts have
+actually executed and passed.

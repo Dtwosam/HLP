@@ -671,8 +671,9 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   lifecycle and early-recipient contracts/workflows are tested. Full-universe transfer
   execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
   verified 200-block keyless filtered-log route is rejected for this job rather
-  than launching an impractical millions-request backfill. The participant-type workflow likewise requires authenticated archive state
-  for its historical `eth_getCode` evidence. The equal-family-coverage and
+  than launching an impractical millions-request backfill. The participant-type
+  workflow likewise requires authenticated archive state for its historical
+  `eth_getCode` evidence. The equal-family-coverage and
   feature-staging workflows now require all eleven implemented families,
   giving a prepared **87-feature** label-free bundle at
   exactly matched subject cutoffs. The staging bundle validates every value
@@ -689,6 +690,26 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   liquidity/depth and price-impact/absorption families remain deferred until
   their required historical inputs can be represented without weak proxies or
   future leakage.
+- guarded Phase-4 entry and base-rate plumbing is now prepared behind the final
+  Phase-3 checkpoint; this does **not** advance the current execution phase or
+  claim `hlp-v1-phase4-discovery`. Phase 4 is the first place outcome labels
+  may meet feature values. `phase4_discovery_entry.py` and its dispatch-only
+  workflow rebuild and SHA-check the exact Phase-2 dataset, Phase-3 feature
+  entry, equal-coverage and final feature-store handoffs before joining them.
+  The join requires the feature-store subject set to equal the confirmed-dump /
+  outcome-eligible set, requires every feature cutoff to equal the exact
+  confirmation block/transaction/log event, preserves Phase-2 universe context
+  outside `feature_values`, and records
+  `labels_joined_after_feature_freeze=true`,
+  `feature_values_mutated=false` and
+  `phase4_discovery_checkpoint_claimed=false`. A separate guarded
+  `phase4-base-rate` artifact reports winner/failure frequency, 2x/3x/5x/10x
+  milestone prevalence, the observed continuous maximum post-dump-multiple
+  distribution and snapshot censoring before testing any feature relationship.
+  That report explicitly keeps `feature_relationships_tested=false` and
+  `signal_promoted=false`; univariate/interaction discovery and chronological
+  unseen-slice validation remain future Phase-4 work after the real upstream
+  checkpoints exist.
 
 
 ### Live/current chain access
