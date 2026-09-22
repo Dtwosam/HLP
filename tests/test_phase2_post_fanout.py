@@ -19,6 +19,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_after_post_fanout_wave_completion_receipt,
     validate_phase2_after_post_fanout_wave_launch_receipt,
     validate_phase2_pre_selector_wave_completion,
+    validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
     validate_phase2_post_fanout_wave_completion,
     validate_phase2_post_fanout_wave_completion_receipt,
@@ -610,3 +611,49 @@ def test_pre_selector_completion_rejects_missing_selector_approval_gate():
             verified,
             dispatch,
         )
+
+
+
+def pre_selector_launch_receipt():
+    return {
+        "version": "phase2-pre-selector-wave-launch-receipt-v1",
+        "pre_selector_control_run_id": 16001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "after_post_fanout_wave_completion_run_id": 16002,
+        "after_post_fanout_wave_completion_artifact_digest": (
+            "sha256:" + "ef" * 32
+        ),
+        "planner_run_id": 16003,
+        "planner_artifact_digest": "sha256:" + "12" * 32,
+        "node_dispatch_control_run_ids": {
+            node_id: 16100 + index
+            for index, node_id in enumerate(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        },
+        "target_run_ids": {
+            node_id: 16200 + index
+            for index, node_id in enumerate(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        },
+        "auto_node_ids": list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": 4,
+        "target_runs_waited_for_completion": False,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_pre_selector_launch_receipt_validates_four_node_handoff():
+    report = validate_phase2_pre_selector_wave_launch_receipt(
+        pre_selector_launch_receipt()
+    )
+    assert report["pre_selector_control_run_id"] == 16001
+    assert report["target_runs_created"] == 4
+    assert report["pools_fun_promotion_held_for_operator"] is True

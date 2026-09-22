@@ -1366,3 +1366,129 @@ def validate_phase2_pre_selector_wave_completion(
         "coverage_promotion_performed": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def validate_phase2_pre_selector_wave_launch_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable four-node pre-selector launch handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-pre-selector-wave-launch-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector launch receipt version changed"
+        )
+
+    control_run_id = int(row.get("pre_selector_control_run_id") or 0)
+    completion_run_id = int(
+        row.get("after_post_fanout_wave_completion_run_id") or 0
+    )
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(control_run_id, completion_run_id, planner_run_id) <= 0:
+        raise ValueError(
+            "Phase-2 pre-selector launch receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 pre-selector launch receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 pre-selector launch head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 pre-selector launch coverage ledger",
+    )
+    completion_digest = _post_fanout_artifact_digest(
+        row.get("after_post_fanout_wave_completion_artifact_digest"),
+        label="Phase-2 seven-node completion artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 pre-selector planner artifact",
+    )
+
+    controls = _post_fanout_run_map(
+        row.get("node_dispatch_control_run_ids"),
+        label="Phase-2 pre-selector control runs",
+        expected_nodes=PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+    )
+    targets = _post_fanout_run_map(
+        row.get("target_run_ids"),
+        label="Phase-2 pre-selector target runs",
+        expected_nodes=PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+    )
+    auto_nodes = row.get("auto_node_ids")
+    if (
+        not isinstance(auto_nodes, list)
+        or sorted(str(value) for value in auto_nodes)
+        != sorted(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector launch receipt auto-node drift"
+        )
+    manual_nodes = row.get("manual_promotion_node_ids")
+    if manual_nodes != list(PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 pre-selector launch promotion-hold drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 pre-selector launch did not hold pools.fun promotion"
+        )
+    if int(row.get("target_runs_created", -1)) != len(
+        PHASE2_PRE_SELECTOR_AUTO_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector launch target count drift"
+        )
+
+    for field in (
+        "target_runs_waited_for_completion",
+        "coverage_promotion_performed",
+        "selector_approval_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 pre-selector launch receipt violates {field}"
+            )
+    if row.get("workflow_dispatch_performed") is not True:
+        raise ValueError(
+            "Phase-2 pre-selector launch receipt lacks dispatch proof"
+        )
+
+    return {
+        "version": "phase2-pre-selector-wave-launch-receipt-v1",
+        "pre_selector_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "after_post_fanout_wave_completion_run_id": completion_run_id,
+        "after_post_fanout_wave_completion_artifact_digest": (
+            completion_digest
+        ),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "node_dispatch_control_run_ids": controls,
+        "target_run_ids": targets,
+        "auto_node_ids": list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": len(targets),
+        "target_runs_waited_for_completion": False,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
