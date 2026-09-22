@@ -82,6 +82,8 @@ jobs:
           )
           from hlp.data.phase2_execution_dispatch import (
               build_phase2_node_dispatch_request,
+              validate_phase2_node_dispatch_attempt,
+              validate_phase2_node_dispatch_receipt,
           )
 
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -90,6 +92,7 @@ jobs:
               ["git", "rev-parse", "HEAD"],
               text=True,
           ).strip().lower()
+          current_control_run_id = int(os.environ["GITHUB_RUN_ID"])
 
           try:
               planner_run_id = int(os.environ["PLANNER_RUN_ID"])
@@ -330,6 +333,176 @@ jobs:
                   "default-branch workflow_dispatch interface drift"
               )
 
+          inputs_hash = hashlib.sha256(
+              json.dumps(
+                  request["inputs"],
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ).encode()
+          ).hexdigest()
+
+          prior_root = Path("upstream/prior-dispatches")
+          if prior_root.exists():
+              shutil.rmtree(prior_root)
+          prior_root.mkdir(parents=True)
+          duplicate = None
+          page = 1
+          while True:
+              artifact_page = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/artifacts?"
+                          "name=phase2-execution-node-dispatch"
+                          f"&per_page=100&page={page}"
+                      ),
+                  ])
+              )
+              artifacts = artifact_page.get("artifacts", [])
+              if not isinstance(artifacts, list):
+                  raise SystemExit(
+                      "node-dispatch artifact listing is invalid"
+                  )
+              for artifact in artifacts:
+                  if artifact.get("expired"):
+                      continue
+                  workflow_run = artifact.get("workflow_run") or {}
+                  try:
+                      prior_control_run_id = int(
+                          workflow_run.get("id") or 0
+                      )
+                  except (TypeError, ValueError):
+                      prior_control_run_id = 0
+                  if (
+                      prior_control_run_id <= 0
+                      or prior_control_run_id == current_control_run_id
+                  ):
+                      continue
+
+                  prior_run = json.loads(
+                      subprocess.check_output([
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          (
+                              f"/repos/{repo}/actions/runs/"
+                              f"{prior_control_run_id}"
+                          ),
+                      ])
+                  )
+                  if prior_run.get("path") != (
+                      ".github/workflows/"
+                      "phase2-execution-node-dispatch.yml"
+                  ):
+                      continue
+                  if prior_run.get("head_branch") != branch:
+                      continue
+                  if str(
+                      prior_run.get("head_sha") or ""
+                  ).lower() != current_head:
+                      continue
+
+                  destination = prior_root / str(prior_control_run_id)
+                  if destination.exists():
+                      shutil.rmtree(destination)
+                  destination.mkdir(parents=True)
+                  subprocess.check_call([
+                      "gh",
+                      "run",
+                      "download",
+                      str(prior_control_run_id),
+                      "--repo",
+                      repo,
+                      "--name",
+                      "phase2-execution-node-dispatch",
+                      "--dir",
+                      str(destination),
+                  ])
+
+                  attempt_path = (
+                      destination
+                      / "phase2-execution-node-dispatch-attempt.json"
+                  )
+                  receipt_path = (
+                      destination
+                      / "phase2-execution-node-dispatch.json"
+                  )
+                  candidate = None
+                  if attempt_path.is_file():
+                      try:
+                          candidate = validate_phase2_node_dispatch_attempt(
+                              json.loads(attempt_path.read_text())
+                          )
+                      except ValueError as exc:
+                          raise SystemExit(
+                              "prior node-dispatch attempt is invalid: "
+                              f"{prior_control_run_id}: {exc}"
+                          ) from exc
+                  elif receipt_path.is_file():
+                      try:
+                          candidate = validate_phase2_node_dispatch_receipt(
+                              json.loads(receipt_path.read_text())
+                          )
+                      except ValueError as exc:
+                          raise SystemExit(
+                              "prior node-dispatch receipt is invalid: "
+                              f"{prior_control_run_id}: {exc}"
+                          ) from exc
+                  else:
+                      raise SystemExit(
+                          "same-HEAD node-dispatch artifact lacks attempt "
+                          f"or receipt: {prior_control_run_id}"
+                      )
+
+                  if (
+                      candidate["node_id"] == node_id
+                      and candidate["planner_run_id"] == planner_run_id
+                  ):
+                      expected_identity = {
+                          "planner_artifact_digest": actual_digest,
+                          "canonical_coverage_ledger_sha256": ledger_sha,
+                          "target_ref": branch,
+                          "target_head_sha": current_head,
+                          "dispatch_inputs_sha256": inputs_hash,
+                      }
+                      drift = [
+                          key
+                          for key, value in expected_identity.items()
+                          if candidate.get(key) != value
+                      ]
+                      if drift:
+                          raise SystemExit(
+                              "prior same-planner/node dispatch identity "
+                              f"drift: {prior_control_run_id}: {drift}"
+                          )
+                      duplicate = {
+                          "control_run_id": prior_control_run_id,
+                          "target_run_id": int(
+                              candidate["dispatched_run_id"]
+                          ),
+                      }
+                      break
+              if duplicate is not None or len(artifacts) < 100:
+                  break
+              page += 1
+              if page > 50:
+                  raise SystemExit(
+                      "node-dispatch duplicate scan exceeded 5000 artifacts"
+                  )
+
+          if duplicate is not None:
+              raise SystemExit(
+                  "Phase-2 node was already dispatched from this planner: "
+                  f"node={node_id} "
+                  f"control_run={duplicate['control_run_id']} "
+                  f"target_run={duplicate['target_run_id']}; "
+                  "refresh the planner before retrying"
+              )
+
           dispatch_payload = {
               "ref": branch,
               "inputs": request["inputs"],
@@ -376,6 +549,38 @@ jobs:
                   "workflow dispatch returned invalid run ID"
               )
 
+          attempt = {
+              "version": "phase2-execution-node-dispatch-attempt-v1",
+              "node_id": node_id,
+              "target_workflow": target_workflow,
+              "target_ref": branch,
+              "target_head_sha": current_head,
+              "node_dispatch_control_run_id": current_control_run_id,
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": actual_digest,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+              "dispatch_input_names": request["input_names"],
+              "dispatch_inputs_sha256": inputs_hash,
+              "dispatched_run_id": dispatched_run_id,
+              "requires_explicit_approval": False,
+              "canonical_ledger_write_authorized": False,
+              "workflow_dispatch_performed": True,
+              "target_run_identity_verified": False,
+          }
+          try:
+              attempt = validate_phase2_node_dispatch_attempt(attempt)
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          attempt_path = Path(
+              "artifacts/phase2-execution-node-dispatch-attempt.json"
+          )
+          attempt_path.write_text(
+              json.dumps(attempt, indent=2, sort_keys=True) + "\n"
+          )
+          attempt_sha = hashlib.sha256(
+              attempt_path.read_bytes()
+          ).hexdigest()
+
           run = json.loads(
               subprocess.check_output([
                   "gh",
@@ -403,13 +608,6 @@ jobs:
                   "dispatched run HEAD identity drift"
               )
 
-          inputs_hash = hashlib.sha256(
-              json.dumps(
-                  request["inputs"],
-                  sort_keys=True,
-                  separators=(",", ":"),
-              ).encode()
-          ).hexdigest()
           receipt = {
               "version": "phase2-execution-node-dispatch-v1",
               "node_id": node_id,
@@ -424,6 +622,7 @@ jobs:
               "canonical_coverage_ledger_sha256": ledger_sha,
               "dispatch_input_names": request["input_names"],
               "dispatch_inputs_sha256": inputs_hash,
+              "dispatch_attempt_sha256": attempt_sha,
               "dispatched_run_id": dispatched_run_id,
               "run_url": response.get("run_url"),
               "html_url": response.get("html_url"),
@@ -449,12 +648,15 @@ jobs:
           print(json.dumps(receipt, sort_keys=True))
           PY
 
-      - name: Upload node-dispatch receipt
+      - name: Upload node-dispatch evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase2-execution-node-dispatch
-          path: artifacts/phase2-execution-node-dispatch.json
-          if-no-files-found: error
+          path: |
+            artifacts/phase2-execution-node-dispatch-attempt.json
+            artifacts/phase2-execution-node-dispatch.json
+          if-no-files-found: warn
           retention-days: 90
 
       - name: Publish node-dispatch summary
