@@ -525,6 +525,94 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase2_research_price_path",
             "missingness_policy": "error_if_missing",
         },
+        {
+            "feature_id": "retention.multi_trade_traders_so_far",
+            "family": "participant_retention",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical trade initiators with at least two "
+                "trades for the token through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "retention.multi_trade_trader_share_so_far",
+            "family": "participant_retention",
+            "dtype": "decimal_string",
+            "formula": (
+                "multi_trade_traders_so_far divided by distinct canonical "
+                "trade initiators observed through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "retention.two_sided_traders_so_far",
+            "family": "participant_retention",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical initiators with at least one buy and "
+                "one sell through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "retention.two_sided_trader_share_so_far",
+            "family": "participant_retention",
+            "dtype": "decimal_string",
+            "formula": (
+                "two_sided_traders_so_far divided by distinct canonical "
+                "trade initiators observed through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "retention.repeat_trades_so_far",
+            "family": "participant_retention",
+            "dtype": "integer",
+            "formula": (
+                "canonical trades beyond each initiator's first trade, "
+                "summed through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "retention.repeat_trade_share_so_far",
+            "family": "participant_retention",
+            "dtype": "decimal_string",
+            "formula": (
+                "repeat_trades_so_far divided by all canonical trades "
+                "through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "retention.latest_trader_prior_trades",
+            "family": "participant_retention",
+            "dtype": "integer",
+            "formula": (
+                "number of earlier canonical trades by the initiator of the "
+                "latest trade observed at or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "retention.latest_trader_is_returning",
+            "family": "participant_retention",
+            "dtype": "boolean",
+            "formula": (
+                "true when the initiator of the latest canonical trade had "
+                "already traded the token before that event"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
     ]
     return [
         {
