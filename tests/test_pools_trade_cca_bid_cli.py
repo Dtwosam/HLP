@@ -3,7 +3,6 @@ import json
 
 from hlp.cli import cmd_rpc_pools_trade_lbp_cca_bid_window
 from hlp.data.types import RawLog
-from hlp.protocols.evm import topic_address
 from hlp.protocols.pools_trade_lbp import (
     CCA_BID_EXITED_TOPIC,
     CCA_BID_SUBMITTED_TOPIC,
@@ -36,7 +35,7 @@ def raw(topic0, bid_id, data, block, log_index):
         topics=(
             topic0,
             topic_uint(bid_id),
-            topic_address(OWNER),
+            "0x" + "0" * 24 + OWNER.removeprefix("0x"),
         ),
         data=data,
         removed=False,
