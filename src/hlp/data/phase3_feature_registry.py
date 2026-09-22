@@ -270,6 +270,94 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_trade_tape",
             "missingness_policy": "null_with_flag",
         },
+        {
+            "feature_id": "holder.holder_count",
+            "family": "holder_state",
+            "dtype": "integer",
+            "formula": (
+                "count of nonzero ERC-20 balances after replaying complete "
+                "transfer history through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.top1_balance_share",
+            "family": "holder_state",
+            "dtype": "decimal_string",
+            "formula": (
+                "largest nonzero holder balance divided by accounted token "
+                "supply at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.top5_balance_share",
+            "family": "holder_state",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of the five largest nonzero holder balances divided by "
+                "accounted token supply at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.top10_balance_share",
+            "family": "holder_state",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of the ten largest nonzero holder balances divided by "
+                "accounted token supply at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.balance_hhi",
+            "family": "holder_state",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of squared nonzero holder balance shares at the "
+                "confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.balance_gini",
+            "family": "holder_state",
+            "dtype": "decimal_string",
+            "formula": (
+                "Gini coefficient of nonzero raw ERC-20 holder balances at "
+                "the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.transfer_events_so_far",
+            "family": "holder_state",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical ERC-20 Transfer events for the token at "
+                "or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "holder.unique_transfer_participants_so_far",
+            "family": "holder_state",
+            "dtype": "integer",
+            "formula": (
+                "distinct nonzero from/to addresses observed in canonical "
+                "ERC-20 Transfer events through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
     ]
     return [
         {

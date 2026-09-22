@@ -14,8 +14,12 @@ def test_phase3_feature_registry_is_versioned_causal_and_outcome_blind():
     report = validate_phase3_feature_registry(registry)
 
     assert report["version"] == PHASE3_FEATURE_REGISTRY_VERSION
-    assert report["features"] == 22
-    assert report["families"] == ["price_drawdown", "trade_flow"]
+    assert report["features"] == 30
+    assert report["families"] == [
+        "holder_state",
+        "price_drawdown",
+        "trade_flow",
+    ]
     assert report["future_state_allowed"] is False
     assert report["outcome_dependency_allowed"] is False
     assert len(report["registry_sha256"]) == 64
