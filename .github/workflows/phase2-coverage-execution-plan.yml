@@ -14,6 +14,7 @@ on:
     paths:
       - '.github/phase2-source-coverage.json'
       - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-archive-rpc-preflight.yml'
       - 'src/hlp/data/phase2_coverage_execution.py'
       - 'src/hlp/data/phase2_coverage.py'
       - 'src/hlp/data/phase2_sources.py'
@@ -22,6 +23,7 @@ on:
     paths:
       - '.github/phase2-source-coverage.json'
       - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-archive-rpc-preflight.yml'
       - 'src/hlp/data/phase2_coverage_execution.py'
       - 'src/hlp/data/phase2_coverage.py'
       - 'src/hlp/data/phase2_sources.py'
