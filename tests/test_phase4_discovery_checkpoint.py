@@ -369,3 +369,24 @@ def test_discovery_handoff_claims_phase4_but_not_a_signal():
     assert handoff["signal_promoted"] is False
     assert handoff["phase5_model_started"] is False
     assert handoff["phase4_discovery_checkpoint_claimed"] is True
+
+
+
+def test_discovery_ledger_rejects_base_rate_population_drift():
+    base = base_handoff()
+    base["discovery_rows_sha256"] = SHA
+
+    with pytest.raises(ValueError, match="base-rate population drift"):
+        build_phase4_discovery_ledger(
+            freeze_report(),
+            validation_report(),
+            chronological_split_handoff=split_handoff(),
+            chronological_split_handoff_sha256=SPLIT_SHA,
+            base_rate_handoff=base,
+            base_rate_handoff_sha256=BASE_SHA,
+            univariate_handoff=univariate_handoff(),
+            univariate_handoff_sha256=UNIVARIATE_SHA,
+            hypothesis_freeze_handoff=freeze_handoff(),
+            hypothesis_freeze_handoff_sha256=FREEZE_SHA,
+            validation_handoff=validation_handoff(),
+        )
