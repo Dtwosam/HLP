@@ -600,11 +600,12 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3_feature_registry.py` now gives every implemented feature a versioned
   formula, snapshot semantics, data dependency, dtype and missingness policy;
   registry definitions are SHA-bound and explicitly forbid future state or
-  outcome dependence. The registry now contains **70 causal features across
-  eight families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  outcome dependence. The registry now contains **80 causal features across
+  ten families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
   9 `trade_size_flow`, 8 `holder_state` / concentration, 8
-  `participant_retention`, 8 `supply_redistribution`, 5 `chain_regime`,
-  and 10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
+  `participant_retention`, 8 `supply_redistribution`, 6
+  `early_recipient_activity`, 5 `chain_regime`, 4 `lifecycle_age`, and
+  10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
   and `venue_mechanics` all
   use the canonical research price path and enforce the exact confirmation
   event as an inclusive cutoff. Chain regime replays the full cross-sectional
@@ -642,8 +643,9 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3-canonical-trade-tape` artifact and compact handoff consumed by
   trade-flow, participant-retention and trade-size-flow features. No canonical
   trade tape is claimed yet because those 14 source-coverage artifacts have not
-  all been executed and accepted. Holder and supply-redistribution features
-  share a complete guarded transfer-acquisition architecture: every eligible
+  all been executed and accepted. Holder, supply-redistribution,
+  early-recipient and lifecycle-age features share a complete guarded
+  transfer-acquisition architecture: every eligible
   token's first code block is binary-searched and boundary-verified against
   archive `eth_getCode`, transfer batches begin at or before the earliest
   verified deployment in the batch, every token must retain continuous scan
@@ -652,13 +654,19 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   mints, burns, self-transfers and zero-value transfers from movement metrics
   and measures recipient activations, sender exits, distinct senders/receivers,
   gross transfer turnover relative to supply and transfer-value concentration
-  only through the exact feature cutoff. The deployment/transfer/holder and
-  redistribution contracts/workflows are tested. Full-universe transfer
+  only through the exact feature cutoff. Lifecycle age uses the verified first
+  contract-code block plus the exact first positive initial-mint event to
+  measure deployment-to-mint and deployment/mint-to-cutoff age without using
+  price history as a launch proxy. Early-recipient activity freezes the first
+  up to 10 distinct positive-transfer recipients and measures retention,
+  current supply share and causal gross in/out flow while explicitly making no
+  creator or EOA assumption. The deployment/transfer/holder, redistribution,
+  lifecycle and early-recipient contracts/workflows are tested. Full-universe transfer
   execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
   verified 200-block keyless filtered-log route is rejected for this job rather
   than launching an impractical millions-request backfill. The
-  equal-family-coverage and feature-staging workflows now require all eight
-  implemented families, giving a prepared **70-feature** label-free bundle at
+  equal-family-coverage and feature-staging workflows now require all ten
+  implemented families, giving a prepared **80-feature** label-free bundle at
   exactly matched subject cutoffs. The staging bundle validates every value
   against registry dtype and missingness policy, preserves per-family
   data-quality flags, consumes no outcome rows, and explicitly publishes
@@ -669,9 +677,10 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   revalidates row types, missingness, data-quality coverage and causal flags,
   and only an actually executed successful finalizer may emit
   `final_checkpoint_claimed=true`. The existence of that workflow is not a
-  checkpoint claim. Creator/early-wallet, relationship, liquidity and
-  absorption families remain deferred until their required historical inputs
-  can be represented without weak proxies or future leakage.
+  checkpoint claim. Creator/deployer identity, funding/relationship graph,
+  liquidity/depth and price-impact/absorption families remain deferred until
+  their required historical inputs can be represented without weak proxies or
+  future leakage.
 
 
 ### Live/current chain access
