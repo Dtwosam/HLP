@@ -8,6 +8,8 @@ from hlp.data.phase2_dump_research import (
     PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION,
     PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION,
     PHASE2_DUMP_GEOMETRY_VERSION,
+    PHASE2_DUMP_DETECTOR_FREEZE_VERSION,
+    PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION,
     PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
     build_phase2_dump_geometry,
     build_phase2_dump_geometry_handoff,
@@ -17,6 +19,8 @@ from hlp.data.phase2_dump_research import (
     build_phase2_dump_candidate_diagnostics,
     build_phase2_dump_candidate_diagnostics_handoff,
     research_phase2_dump_candidates,
+    materialize_phase2_dump_detector_freeze,
+    build_phase2_dump_detector_freeze_handoff,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
 
@@ -465,3 +469,167 @@ def test_candidate_diagnostics_handoff_cannot_self_approve_freeze(tmp_path):
     assert handoff["detector_freeze_ready"] is False
     assert handoff["phase2_dump_detector_frozen"] is False
     assert handoff["outcome_labels_computed"] is False
+
+
+
+def test_explicit_detector_freeze_uses_diagnostics_but_never_outcomes(tmp_path):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    candidate_path = tmp_path / "candidates.jsonl"
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [
+            candidate("chosen", "0.4", "0.25"),
+            candidate("other", "0.6", "0.25"),
+        ],
+        geometry_summary=geometry_summary,
+        output=candidate_path,
+    )
+    import json
+    candidate_rows = [
+        json.loads(line)
+        for line in candidate_path.read_text().splitlines()
+        if line.strip()
+    ]
+    diagnostics_rows, diagnostics_summary = (
+        build_phase2_dump_candidate_diagnostics(
+            candidate_rows,
+            research_summary=research,
+        )
+    )
+    output = tmp_path / "frozen.jsonl"
+    manifest, frozen = materialize_phase2_dump_detector_freeze(
+        candidate_rows,
+        diagnostics_rows,
+        research_summary=research,
+        diagnostics_summary=diagnostics_summary,
+        selected_candidate_id="chosen",
+        output=output,
+    )
+
+    assert frozen["version"] == PHASE2_DUMP_DETECTOR_FREEZE_VERSION
+    assert frozen["selected_candidate_id"] == "chosen"
+    assert frozen["selected_candidate_spec"][
+        "min_drawdown_fraction"
+    ] == "0.4"
+    assert frozen["tokens"] == 1
+    assert frozen["detector_rows"] == 1
+    assert frozen["confirmed_tokens"] == 1
+    assert frozen["uses_outcome_labels"] is False
+    assert frozen["candidate_selected"] is True
+    assert frozen["phase2_dump_detector_frozen"] is True
+    assert frozen["outcome_labels_computed"] is False
+
+    row = json.loads(output.read_text())
+    assert row["version"] == PHASE2_DUMP_DETECTOR_FREEZE_VERSION
+    assert row["detector_id"] == "chosen"
+    assert row["detector_frozen"] is True
+    assert row["point_in_time_confirmed"] is True
+    assert manifest["sha256"] == frozen["detector_rows_sha256"]
+
+
+def test_detector_freeze_handoff_binds_explicit_selection(tmp_path):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    candidate_path = tmp_path / "candidates.jsonl"
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [candidate("chosen", "0.4", "0.25")],
+        geometry_summary=geometry_summary,
+        output=candidate_path,
+    )
+    import json
+    candidate_rows = [
+        json.loads(line)
+        for line in candidate_path.read_text().splitlines()
+        if line.strip()
+    ]
+    diagnostics_rows, diagnostics_summary = (
+        build_phase2_dump_candidate_diagnostics(
+            candidate_rows,
+            research_summary=research,
+        )
+    )
+    _, frozen = materialize_phase2_dump_detector_freeze(
+        candidate_rows,
+        diagnostics_rows,
+        research_summary=research,
+        diagnostics_summary=diagnostics_summary,
+        selected_candidate_id="chosen",
+        output=tmp_path / "frozen.jsonl",
+    )
+    handoff = build_phase2_dump_detector_freeze_handoff(
+        frozen,
+        freeze_summary_sha256=SHA,
+        candidate_research_handoff_sha256=SHA,
+        candidate_diagnostics_handoff_sha256=SHA,
+    )
+    assert (
+        handoff["version"]
+        == PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION
+    )
+    assert handoff["selected_candidate_id"] == "chosen"
+    assert handoff["candidate_selected"] is True
+    assert handoff["detector_freeze_ready"] is True
+    assert handoff["phase2_dump_detector_frozen"] is True
+    assert handoff["outcome_labels_computed"] is False
+
+
+def test_detector_freeze_rejects_unknown_candidate_and_outcome_contamination(
+    tmp_path,
+):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    candidate_path = tmp_path / "candidates.jsonl"
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [candidate("chosen", "0.4", "0.25")],
+        geometry_summary=geometry_summary,
+        output=candidate_path,
+    )
+    import json
+    candidate_rows = [
+        json.loads(line)
+        for line in candidate_path.read_text().splitlines()
+        if line.strip()
+    ]
+    diagnostics_rows, diagnostics_summary = (
+        build_phase2_dump_candidate_diagnostics(
+            candidate_rows,
+            research_summary=research,
+        )
+    )
+
+    with pytest.raises(ValueError, match="unknown"):
+        materialize_phase2_dump_detector_freeze(
+            candidate_rows,
+            diagnostics_rows,
+            research_summary=research,
+            diagnostics_summary=diagnostics_summary,
+            selected_candidate_id="missing",
+            output=tmp_path / "missing.jsonl",
+        )
+
+    contaminated = deepcopy(diagnostics_summary)
+    contaminated["outcome_labels_computed"] = True
+    with pytest.raises(ValueError, match="outcome labels"):
+        materialize_phase2_dump_detector_freeze(
+            candidate_rows,
+            diagnostics_rows,
+            research_summary=research,
+            diagnostics_summary=contaminated,
+            selected_candidate_id="chosen",
+            output=tmp_path / "contaminated.jsonl",
+        )

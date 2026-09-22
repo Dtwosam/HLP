@@ -32,6 +32,12 @@ PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION = (
 PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION = (
     "phase2-dump-candidate-diagnostics-handoff-v1"
 )
+PHASE2_DUMP_DETECTOR_FREEZE_VERSION = (
+    "phase2-dump-detector-freeze-v1"
+)
+PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION = (
+    "phase2-dump-detector-freeze-handoff-v1"
+)
 PEAK_DRAWDOWN_REBOUND_FAMILY = "peak_drawdown_rebound"
 
 
@@ -1566,5 +1572,370 @@ def build_phase2_dump_candidate_diagnostics_handoff(
         "detector_freeze_ready": False,
         "dump_threshold_frozen": False,
         "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
+
+
+
+def materialize_phase2_dump_detector_freeze(
+    candidate_rows: Iterable[Mapping[str, object]],
+    diagnostics_rows: Iterable[Mapping[str, object]],
+    *,
+    research_summary: Mapping[str, object],
+    diagnostics_summary: Mapping[str, object],
+    selected_candidate_id: str,
+    output: Path,
+) -> tuple[dict, dict]:
+    """Freeze one explicitly selected, outcome-blind detector candidate."""
+
+    research = dict(research_summary)
+    diagnostics = dict(diagnostics_summary)
+    selected = str(selected_candidate_id).strip()
+    if not selected:
+        raise ValueError("dump detector freeze requires selected candidate id")
+    if (
+        str(research.get("version") or "")
+        != PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+    ):
+        raise ValueError("dump detector freeze candidate research version changed")
+    if (
+        str(diagnostics.get("version") or "")
+        != PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION
+    ):
+        raise ValueError("dump detector freeze diagnostics version changed")
+    for payload, label in (
+        (research, "candidate research"),
+        (diagnostics, "candidate diagnostics"),
+    ):
+        if payload.get("uses_price_path_only") is not True:
+            raise ValueError(
+                f"dump detector freeze {label} is not price-path only"
+            )
+        if payload.get("candidate_selected") is not False:
+            raise ValueError(
+                f"dump detector freeze {label} already selected a candidate"
+            )
+        if payload.get("phase2_dump_detector_frozen") is not False:
+            raise ValueError(
+                f"dump detector freeze {label} already froze a detector"
+            )
+        if payload.get("outcome_labels_computed") is not False:
+            raise ValueError(
+                f"dump detector freeze {label} contains outcome labels"
+            )
+    if diagnostics.get("uses_outcome_labels") is not False:
+        raise ValueError(
+            "dump detector freeze diagnostics use outcome labels"
+        )
+    if diagnostics.get("detector_freeze_ready") is not False:
+        raise ValueError(
+            "dump detector diagnostics cannot self-approve freeze"
+        )
+    if research.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump detector freeze candidate research is not point-in-time"
+        )
+    if diagnostics.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump detector freeze diagnostics are not point-in-time"
+        )
+
+    linked_fields = (
+        "snapshot_head_block",
+        "universe_sha256",
+        "geometry_sha256",
+        "candidate_specs_sha256",
+        "candidate_rows_sha256",
+        "tokens",
+    )
+    for field in linked_fields:
+        if str(research.get(field)) != str(diagnostics.get(field)):
+            raise ValueError(
+                f"dump detector freeze research/diagnostics drift: {field}"
+            )
+
+    specs = {
+        str(row["candidate_id"]): dict(row)
+        for row in (research.get("candidate_specs") or [])
+    }
+    if selected not in specs:
+        raise ValueError(
+            f"dump detector freeze selected candidate is unknown: {selected}"
+        )
+    selected_spec = specs[selected]
+    if (
+        str(selected_spec.get("family") or "")
+        != PEAK_DRAWDOWN_REBOUND_FAMILY
+    ):
+        raise ValueError(
+            "dump detector freeze selected candidate family changed"
+        )
+
+    diagnostic_map = {}
+    for raw in diagnostics_rows:
+        row = dict(raw)
+        if (
+            str(row.get("version") or "")
+            != PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION
+        ):
+            raise ValueError("dump detector diagnostics row version changed")
+        candidate_id = str(row.get("candidate_id") or "")
+        if candidate_id not in specs:
+            raise ValueError(
+                f"dump detector diagnostics contain unknown candidate: "
+                f"{candidate_id}"
+            )
+        if candidate_id in diagnostic_map:
+            raise ValueError(
+                f"dump detector diagnostics repeat candidate: {candidate_id}"
+            )
+        if row.get("uses_outcome_labels") is not False:
+            raise ValueError(
+                f"dump detector diagnostics row uses outcomes: {candidate_id}"
+            )
+        if row.get("candidate_selected") is not False:
+            raise ValueError(
+                f"dump detector diagnostics row selects candidate: {candidate_id}"
+            )
+        diagnostic_map[candidate_id] = row
+    if set(diagnostic_map) != set(specs):
+        raise ValueError(
+            "dump detector diagnostics candidate coverage changed"
+        )
+    selected_diagnostic = diagnostic_map[selected]
+
+    tokens = int(research.get("tokens", -1))
+    if tokens <= 0:
+        raise ValueError("dump detector freeze token count is invalid")
+    all_rows = 0
+    selected_rows = []
+    seen_selected_tokens = set()
+    statuses = Counter()
+    for raw in candidate_rows:
+        row = dict(raw)
+        if (
+            str(row.get("version") or "")
+            != PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+        ):
+            raise ValueError("dump detector candidate row version changed")
+        candidate_id = str(row.get("candidate_id") or "")
+        if candidate_id not in specs:
+            raise ValueError(
+                f"dump detector freeze contains unknown candidate: "
+                f"{candidate_id}"
+            )
+        token = normalize_address(str(row.get("token") or ""))
+        all_rows += 1
+        if candidate_id != selected:
+            continue
+        if token in seen_selected_tokens:
+            raise ValueError(
+                f"dump detector freeze repeats selected token: {token}"
+            )
+        seen_selected_tokens.add(token)
+        status = str(row.get("candidate_status") or "")
+        if status not in {
+            "confirmed",
+            "drawdown_unconfirmed",
+            "no_material_drawdown",
+        }:
+            raise ValueError(
+                f"dump detector freeze selected status is invalid: {status}"
+            )
+        confirmed = status == "confirmed"
+        if bool(row.get("point_in_time_confirmed")) != confirmed:
+            raise ValueError(
+                "dump detector freeze point-in-time flag drift"
+            )
+        if row.get("research_candidate_only") is not True:
+            raise ValueError(
+                "dump detector freeze candidate row is not research-only"
+            )
+        frozen = {
+            key: value
+            for key, value in row.items()
+            if key not in {
+                "version",
+                "candidate_id",
+                "research_candidate_only",
+            }
+        }
+        frozen.update({
+            "version": PHASE2_DUMP_DETECTOR_FREEZE_VERSION,
+            "detector_id": selected,
+            "detector_family": selected_spec["family"],
+            "candidate_status": status,
+            "point_in_time_confirmed": confirmed,
+            "detector_frozen": True,
+        })
+        selected_rows.append(frozen)
+        statuses[status] += 1
+
+    expected_all = int(research.get("candidate_rows", -1))
+    if all_rows != expected_all:
+        raise ValueError(
+            "dump detector freeze candidate row count changed"
+        )
+    if len(selected_rows) != tokens:
+        raise ValueError(
+            "dump detector freeze selected candidate token coverage changed"
+        )
+    if len(seen_selected_tokens) != tokens:
+        raise ValueError(
+            "dump detector freeze selected candidate token uniqueness changed"
+        )
+
+    selected_rows.sort(key=lambda row: row["token"])
+    manifest = write_jsonl_snapshot(
+        selected_rows,
+        output=output,
+        provenance={
+            "version": PHASE2_DUMP_DETECTOR_FREEZE_VERSION,
+            "selected_candidate_id": selected,
+            "candidate_specs_sha256": research["candidate_specs_sha256"],
+            "candidate_rows_sha256": research["candidate_rows_sha256"],
+            "uses_price_path_only": True,
+            "uses_outcome_labels": False,
+            "selection_mode": "explicit_candidate_id",
+            "candidate_selected": True,
+            "dump_threshold_frozen": True,
+            "phase2_dump_detector_frozen": True,
+            "outcome_labels_computed": False,
+        },
+    )
+
+    equivalent_candidates = sorted({
+        right if left == selected else left
+        for pair in diagnostics.get("equivalent_candidate_pairs") or []
+        for left, right in [pair]
+        if selected in {left, right}
+    })
+    freeze_summary = {
+        "version": PHASE2_DUMP_DETECTOR_FREEZE_VERSION,
+        "snapshot_head_block": int(research["snapshot_head_block"]),
+        "universe_sha256": str(research["universe_sha256"]),
+        "normalized_price_path_sha256": str(
+            research["normalized_price_path_sha256"]
+        ),
+        "geometry_sha256": str(research["geometry_sha256"]),
+        "candidate_specs_sha256": str(
+            research["candidate_specs_sha256"]
+        ),
+        "candidate_rows_sha256": str(
+            research["candidate_rows_sha256"]
+        ),
+        "selected_candidate_id": selected,
+        "selected_candidate_spec": dict(selected_spec),
+        "selected_candidate_diagnostics": dict(selected_diagnostic),
+        "equivalent_candidate_ids": equivalent_candidates,
+        "tokens": tokens,
+        "detector_rows": int(manifest["records"]),
+        "detector_rows_sha256": manifest["sha256"],
+        "status_counts": dict(sorted(statuses.items())),
+        "confirmed_tokens": int(statuses.get("confirmed", 0)),
+        "uses_price_path_only": True,
+        "uses_outcome_labels": False,
+        "selection_mode": "explicit_candidate_id",
+        "point_in_time_confirmation": True,
+        "candidate_selected": True,
+        "detector_freeze_ready": True,
+        "dump_threshold_frozen": True,
+        "phase2_dump_detector_frozen": True,
+        "outcome_labels_computed": False,
+    }
+    return manifest, freeze_summary
+
+
+def build_phase2_dump_detector_freeze_handoff(
+    freeze_summary: Mapping[str, object],
+    *,
+    freeze_summary_sha256: str,
+    candidate_research_handoff_sha256: str,
+    candidate_diagnostics_handoff_sha256: str,
+) -> dict:
+    """Bind an explicit detector freeze before outcome-label computation."""
+
+    summary = dict(freeze_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_DETECTOR_FREEZE_VERSION
+    ):
+        raise ValueError("dump detector freeze handoff version changed")
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError("dump detector freeze is not price-path only")
+    if summary.get("uses_outcome_labels") is not False:
+        raise ValueError("dump detector freeze used outcome labels")
+    if summary.get("selection_mode") != "explicit_candidate_id":
+        raise ValueError("dump detector freeze selection mode changed")
+    if summary.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump detector freeze is not point-in-time compatible"
+        )
+    if summary.get("candidate_selected") is not True:
+        raise ValueError("dump detector freeze lacks selected candidate")
+    if summary.get("detector_freeze_ready") is not True:
+        raise ValueError("dump detector freeze is not ready")
+    if summary.get("dump_threshold_frozen") is not True:
+        raise ValueError("dump detector threshold is not frozen")
+    if summary.get("phase2_dump_detector_frozen") is not True:
+        raise ValueError("dump detector is not frozen")
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError(
+            "dump detector freeze cannot contain outcome labels"
+        )
+
+    spec = dict(summary.get("selected_candidate_spec") or {})
+    selected = str(summary.get("selected_candidate_id") or "")
+    if not selected or str(spec.get("candidate_id") or "") != selected:
+        raise ValueError("dump detector freeze selected spec drift")
+
+    return {
+        "version": PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION,
+        "snapshot_head_block": int(summary["snapshot_head_block"]),
+        "universe_sha256": _sha256(
+            summary.get("universe_sha256"),
+            label="dump detector universe",
+        ),
+        "normalized_price_path_sha256": _sha256(
+            summary.get("normalized_price_path_sha256"),
+            label="dump detector price path",
+        ),
+        "geometry_sha256": _sha256(
+            summary.get("geometry_sha256"),
+            label="dump detector geometry",
+        ),
+        "candidate_specs_sha256": _sha256(
+            summary.get("candidate_specs_sha256"),
+            label="dump detector candidate specs",
+        ),
+        "candidate_rows_sha256": _sha256(
+            summary.get("candidate_rows_sha256"),
+            label="dump detector candidate rows",
+        ),
+        "candidate_research_handoff_sha256": _sha256(
+            candidate_research_handoff_sha256,
+            label="dump detector candidate research handoff",
+        ),
+        "candidate_diagnostics_handoff_sha256": _sha256(
+            candidate_diagnostics_handoff_sha256,
+            label="dump detector diagnostics handoff",
+        ),
+        "detector_rows_sha256": _sha256(
+            summary.get("detector_rows_sha256"),
+            label="dump detector rows",
+        ),
+        "freeze_summary_sha256": _sha256(
+            freeze_summary_sha256,
+            label="dump detector freeze summary",
+        ),
+        "selected_candidate_id": selected,
+        "selected_candidate_spec": spec,
+        "tokens": int(summary["tokens"]),
+        "detector_rows": int(summary["detector_rows"]),
+        "confirmed_tokens": int(summary["confirmed_tokens"]),
+        "candidate_selected": True,
+        "detector_freeze_ready": True,
+        "dump_threshold_frozen": True,
+        "phase2_dump_detector_frozen": True,
         "outcome_labels_computed": False,
     }
