@@ -18,11 +18,13 @@ def test_phase3_feature_coverage_requires_price_trade_and_entry():
     assert "phase3-retention-features" in text
     assert "phase3-price-features" in text
     assert "phase3-trade-features" in text
+    assert "phase3-trade-size-flow-features" in text
     assert "materialize_phase3_feature_coverage" in text
     assert (
         "required_families: "
         "chain_regime,holder_state,participant_retention,"
-        "price_drawdown,supply_redistribution,trade_flow,venue_mechanics"
+        "price_drawdown,supply_redistribution,trade_flow,"
+        "trade_size_flow,venue_mechanics"
     ) in text
     assert "matched_subject_coverage_equal: true" in text
 

@@ -99,6 +99,18 @@ on:
         description: Exact SHA-256 of phase3-trade-features-handoff.json
         required: true
         type: string
+      trade_size_flow_run_id:
+        description: Exact phase3-trade-size-flow-features run ID
+        required: true
+        type: string
+      expected_trade_size_flow_artifact_digest:
+        description: Exact phase3-trade-size-flow-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_trade_size_flow_handoff_sha256:
+        description: Exact SHA-256 of phase3-trade-size-flow-features-handoff.json
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -133,6 +145,9 @@ env:
   TRADE_FEATURE_RUN_ID: ${{ inputs.trade_feature_run_id }}
   EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_trade_feature_artifact_digest }}
   EXPECTED_TRADE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_trade_feature_handoff_sha256 }}
+  TRADE_SIZE_FLOW_RUN_ID: ${{ inputs.trade_size_flow_run_id }}
+  EXPECTED_TRADE_SIZE_FLOW_ARTIFACT_DIGEST: ${{ inputs.expected_trade_size_flow_artifact_digest }}
+  EXPECTED_TRADE_SIZE_FLOW_HANDOFF_SHA256: ${{ inputs.expected_trade_size_flow_handoff_sha256 }}
 
 jobs:
   coverage:
@@ -192,6 +207,9 @@ jobs:
           )
           from hlp.data.phase3_trade_features import (
               build_phase3_trade_feature_handoff,
+          )
+          from hlp.data.phase3_trade_size_flow_features import (
+              build_phase3_trade_size_flow_handoff,
           )
           from hlp.data.phase3_venue_features import (
               build_phase3_venue_feature_handoff,
@@ -283,6 +301,7 @@ jobs:
           retention_root = Path("inputs/retention")
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
+          trade_size_root = Path("inputs/trade-size-flow")
 
           download_named(
               int(os.environ["FEATURE_ENTRY_RUN_ID"]),
@@ -341,6 +360,15 @@ jobs:
               trade_root,
               "Phase-3 trade features",
               os.environ["EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["TRADE_SIZE_FLOW_RUN_ID"]),
+              "phase3-trade-size-flow-features",
+              trade_size_root,
+              "Phase-3 trade-size-flow features",
+              os.environ[
+                  "EXPECTED_TRADE_SIZE_FLOW_ARTIFACT_DIGEST"
+              ],
           )
 
           subjects_path = find_unique(
@@ -777,6 +805,73 @@ jobs:
                   "Phase-3 trade-feature/entry linkage drift"
               )
 
+          trade_size_rows_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features.jsonl",
+          )
+          trade_size_manifest_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features.jsonl.manifest.json",
+          )
+          trade_size_manifest = json.loads(
+              trade_size_manifest_path.read_text()
+          )
+          trade_size_summary_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features-summary.json",
+          )
+          trade_size_summary = json.loads(
+              trade_size_summary_path.read_text()
+          )
+          trade_size_summary_sha = sha256_path(
+              trade_size_summary_path
+          )
+          trade_size_handoff_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features-handoff.json",
+          )
+          trade_size_handoff_sha = sha256_path(
+              trade_size_handoff_path
+          )
+          if trade_size_handoff_sha != os.environ[
+              "EXPECTED_TRADE_SIZE_FLOW_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "Phase-3 trade-size-flow handoff SHA drift"
+              )
+          trade_size_handoff = json.loads(
+              trade_size_handoff_path.read_text()
+          )
+          rebuilt_trade_size = build_phase3_trade_size_flow_handoff(
+              trade_size_summary,
+              feature_summary_sha256=trade_size_summary_sha,
+              feature_entry_handoff_sha256=trade_size_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_trade_handoff_sha256=trade_size_summary[
+                  "canonical_trade_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=trade_size_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade_size != trade_size_handoff:
+              raise SystemExit(
+                  "Phase-3 trade-size-flow handoff content drift"
+              )
+          if trade_size_manifest.get("sha256") != trade_size_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 trade-size-flow manifest SHA drift"
+              )
+          if trade_size_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 trade-size-flow/entry linkage drift"
+              )
+
           registry = build_phase3_feature_registry()
           registry_report = validate_phase3_feature_registry(registry)
           registry_sha = registry_report["registry_sha256"]
@@ -794,6 +889,8 @@ jobs:
               raise SystemExit("Phase-3 price registry SHA drift")
           if trade_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 trade registry SHA drift")
+          if trade_size_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 trade-size-flow registry SHA drift")
 
           output = Path(
               "artifacts/phase3-feature-coverage.jsonl"
@@ -832,6 +929,10 @@ jobs:
                       trade_rows_path,
                       trade_manifest_path,
                   ),
+                  "trade_size_flow": iter_validated_jsonl(
+                      trade_size_rows_path,
+                      trade_size_manifest_path,
+                  ),
               },
               {
                   "chain_regime": chain_handoff,
@@ -841,6 +942,7 @@ jobs:
                   "participant_retention": retention_handoff,
                   "price_drawdown": price_handoff,
                   "trade_flow": trade_handoff,
+                  "trade_size_flow": trade_size_handoff,
               },
               feature_registry=registry,
               required_families=[
@@ -850,6 +952,7 @@ jobs:
                   "price_drawdown",
                   "supply_redistribution",
                   "trade_flow",
+                  "trade_size_flow",
                   "venue_mechanics",
               ],
               output=output,
@@ -889,6 +992,12 @@ jobs:
                   os.environ["TRADE_FEATURE_RUN_ID"]
               ),
               "trade_feature_handoff_sha256": trade_handoff_sha,
+              "trade_size_flow_run_id": int(
+                  os.environ["TRADE_SIZE_FLOW_RUN_ID"]
+              ),
+              "trade_size_flow_handoff_sha256": (
+                  trade_size_handoff_sha
+              ),
           })
           summary_path = Path(
               "artifacts/phase3-feature-coverage-summary.json"
@@ -984,7 +1093,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: chain_regime,holder_state,participant_retention,price_drawdown,supply_redistribution,trade_flow,venue_mechanics"
+            echo "- required_families: chain_regime,holder_state,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
