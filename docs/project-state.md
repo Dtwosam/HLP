@@ -483,14 +483,20 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   remains draft and unmerged. The read-only
   `phase2-default-branch-dispatch-readiness` workflow now compares the actual
   default-branch workflow directory against the execution DAG and separately
-  reports first-wave and full-DAG dispatch readiness. Its live result against
-  the current default branch is **0/42 required workflows present**,
+  reports first-wave and full-DAG dispatch readiness. It now hashes each
+  required workflow's complete `workflow_dispatch` block, so a stale or
+  incompatible default-branch interface cannot pass on filename alone. Its live
+  result against the current default branch is **0/43 required workflows
+  present**, **0 incompatible present interfaces**,
   `phase2_first_wave_dispatch_ready=false`, and
   `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
-  **#25** now provides the non-invasive bootstrap option: it is based directly
-  on `main`, contains exactly **42 manual Phase-2 workflow files plus one
-  safety note**, is clean/mergeable, and carries no source code or coverage
-  ledger mutation. All 42 bootstrap workflows were audited as manual-only
+  **#25** provides the non-invasive bootstrap option: it is based directly on
+  `main`, contains exactly **43 manual Phase-2 workflow files plus one safety
+  note**, and carries no source code or coverage-ledger mutation. **42/43**
+  bootstrap workflows are byte-for-byte identical to the current compatibility
+  target; the planner copy differs only by removing its automatic branch/PR
+  triggers while preserving the exact manual-dispatch interface. All 43
+  bootstrap workflows are manual-only on that branch
   (`workflow_dispatch` present; no `push`/`pull_request` triggers).
   After that workflow surface is merged, execution can target
   `phase1/data-acquisition-spike` without merging the full 764-file project
@@ -509,16 +515,30 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   a node-to-run-ID map, fetch each exact GitHub Actions run, and grant completion
   credit only when the run belongs to this repository and branch, matches the
   DAG node's exact workflow path, was triggered by `workflow_dispatch`, and
-  completed successfully. Ledger-commit runs are deliberately excluded from
-  that receipt mechanism because a successful canonical write must instead be
-  visible in the source-of-truth coverage ledger after the planner regenerates.
-  The planner also emits a machine-readable `phase2-dispatch-input-plan.json`:
+  completed successfully. Historical run receipts are also lineage-checked:
+  the current branch must be identical to or descend from the run head, and the
+  only permitted intervening path change is the canonical
+  `.github/phase2-source-coverage.json` ledger. Any code/workflow drift makes
+  the run stale. Ledger-commit runs are deliberately excluded from that receipt
+  mechanism because a successful canonical write must instead be visible in
+  the source-of-truth coverage ledger after the planner regenerates. Every
+  planner artifact now carries both the exact planner HEAD and canonical
+  coverage-ledger SHA. The planner also emits a machine-readable
+  `phase2-dispatch-input-plan.json`:
   for every currently dispatchable or approval-gated node it reads the actual
   target workflow's `workflow_dispatch` schema, fills dependency run-ID inputs
   only from those verified receipts, and lists every remaining digest/path/
   approval field explicitly instead of inventing it. On the current 2/14
   ledger, the live planner emits exactly two first-wave nodes:
-  `preflight:archive_authenticated` and `shared:quote_registry`.
+  `preflight:archive_authenticated` and `shared:quote_registry`. A separate
+  manual `phase2-execution-node-dispatch` workflow is now prepared to consume
+  one exact successful planner run/artifact, require the planner HEAD and
+  canonical-ledger SHA to still match the execution branch, re-check the target
+  workflow's default-branch manual interface, and dispatch exactly one
+  `ready_to_dispatch` node through GitHub's workflow-dispatch API. It records
+  the returned target run ID immediately and never authorizes selector/manual
+  approval gates or canonical-ledger writes; those remain separate explicit
+  workflows.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
