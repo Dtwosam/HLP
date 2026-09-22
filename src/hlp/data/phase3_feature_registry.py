@@ -415,6 +415,116 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase2_research_price_path",
             "missingness_policy": "error_if_missing",
         },
+        {
+            "feature_id": "venue.unique_source_ids_seen_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical source_ids observed for the token from "
+                "its first price point through the confirmation cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.unique_component_ids_seen_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical component_ids observed for the token "
+                "through the confirmation cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.source_set_switches_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "count of causal changes in the canonical source_id set "
+                "between consecutive token price points through cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.component_set_switches_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "count of causal changes in the canonical component_id set "
+                "between consecutive token price points through cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.current_source_count",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "number of canonical source_ids attached to the exact "
+                "confirmation-cutoff price point"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.current_component_count",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "number of canonical component_ids attached to the exact "
+                "confirmation-cutoff price point"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.multi_source_events_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "count of token price points through cutoff carrying more "
+                "than one canonical source_id"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.multi_component_events_so_far",
+            "family": "venue_mechanics",
+            "dtype": "integer",
+            "formula": (
+                "count of token price points through cutoff carrying more "
+                "than one canonical component_id"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.current_event_multi_source",
+            "family": "venue_mechanics",
+            "dtype": "boolean",
+            "formula": (
+                "true when the exact confirmation-cutoff price point carries "
+                "more than one canonical source_id"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "venue.current_event_multi_component",
+            "family": "venue_mechanics",
+            "dtype": "boolean",
+            "formula": (
+                "true when the exact confirmation-cutoff price point carries "
+                "more than one canonical component_id"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
     ]
     return [
         {
