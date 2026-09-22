@@ -14,6 +14,7 @@ from hlp.data.phase2_execution_dispatch import (
     build_phase2_dispatch_input_plan,
     build_phase2_node_dispatch_request,
     validate_phase2_node_dispatch_attempt,
+    validate_phase2_node_dispatch_evidence,
     validate_phase2_node_dispatch_receipt,
     extract_workflow_dispatch_inputs,
 )
@@ -470,3 +471,48 @@ def test_node_dispatch_attempt_rejects_tampering(field, value, match):
     row[field] = value
     with pytest.raises(ValueError, match=match):
         validate_phase2_node_dispatch_attempt(row)
+
+
+
+def matching_dispatch_evidence():
+    attempt = dispatch_attempt()
+    receipt = dispatch_receipt()
+    attempt["node_dispatch_control_run_id"] = 99
+    attempt_sha = receipt["dispatch_attempt_sha256"]
+    return attempt, receipt, attempt_sha
+
+
+def test_node_dispatch_evidence_reconciles_attempt_and_final_receipt():
+    attempt, receipt, attempt_sha = matching_dispatch_evidence()
+    evidence = validate_phase2_node_dispatch_evidence(
+        attempt,
+        receipt,
+        attempt_file_sha256=attempt_sha,
+    )
+
+    assert evidence["node_id"] == "shared:quote_registry"
+    assert evidence["dispatch_attempt_sha256"] == attempt_sha
+    assert evidence["attempt_target_run_identity_verified"] is False
+    assert evidence["final_target_run_identity_verified"] is True
+    assert evidence["canonical_ledger_write_authorized"] is False
+
+
+def test_node_dispatch_evidence_rejects_attempt_file_sha_drift():
+    attempt, receipt, _ = matching_dispatch_evidence()
+    with pytest.raises(ValueError, match="exact attempt file bytes"):
+        validate_phase2_node_dispatch_evidence(
+            attempt,
+            receipt,
+            attempt_file_sha256="56" * 32,
+        )
+
+
+def test_node_dispatch_evidence_rejects_attempt_receipt_identity_drift():
+    attempt, receipt, attempt_sha = matching_dispatch_evidence()
+    attempt["dispatched_run_id"] = 999
+    with pytest.raises(ValueError, match="identity drift"):
+        validate_phase2_node_dispatch_evidence(
+            attempt,
+            receipt,
+            attempt_file_sha256=attempt_sha,
+        )

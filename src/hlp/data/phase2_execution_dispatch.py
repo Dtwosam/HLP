@@ -712,3 +712,82 @@ def validate_phase2_node_dispatch_receipt(
         "canonical_ledger_write_authorized": False,
         "workflow_dispatch_performed": True,
     }
+
+
+
+def validate_phase2_node_dispatch_evidence(
+    attempt: Mapping[str, object],
+    receipt: Mapping[str, object],
+    *,
+    attempt_file_sha256: str,
+) -> dict:
+    """Reconcile target-creation evidence with the successful final receipt."""
+
+    normalized_attempt = validate_phase2_node_dispatch_attempt(attempt)
+    normalized_receipt = validate_phase2_node_dispatch_receipt(receipt)
+    actual_attempt_sha = _sha256_hex(
+        attempt_file_sha256,
+        label="Phase-2 node-dispatch attempt file bytes",
+    )
+    if normalized_receipt["dispatch_attempt_sha256"] != actual_attempt_sha:
+        raise ValueError(
+            "Phase-2 node-dispatch final receipt does not bind the exact "
+            "attempt file bytes"
+        )
+
+    shared_keys = (
+        "node_id",
+        "target_workflow",
+        "target_ref",
+        "target_head_sha",
+        "node_dispatch_control_run_id",
+        "planner_run_id",
+        "planner_artifact_digest",
+        "canonical_coverage_ledger_sha256",
+        "dispatch_input_names",
+        "dispatch_inputs_sha256",
+        "dispatched_run_id",
+        "requires_explicit_approval",
+        "canonical_ledger_write_authorized",
+        "workflow_dispatch_performed",
+    )
+    drift = [
+        key
+        for key in shared_keys
+        if normalized_attempt.get(key) != normalized_receipt.get(key)
+    ]
+    if drift:
+        raise ValueError(
+            "Phase-2 node-dispatch attempt/final receipt identity drift: "
+            f"{drift}"
+        )
+
+    return {
+        "version": "phase2-execution-node-dispatch-evidence-v1",
+        "node_id": normalized_receipt["node_id"],
+        "target_workflow": normalized_receipt["target_workflow"],
+        "target_ref": normalized_receipt["target_ref"],
+        "target_head_sha": normalized_receipt["target_head_sha"],
+        "node_dispatch_control_run_id": normalized_receipt[
+            "node_dispatch_control_run_id"
+        ],
+        "planner_run_id": normalized_receipt["planner_run_id"],
+        "planner_artifact_digest": normalized_receipt[
+            "planner_artifact_digest"
+        ],
+        "canonical_coverage_ledger_sha256": normalized_receipt[
+            "canonical_coverage_ledger_sha256"
+        ],
+        "dispatch_input_names": normalized_receipt[
+            "dispatch_input_names"
+        ],
+        "dispatch_inputs_sha256": normalized_receipt[
+            "dispatch_inputs_sha256"
+        ],
+        "dispatch_attempt_sha256": actual_attempt_sha,
+        "dispatched_run_id": normalized_receipt["dispatched_run_id"],
+        "attempt_target_run_identity_verified": False,
+        "final_target_run_identity_verified": True,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
