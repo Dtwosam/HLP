@@ -16,6 +16,11 @@ BASE_SHA = "22" * 32
 UNIVARIATE_SHA = "33" * 32
 FREEZE_SHA = "44" * 32
 VALIDATION_SHA = "55" * 32
+MAGNITUDE_SHA = "56" * 32
+NONLINEAR_SHA = "57" * 32
+INTERACTION_SHA = "58" * 32
+SIMPLE_MODEL_SHA = "59" * 32
+STABILITY_SHA = "5a" * 32
 PLAN_SHA = "66" * 32
 DISCOVERY_ROWS_SHA = "77" * 32
 DISCOVERY_SPLIT_SHA = "88" * 32
@@ -27,10 +32,13 @@ def split_handoff():
         "version": "phase4-chronological-split-handoff-v1",
         "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
         "feature_registry_sha256": SHA,
+        "feature_registry_file_sha256": SHA,
         "discovery_rows_sha256": DISCOVERY_ROWS_SHA,
         "discovery_subjects": 20,
         "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
         "validation_split_rows_sha256": VALIDATION_ROWS_SHA,
+        "discovery_split_rows": 12,
+        "validation_split_rows": 6,
         "phase4_split_frozen": True,
         "final_test_separated": True,
         "split_assignment_uses_feature_values": False,
@@ -131,6 +139,128 @@ def validation_handoff():
         "signal_promoted": False,
         "phase4_discovery_checkpoint_claimed": False,
         "phase4_validation_report_ready": True,
+    }
+
+
+def magnitude_handoff():
+    return {
+        "version": "phase4-magnitude-strata-handoff-v1",
+        "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
+        "feature_registry_sha256": SHA,
+        "feature_registry_file_sha256": SHA,
+        "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
+        "chronological_split_handoff_sha256": SPLIT_SHA,
+        "analysis_subjects": 12,
+        "features_analyzed": 3,
+        "families_analyzed": 1,
+        "ordinary_5x_vs_10x_plus_compared": True,
+        "ordinary_5x_vs_20x_plus_compared": True,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
+        "candidate_features_ranked": False,
+        "signal_promoted": False,
+        "phase4_discovery_checkpoint_claimed": False,
+        "phase4_magnitude_strata_report_ready": True,
+    }
+
+
+def nonlinear_handoff():
+    return {
+        "version": "phase4-nonlinear-handoff-v1",
+        "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
+        "feature_registry_sha256": SHA,
+        "feature_registry_file_sha256": SHA,
+        "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
+        "chronological_split_handoff_sha256": SPLIT_SHA,
+        "analysis_subjects": 12,
+        "numeric_features_analyzed": 2,
+        "non_numeric_features_excluded": 1,
+        "nonlinear_relationships_examined": True,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
+        "candidate_thresholds_promoted": False,
+        "candidate_features_ranked": False,
+        "signal_promoted": False,
+        "phase4_discovery_checkpoint_claimed": False,
+        "phase4_nonlinear_report_ready": True,
+    }
+
+
+def interaction_handoff():
+    return {
+        "version": "phase4-interaction-handoff-v1",
+        "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
+        "feature_registry_sha256": SHA,
+        "feature_registry_file_sha256": SHA,
+        "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
+        "chronological_split_handoff_sha256": SPLIT_SHA,
+        "analysis_subjects": 12,
+        "eligible_features": 2,
+        "excluded_feature_count": 1,
+        "pair_count": 1,
+        "same_family_pairs": 0,
+        "cross_family_pairs": 1,
+        "effect_available_pairs": 1,
+        "pairwise_interactions_examined": True,
+        "interaction_pairs_ranked": False,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
+        "signal_promoted": False,
+        "phase4_discovery_checkpoint_claimed": False,
+        "phase4_interaction_report_ready": True,
+    }
+
+
+def simple_model_handoff():
+    return {
+        "version": "phase4-simple-model-handoff-v1",
+        "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
+        "feature_registry_sha256": SHA,
+        "feature_registry_file_sha256": SHA,
+        "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
+        "validation_rows_sha256": VALIDATION_ROWS_SHA,
+        "chronological_split_handoff_sha256": SPLIT_SHA,
+        "discovery_rows": 12,
+        "validation_rows": 6,
+        "eligible_features": 2,
+        "excluded_feature_count": 1,
+        "predictor_count": 4,
+        "preprocessing_fit_on_discovery_only": True,
+        "models_fit_on_discovery_only": True,
+        "validation_rows_consumed": True,
+        "final_test_rows_consumed": False,
+        "transparent_simple_models_examined": True,
+        "automatic_model_feature_selection_used": True,
+        "production_model_selected": False,
+        "signal_threshold_selected": False,
+        "signal_promoted": False,
+        "phase4_discovery_checkpoint_claimed": False,
+        "phase4_simple_model_report_ready": True,
+    }
+
+
+def stability_handoff():
+    return {
+        "version": "phase4-stability-handoff-v1",
+        "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
+        "feature_registry_sha256": SHA,
+        "discovery_split_rows_sha256": DISCOVERY_SPLIT_SHA,
+        "hypothesis_plan_sha256": PLAN_SHA,
+        "hypothesis_freeze_handoff_sha256": FREEZE_SHA,
+        "chronological_split_handoff_sha256": SPLIT_SHA,
+        "analysis_subjects": 12,
+        "hypotheses_examined": 2,
+        "resamples_per_hypothesis": 32,
+        "sample_fraction": "0.8",
+        "chronological_fold_count": 4,
+        "repeated_sampling_stability_examined": True,
+        "chronological_stability_examined": True,
+        "stability_pass_fail_threshold_applied": False,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
+        "signal_promoted": False,
+        "phase4_discovery_checkpoint_claimed": False,
+        "phase4_stability_report_ready": True,
     }
 
 
@@ -253,6 +383,16 @@ def build(
             if validation_handoff_value is None
             else validation_handoff_value
         ),
+        magnitude_strata_handoff=magnitude_handoff(),
+        magnitude_strata_handoff_sha256=MAGNITUDE_SHA,
+        nonlinear_handoff=nonlinear_handoff(),
+        nonlinear_handoff_sha256=NONLINEAR_SHA,
+        interaction_handoff=interaction_handoff(),
+        interaction_handoff_sha256=INTERACTION_SHA,
+        simple_model_handoff=simple_model_handoff(),
+        simple_model_handoff_sha256=SIMPLE_MODEL_SHA,
+        stability_handoff=stability_handoff(),
+        stability_handoff_sha256=STABILITY_SHA,
     )
 
 
@@ -297,6 +437,14 @@ def test_discovery_ledger_logs_validated_rejected_and_unselected():
     )
     assert ledger["all_hypothesis_dispositions_logged"] is True
     assert ledger["rejected_hypotheses_logged"] is True
+    assert ledger["magnitude_strata_examined"] is True
+    assert ledger["nonlinear_relationships_examined"] is True
+    assert ledger["pairwise_interactions_examined"] is True
+    assert ledger["transparent_simple_models_examined"] is True
+    assert ledger["repeated_sampling_stability_examined"] is True
+    assert ledger["chronological_stability_examined"] is True
+    assert ledger["sequence_analysis_performed"] is False
+    assert ledger["cluster_analysis_performed"] is False
     assert ledger["final_test_rows_consumed"] is False
     assert ledger["signal_promoted"] is False
     assert ledger["phase4_discovery_checkpoint_claimed"] is True
@@ -360,11 +508,23 @@ def test_discovery_handoff_claims_phase4_but_not_a_signal():
         univariate_handoff_sha256=UNIVARIATE_SHA,
         hypothesis_freeze_handoff_sha256=FREEZE_SHA,
         validation_handoff_sha256=VALIDATION_SHA,
+        magnitude_strata_handoff_sha256=MAGNITUDE_SHA,
+        nonlinear_handoff_sha256=NONLINEAR_SHA,
+        interaction_handoff_sha256=INTERACTION_SHA,
+        simple_model_handoff_sha256=SIMPLE_MODEL_SHA,
+        stability_handoff_sha256=STABILITY_SHA,
     )
 
     assert handoff["version"] == PHASE4_DISCOVERY_HANDOFF_VERSION
     assert handoff["checkpoint_name"] == "hlp-v1-phase4-discovery"
     assert handoff["rejected_hypotheses_logged"] is True
+    assert handoff["magnitude_strata_examined"] is True
+    assert handoff["nonlinear_relationships_examined"] is True
+    assert handoff["pairwise_interactions_examined"] is True
+    assert handoff["transparent_simple_models_examined"] is True
+    assert handoff["repeated_sampling_stability_examined"] is True
+    assert handoff["sequence_analysis_performed"] is False
+    assert handoff["cluster_analysis_performed"] is False
     assert handoff["final_test_rows_consumed"] is False
     assert handoff["signal_promoted"] is False
     assert handoff["phase5_model_started"] is False
@@ -389,4 +549,45 @@ def test_discovery_ledger_rejects_base_rate_population_drift():
             hypothesis_freeze_handoff=freeze_handoff(),
             hypothesis_freeze_handoff_sha256=FREEZE_SHA,
             validation_handoff=validation_handoff(),
+            magnitude_strata_handoff=magnitude_handoff(),
+            magnitude_strata_handoff_sha256=MAGNITUDE_SHA,
+            nonlinear_handoff=nonlinear_handoff(),
+            nonlinear_handoff_sha256=NONLINEAR_SHA,
+            interaction_handoff=interaction_handoff(),
+            interaction_handoff_sha256=INTERACTION_SHA,
+            simple_model_handoff=simple_model_handoff(),
+            simple_model_handoff_sha256=SIMPLE_MODEL_SHA,
+            stability_handoff=stability_handoff(),
+            stability_handoff_sha256=STABILITY_SHA,
+        )
+
+
+
+def test_discovery_ledger_rejects_experiment_suite_population_drift():
+    magnitude = magnitude_handoff()
+    magnitude["analysis_subjects"] = 11
+
+    with pytest.raises(ValueError, match="magnitude-strata subject-count drift"):
+        build_phase4_discovery_ledger(
+            freeze_report(),
+            validation_report(),
+            chronological_split_handoff=split_handoff(),
+            chronological_split_handoff_sha256=SPLIT_SHA,
+            base_rate_handoff=base_handoff(),
+            base_rate_handoff_sha256=BASE_SHA,
+            univariate_handoff=univariate_handoff(),
+            univariate_handoff_sha256=UNIVARIATE_SHA,
+            hypothesis_freeze_handoff=freeze_handoff(),
+            hypothesis_freeze_handoff_sha256=FREEZE_SHA,
+            validation_handoff=validation_handoff(),
+            magnitude_strata_handoff=magnitude,
+            magnitude_strata_handoff_sha256=MAGNITUDE_SHA,
+            nonlinear_handoff=nonlinear_handoff(),
+            nonlinear_handoff_sha256=NONLINEAR_SHA,
+            interaction_handoff=interaction_handoff(),
+            interaction_handoff_sha256=INTERACTION_SHA,
+            simple_model_handoff=simple_model_handoff(),
+            simple_model_handoff_sha256=SIMPLE_MODEL_SHA,
+            stability_handoff=stability_handoff(),
+            stability_handoff_sha256=STABILITY_SHA,
         )
