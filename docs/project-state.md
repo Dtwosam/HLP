@@ -487,6 +487,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   completed successfully. Ledger-commit runs are deliberately excluded from
   that receipt mechanism because a successful canonical write must instead be
   visible in the source-of-truth coverage ledger after the planner regenerates.
+  The planner also emits a machine-readable `phase2-dispatch-input-plan.json`:
+  for every currently dispatchable or approval-gated node it reads the actual
+  target workflow's `workflow_dispatch` schema, fills dependency run-ID inputs
+  only from those verified receipts, and lists every remaining digest/path/
+  approval field explicitly instead of inventing it. On the current 2/14
+  ledger, the live planner emits exactly two first-wave nodes:
+  `preflight:archive_authenticated` and `shared:quote_registry`.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
