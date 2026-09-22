@@ -14,7 +14,7 @@ from hlp.protocols.erc20 import TRANSFER_TOPIC, decode_erc20_transfer
 ZERO_ADDRESS = "0x" + "00" * 20
 
 
-def fetch_pons_transfer_rows(
+def fetch_erc20_transfer_rows(
     rpc: RpcClient,
     tokens: Iterable[str],
     *,
@@ -23,7 +23,7 @@ def fetch_pons_transfer_rows(
     chunk_size: int = 2_000,
     min_chunk_size: int = 25,
 ) -> Iterator[dict]:
-    """Fetch ERC-20 Transfer logs for a bounded representative token set."""
+    """Fetch ERC-20 Transfer logs for a bounded token-address set."""
     token_set = {
         normalize_address(token)
         for token in tokens
@@ -32,7 +32,7 @@ def fetch_pons_transfer_rows(
         raise ValueError("at least one Pons token is required")
     if len(token_set) > 50:
         raise ValueError(
-            "representative transfer tape is capped at 50 tokens per request"
+            "ERC-20 transfer tape is capped at 50 tokens per request"
         )
     if from_block < 0 or to_block < from_block:
         raise ValueError("invalid representative transfer range")
@@ -59,10 +59,31 @@ def fetch_pons_transfer_rows(
         order = event_order(row)
         if previous is not None and order <= previous:
             raise ValueError(
-                "representative transfer tape is not strictly chronological"
+                "ERC-20 transfer tape is not strictly chronological"
             )
         previous = order
         yield row
+
+
+def fetch_pons_transfer_rows(
+    rpc: RpcClient,
+    tokens: Iterable[str],
+    *,
+    from_block: int,
+    to_block: int,
+    chunk_size: int = 2_000,
+    min_chunk_size: int = 25,
+) -> Iterator[dict]:
+    """Backward-compatible representative-Pons transfer fetch wrapper."""
+
+    yield from fetch_erc20_transfer_rows(
+        rpc,
+        tokens,
+        from_block=from_block,
+        to_block=to_block,
+        chunk_size=chunk_size,
+        min_chunk_size=min_chunk_size,
+    )
 
 
 def reconstruct_pons_holder_states(

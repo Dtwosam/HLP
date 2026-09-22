@@ -50,6 +50,8 @@ def test_transfer_adapter_and_token_coverage_require_initial_mint():
         rows,
         snapshot_head_block=100,
         search_from_block=1,
+        first_code_block=1,
+        deployment_boundary_verified=True,
         raw_transfer_tape_sha256=SHA,
         historical_event_scan_complete=True,
     )
@@ -71,6 +73,8 @@ def test_transfer_coverage_rejects_history_starting_after_mint():
             rows,
             snapshot_head_block=100,
             search_from_block=2,
+            first_code_block=2,
+            deployment_boundary_verified=True,
             raw_transfer_tape_sha256=SHA,
             historical_event_scan_complete=True,
         )
@@ -86,6 +90,8 @@ def test_canonical_transfer_tape_requires_exact_universe_coverage(tmp_path):
         rows,
         snapshot_head_block=100,
         search_from_block=1,
+        first_code_block=1,
+        deployment_boundary_verified=True,
         raw_transfer_tape_sha256=SHA,
         historical_event_scan_complete=True,
     )
@@ -131,3 +137,23 @@ def test_canonical_transfer_handoff_is_holder_compatible():
     assert handoff["version"] == "phase3-canonical-transfer-handoff-v1"
     assert handoff["initial_mint_coverage_complete"] is True
     assert handoff["transfer_coverage_complete"] is True
+
+
+
+def test_transfer_coverage_rejects_scan_start_after_deployment():
+    import pytest
+
+    rows = adapt_erc20_transfers_to_phase3([
+        decoded(10, ZERO, A, 1000),
+    ])
+    with pytest.raises(ValueError, match="does not include deployment"):
+        build_phase3_transfer_token_coverage(
+            TOKEN,
+            rows,
+            snapshot_head_block=100,
+            search_from_block=11,
+            first_code_block=10,
+            deployment_boundary_verified=True,
+            raw_transfer_tape_sha256=SHA,
+            historical_event_scan_complete=True,
+        )

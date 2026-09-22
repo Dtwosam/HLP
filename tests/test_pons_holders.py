@@ -2,6 +2,7 @@ import pytest
 
 from hlp.data.pons_holders import (
     ZERO_ADDRESS,
+    fetch_erc20_transfer_rows,
     fetch_pons_transfer_rows,
     reconstruct_pons_holder_states,
     summarize_pons_holder_states,
@@ -137,3 +138,45 @@ def test_transfer_fetch_caps_representative_token_set():
                 to_block=2,
             )
         )
+
+
+
+def test_generic_transfer_fetch_matches_backward_compatible_wrapper():
+    raw = RawLog(
+        chain_id=4663,
+        block_number=10,
+        block_hash=None,
+        transaction_hash="0x" + "33" * 32,
+        transaction_index=1,
+        log_index=2,
+        address=TOKEN,
+        topics=(
+            TRANSFER_TOPIC,
+            topic_address(ZERO_ADDRESS),
+            topic_address(A),
+        ),
+        data="0x" + f"{7:064x}",
+        removed=False,
+    )
+
+    class Rpc:
+        def iter_logs_chunked(self, *args, **kwargs):
+            return iter([raw])
+
+    generic = list(
+        fetch_erc20_transfer_rows(
+            Rpc(),
+            [TOKEN],
+            from_block=5,
+            to_block=15,
+        )
+    )
+    wrapped = list(
+        fetch_pons_transfer_rows(
+            Rpc(),
+            [TOKEN],
+            from_block=5,
+            to_block=15,
+        )
+    )
+    assert generic == wrapped

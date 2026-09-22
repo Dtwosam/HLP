@@ -129,6 +129,8 @@ def build_phase3_transfer_token_coverage(
     *,
     snapshot_head_block: int,
     search_from_block: int,
+    first_code_block: int,
+    deployment_boundary_verified: bool,
     raw_transfer_tape_sha256: str,
     historical_event_scan_complete: bool,
 ) -> dict:
@@ -137,8 +139,17 @@ def build_phase3_transfer_token_coverage(
     token = normalize_address(token)
     snapshot = int(snapshot_head_block)
     start = int(search_from_block)
+    first_code = int(first_code_block)
     if snapshot <= 0 or start < 0 or start > snapshot:
         raise ValueError("Phase-3 transfer coverage range is invalid")
+    if first_code < 0 or first_code > snapshot or start > first_code:
+        raise ValueError(
+            "Phase-3 transfer coverage does not include deployment boundary"
+        )
+    if deployment_boundary_verified is not True:
+        raise ValueError(
+            "Phase-3 transfer coverage deployment boundary is unverified"
+        )
 
     rows = []
     previous = None
@@ -195,6 +206,8 @@ def build_phase3_transfer_token_coverage(
         "token": token,
         "snapshot_head_block": snapshot,
         "search_from_block": start,
+        "first_code_block": first_code,
+        "deployment_boundary_verified": True,
         "search_to_block": snapshot,
         "continuous": complete,
         "missing_ranges": [],
@@ -289,6 +302,21 @@ def materialize_phase3_canonical_transfer_tape(
         if int(row.get("search_to_block", -1)) != snapshot:
             raise ValueError(
                 f"Phase-3 transfer coverage end drift: {token}"
+            )
+        first_code = int(row.get("first_code_block", -1))
+        start = int(row.get("search_from_block", -1))
+        if (
+            first_code < 0
+            or first_code > snapshot
+            or start < 0
+            or start > first_code
+        ):
+            raise ValueError(
+                f"Phase-3 transfer deployment coverage drift: {token}"
+            )
+        if row.get("deployment_boundary_verified") is not True:
+            raise ValueError(
+                f"Phase-3 transfer deployment boundary unverified: {token}"
             )
         if row.get("continuous") is not True:
             raise ValueError(
