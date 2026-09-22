@@ -7,10 +7,12 @@ from hlp.data.phase2_coverage_execution import (
 )
 from hlp.data.phase2_execution_dispatch import (
     PHASE2_DISPATCH_INPUT_PLAN_VERSION,
+    PHASE2_NODE_DISPATCH_RECEIPT_VERSION,
     PHASE2_NODE_DISPATCH_REQUEST_VERSION,
     RUN_ID_INPUT_BINDINGS,
     build_phase2_dispatch_input_plan,
     build_phase2_node_dispatch_request,
+    validate_phase2_node_dispatch_receipt,
     extract_workflow_dispatch_inputs,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
@@ -347,3 +349,57 @@ def test_node_dispatch_request_rejects_approval_gated_nodes():
             node_id="ledger_commit:pools_fun",
             manual_inputs={"apply_proposed_ledger": True},
         )
+
+
+
+def dispatch_receipt():
+    return {
+        "version": PHASE2_NODE_DISPATCH_RECEIPT_VERSION,
+        "node_id": "shared:quote_registry",
+        "target_workflow": "phase2-direct-quote-registry.yml",
+        "target_ref": "phase1/data-acquisition-spike",
+        "target_head_sha": "ab" * 20,
+        "planner_run_id": 101,
+        "planner_artifact_digest": "sha256:" + "cd" * 32,
+        "canonical_coverage_ledger_sha256": "ef" * 32,
+        "dispatch_input_names": [],
+        "dispatch_inputs_sha256": "12" * 32,
+        "dispatched_run_id": 202,
+        "requires_explicit_approval": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_node_dispatch_receipt_validates_immutable_mapping():
+    row = validate_phase2_node_dispatch_receipt(dispatch_receipt())
+
+    assert row["node_id"] == "shared:quote_registry"
+    assert row["dispatched_run_id"] == 202
+    assert row["target_workflow"] == "phase2-direct-quote-registry.yml"
+    assert row["canonical_ledger_write_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("version", "other", "version changed"),
+        ("node_id", "ledger_commit:pools_fun", "ledger commit"),
+        ("dispatched_run_id", 0, "run IDs must be positive"),
+        (
+            "canonical_ledger_write_authorized",
+            True,
+            "authorizes ledger write",
+        ),
+        (
+            "workflow_dispatch_performed",
+            False,
+            "does not prove dispatch",
+        ),
+    ],
+)
+def test_node_dispatch_receipt_rejects_tampering(field, value, match):
+    row = dispatch_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_node_dispatch_receipt(row)
