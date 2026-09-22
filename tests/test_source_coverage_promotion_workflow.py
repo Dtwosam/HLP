@@ -28,6 +28,10 @@ def test_source_coverage_promotion_is_complete_only_and_non_mutating():
     assert "apply_phase2_source_coverage_report" in text
     assert "promotion only accepts coverage_status=complete" in text
     assert "phase2-source-coverage.proposed.json" in text
+    assert "base_ledger_sha256" in text
+    assert "proposed_ledger_sha256" in text
+    assert "\"proposal_only\": True" in text
+    assert "\"canonical_ledger_mutated\": False" in text
     assert "canonical coverage ledger changed during proposal build" in text
     assert "promotion regressed an already-complete source" in text
     assert "git commit" not in text
