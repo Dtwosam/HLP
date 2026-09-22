@@ -10,6 +10,7 @@ from hlp.data.phase2_coverage_execution import COVERAGE_NODE_BY_SOURCE
 
 PHASE2_DISPATCH_INPUT_PLAN_VERSION = "phase2-dispatch-input-plan-v1"
 PHASE2_NODE_DISPATCH_REQUEST_VERSION = "phase2-node-dispatch-request-v1"
+PHASE2_NODE_DISPATCH_RECEIPT_VERSION = "phase2-execution-node-dispatch-v1"
 
 RUN_ID_INPUT_BINDINGS: dict[str, dict[str, str]] = {
     "shared:direct_market_registry": {
@@ -452,4 +453,130 @@ def build_phase2_node_dispatch_request(
         "planner_status": "ready_to_dispatch",
         "workflow_dispatch_authorized": True,
         "canonical_ledger_write_authorized": False,
+    }
+
+
+
+def _sha256_hex(value: object, *, label: str) -> str:
+    text = str(value or "").lower().removeprefix("sha256:")
+    if len(text) != 64:
+        raise ValueError(f"{label} must be 64 hex chars")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def _commit_sha(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if len(text) != 40:
+        raise ValueError(f"{label} must be a 40-char commit SHA")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def validate_phase2_node_dispatch_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate one immutable node-dispatch receipt before planner reuse."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != PHASE2_NODE_DISPATCH_RECEIPT_VERSION:
+        raise ValueError("Phase-2 node-dispatch receipt version changed")
+
+    node_id = str(row.get("node_id") or "")
+    if not node_id:
+        raise ValueError("Phase-2 node-dispatch receipt node_id is empty")
+    if node_id.startswith("ledger_commit:"):
+        raise ValueError(
+            "Phase-2 node-dispatch receipt cannot authorize ledger commit"
+        )
+
+    workflow = str(row.get("target_workflow") or "")
+    if not workflow.endswith(".yml"):
+        raise ValueError(
+            "Phase-2 node-dispatch receipt target workflow is invalid"
+        )
+    target_ref = str(row.get("target_ref") or "")
+    if not target_ref:
+        raise ValueError(
+            "Phase-2 node-dispatch receipt target ref is empty"
+        )
+    target_head = _commit_sha(
+        row.get("target_head_sha"),
+        label="Phase-2 node-dispatch target head",
+    )
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    dispatched_run_id = int(row.get("dispatched_run_id") or 0)
+    if planner_run_id <= 0 or dispatched_run_id <= 0:
+        raise ValueError(
+            "Phase-2 node-dispatch receipt run IDs must be positive"
+        )
+
+    artifact_digest = str(
+        row.get("planner_artifact_digest") or ""
+    ).lower()
+    if (
+        not artifact_digest.startswith("sha256:")
+        or len(artifact_digest) != 71
+    ):
+        raise ValueError(
+            "Phase-2 node-dispatch planner artifact digest is invalid"
+        )
+    _sha256_hex(
+        artifact_digest,
+        label="Phase-2 node-dispatch planner artifact digest",
+    )
+    ledger_sha = _sha256_hex(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 node-dispatch coverage ledger",
+    )
+
+    input_names = row.get("dispatch_input_names")
+    if not isinstance(input_names, list):
+        raise ValueError(
+            "Phase-2 node-dispatch receipt input names are invalid"
+        )
+    normalized_names = [str(value) for value in input_names]
+    if len(normalized_names) != len(set(normalized_names)):
+        raise ValueError(
+            "Phase-2 node-dispatch receipt repeats an input name"
+        )
+    inputs_sha = _sha256_hex(
+        row.get("dispatch_inputs_sha256"),
+        label="Phase-2 node-dispatch inputs",
+    )
+
+    if row.get("requires_explicit_approval") is not False:
+        raise ValueError(
+            "Phase-2 node-dispatch receipt unexpectedly required approval"
+        )
+    if row.get("canonical_ledger_write_authorized") is not False:
+        raise ValueError(
+            "Phase-2 node-dispatch receipt authorizes ledger write"
+        )
+    if row.get("workflow_dispatch_performed") is not True:
+        raise ValueError(
+            "Phase-2 node-dispatch receipt does not prove dispatch"
+        )
+
+    return {
+        "version": PHASE2_NODE_DISPATCH_RECEIPT_VERSION,
+        "node_id": node_id,
+        "target_workflow": workflow,
+        "target_ref": target_ref,
+        "target_head_sha": target_head,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": artifact_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "dispatch_input_names": sorted(normalized_names),
+        "dispatch_inputs_sha256": inputs_sha,
+        "dispatched_run_id": dispatched_run_id,
+        "requires_explicit_approval": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
     }
