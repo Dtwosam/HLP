@@ -37,6 +37,15 @@ PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS = (
 PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS = (
     "promote:pools_fun",
 )
+PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS = (
+    "shared:direct_quality_evidence",
+    "shared:direct_launch_population",
+    "coverage:pools_trade_lbp",
+    "derive:trench_handoff_freeze",
+)
+PHASE2_AFTER_POST_FANOUT_NEXT_MANUAL_NODE_IDS = (
+    "promote:pools_fun",
+)
 
 
 def validate_phase2_post_fanout_stage(
@@ -571,6 +580,319 @@ def validate_phase2_post_fanout_wave_completion(
         "auto_nodes": auto_rows,
         "manual_promotion_node_ids": list(
             PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS
+        ),
+        "manual_promotion_inputs": actual_manual,
+        "pools_fun_promotion_held_for_operator": True,
+        "canonical_coverage_sources_unchanged": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+
+def validate_phase2_post_fanout_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff after the nine-node wave completes."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-post-fanout-wave-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 post-fan-out completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("post_fanout_completion_control_run_id") or 0
+    )
+    launch_run_id = int(
+        row.get("post_fanout_wave_launch_run_id") or 0
+    )
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(control_run_id, launch_run_id, planner_run_id) <= 0:
+        raise ValueError(
+            "Phase-2 post-fan-out completion receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 post-fan-out completion receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 post-fan-out completion head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 post-fan-out completion coverage ledger",
+    )
+    launch_digest = _post_fanout_artifact_digest(
+        row.get("post_fanout_wave_artifact_digest"),
+        label="Phase-2 post-fan-out launch artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 post-fan-out completion planner artifact",
+    )
+
+    targets = _post_fanout_run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 post-fan-out verified target runs",
+        expected_nodes=PHASE2_POST_FANOUT_AUTO_NODE_IDS,
+    )
+    control_ids_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(control_ids_raw, list):
+        raise ValueError(
+            "Phase-2 post-fan-out completion control-run list is missing"
+        )
+    control_ids = [int(value) for value in control_ids_raw]
+    if (
+        len(control_ids) != 24
+        or len(set(control_ids)) != 24
+        or min(control_ids) <= 0
+    ):
+        raise ValueError(
+            "Phase-2 post-fan-out completion requires exactly 24 unique "
+            "positive dispatcher control runs"
+        )
+
+    auto_nodes = row.get("auto_node_ids")
+    if (
+        not isinstance(auto_nodes, list)
+        or sorted(str(value) for value in auto_nodes)
+        != sorted(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+    ):
+        raise ValueError(
+            "Phase-2 post-fan-out completion auto-node drift"
+        )
+    manual_nodes = row.get("manual_promotion_node_ids")
+    if manual_nodes != list(PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 post-fan-out completion promotion-hold drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 post-fan-out completion did not hold pools.fun promotion"
+        )
+
+    required_true = (
+        "post_fanout_targets_completed_successfully",
+        "planner_refreshed",
+    )
+    for field in required_true:
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 post-fan-out completion receipt violates {field}"
+            )
+    required_false = (
+        "coverage_promotion_performed",
+        "selector_approval_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    )
+    for field in required_false:
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 post-fan-out completion receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-post-fanout-wave-completion-receipt-v1",
+        "post_fanout_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "post_fanout_wave_launch_run_id": launch_run_id,
+        "post_fanout_wave_artifact_digest": launch_digest,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": sorted(control_ids),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "auto_node_ids": list(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "post_fanout_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_after_post_fanout_wave_completion(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze the exact planner boundary after the seven-node wave succeeds."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion changed canonical sources"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion changed source count"
+        )
+    if int(execution.get("incomplete_sources", -1)) != 12:
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion incomplete count drift"
+        )
+
+    expected_completed = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+    )
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    if not isinstance(completed, list) or not isinstance(ready, list):
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion lacks node-state lists"
+        )
+    if set(completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion node-credit drift"
+        )
+
+    expected_ready = set(
+        PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS
+    ) | set(PHASE2_AFTER_POST_FANOUT_NEXT_MANUAL_NODE_IDS)
+    if set(ready) != expected_ready:
+        raise ValueError(
+            "Phase-2 next-wave ready-node set drift: "
+            f"{sorted(ready)}"
+        )
+
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion lacks lineage proof"
+        )
+    receipt_completed = verified.get("completed_node_ids")
+    if not isinstance(receipt_completed, list):
+        raise ValueError(
+            "Phase-2 after-post-fan-out verified node list is missing"
+        )
+    if set(receipt_completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 after-post-fan-out verified node-credit drift"
+        )
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != len(expected_completed)
+        or len(set(int(value) for value in control_ids))
+        != len(expected_completed)
+    ):
+        raise ValueError(
+            "Phase-2 after-post-fan-out completion requires exactly 31 "
+            "dispatcher control runs"
+        )
+
+    if dispatch.get("run_id_inputs_generated_from_verified_receipts") is not True:
+        raise ValueError(
+            "Phase-2 next-wave dispatch plan lacks verified inputs"
+        )
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError(
+            "Phase-2 next-wave dispatch rows are missing"
+        )
+    by_id = {
+        str(row.get("node_id") or ""): dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != expected_ready:
+        raise ValueError(
+            "Phase-2 next-wave dispatch row set drift"
+        )
+
+    auto_rows = []
+    for node_id in PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS:
+        row = by_id[node_id]
+        if str(row.get("status") or "") != "ready_to_dispatch":
+            raise ValueError(
+                f"Phase-2 next-wave auto node not ready: {node_id}"
+            )
+        if row.get("requires_explicit_approval") is not False:
+            raise ValueError(
+                f"Phase-2 next-wave auto node requires approval: {node_id}"
+            )
+        run_inputs = row.get("run_id_inputs")
+        if not isinstance(run_inputs, Mapping) or not run_inputs:
+            raise ValueError(
+                f"Phase-2 next-wave auto node lacks generated run inputs: "
+                f"{node_id}"
+            )
+        if list(row.get("remaining_manual_inputs") or []):
+            raise ValueError(
+                f"Phase-2 next-wave auto node has manual inputs: {node_id}"
+            )
+        if set(str(value) for value in row.get(
+            "all_dispatch_input_names"
+        ) or []) != set(run_inputs):
+            raise ValueError(
+                f"Phase-2 next-wave auto input schema drift: {node_id}"
+            )
+        auto_rows.append({
+            "node_id": node_id,
+            "workflow": str(row.get("workflow") or ""),
+            "run_id_inputs": dict(run_inputs),
+        })
+
+    promotion = by_id["promote:pools_fun"]
+    if str(promotion.get("status") or "") != "ready_to_dispatch":
+        raise ValueError(
+            "Phase-2 pools.fun promotion is not ready after seven-node wave"
+        )
+    if str(promotion.get("workflow") or "") != (
+        "phase2-source-coverage-promotion.yml"
+    ):
+        raise ValueError(
+            "Phase-2 pools.fun promotion workflow drift after seven-node wave"
+        )
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value)
+        for value in promotion.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError(
+            "Phase-2 pools.fun promotion manual-input drift after seven-node "
+            "wave"
+        )
+
+    return {
+        "version": "phase2-after-post-fanout-wave-completion-v1",
+        "completed_execution_node_ids": sorted(expected_completed),
+        "completed_execution_nodes": len(expected_completed),
+        "node_dispatch_control_runs_consumed": len(control_ids),
+        "auto_node_ids": list(
+            PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS
+        ),
+        "auto_nodes": auto_rows,
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_FANOUT_NEXT_MANUAL_NODE_IDS
         ),
         "manual_promotion_inputs": actual_manual,
         "pools_fun_promotion_held_for_operator": True,
