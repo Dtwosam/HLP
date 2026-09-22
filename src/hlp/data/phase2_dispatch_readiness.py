@@ -27,6 +27,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-direct-selector-approved-freeze.yml",
     "phase2-post-selector-wave-launch.yml",
     "phase2-post-selector-wave-completion.yml",
+    "phase2-direct-coverage-wave-launch.yml",
+    "phase2-direct-coverage-wave-completion.yml",
     "phase2-archive-fanout-launch.yml",
     "phase2-archive-fanout-completion.yml",
     "phase2-post-fanout-wave-launch.yml",
