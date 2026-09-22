@@ -65,6 +65,7 @@ def test_bootstrap_readiness_accepts_exact_surface_and_planner_variant():
     expected, bootstrap = surfaces()
     assert "phase2-archive-fanout-completion.yml" in expected
     assert "phase2-post-fanout-wave-launch.yml" in expected
+    assert "phase2-post-fanout-wave-completion.yml" in expected
     report = evaluate_phase2_bootstrap_readiness(
         expected,
         bootstrap,
