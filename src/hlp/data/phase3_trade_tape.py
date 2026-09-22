@@ -12,6 +12,9 @@ from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.phase3_feature_entry import (
     PHASE3_FEATURE_ENTRY_HANDOFF_VERSION,
 )
+from hlp.data.phase3_trade_source_plan import (
+    build_phase3_trade_source_plan,
+)
 from hlp.data.phase3_trade_features import (
     PHASE3_CANONICAL_TRADE_HANDOFF_VERSION,
     PHASE3_CANONICAL_TRADE_VERSION,
@@ -91,9 +94,10 @@ def build_phase3_trade_source_coverage(
     market_registry_sha256: str,
     raw_trade_tape_sha256: str,
     raw_trade_rows: int,
-    transaction_identity_sha256: str,
+    wallet_identity_sha256: str,
+    wallet_identity_kind: str,
     historical_event_scan_complete: bool,
-    transaction_identity_complete: bool,
+    wallet_identity_complete: bool,
     canonical_trade_adapter_complete: bool,
 ) -> dict:
     """Bind one source's canonical trades to complete historical evidence."""
@@ -103,7 +107,12 @@ def build_phase3_trade_source_coverage(
         for row in build_phase2_source_inventory()
     }
     source = inventory.get(str(source_id))
-    if source is None:
+    plan = {
+        str(row["source_id"]): dict(row)
+        for row in build_phase3_trade_source_plan()
+    }
+    source_plan = plan.get(str(source_id))
+    if source is None or source_plan is None:
         raise ValueError(
             f"unknown Phase-3 trade coverage source: {source_id}"
         )
@@ -113,6 +122,15 @@ def build_phase3_trade_source_coverage(
     raw_count = int(raw_trade_rows)
     if raw_count < 0:
         raise ValueError("Phase-3 raw trade row count is invalid")
+    identity_kind = str(wallet_identity_kind or "")
+    expected_identity_kind = str(
+        source_plan.get("wallet_identity_kind") or ""
+    )
+    if identity_kind != expected_identity_kind:
+        raise ValueError(
+            f"{source_id} Phase-3 wallet identity kind drift: "
+            f"{identity_kind} != {expected_identity_kind}"
+        )
 
     eligible = sorted({
         normalize_address(str(token))
@@ -149,7 +167,7 @@ def build_phase3_trade_source_coverage(
     canonical_rows, canonical_sha = _jsonl_sha(rows)
     complete = (
         historical_event_scan_complete is True
-        and transaction_identity_complete is True
+        and wallet_identity_complete is True
         and canonical_trade_adapter_complete is True
     )
     return {
@@ -168,17 +186,18 @@ def build_phase3_trade_source_coverage(
             label=f"{source_id} Phase-3 raw trade tape",
         ),
         "raw_trade_rows": raw_count,
-        "transaction_identity_sha256": _sha256(
-            transaction_identity_sha256,
-            label=f"{source_id} transaction identity",
+        "wallet_identity_sha256": _sha256(
+            wallet_identity_sha256,
+            label=f"{source_id} wallet identity",
         ),
+        "wallet_identity_kind": identity_kind,
         "canonical_trade_rows": canonical_rows,
         "canonical_trade_rows_sha256": canonical_sha,
         "historical_event_scan_complete": (
             historical_event_scan_complete is True
         ),
-        "transaction_identity_complete": (
-            transaction_identity_complete is True
+        "wallet_identity_complete": (
+            wallet_identity_complete is True
         ),
         "canonical_trade_adapter_complete": (
             canonical_trade_adapter_complete is True
@@ -300,6 +319,20 @@ def materialize_phase3_canonical_trade_tape(
             raise ValueError(
                 f"{source_id} Phase-3 trade coverage snapshot drift"
             )
+        source_plan = {
+            str(item["source_id"]): dict(item)
+            for item in build_phase3_trade_source_plan()
+        }[source_id]
+        if str(row.get("wallet_identity_kind") or "") != str(
+            source_plan.get("wallet_identity_kind") or ""
+        ):
+            raise ValueError(
+                f"{source_id} Phase-3 wallet identity provenance drift"
+            )
+        _sha256(
+            row.get("wallet_identity_sha256"),
+            label=f"{source_id} wallet identity evidence",
+        )
         expected_tokens = source_tokens[source_id]
         if int(row.get("eligible_tokens", -1)) != len(expected_tokens):
             raise ValueError(
@@ -314,7 +347,7 @@ def materialize_phase3_canonical_trade_tape(
             )
         for flag in (
             "historical_event_scan_complete",
-            "transaction_identity_complete",
+            "wallet_identity_complete",
             "canonical_trade_adapter_complete",
             "trade_coverage_complete",
         ):

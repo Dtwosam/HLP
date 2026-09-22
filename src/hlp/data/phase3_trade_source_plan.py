@@ -26,7 +26,7 @@ CURVE_SOURCES = frozenset({
     "hood_fun_current",
     "hood_fun_previous",
 })
-LBP_BLOCKED_SOURCES = frozenset({"pools_trade_lbp"})
+LBP_CCA_SOURCES = frozenset({"pools_trade_lbp"})
 
 
 def build_phase3_trade_source_plan() -> list[dict]:
@@ -41,7 +41,7 @@ def build_phase3_trade_source_plan() -> list[dict]:
         | V3_SOURCES
         | V4_SOURCES
         | CURVE_SOURCES
-        | LBP_BLOCKED_SOURCES
+        | LBP_CCA_SOURCES
     )
     if planned != set(inventory):
         raise ValueError(
@@ -55,6 +55,8 @@ def build_phase3_trade_source_plan() -> list[dict]:
         source = inventory[source_id]
         if source_id in PONS_SOURCES:
             strategy = "pons_normalized_trade_adapter"
+            wallet_identity_kind = "source_normalized_initiator"
+            transaction_initiator_required = True
             implementation = [
                 "hlp.data.pons_trades.normalize_pons_trades",
                 "hlp.data.phase3_trade_adapters.adapt_pons_trades_to_phase3",
@@ -63,6 +65,8 @@ def build_phase3_trade_source_plan() -> list[dict]:
             gap = None
         elif source_id in V3_SOURCES:
             strategy = "raw_v3_swap_plus_tx_identity"
+            wallet_identity_kind = "transaction_from"
+            transaction_initiator_required = True
             implementation = [
                 "hlp.protocols.uniswap.decode_v3_swap",
                 "hlp.data.transaction_identity",
@@ -72,6 +76,8 @@ def build_phase3_trade_source_plan() -> list[dict]:
             gap = None
         elif source_id in V4_SOURCES:
             strategy = "raw_v4_swap_plus_tx_identity"
+            wallet_identity_kind = "transaction_from"
+            transaction_initiator_required = True
             implementation = [
                 "hlp.protocols.uniswap.decode_v4_swap",
                 "hlp.data.transaction_identity",
@@ -81,6 +87,8 @@ def build_phase3_trade_source_plan() -> list[dict]:
             gap = None
         elif source_id in CURVE_SOURCES:
             strategy = "native_curve_trade_plus_tx_identity"
+            wallet_identity_kind = "transaction_from"
+            transaction_initiator_required = True
             implementation = [
                 "hlp.data.transaction_identity",
                 "hlp.data.phase3_trade_adapters",
@@ -88,18 +96,17 @@ def build_phase3_trade_source_plan() -> list[dict]:
             ready = True
             gap = None
         else:
-            strategy = "lbp_wallet_fill_attribution_plus_migrated_v4"
+            strategy = "cca_bid_owner_plus_finalized_exit_fill"
+            wallet_identity_kind = "cca_bid_owner"
+            transaction_initiator_required = False
             implementation = [
-                "hlp.protocols.pools_trade_lbp",
-                "hlp.data.pools_trade_cca",
-                "hlp.data.phase3_trade_adapters.adapt_v4_swaps_to_phase3",
+                "hlp.protocols.pools_trade_lbp.decode_pools_trade_cca_bid_submitted",
+                "hlp.protocols.pools_trade_lbp.decode_pools_trade_cca_bid_exited",
+                "hlp.data.pools_trade_cca_bids.reconcile_cca_bid_fills",
+                "hlp.data.phase3_trade_adapters.adapt_pools_trade_cca_fills_to_phase3",
             ]
-            ready = False
-            gap = (
-                "wallet-level LBP/CCA fill attribution is not frozen; "
-                "checkpoint/clearing-price rows are state evidence, not "
-                "user-trade rows"
-            )
+            ready = True
+            gap = None
 
         rows.append({
             "version": PHASE3_TRADE_SOURCE_PLAN_VERSION,
@@ -109,7 +116,9 @@ def build_phase3_trade_source_plan() -> list[dict]:
             "market_phases": list(source.get("market_phases") or []),
             "adapter_strategy": strategy,
             "implementation_evidence": implementation,
-            "transaction_initiator_required": True,
+            "wallet_identity_required": True,
+            "wallet_identity_kind": wallet_identity_kind,
+            "transaction_initiator_required": transaction_initiator_required,
             "historical_event_scan_required": True,
             "exact_frozen_source_membership_required": True,
             "ready_for_canonical_trade_backfill": ready,
@@ -150,7 +159,7 @@ def summarize_phase3_trade_source_plan(
             )
         seen.add(source_id)
         for flag in (
-            "transaction_initiator_required",
+            "wallet_identity_required",
             "historical_event_scan_required",
             "exact_frozen_source_membership_required",
         ):
@@ -158,6 +167,27 @@ def summarize_phase3_trade_source_plan(
                 raise ValueError(
                     f"{source_id} Phase-3 trade plan lost {flag}"
                 )
+        identity_kind = str(
+            row.get("wallet_identity_kind") or ""
+        )
+        if identity_kind not in {
+            "source_normalized_initiator",
+            "transaction_from",
+            "cca_bid_owner",
+        }:
+            raise ValueError(
+                f"{source_id} Phase-3 trade plan identity kind invalid"
+            )
+        tx_required = row.get("transaction_initiator_required")
+        if identity_kind == "cca_bid_owner":
+            if tx_required is not False:
+                raise ValueError(
+                    f"{source_id} CCA owner identity must not require tx.from"
+                )
+        elif tx_required is not True:
+            raise ValueError(
+                f"{source_id} Phase-3 trade plan lost tx.from identity"
+            )
         if row.get("outcome_dependency_allowed") is not False:
             raise ValueError(
                 f"{source_id} Phase-3 trade plan allows outcomes"

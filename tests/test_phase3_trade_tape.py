@@ -65,9 +65,18 @@ def coverage_for(source_id, rows, eligible_tokens):
         market_registry_sha256=SHA,
         raw_trade_tape_sha256=SHA,
         raw_trade_rows=len(rows),
-        transaction_identity_sha256=SHA,
+        wallet_identity_sha256=SHA,
+        wallet_identity_kind=(
+            "cca_bid_owner"
+            if source_id == "pools_trade_lbp"
+            else (
+                "source_normalized_initiator"
+                if source_id in {"pons_v1", "pons_v2"}
+                else "transaction_from"
+            )
+        ),
         historical_event_scan_complete=True,
-        transaction_identity_complete=True,
+        wallet_identity_complete=True,
         canonical_trade_adapter_complete=True,
     )
 
@@ -191,3 +200,42 @@ def test_canonical_trade_handoff_matches_trade_feature_contract():
     assert handoff["version"] == PHASE3_CANONICAL_TRADE_HANDOFF_VERSION
     assert handoff["trade_coverage_complete"] is True
     assert handoff["future_state_allowed"] is False
+
+
+
+def test_source_coverage_accepts_cca_event_owner_identity():
+    row = build_phase3_trade_source_coverage(
+        "pools_trade_lbp",
+        [],
+        eligible_tokens=[],
+        snapshot_head_block=100,
+        market_registry_sha256=SHA,
+        raw_trade_tape_sha256=SHA,
+        raw_trade_rows=0,
+        wallet_identity_sha256=SHA,
+        wallet_identity_kind="cca_bid_owner",
+        historical_event_scan_complete=True,
+        wallet_identity_complete=True,
+        canonical_trade_adapter_complete=True,
+    )
+    assert row["wallet_identity_kind"] == "cca_bid_owner"
+    assert row["wallet_identity_complete"] is True
+    assert row["trade_coverage_complete"] is True
+
+
+def test_source_coverage_rejects_wrong_identity_kind():
+    with pytest.raises(ValueError, match="identity kind drift"):
+        build_phase3_trade_source_coverage(
+            "pools_trade_lbp",
+            [],
+            eligible_tokens=[],
+            snapshot_head_block=100,
+            market_registry_sha256=SHA,
+            raw_trade_tape_sha256=SHA,
+            raw_trade_rows=0,
+            wallet_identity_sha256=SHA,
+            wallet_identity_kind="transaction_from",
+            historical_event_scan_complete=True,
+            wallet_identity_complete=True,
+            canonical_trade_adapter_complete=True,
+        )
