@@ -179,7 +179,19 @@ Implemented foundation:
   threshold labels; the frozen selector identity is bound in provenance while
   all competing market histories remain available. Only after those checks does
   the workflow validate a proposed per-venue `complete` coverage row in memory
-  and publish exact promotion metadata, without mutating the ledger;
+  and publish exact promotion metadata, without mutating the ledger. A final
+  dispatch-only direct eligibility handoff is now prepared behind all three
+  complete direct-source coverage artifacts plus the exact frozen selector. It
+  revalidates every source report, every one of the **128** point shards per
+  venue and each aggregate SHA, derives exact per-source token memberships,
+  k-way merges the three chronological histories without loading the full tapes
+  into memory, and applies the frozen selector exactly once across venues. The
+  resulting canonical cross-venue series is summarized per token, then split
+  back across the three conclusive direct source memberships so the universe
+  gate still receives one source entry for Uniswap V3, Sushi V3 and Uniswap V4
+  while non-selected competing-pool prices never become alternate eligibility
+  histories. The handoff is SHA-bound, preserves selected-pool-only volume
+  semantics and remains `phase2_universe_frozen=false`;
 - direct-market launch-origin attribution is now progressive and fail-closed.
   Exact address matches can immediately mark a market as originating from a
   known launch source, but unmatched markets remain `unattributed` until every
