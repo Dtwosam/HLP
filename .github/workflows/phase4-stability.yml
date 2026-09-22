@@ -1,0 +1,418 @@
+name: phase4-stability
+
+on:
+  workflow_dispatch:
+    inputs:
+      chronological_split_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-chronological-split
+        required: true
+        type: string
+      hypothesis_freeze_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-hypothesis-freeze
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-stability-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHRONOLOGICAL_SPLIT_HANDOFF_JSON: ${{ inputs.chronological_split_handoff_json }}
+  HYPOTHESIS_FREEZE_HANDOFF_JSON: ${{ inputs.hypothesis_freeze_handoff_json }}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: stability
+        name: Re-measure frozen hypotheses across discovery-only samples
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import select_equivalent_artifact_retry
+          from hlp.data.phase4_chronological_split import (
+              build_phase4_chronological_split_handoff,
+          )
+          from hlp.data.phase4_hypothesis_freeze import (
+              build_phase4_hypothesis_freeze_handoff,
+          )
+          from hlp.data.phase4_stability import (
+              build_phase4_stability_handoff,
+              build_phase4_stability_report,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor(env_name, label):
+              try:
+                  value = json.loads(os.environ[env_name])
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(
+                      f"{label} descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{label} descriptor must be an object")
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(f"{label} run_id is invalid") from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(f"{label} artifact_digest is invalid")
+              if len(handoff_sha) != 64:
+                  raise SystemExit(f"{label} handoff_sha256 is invalid")
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} digest/SHA is not hexadecimal"
+                  ) from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(
+              run_id,
+              name,
+              destination,
+              label,
+              expected_digest,
+          ):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          (
+              split_run,
+              split_digest,
+              split_expected_sha,
+          ) = descriptor(
+              "CHRONOLOGICAL_SPLIT_HANDOFF_JSON",
+              "Phase-4 chronological split",
+          )
+          (
+              freeze_run,
+              freeze_digest,
+              freeze_expected_sha,
+          ) = descriptor(
+              "HYPOTHESIS_FREEZE_HANDOFF_JSON",
+              "Phase-4 hypothesis freeze",
+          )
+
+          split_root = Path("inputs/split")
+          freeze_root = Path("inputs/freeze")
+          download_named(
+              split_run,
+              "phase4-chronological-split",
+              split_root,
+              "Phase-4 chronological split",
+              split_digest,
+          )
+          download_named(
+              freeze_run,
+              "phase4-hypothesis-freeze",
+              freeze_root,
+              "Phase-4 hypothesis freeze",
+              freeze_digest,
+          )
+
+          if list(split_root.rglob("phase4-validation.jsonl")):
+              raise SystemExit(
+                  "Phase-4 stability artifact exposes validation rows"
+              )
+          if list(split_root.rglob("phase4-final-test.jsonl")):
+              raise SystemExit(
+                  "Phase-4 stability artifact exposes final-test rows"
+              )
+
+          rows_path = find_unique(
+              split_root,
+              "phase4-discovery-train.jsonl",
+          )
+          manifest_path = find_unique(
+              split_root,
+              "phase4-discovery-train.jsonl.manifest.json",
+          )
+          manifest = json.loads(manifest_path.read_text())
+          split_summary_path = find_unique(
+              split_root,
+              "phase4-chronological-split-summary.json",
+          )
+          split_summary = json.loads(split_summary_path.read_text())
+          split_summary_sha = sha256_path(split_summary_path)
+          split_handoff_path = find_unique(
+              split_root,
+              "phase4-chronological-split-handoff.json",
+          )
+          split_handoff_sha = sha256_path(split_handoff_path)
+          if split_handoff_sha != split_expected_sha:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff SHA drift"
+              )
+          split_handoff = json.loads(split_handoff_path.read_text())
+          registry_path = find_unique(
+              split_root,
+              "phase4-feature-registry.json",
+          )
+          registry_file_sha = sha256_path(registry_path)
+          rebuilt_split = build_phase4_chronological_split_handoff(
+              split_summary,
+              split_summary_sha256=split_summary_sha,
+              discovery_entry_handoff_sha256=split_summary[
+                  "discovery_entry_handoff_sha256"
+              ],
+              feature_registry_file_sha256=registry_file_sha,
+          )
+          if rebuilt_split != split_handoff:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff content drift"
+              )
+          if manifest.get("sha256") != split_handoff[
+              "discovery_split_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 discovery-slice manifest SHA drift"
+              )
+
+          freeze_report_path = find_unique(
+              freeze_root,
+              "phase4-hypothesis-freeze-report.json",
+          )
+          freeze_report = json.loads(freeze_report_path.read_text())
+          freeze_report_sha = sha256_path(freeze_report_path)
+          freeze_handoff_path = find_unique(
+              freeze_root,
+              "phase4-hypothesis-freeze-handoff.json",
+          )
+          freeze_handoff_sha = sha256_path(freeze_handoff_path)
+          if freeze_handoff_sha != freeze_expected_sha:
+              raise SystemExit(
+                  "Phase-4 hypothesis-freeze handoff SHA drift"
+              )
+          freeze_handoff = json.loads(freeze_handoff_path.read_text())
+          rebuilt_freeze = build_phase4_hypothesis_freeze_handoff(
+              freeze_report,
+              report_sha256=freeze_report_sha,
+              univariate_handoff_sha256=freeze_report[
+                  "univariate_handoff_sha256"
+              ],
+          )
+          if rebuilt_freeze != freeze_handoff:
+              raise SystemExit(
+                  "Phase-4 hypothesis-freeze handoff content drift"
+              )
+          if freeze_handoff[
+              "chronological_split_handoff_sha256"
+          ] != split_handoff_sha:
+              raise SystemExit(
+                  "Phase-4 hypothesis-freeze/split linkage drift"
+              )
+
+          report = build_phase4_stability_report(
+              iter_validated_jsonl(
+                  rows_path,
+                  manifest_path,
+              ),
+              freeze_report,
+              hypothesis_freeze_handoff=freeze_handoff,
+              chronological_split_handoff=split_handoff,
+              chronological_split_handoff_sha256=split_handoff_sha,
+              discovery_rows_sha256=manifest["sha256"],
+          )
+          report.update({
+              "chronological_split_run_id": split_run,
+              "hypothesis_freeze_run_id": freeze_run,
+              "chronological_split_handoff_sha256": (
+                  split_handoff_sha
+              ),
+              "hypothesis_freeze_handoff_sha256": (
+                  freeze_handoff_sha
+              ),
+          })
+          report_path = Path(
+              "artifacts/phase4-stability-report.json"
+          )
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(
+              report_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase4_stability_handoff(
+              report,
+              report_sha256=report_sha,
+              hypothesis_freeze_handoff_sha256=freeze_handoff_sha,
+              chronological_split_handoff_sha256=split_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase4-stability-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"hypotheses={report['hypotheses_examined']}\n"
+              )
+              handle.write(
+                  f"resamples={report['resamples_per_hypothesis']}\n"
+              )
+          print(json.dumps({
+              "hypotheses_examined": report["hypotheses_examined"],
+              "resamples_per_hypothesis": (
+                  report["resamples_per_hypothesis"]
+              ),
+              "chronological_fold_count": (
+                  report["chronological_fold_count"]
+              ),
+              "repeated_sampling_stability_examined": True,
+              "chronological_stability_examined": True,
+              "stability_pass_fail_threshold_applied": False,
+              "validation_rows_consumed": False,
+              "final_test_rows_consumed": False,
+              "signal_promoted": False,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-4 stability diagnostics
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-stability
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 stability identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.stability.outputs.report_sha256 }}
+          HANDOFF_SHA256: ${{ steps.stability.outputs.handoff_sha256 }}
+          HYPOTHESES: ${{ steps.stability.outputs.hypotheses }}
+          RESAMPLES: ${{ steps.stability.outputs.resamples }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 repeated-sampling stability"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-stability"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- report_sha256: ${REPORT_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- hypotheses_examined: ${HYPOTHESES}"
+            echo "- resamples_per_hypothesis: ${RESAMPLES}"
+            echo "- repeated_sampling_stability_examined: true"
+            echo "- chronological_stability_examined: true"
+            echo "- stability_pass_fail_threshold_applied: false"
+            echo "- validation_rows_consumed: false"
+            echo "- final_test_rows_consumed: false"
+            echo "- signal_promoted: false"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
