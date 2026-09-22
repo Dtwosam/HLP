@@ -20,6 +20,9 @@ PHASE2_RESEARCH_LAUNCHPAD_BINDING_VERSION = (
 PHASE2_RESEARCH_DIRECT_BINDING_VERSION = (
     "phase2-research-direct-binding-v1"
 )
+PHASE2_RESEARCH_REHYDRATION_PLAN_VERSION = (
+    "phase2-research-rehydration-plan-v1"
+)
 PHASE2_UNIVERSE_PROVENANCE_VERSION = "phase2-universe-provenance-v1"
 PHASE2_UNIVERSE_FREEZE_HANDOFF_VERSION = "phase2-universe-freeze-handoff-v1"
 LAUNCHPAD_ELIGIBILITY_PROVENANCE_VERSION = (
@@ -404,5 +407,144 @@ def resolve_direct_rehydration_binding(
         "coverage_bindings": normalized,
         "requires_price_rehydration": False,
         "dump_threshold_frozen": False,
+        "outcome_labels_computed": False,
+    }
+
+
+
+def build_phase2_research_rehydration_plan(
+    seed: Mapping[str, object],
+    launchpad_bindings: Mapping[str, Mapping[str, object]],
+    direct_binding: Mapping[str, object],
+) -> dict:
+    """Assemble a compact immutable identity plan before shard downloads."""
+
+    if (
+        str(seed.get("version") or "")
+        != PHASE2_RESEARCH_REHYDRATION_SEED_VERSION
+    ):
+        raise ValueError("research rehydration seed version changed")
+    components = seed.get("components")
+    if not isinstance(components, Mapping):
+        raise ValueError("research rehydration seed components are missing")
+
+    expected_launchpads = {
+        str(component_id)
+        for component_id, raw in components.items()
+        if dict(raw).get("source_kind") == "launchpad"
+    }
+    if {str(value) for value in launchpad_bindings} != expected_launchpads:
+        raise ValueError("research rehydration launchpad binding set changed")
+
+    normalized_launchpads = {}
+    for source_id in sorted(expected_launchpads):
+        binding = dict(launchpad_bindings[source_id])
+        component = dict(components[source_id])
+        if (
+            str(binding.get("version") or "")
+            != PHASE2_RESEARCH_LAUNCHPAD_BINDING_VERSION
+        ):
+            raise ValueError(
+                f"{source_id} research launchpad binding version changed"
+            )
+        if str(binding.get("component_id") or "") != source_id:
+            raise ValueError(
+                f"{source_id} research launchpad component drift"
+            )
+        if int(binding.get("handoff_run_id", -1)) != int(
+            component["handoff_run_id"]
+        ):
+            raise ValueError(
+                f"{source_id} research launchpad handoff run drift"
+            )
+        if str(binding.get("handoff_artifact_name") or "") != str(
+            component["handoff_artifact_name"]
+        ):
+            raise ValueError(
+                f"{source_id} research launchpad artifact name drift"
+            )
+        if _artifact_digest(
+            binding.get("handoff_artifact_digest"),
+            label=f"{source_id} research handoff",
+        ) != component["handoff_artifact_digest"]:
+            raise ValueError(
+                f"{source_id} research launchpad artifact digest drift"
+            )
+        if binding.get("requires_price_rehydration") is not True:
+            raise ValueError(
+                f"{source_id} research launchpad unexpectedly skips rehydration"
+            )
+        if binding.get("dump_threshold_frozen") is not False:
+            raise ValueError(
+                f"{source_id} research launchpad freezes dump threshold"
+            )
+        if binding.get("outcome_labels_computed") is not False:
+            raise ValueError(
+                f"{source_id} research launchpad contains outcome labels"
+            )
+        normalized_launchpads[source_id] = binding
+
+    direct_component = dict(
+        components.get(DIRECT_RESEARCH_COMPONENT_ID) or {}
+    )
+    direct = dict(direct_binding)
+    if (
+        str(direct.get("version") or "")
+        != PHASE2_RESEARCH_DIRECT_BINDING_VERSION
+    ):
+        raise ValueError("research direct binding version changed")
+    if (
+        str(direct.get("component_id") or "")
+        != DIRECT_RESEARCH_COMPONENT_ID
+    ):
+        raise ValueError("research direct component id changed")
+    if sorted(direct.get("source_ids") or []) != sorted(
+        direct_component.get("source_ids") or []
+    ):
+        raise ValueError("research direct source set changed")
+    if int(direct.get("handoff_run_id", -1)) != int(
+        direct_component.get("handoff_run_id", -2)
+    ):
+        raise ValueError("research direct handoff run drift")
+    if str(direct.get("handoff_artifact_name") or "") != str(
+        direct_component.get("handoff_artifact_name") or ""
+    ):
+        raise ValueError("research direct handoff artifact name drift")
+    if _artifact_digest(
+        direct.get("handoff_artifact_digest"),
+        label="research direct handoff",
+    ) != direct_component.get("handoff_artifact_digest"):
+        raise ValueError("research direct handoff artifact digest drift")
+    if direct.get("requires_price_rehydration") is not False:
+        raise ValueError("research direct canonical tape should already exist")
+    if direct.get("dump_threshold_frozen") is not False:
+        raise ValueError("research direct binding freezes dump threshold")
+    if direct.get("outcome_labels_computed") is not False:
+        raise ValueError("research direct binding contains outcome labels")
+
+    return {
+        "version": PHASE2_RESEARCH_REHYDRATION_PLAN_VERSION,
+        "chain_id": int(seed.get("chain_id", 0)),
+        "snapshot_head_block": int(seed["snapshot_head_block"]),
+        "eligible_universe_sha256": _sha256(
+            seed.get("eligible_universe_sha256"),
+            label="research plan universe",
+        ),
+        "universe_provenance_sha256": _sha256(
+            seed.get("universe_provenance_sha256"),
+            label="research plan universe provenance",
+        ),
+        "coverage_ledger_sha256": _sha256(
+            seed.get("coverage_ledger_sha256"),
+            label="research plan coverage ledger",
+        ),
+        "launchpad_bindings": normalized_launchpads,
+        "direct_binding": direct,
+        "component_count": int(seed["component_count"]),
+        "source_count": int(seed["source_count"]),
+        "source_handoffs_exact": True,
+        "research_price_paths_materialized": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
         "outcome_labels_computed": False,
     }

@@ -7,6 +7,7 @@ from hlp.data.phase2_eligibility import PHASE2_LAUNCHPAD_ELIGIBILITY_VERSION
 from hlp.data.phase2_research_paths import DIRECT_RESEARCH_COMPONENT_ID
 from hlp.data.phase2_research_rehydration import (
     PHASE2_RESEARCH_REHYDRATION_SEED_VERSION,
+    build_phase2_research_rehydration_plan,
     build_phase2_research_rehydration_seed,
     resolve_direct_rehydration_binding,
     resolve_launchpad_rehydration_binding,
@@ -206,3 +207,83 @@ def test_direct_binding_keeps_all_three_coverage_tapes_under_one_component():
     assert binding["component_id"] == DIRECT_RESEARCH_COMPONENT_ID
     assert set(binding["coverage_bindings"]) == set(direct_sources)
     assert binding["requires_price_rehydration"] is False
+
+
+
+def test_rehydration_plan_refuses_identity_substitution_and_stays_unmaterialized():
+    inventory, summary, provenance, handoff = frozen_inputs()
+    seed = build_phase2_research_rehydration_seed(
+        summary,
+        provenance,
+        handoff,
+        source_inventory=inventory,
+        universe_sha256=UNIVERSE_SHA,
+    )
+
+    launchpad_bindings = {}
+    for source_id, component in seed["components"].items():
+        if component["source_kind"] != "launchpad":
+            continue
+        launchpad_bindings[source_id] = {
+            "version": "phase2-research-launchpad-binding-v1",
+            "component_id": source_id,
+            "source_ids": [source_id],
+            "handoff_run_id": component["handoff_run_id"],
+            "handoff_artifact_name": component["handoff_artifact_name"],
+            "handoff_artifact_digest": component[
+                "handoff_artifact_digest"
+            ],
+            "coverage_run_id": 100,
+            "coverage_artifact_name": "coverage",
+            "coverage_artifact_digest": "sha256:" + SHA,
+            "coverage_report_path": "coverage.json",
+            "coverage_report_sha256": SHA,
+            "coverage_provenance_sha256": SHA,
+            "eligibility_run_id": 200,
+            "eligibility_artifact_name": "eligibility",
+            "eligibility_artifact_digest": "sha256:" + SHA,
+            "eligibility_summary_path": "summary.jsonl",
+            "eligibility_summary_sha256": SHA,
+            "requires_price_rehydration": True,
+            "dump_threshold_frozen": False,
+            "outcome_labels_computed": False,
+        }
+
+    direct_component = seed["components"][DIRECT_RESEARCH_COMPONENT_ID]
+    direct_binding = {
+        "version": "phase2-research-direct-binding-v1",
+        "component_id": DIRECT_RESEARCH_COMPONENT_ID,
+        "source_ids": direct_component["source_ids"],
+        "handoff_run_id": direct_component["handoff_run_id"],
+        "handoff_artifact_name": direct_component[
+            "handoff_artifact_name"
+        ],
+        "handoff_artifact_digest": direct_component[
+            "handoff_artifact_digest"
+        ],
+        "canonical_points_path": direct_component[
+            "canonical_points_path"
+        ],
+        "coverage_bindings": {},
+        "requires_price_rehydration": False,
+        "dump_threshold_frozen": False,
+        "outcome_labels_computed": False,
+    }
+
+    plan = build_phase2_research_rehydration_plan(
+        seed,
+        launchpad_bindings,
+        direct_binding,
+    )
+    assert plan["component_count"] == 12
+    assert plan["research_price_paths_materialized"] is False
+    assert plan["dump_threshold_frozen"] is False
+    assert plan["outcome_labels_computed"] is False
+
+    launchpad_bindings["pools_fun"]["handoff_run_id"] += 1
+    with pytest.raises(ValueError, match="handoff run drift"):
+        build_phase2_research_rehydration_plan(
+            seed,
+            launchpad_bindings,
+            direct_binding,
+        )
