@@ -12,6 +12,7 @@ def test_phase3_staging_requires_coverage_price_and_trade_artifacts():
     assert "\n  pull_request:" not in text
     assert "phase3-feature-coverage" in text
     assert "phase3-early-recipient-features" in text
+    assert "phase3-participant-type-features" in text
     assert "phase3-chain-regime-features" in text
     assert "phase3-venue-mechanics-features" in text
     assert "phase3-holder-features" in text
@@ -34,7 +35,7 @@ def test_phase3_staging_never_claims_final_feature_store():
     assert (
         "included_families: "
         "chain_regime,early_recipient_activity,holder_state,"
-        "lifecycle_age,participant_retention,"
+        "lifecycle_age,participant_retention,participant_type,"
         "price_drawdown,supply_redistribution,trade_flow,"
         "trade_size_flow,venue_mechanics"
     ) in text
@@ -50,6 +51,7 @@ def test_phase3_staging_stays_within_dispatch_input_limit():
     text = WORKFLOW.read_text()
 
     assert "early_recipient_feature_handoff_json:" in text
+    assert "participant_type_feature_handoff_json:" in text
     assert "chain_regime_handoff_json:" in text
     assert "holder_feature_handoff_json:" in text
     assert "lifecycle_feature_handoff_json:" in text
@@ -81,5 +83,5 @@ def test_phase3_staging_leaves_dispatch_headroom():
         and not line.startswith("        ")
         and line.endswith(":")
     ]
-    assert len(input_lines) == 23
+    assert len(input_lines) == 24
     assert len(input_lines) < 25

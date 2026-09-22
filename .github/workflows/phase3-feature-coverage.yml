@@ -19,6 +19,10 @@ on:
         description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-early-recipient-features
         required: true
         type: string
+      participant_type_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-participant-type-features
+        required: true
+        type: string
       chain_regime_handoff_json:
         description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-chain-regime-features
         required: true
@@ -109,6 +113,7 @@ env:
   EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
   EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
   EARLY_RECIPIENT_FEATURE_HANDOFF_JSON: ${{ inputs.early_recipient_feature_handoff_json }}
+  PARTICIPANT_TYPE_FEATURE_HANDOFF_JSON: ${{ inputs.participant_type_feature_handoff_json }}
   CHAIN_REGIME_HANDOFF_JSON: ${{ inputs.chain_regime_handoff_json }}
   VENUE_FEATURE_RUN_ID: ${{ inputs.venue_feature_run_id }}
   EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_venue_feature_artifact_digest }}
@@ -164,6 +169,9 @@ jobs:
           )
           from hlp.data.phase3_early_recipient_features import (
               build_phase3_early_recipient_feature_handoff,
+          )
+          from hlp.data.phase3_participant_type_features import (
+              build_phase3_participant_type_feature_handoff,
           )
           from hlp.data.phase3_feature_coverage import (
               build_phase3_feature_coverage_handoff,
@@ -281,6 +289,7 @@ jobs:
 
           entry_root = Path("inputs/entry")
           early_root = Path("inputs/early-recipient")
+          participant_type_root = Path("inputs/participant-type")
           chain_root = Path("inputs/chain-regime")
           venue_root = Path("inputs/venue")
           holder_root = Path("inputs/holder")
@@ -340,6 +349,14 @@ jobs:
           ) = parse_feature_descriptor(
               "EARLY_RECIPIENT_FEATURE_HANDOFF_JSON",
               "early-recipient-feature",
+          )
+          (
+              participant_type_run_id,
+              participant_type_artifact_digest,
+              participant_type_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "PARTICIPANT_TYPE_FEATURE_HANDOFF_JSON",
+              "participant-type-feature",
           )
           (
               chain_run_id,
@@ -423,6 +440,13 @@ jobs:
               early_root,
               "Phase-3 early-recipient features",
               early_artifact_digest,
+          )
+          download_named(
+              participant_type_run_id,
+              "phase3-participant-type-features",
+              participant_type_root,
+              "Phase-3 participant-type features",
+              participant_type_artifact_digest,
           )
           download_named(
               chain_run_id,
@@ -588,6 +612,85 @@ jobs:
           ):
               raise SystemExit(
                   "Phase-3 early-recipient/entry linkage drift"
+              )
+
+          participant_type_rows_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features.jsonl",
+          )
+          participant_type_manifest_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features.jsonl.manifest.json",
+          )
+          participant_type_manifest = json.loads(
+              participant_type_manifest_path.read_text()
+          )
+          participant_type_code_manifest_path = find_unique(
+              participant_type_root,
+              "phase3-participant-code-state.jsonl.manifest.json",
+          )
+          participant_type_code_manifest = json.loads(
+              participant_type_code_manifest_path.read_text()
+          )
+          participant_type_summary_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features-summary.json",
+          )
+          participant_type_summary = json.loads(
+              participant_type_summary_path.read_text()
+          )
+          participant_type_summary_sha = sha256_path(
+              participant_type_summary_path
+          )
+          participant_type_handoff_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features-handoff.json",
+          )
+          participant_type_handoff_sha = sha256_path(
+              participant_type_handoff_path
+          )
+          if participant_type_handoff_sha != (
+              participant_type_expected_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 participant-type handoff SHA drift"
+              )
+          participant_type_handoff = json.loads(
+              participant_type_handoff_path.read_text()
+          )
+          rebuilt_participant_type = (
+              build_phase3_participant_type_feature_handoff(
+                  participant_type_summary,
+                  feature_summary_sha256=participant_type_summary_sha,
+                  feature_entry_handoff_sha256=participant_type_summary[
+                      "feature_entry_handoff_sha256"
+                  ],
+                  canonical_trade_handoff_sha256=participant_type_summary[
+                      "canonical_trade_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_participant_type != participant_type_handoff:
+              raise SystemExit(
+                  "Phase-3 participant-type handoff content drift"
+              )
+          if participant_type_manifest.get("sha256") != (
+              participant_type_handoff["feature_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 participant-type manifest SHA drift"
+              )
+          if participant_type_code_manifest.get("sha256") != (
+              participant_type_handoff["participant_code_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 participant code-state manifest SHA drift"
+              )
+          if participant_type_handoff[
+              "feature_entry_handoff_sha256"
+          ] != entry_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 participant-type/entry linkage drift"
               )
 
           chain_rows_path = find_unique(
@@ -1108,6 +1211,12 @@ jobs:
               raise SystemExit(
                   "Phase-3 early-recipient registry SHA drift"
               )
+          if participant_type_handoff[
+              "feature_registry_sha256"
+          ] != registry_sha:
+              raise SystemExit(
+                  "Phase-3 participant-type registry SHA drift"
+              )
           if chain_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 chain-regime registry SHA drift")
           if venue_handoff["feature_registry_sha256"] != registry_sha:
@@ -1164,6 +1273,10 @@ jobs:
                       retention_rows_path,
                       retention_manifest_path,
                   ),
+                  "participant_type": iter_validated_jsonl(
+                      participant_type_rows_path,
+                      participant_type_manifest_path,
+                  ),
                   "price_drawdown": iter_validated_jsonl(
                       price_rows_path,
                       price_manifest_path,
@@ -1185,6 +1298,7 @@ jobs:
                   "lifecycle_age": lifecycle_handoff,
                   "supply_redistribution": redistribution_handoff,
                   "participant_retention": retention_handoff,
+                  "participant_type": participant_type_handoff,
                   "price_drawdown": price_handoff,
                   "trade_flow": trade_handoff,
                   "trade_size_flow": trade_size_handoff,
@@ -1196,6 +1310,7 @@ jobs:
                   "holder_state",
                   "lifecycle_age",
                   "participant_retention",
+                  "participant_type",
                   "price_drawdown",
                   "supply_redistribution",
                   "trade_flow",
@@ -1211,6 +1326,10 @@ jobs:
               "feature_entry_handoff_sha256": entry_handoff_sha,
               "early_recipient_feature_run_id": early_run_id,
               "early_recipient_feature_handoff_sha256": early_handoff_sha,
+              "participant_type_feature_run_id": participant_type_run_id,
+              "participant_type_feature_handoff_sha256": (
+                  participant_type_handoff_sha
+              ),
               "chain_regime_run_id": chain_run_id,
               "chain_regime_handoff_sha256": chain_handoff_sha,
               "venue_feature_run_id": int(
@@ -1338,7 +1457,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: chain_regime,early_recipient_activity,holder_state,lifecycle_age,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
+            echo "- required_families: chain_regime,early_recipient_activity,holder_state,lifecycle_age,participant_retention,participant_type,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
