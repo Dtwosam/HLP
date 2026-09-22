@@ -23,6 +23,26 @@ on:
         description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-validation
         required: true
         type: string
+      magnitude_strata_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-magnitude-strata
+        required: true
+        type: string
+      nonlinear_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-nonlinear
+        required: true
+        type: string
+      interaction_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-interactions
+        required: true
+        type: string
+      simple_model_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-simple-models
+        required: true
+        type: string
+      stability_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-stability
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -38,6 +58,11 @@ env:
   UNIVARIATE_HANDOFF_JSON: ${{ inputs.univariate_handoff_json }}
   HYPOTHESIS_FREEZE_HANDOFF_JSON: ${{ inputs.hypothesis_freeze_handoff_json }}
   VALIDATION_HANDOFF_JSON: ${{ inputs.validation_handoff_json }}
+  MAGNITUDE_STRATA_HANDOFF_JSON: ${{ inputs.magnitude_strata_handoff_json }}
+  NONLINEAR_HANDOFF_JSON: ${{ inputs.nonlinear_handoff_json }}
+  INTERACTION_HANDOFF_JSON: ${{ inputs.interaction_handoff_json }}
+  SIMPLE_MODEL_HANDOFF_JSON: ${{ inputs.simple_model_handoff_json }}
+  STABILITY_HANDOFF_JSON: ${{ inputs.stability_handoff_json }}
 
 jobs:
   finalize:
@@ -85,6 +110,21 @@ jobs:
           from hlp.data.phase4_hypothesis_freeze import (
               build_phase4_hypothesis_freeze_handoff,
           )
+          from hlp.data.phase4_interaction import (
+              build_phase4_interaction_handoff,
+          )
+          from hlp.data.phase4_magnitude_strata import (
+              build_phase4_magnitude_strata_handoff,
+          )
+          from hlp.data.phase4_nonlinear import (
+              build_phase4_nonlinear_handoff,
+          )
+          from hlp.data.phase4_simple_models import (
+              build_phase4_simple_model_handoff,
+          )
+          from hlp.data.phase4_stability import (
+              build_phase4_stability_handoff,
+          )
           from hlp.data.phase4_univariate import (
               build_phase4_univariate_handoff,
           )
@@ -93,12 +133,6 @@ jobs:
           )
 
           repo = os.environ["GITHUB_REPOSITORY"]
-
-          raise SystemExit(
-              "Phase-4 discovery checkpoint remains blocked until "
-              "nonlinear, interaction, simple-model and magnitude-strata "
-              "discovery layers are integrated"
-          )
 
           def sha256_path(path):
               return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -250,6 +284,36 @@ jobs:
                   "VALIDATION_HANDOFF_JSON",
                   "phase4-validation",
                   "Phase-4 validation",
+              ),
+              (
+                  "magnitude",
+                  "MAGNITUDE_STRATA_HANDOFF_JSON",
+                  "phase4-magnitude-strata",
+                  "Phase-4 magnitude strata",
+              ),
+              (
+                  "nonlinear",
+                  "NONLINEAR_HANDOFF_JSON",
+                  "phase4-nonlinear",
+                  "Phase-4 nonlinear diagnostics",
+              ),
+              (
+                  "interaction",
+                  "INTERACTION_HANDOFF_JSON",
+                  "phase4-interactions",
+                  "Phase-4 interaction diagnostics",
+              ),
+              (
+                  "simple_model",
+                  "SIMPLE_MODEL_HANDOFF_JSON",
+                  "phase4-simple-models",
+                  "Phase-4 simple models",
+              ),
+              (
+                  "stability",
+                  "STABILITY_HANDOFF_JSON",
+                  "phase4-stability",
+                  "Phase-4 stability diagnostics",
               ),
           ]
           descriptors = {}
