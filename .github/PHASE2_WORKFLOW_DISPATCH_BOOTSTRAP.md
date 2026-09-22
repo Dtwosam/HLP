@@ -5,7 +5,7 @@ workflow surface on the repository default-branch lineage, which GitHub
 requires before `workflow_dispatch` can be used.
 
 Compatibility target:
-`phase1/data-acquisition-spike@c637102d2621b4b08fad8b696afd8ef697cfd3bd`
+`phase1/data-acquisition-spike@8e4703aabf8dcbb0d6bee085136437748e1b6f00`
 
 The bootstrap currently contains 44 Phase 2 workflow files:
 

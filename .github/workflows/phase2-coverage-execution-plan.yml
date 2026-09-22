@@ -57,7 +57,7 @@ jobs:
           )
           from hlp.data.phase2_execution_dispatch import (
               build_phase2_dispatch_input_plan,
-              validate_phase2_node_dispatch_receipt,
+              validate_phase2_node_dispatch_evidence,
           )
           from hlp.data.phase2_execution_runs import (
               validate_phase2_execution_run_receipts,
@@ -219,35 +219,44 @@ jobs:
                   "--dir",
                   str(destination),
               ])
+              attempt_path = (
+                  destination
+                  / "phase2-execution-node-dispatch-attempt.json"
+              )
               receipt_path = (
                   destination
                   / "phase2-execution-node-dispatch.json"
               )
-              if not receipt_path.is_file():
+              if not attempt_path.is_file() or not receipt_path.is_file():
                   raise SystemExit(
-                      "node-dispatch artifact lacks immutable receipt"
+                      "node-dispatch artifact lacks attempt/final evidence"
                   )
+              attempt_bytes = attempt_path.read_bytes()
               try:
-                  dispatch_receipt = (
-                      validate_phase2_node_dispatch_receipt(
-                          json.loads(receipt_path.read_text())
+                  dispatch_evidence = (
+                      validate_phase2_node_dispatch_evidence(
+                          json.loads(attempt_bytes),
+                          json.loads(receipt_path.read_text()),
+                          attempt_file_sha256=hashlib.sha256(
+                              attempt_bytes
+                          ).hexdigest(),
                       )
                   )
               except ValueError as exc:
                   raise SystemExit(str(exc)) from exc
-              if dispatch_receipt["target_ref"] != branch:
+              if dispatch_evidence["target_ref"] != branch:
                   raise SystemExit(
-                      "node-dispatch receipt target ref drift"
+                      "node-dispatch evidence target ref drift"
                   )
-              if dispatch_receipt[
+              if dispatch_evidence[
                   "node_dispatch_control_run_id"
               ] != dispatch_run_id:
                   raise SystemExit(
-                      "node-dispatch receipt/control run identity drift"
+                      "node-dispatch evidence/control run identity drift"
                   )
-              node_id = dispatch_receipt["node_id"]
+              node_id = dispatch_evidence["node_id"]
               target_run_id = int(
-                  dispatch_receipt["dispatched_run_id"]
+                  dispatch_evidence["dispatched_run_id"]
               )
               existing = completed_runs.get(node_id)
               if (
