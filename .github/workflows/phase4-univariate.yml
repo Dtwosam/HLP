@@ -3,8 +3,8 @@ name: phase4-univariate
 on:
   workflow_dispatch:
     inputs:
-      discovery_entry_handoff_json:
-        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-discovery-entry
+      chronological_split_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-chronological-split
         required: true
         type: string
       base_rate_handoff_json:
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DISCOVERY_ENTRY_HANDOFF_JSON: ${{ inputs.discovery_entry_handoff_json }}
+  CHRONOLOGICAL_SPLIT_HANDOFF_JSON: ${{ inputs.chronological_split_handoff_json }}
   BASE_RATE_HANDOFF_JSON: ${{ inputs.base_rate_handoff_json }}
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
         run: python -m pip install -e .
 
       - id: univariate
-        name: Compare winners and failures feature by feature
+        name: Compare discovery-slice winners and failures feature by feature
         run: |
           mkdir -p inputs artifacts
           python - <<'PY'
@@ -60,8 +60,8 @@ jobs:
           from hlp.data.phase4_base_rate import (
               build_phase4_base_rate_handoff,
           )
-          from hlp.data.phase4_discovery_entry import (
-              build_phase4_discovery_entry_handoff,
+          from hlp.data.phase4_chronological_split import (
+              build_phase4_chronological_split_handoff,
           )
           from hlp.data.phase4_univariate import (
               build_phase4_univariate_handoff,
@@ -192,12 +192,12 @@ jobs:
               return matches[0]
 
           (
-              discovery_run,
-              discovery_digest,
-              discovery_expected_sha,
+              split_run,
+              split_digest,
+              split_expected_sha,
           ) = descriptor(
-              "DISCOVERY_ENTRY_HANDOFF_JSON",
-              "Phase-4 discovery entry",
+              "CHRONOLOGICAL_SPLIT_HANDOFF_JSON",
+              "Phase-4 chronological split",
           )
           (
               base_rate_run,
@@ -208,14 +208,14 @@ jobs:
               "Phase-4 base rate",
           )
 
-          discovery_root = Path("inputs/discovery-entry")
+          split_root = Path("inputs/chronological-split")
           base_rate_root = Path("inputs/base-rate")
           download_named(
-              discovery_run,
-              "phase4-discovery-entry",
-              discovery_root,
-              "Phase-4 discovery entry",
-              discovery_digest,
+              split_run,
+              "phase4-chronological-split",
+              split_root,
+              "Phase-4 chronological split",
+              split_digest,
           )
           download_named(
               base_rate_run,
@@ -225,79 +225,50 @@ jobs:
               base_rate_digest,
           )
 
-          rows_path = find_unique(
-              discovery_root,
-              "phase4-discovery-entry.jsonl",
-          )
-          manifest_path = find_unique(
-              discovery_root,
-              "phase4-discovery-entry.jsonl.manifest.json",
-          )
-          manifest = json.loads(manifest_path.read_text())
-          summary_path = find_unique(
-              discovery_root,
-              "phase4-discovery-entry-summary.json",
-          )
-          summary = json.loads(summary_path.read_text())
-          summary_sha = sha256_path(summary_path)
-          discovery_handoff_path = find_unique(
-              discovery_root,
-              "phase4-discovery-entry-handoff.json",
-          )
-          discovery_handoff_sha = sha256_path(
-              discovery_handoff_path
-          )
-          if discovery_handoff_sha != discovery_expected_sha:
+          if list(split_root.rglob("phase4-validation.jsonl")):
               raise SystemExit(
-                  "Phase-4 discovery-entry handoff SHA drift"
+                  "Phase-4 univariate artifact exposes validation rows"
               )
-          discovery_handoff = json.loads(
-              discovery_handoff_path.read_text()
-          )
-          rebuilt_discovery = build_phase4_discovery_entry_handoff(
-              summary,
-              discovery_summary_sha256=summary_sha,
-              phase2_dataset_handoff_sha256=summary[
-                  "phase2_dataset_handoff_sha256"
-              ],
-              feature_store_handoff_sha256=summary[
-                  "feature_store_handoff_sha256"
-              ],
-              feature_coverage_handoff_sha256=summary[
-                  "feature_coverage_handoff_sha256"
-              ],
-              feature_entry_handoff_sha256=summary[
-                  "feature_entry_handoff_sha256"
-              ],
-          )
-          if rebuilt_discovery != discovery_handoff:
+          if list(split_root.rglob("phase4-final-test.jsonl")):
               raise SystemExit(
-                  "Phase-4 discovery-entry handoff content drift"
-              )
-          if manifest.get("sha256") != discovery_handoff[
-              "discovery_rows_sha256"
-          ]:
-              raise SystemExit(
-                  "Phase-4 discovery-entry manifest SHA drift"
-              )
-          if int(manifest.get("records", -1)) != int(
-              discovery_handoff["discovery_subjects"]
-          ):
-              raise SystemExit(
-                  "Phase-4 discovery-entry subject count drift"
+                  "Phase-4 univariate artifact exposes final-test rows"
               )
 
+          rows_path = find_unique(
+              split_root,
+              "phase4-discovery-train.jsonl",
+          )
+          manifest_path = find_unique(
+              split_root,
+              "phase4-discovery-train.jsonl.manifest.json",
+          )
+          manifest = json.loads(manifest_path.read_text())
+          split_summary_path = find_unique(
+              split_root,
+              "phase4-chronological-split-summary.json",
+          )
+          split_summary = json.loads(
+              split_summary_path.read_text()
+          )
+          split_summary_sha = sha256_path(split_summary_path)
+          split_handoff_path = find_unique(
+              split_root,
+              "phase4-chronological-split-handoff.json",
+          )
+          split_handoff_sha = sha256_path(split_handoff_path)
+          if split_handoff_sha != split_expected_sha:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff SHA drift"
+              )
+          split_handoff = json.loads(
+              split_handoff_path.read_text()
+          )
+
           registry_path = find_unique(
-              discovery_root,
+              split_root,
               "phase4-feature-registry.json",
           )
           registry_file_sha = sha256_path(registry_path)
-          if registry_file_sha != discovery_handoff[
-              "feature_registry_file_sha256"
-          ]:
-              raise SystemExit(
-                  "Phase-4 feature-registry file SHA drift"
-              )
           registry = json.loads(registry_path.read_text())
           if not isinstance(registry, list):
               raise SystemExit(
@@ -306,11 +277,42 @@ jobs:
           registry_report = validate_phase3_feature_registry(
               registry
           )
-          if registry_report["registry_sha256"] != discovery_handoff[
+          if registry_file_sha != split_handoff[
+              "feature_registry_file_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 feature-registry file SHA drift"
+              )
+          if registry_report["registry_sha256"] != split_handoff[
               "feature_registry_sha256"
           ]:
               raise SystemExit(
                   "Phase-4 feature-registry definition drift"
+              )
+
+          rebuilt_split = build_phase4_chronological_split_handoff(
+              split_summary,
+              split_summary_sha256=split_summary_sha,
+              discovery_entry_handoff_sha256=split_summary[
+                  "discovery_entry_handoff_sha256"
+              ],
+              feature_registry_file_sha256=registry_file_sha,
+          )
+          if rebuilt_split != split_handoff:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff content drift"
+              )
+          if manifest.get("sha256") != split_handoff[
+              "discovery_split_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 discovery-slice manifest SHA drift"
+              )
+          if int(manifest.get("records", -1)) != int(
+              split_handoff["discovery_split_rows"]
+          ):
+              raise SystemExit(
+                  "Phase-4 discovery-slice row count drift"
               )
 
           base_report_path = find_unique(
@@ -342,9 +344,11 @@ jobs:
               )
           if base_handoff[
               "discovery_entry_handoff_sha256"
-          ] != discovery_handoff_sha:
+          ] != split_handoff[
+              "discovery_entry_handoff_sha256"
+          ]:
               raise SystemExit(
-                  "Phase-4 base-rate/discovery-entry linkage drift"
+                  "Phase-4 base-rate/split parent linkage drift"
               )
 
           report = build_phase4_univariate_report(
@@ -353,14 +357,14 @@ jobs:
                   manifest_path,
               ),
               registry,
-              discovery_entry_handoff=discovery_handoff,
+              chronological_split_handoff=split_handoff,
               base_rate_handoff=base_handoff,
           )
           report.update({
-              "discovery_entry_run_id": discovery_run,
+              "chronological_split_run_id": split_run,
               "base_rate_run_id": base_rate_run,
-              "discovery_entry_handoff_sha256": (
-                  discovery_handoff_sha
+              "chronological_split_handoff_sha256": (
+                  split_handoff_sha
               ),
               "base_rate_handoff_sha256": base_handoff_sha,
               "feature_registry_file_sha256": registry_file_sha,
@@ -381,7 +385,7 @@ jobs:
           output_handoff = build_phase4_univariate_handoff(
               report,
               report_sha256=report_sha,
-              discovery_entry_handoff_sha256=discovery_handoff_sha,
+              chronological_split_handoff_sha256=split_handoff_sha,
               base_rate_handoff_sha256=base_handoff_sha,
               feature_registry_file_sha256=registry_file_sha,
           )
@@ -415,16 +419,22 @@ jobs:
                   f"families={report['families_tested']}\n"
               )
               handle.write(
+                  f"subjects={report['analysis_subjects']}\n"
+              )
+              handle.write(
                   f"winners={report['winner_tokens']}\n"
               )
               handle.write(
                   f"failures={report['failure_tokens']}\n"
               )
           print(json.dumps({
+              "analysis_subjects": report["analysis_subjects"],
               "features_tested": report["features_tested"],
               "families_tested": report["families_tested"],
               "winner_tokens": report["winner_tokens"],
               "failure_tokens": report["failure_tokens"],
+              "validation_rows_consumed": False,
+              "final_test_rows_consumed": False,
               "univariate_relationships_tested": True,
               "candidate_features_ranked": False,
               "signal_promoted": False,
@@ -450,6 +460,7 @@ jobs:
           HANDOFF_SHA256: ${{ steps.univariate.outputs.handoff_sha256 }}
           FEATURES: ${{ steps.univariate.outputs.features }}
           FAMILIES: ${{ steps.univariate.outputs.families }}
+          SUBJECTS: ${{ steps.univariate.outputs.subjects }}
           WINNERS: ${{ steps.univariate.outputs.winners }}
           FAILURES: ${{ steps.univariate.outputs.failures }}
         run: |
@@ -463,10 +474,13 @@ jobs:
             echo "- artifact_digest: ${ARTIFACT_DIGEST}"
             echo "- report_sha256: ${REPORT_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- analysis_subjects: ${SUBJECTS}"
             echo "- features_tested: ${FEATURES}"
             echo "- families_tested: ${FAMILIES}"
             echo "- winner_tokens: ${WINNERS}"
             echo "- failure_tokens: ${FAILURES}"
+            echo "- validation_rows_consumed: false"
+            echo "- final_test_rows_consumed: false"
             echo "- univariate_relationships_tested: true"
             echo "- candidate_features_ranked: false"
             echo "- signal_promoted: false"
