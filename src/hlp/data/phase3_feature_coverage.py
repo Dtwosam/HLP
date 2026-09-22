@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
+from hlp.data.phase3_chain_regime import (
+    PHASE3_CHAIN_REGIME_HANDOFF_VERSION,
+)
 from hlp.data.phase3_feature_entry import (
     PHASE3_FEATURE_SNAPSHOT_KIND,
     PHASE3_FEATURE_SUBJECT_FIELDS,
@@ -13,6 +16,9 @@ from hlp.data.phase3_feature_entry import (
 )
 from hlp.data.phase3_feature_registry import (
     validate_phase3_feature_registry,
+)
+from hlp.data.phase3_holder_features import (
+    PHASE3_HOLDER_FEATURE_HANDOFF_VERSION,
 )
 from hlp.data.phase3_price_features import (
     PHASE3_PRICE_FEATURE_HANDOFF_VERSION,
@@ -29,6 +35,14 @@ PHASE3_FEATURE_COVERAGE_HANDOFF_VERSION = (
 )
 
 FAMILY_HANDOFF_CONTRACTS = {
+    "chain_regime": (
+        PHASE3_CHAIN_REGIME_HANDOFF_VERSION,
+        "phase3_chain_regime_features_ready",
+    ),
+    "holder_state": (
+        PHASE3_HOLDER_FEATURE_HANDOFF_VERSION,
+        "phase3_holder_features_ready",
+    ),
     "price_drawdown": (
         PHASE3_PRICE_FEATURE_HANDOFF_VERSION,
         "phase3_price_features_ready",

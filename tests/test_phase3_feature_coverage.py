@@ -168,3 +168,21 @@ def test_feature_coverage_handoff_keeps_missingness_not_outcomes():
     assert handoff["version"] == PHASE3_FEATURE_COVERAGE_HANDOFF_VERSION
     assert handoff["matched_subject_coverage_equal"] is True
     assert handoff["outcome_fields_exposed"] is False
+
+
+
+def test_feature_coverage_contract_supports_regime_and_holder_families():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert set(FAMILY_HANDOFF_CONTRACTS) == {
+        "chain_regime",
+        "holder_state",
+        "price_drawdown",
+        "trade_flow",
+    }
+    assert FAMILY_HANDOFF_CONTRACTS["chain_regime"][1] == (
+        "phase3_chain_regime_features_ready"
+    )
+    assert FAMILY_HANDOFF_CONTRACTS["holder_state"][1] == (
+        "phase3_holder_features_ready"
+    )
