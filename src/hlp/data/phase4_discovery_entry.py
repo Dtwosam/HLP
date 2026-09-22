@@ -519,6 +519,10 @@ def build_phase4_discovery_entry_handoff(
             summary.get("feature_registry_sha256"),
             label="Phase-4 discovery feature registry",
         ),
+        "feature_registry_file_sha256": _sha256(
+            summary.get("feature_registry_file_sha256"),
+            label="Phase-4 discovery feature registry file",
+        ),
         "discovery_rows_sha256": _sha256(
             summary.get("discovery_rows_sha256"),
             label="Phase-4 discovery rows",

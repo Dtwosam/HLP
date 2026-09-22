@@ -234,6 +234,7 @@ def test_discovery_entry_handoff_never_claims_phase4_checkpoint():
         "snapshot_head_block": 100,
         "eligible_universe_sha256": SHA,
         "feature_registry_sha256": REGISTRY_SHA,
+        "feature_registry_file_sha256": SHA,
         "discovery_rows_sha256": SHA,
         "discovery_subjects": 10,
         "comeback_5x_tokens": 2,
@@ -257,6 +258,7 @@ def test_discovery_entry_handoff_never_claims_phase4_checkpoint():
         feature_entry_handoff_sha256=ENTRY_SHA,
     )
     assert handoff["version"] == PHASE4_DISCOVERY_ENTRY_HANDOFF_VERSION
+    assert handoff["feature_registry_file_sha256"] == SHA
     assert handoff["universe_context_retained"] is True
     assert handoff["labels_joined_after_feature_freeze"] is True
     assert handoff["feature_values_mutated"] is False

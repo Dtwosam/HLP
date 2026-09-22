@@ -46,6 +46,9 @@ def test_phase4_discovery_entry_rebuilds_full_checkpoint_chain():
     assert "phase3-feature-entry" in text
     assert "phase3-feature-coverage" in text
     assert "phase3-feature-store" in text
+    assert "phase3-feature-registry.json" in text
+    assert "validate_phase3_feature_registry" in text
+    assert "phase4-feature-registry.json" in text
 
 
 def test_phase4_discovery_entry_never_claims_discovery_checkpoint():

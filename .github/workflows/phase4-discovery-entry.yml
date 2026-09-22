@@ -73,6 +73,9 @@ jobs:
           from hlp.data.phase3_feature_entry import (
               build_phase3_feature_entry_handoff,
           )
+          from hlp.data.phase3_feature_registry import (
+              validate_phase3_feature_registry,
+          )
           from hlp.data.phase3_feature_store import (
               build_phase3_feature_store_handoff,
           )
@@ -352,6 +355,20 @@ jobs:
           ):
               raise SystemExit("Phase-3 coverage subject count drift")
 
+          registry_path = find_unique(
+              store_root,
+              "phase3-feature-registry.json",
+          )
+          registry_file_sha = sha256_path(registry_path)
+          registry_rows = json.loads(registry_path.read_text())
+          if not isinstance(registry_rows, list):
+              raise SystemExit(
+                  "Phase-3 feature registry file is not a JSON list"
+              )
+          registry_report = validate_phase3_feature_registry(
+              registry_rows
+          )
+
           store_rows_path = find_unique(
               store_root,
               "phase3-feature-store.jsonl",
@@ -387,6 +404,18 @@ jobs:
           )
           if rebuilt_store != store_handoff:
               raise SystemExit("Phase-3 feature-store handoff content drift")
+          if registry_report["registry_sha256"] != store_handoff[
+              "feature_registry_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 feature registry definitions drift"
+              )
+          if int(registry_report["features"]) != int(
+              store_handoff["features_per_subject"]
+          ):
+              raise SystemExit(
+                  "Phase-3 feature registry count drift"
+              )
           if store_manifest.get("sha256") != store_handoff[
               "feature_rows_sha256"
           ]:
@@ -395,6 +424,11 @@ jobs:
               store_handoff["feature_subjects"]
           ):
               raise SystemExit("Phase-3 feature-store subject count drift")
+
+          shutil.copyfile(
+              registry_path,
+              Path("artifacts/phase4-feature-registry.json"),
+          )
 
           output = Path("artifacts/phase4-discovery-entry.jsonl")
           manifest, summary = materialize_phase4_discovery_entry(
@@ -425,6 +459,7 @@ jobs:
               "feature_entry_handoff_sha256": entry_handoff_sha,
               "feature_coverage_handoff_sha256": coverage_handoff_sha,
               "feature_store_handoff_sha256": store_handoff_sha,
+              "feature_registry_file_sha256": registry_file_sha,
           })
           summary_path = Path(
               "artifacts/phase4-discovery-entry-summary.json"
@@ -499,6 +534,7 @@ jobs:
             artifacts/phase4-discovery-entry.jsonl.manifest.json
             artifacts/phase4-discovery-entry-summary.json
             artifacts/phase4-discovery-entry-handoff.json
+            artifacts/phase4-feature-registry.json
           if-no-files-found: error
           retention-days: 90
 
