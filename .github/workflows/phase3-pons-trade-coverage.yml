@@ -27,17 +27,32 @@ on:
         description: Exact SHA-256 of phase2-universe-freeze-handoff.json
         required: true
         type: string
-      pons_research_artifacts_json:
-        description: JSON array for pons_v1 and pons_v2 with run_id, artifact_digest, report_sha256
+      research_run_id:
+        description: Exact phase2-research-materialize-pons run ID
         required: true
         type: string
+      expected_research_artifact_digest:
+        description: Exact phase2-research-materialized-* artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_research_report_sha256:
+        description: Exact SHA-256 of phase2-research-component-report.json
+        required: true
+        type: string
+      source_id:
+        description: Pons source to promote into Phase-3 trade coverage
+        required: true
+        type: choice
+        options:
+          - pons_v1
+          - pons_v2
 
 permissions:
   actions: read
   contents: read
 
 concurrency:
-  group: phase3-pons-trade-coverage-${{ github.ref }}
+  group: phase3-pons-trade-coverage-${{ inputs.source_id }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -47,7 +62,10 @@ env:
   UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
   EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
   EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
-  PONS_RESEARCH_ARTIFACTS_JSON: ${{ inputs.pons_research_artifacts_json }}
+  RESEARCH_RUN_ID: ${{ inputs.research_run_id }}
+  EXPECTED_RESEARCH_ARTIFACT_DIGEST: ${{ inputs.expected_research_artifact_digest }}
+  EXPECTED_RESEARCH_REPORT_SHA256: ${{ inputs.expected_research_report_sha256 }}
+  SOURCE_ID: ${{ inputs.source_id }}
 
 jobs:
   coverage:
@@ -63,13 +81,14 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e .
+
       - id: coverage
-        name: Build exact Pons Phase-3 wallet-trade coverage
+        name: Promote accepted Pons replay into Phase-3 trade coverage
         run: |
           mkdir -p inputs artifacts
           python - <<'PY'
           import hashlib
-          import itertools
+          import heapq
           import json
           import os
           import shutil
@@ -91,11 +110,18 @@ jobs:
           from hlp.data.pons_trades import (
               iter_normalized_pons_trades,
           )
-          from hlp.data.sharded_tape import iter_validated_jsonl
+          from hlp.data.sharded_tape import (
+              iter_validated_jsonl,
+              validate_jsonl_snapshot,
+          )
           from hlp.data.snapshot import write_jsonl_snapshot
 
           repo = os.environ["GITHUB_REPOSITORY"]
-          source_ids = {"pons_v1", "pons_v2"}
+          source_id = os.environ["SOURCE_ID"]
+          if source_id not in {"pons_v1", "pons_v2"}:
+              raise SystemExit(
+                  f"unsupported Phase-3 Pons source: {source_id}"
+              )
 
           def sha256_path(path):
               return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -164,66 +190,9 @@ jobs:
                   )
               return matches[0]
 
-          try:
-              descriptors = json.loads(
-                  os.environ["PONS_RESEARCH_ARTIFACTS_JSON"]
-              )
-          except json.JSONDecodeError as exc:
-              raise SystemExit(
-                  "pons_research_artifacts_json is invalid JSON"
-              ) from exc
-          if not isinstance(descriptors, list) or len(descriptors) != 2:
-              raise SystemExit(
-                  "pons_research_artifacts_json must contain two descriptors"
-              )
-          by_source = {}
-          for raw in descriptors:
-              if not isinstance(raw, dict):
-                  raise SystemExit("Pons research descriptor must be object")
-              source_id = str(raw.get("source_id") or "")
-              if source_id not in source_ids or source_id in by_source:
-                  raise SystemExit(
-                      f"Pons research source invalid/repeated: {source_id}"
-                  )
-              try:
-                  run_id = int(raw["run_id"])
-              except (KeyError, TypeError, ValueError) as exc:
-                  raise SystemExit(
-                      f"{source_id}: research run_id invalid"
-                  ) from exc
-              digest = str(raw.get("artifact_digest") or "").lower()
-              report_sha = str(
-                  raw.get("report_sha256") or ""
-              ).lower().removeprefix("sha256:")
-              if run_id <= 0:
-                  raise SystemExit(
-                      f"{source_id}: research run_id must be positive"
-                  )
-              if not digest.startswith("sha256:") or len(digest) != 71:
-                  raise SystemExit(
-                      f"{source_id}: research artifact digest invalid"
-                  )
-              if len(report_sha) != 64:
-                  raise SystemExit(
-                      f"{source_id}: research report SHA invalid"
-                  )
-              try:
-                  int(digest.split(":", 1)[1], 16)
-                  int(report_sha, 16)
-              except ValueError as exc:
-                  raise SystemExit(
-                      f"{source_id}: research SHA identity is non-hex"
-                  ) from exc
-              by_source[source_id] = {
-                  "run_id": run_id,
-                  "artifact_digest": digest,
-                  "report_sha256": report_sha,
-              }
-          if set(by_source) != source_ids:
-              raise SystemExit("Pons research source set changed")
-
           entry_root = Path("inputs/entry")
           universe_root = Path("inputs/universe")
+          research_root = Path("inputs/research")
           download_named(
               int(os.environ["FEATURE_ENTRY_RUN_ID"]),
               "phase3-feature-entry",
@@ -237,6 +206,13 @@ jobs:
               universe_root,
               "Phase-2 frozen universe",
               os.environ["EXPECTED_UNIVERSE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["RESEARCH_RUN_ID"]),
+              f"phase2-research-materialized-{source_id}",
+              research_root,
+              f"accepted {source_id} research replay",
+              os.environ["EXPECTED_RESEARCH_ARTIFACT_DIGEST"],
           )
 
           entry_summary_path = find_unique(
@@ -315,372 +291,363 @@ jobs:
                   "Phase-3 entry/universe snapshot drift"
               )
 
+          research_report_path = find_unique(
+              research_root,
+              "phase2-research-component-report.json",
+          )
+          research_report_sha = sha256_path(research_report_path)
+          if research_report_sha != os.environ[
+              "EXPECTED_RESEARCH_REPORT_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  f"{source_id} research report SHA drift"
+              )
+          report = json.loads(research_report_path.read_text())
+          if report.get("version") != (
+              "phase2-pons-research-materialization-v1"
+          ):
+              raise SystemExit(
+                  f"{source_id} research report version drift"
+              )
+          if report.get("source_id") != source_id:
+              raise SystemExit(
+                  f"{source_id} research source id drift"
+              )
+          if report.get("component_id") != source_id:
+              raise SystemExit(
+                  f"{source_id} research component id drift"
+              )
+          if report.get("eligible_universe_sha256") != (
+              universe_manifest["sha256"]
+          ):
+              raise SystemExit(
+                  f"{source_id} research/universe SHA drift"
+              )
+          for flag in (
+              "full_inputs_validated",
+              "eligible_token_coverage_complete",
+              "accepted_lifecycle_replay_equivalent",
+              "research_component_ready",
+          ):
+              if report.get(flag) is not True:
+                  raise SystemExit(
+                      f"{source_id} research report lacks {flag}"
+                  )
+          if report.get("outcome_labels_computed") is not False:
+              raise SystemExit(
+                  f"{source_id} research replay consumed outcomes"
+              )
+          if int(report.get("canonical_market_shards", 0)) <= 0:
+              raise SystemExit(
+                  f"{source_id} research replay lacks canonical market shards"
+              )
+
           universe_rows = list(
               iter_validated_jsonl(
                   universe_path,
                   universe_manifest_path,
               )
           )
-          eligible_by_source = {
-              source_id: sorted({
-                  str(row["token"]).lower()
-                  for row in universe_rows
-                  if source_id in set(row.get("source_ids") or [])
-              })
-              for source_id in sorted(source_ids)
-          }
+          eligible_tokens = sorted({
+              str(row["token"]).lower()
+              for row in universe_rows
+              if source_id in set(row.get("source_ids") or [])
+          })
+          if len(eligible_tokens) != int(report["eligible_tokens"]):
+              raise SystemExit(
+                  f"{source_id} research/universe token count drift: "
+                  f"{len(eligible_tokens)} != {report['eligible_tokens']}"
+              )
+          eligible_set = set(eligible_tokens)
 
-          summaries = []
-          canonical_descriptors = []
-          for source_id in sorted(source_ids):
-              descriptor = by_source[source_id]
-              root = Path("inputs/research") / source_id
-              artifact_name = (
-                  f"phase2-research-materialized-{source_id}"
+          def validated_file(name):
+              path = find_unique(research_root, name)
+              manifest_path = find_unique(
+                  research_root,
+                  name + ".manifest.json",
               )
-              download_named(
-                  descriptor["run_id"],
-                  artifact_name,
-                  root,
-                  f"Phase-2 research {source_id}",
-                  descriptor["artifact_digest"],
+              validate_jsonl_snapshot(path, manifest_path)
+              return path, manifest_path, json.loads(
+                  manifest_path.read_text()
               )
-              report_path = find_unique(
-                  root,
-                  "phase2-research-component-report.json",
-              )
-              if sha256_path(report_path) != descriptor[
-                  "report_sha256"
-              ]:
-                  raise SystemExit(
-                      f"{source_id}: research report SHA drift"
-                  )
-              report = json.loads(report_path.read_text())
-              if report.get("version") != (
-                  "phase2-pons-research-materialization-v1"
-              ):
-                  raise SystemExit(
-                      f"{source_id}: research report version drift"
-                  )
-              if report.get("component_id") != source_id:
-                  raise SystemExit(
-                      f"{source_id}: research component id drift"
-                  )
-              if report.get("source_id") != source_id:
-                  raise SystemExit(
-                      f"{source_id}: research source id drift"
-                  )
-              if report.get("eligible_universe_sha256") != (
-                  universe_manifest["sha256"]
-              ):
-                  raise SystemExit(
-                      f"{source_id}: research universe SHA drift"
-                  )
-              for flag in (
-                  "full_inputs_validated",
-                  "eligible_token_coverage_complete",
-                  "accepted_lifecycle_replay_equivalent",
-                  "research_component_ready",
-              ):
-                  if report.get(flag) is not True:
-                      raise SystemExit(
-                          f"{source_id}: research report lacks {flag}"
-                      )
-              for flag in (
-                  "dump_threshold_frozen",
-                  "outcome_labels_computed",
-              ):
-                  if report.get(flag) is not False:
-                      raise SystemExit(
-                          f"{source_id}: research report violates {flag}"
-                      )
-              eligible_tokens = eligible_by_source[source_id]
-              if int(report.get("eligible_tokens", -1)) != len(
-                  eligible_tokens
-              ):
-                  raise SystemExit(
-                      f"{source_id}: eligible token count drift"
-                  )
-              if not eligible_tokens:
-                  raise SystemExit(
-                      f"{source_id}: frozen universe has no eligible tokens"
-                  )
 
-              if source_id == "pons_v1":
-                  research_names = [
-                      "phase2-research-pons_v1.jsonl",
-                  ]
-              else:
-                  research_names = [
-                      "phase2-research-pons_v2-curve.jsonl",
-                      "phase2-research-pons_v2-v4.jsonl",
-                  ]
-              research_iters = []
-              research_sha_rows = []
-              research_records = 0
-              for name in research_names:
-                  path = find_unique(root, name)
-                  manifest_path = find_unique(
-                      root,
-                      name + ".manifest.json",
+          point_files = []
+          if source_id == "pons_v1":
+              path, manifest_path, manifest = validated_file(
+                  "phase2-research-pons_v1.jsonl"
+              )
+              if int(manifest["records"]) != int(
+                  report["materialized_records"]
+              ):
+                  raise SystemExit(
+                      "pons_v1 research record count drift"
                   )
-                  manifest = json.loads(manifest_path.read_text())
-                  if sha256_path(path) != manifest.get("sha256"):
+              if manifest["sha256"] != report["materialized_sha256"]:
+                  raise SystemExit(
+                      "pons_v1 research SHA drift"
+                  )
+              point_files.append((path, manifest_path))
+          else:
+              total = 0
+              segment_names = {
+                  "curve": "phase2-research-pons_v2-curve.jsonl",
+                  "graduation_seed": (
+                      "phase2-research-pons_v2-graduation-seed.jsonl"
+                  ),
+                  "v4": "phase2-research-pons_v2-v4.jsonl",
+              }
+              validated = {}
+              for segment, name in segment_names.items():
+                  path, manifest_path, manifest = validated_file(name)
+                  expected = dict(report["segments"][segment])
+                  if int(manifest["records"]) != int(
+                      expected["records"]
+                  ):
                       raise SystemExit(
-                          f"{source_id}: {name} SHA drift"
+                          f"pons_v2 {segment} record count drift"
                       )
-                  records = int(manifest.get("records", -1))
-                  if records < 0:
+                  if manifest["sha256"] != expected["sha256"]:
                       raise SystemExit(
-                          f"{source_id}: {name} record count invalid"
+                          f"pons_v2 {segment} SHA drift"
                       )
-                  research_records += records
-                  research_sha_rows.append({
-                      "file": name,
-                      "records": records,
-                      "sha256": manifest["sha256"],
-                  })
-                  research_iters.append(
+                  total += int(manifest["records"])
+                  validated[segment] = (path, manifest_path)
+              if total != int(report["materialized_records"]):
+                  raise SystemExit(
+                      "pons_v2 total research record count drift"
+                  )
+              point_files.extend([
+                  validated["curve"],
+                  validated["v4"],
+              ])
+
+          def order(row):
+              tx = row.get("transaction_index")
+              return (
+                  int(row["block_number"]),
+                  -1 if tx is None else int(tx),
+                  int(row["log_index"]),
+                  str(row["token"]).lower(),
+              )
+
+          def trade_stream():
+              streams = [
+                  iter_normalized_pons_trades(
                       iter_validated_jsonl(path, manifest_path)
                   )
+                  for path, manifest_path in point_files
+              ]
+              if len(streams) == 1:
+                  yield from streams[0]
+              else:
+                  yield from heapq.merge(
+                      *streams,
+                      key=order,
+                  )
 
-              research_identity = (
+          raw_digest = hashlib.sha256()
+          identity_digest = hashlib.sha256()
+          raw_trade_rows = 0
+          previous = None
+          for row in trade_stream():
+              token = str(row["token"]).lower()
+              if token not in eligible_set:
+                  raise SystemExit(
+                      f"{source_id} normalized trade outside frozen "
+                      f"membership: {token}"
+                  )
+              key = order(row)
+              if previous is not None and key <= previous:
+                  raise SystemExit(
+                      f"{source_id} normalized trade tape is not "
+                      "strictly chronological"
+                  )
+              previous = key
+              raw_digest.update((
                   json.dumps(
-                      research_sha_rows,
+                      row,
                       sort_keys=True,
                       separators=(",", ":"),
                   )
                   + "\n"
-              ).encode()
-              research_sha = hashlib.sha256(
-                  research_identity
-              ).hexdigest()
-
-              normalized_path = Path(
-                  f"artifacts/phase3-{source_id}-normalized-trades.jsonl"
-              )
-              normalized_manifest = write_jsonl_snapshot(
-                  iter_normalized_pons_trades(
-                      itertools.chain.from_iterable(research_iters)
+              ).encode())
+              identity = {
+                  "token": token,
+                  "initiator": str(row["initiator"]).lower(),
+                  "transaction_hash": str(
+                      row["transaction_hash"]
+                  ).lower(),
+                  "block_number": int(row["block_number"]),
+                  "transaction_index": row.get(
+                      "transaction_index"
                   ),
-                  output=normalized_path,
-                  provenance={
-                      "source_id": source_id,
-                      "phase2_research_report_sha256": descriptor[
-                          "report_sha256"
-                      ],
-                      "phase2_research_tapes_sha256": research_sha,
-                      "eligible_universe_sha256": universe_manifest[
-                          "sha256"
-                      ],
-                      "wallet_identity_kind": (
-                          "source_normalized_initiator"
-                      ),
-                      "outcome_rows_consumed": False,
-                      "future_state_allowed": False,
-                  },
-              )
-              canonical_path = Path(
-                  f"artifacts/phase3-{source_id}-canonical-trades.jsonl"
-              )
-              normalized_manifest_path = normalized_path.with_suffix(
-                  normalized_path.suffix + ".manifest.json"
-              )
-              canonical_manifest = write_jsonl_snapshot(
-                  iter_adapt_pons_trades_to_phase3(
-                      iter_validated_jsonl(
-                          normalized_path,
-                          normalized_manifest_path,
-                      )
-                  ),
-                  output=canonical_path,
-                  provenance={
-                      "source_id": source_id,
-                      "normalized_trade_rows_sha256": (
-                          normalized_manifest["sha256"]
-                      ),
-                      "eligible_universe_sha256": universe_manifest[
-                          "sha256"
-                      ],
-                      "wallet_identity_kind": (
-                          "source_normalized_initiator"
-                      ),
-                      "outcome_rows_consumed": False,
-                      "future_state_allowed": False,
-                  },
-              )
-
-              coverage = build_phase3_trade_source_coverage(
-                  source_id,
-                  iter_validated_jsonl(
-                      canonical_path,
-                      canonical_path.with_suffix(
-                          canonical_path.suffix + ".manifest.json"
-                      ),
-                  ),
-                  eligible_tokens=eligible_tokens,
-                  snapshot_head_block=int(
-                      entry_handoff["snapshot_head_block"]
-                  ),
-                  market_registry_sha256=report[
-                      "source_binding_sha256"
-                  ],
-                  raw_trade_tape_sha256=normalized_manifest[
-                      "sha256"
-                  ],
-                  raw_trade_rows=int(
-                      normalized_manifest["records"]
-                  ),
-                  wallet_identity_sha256=normalized_manifest[
-                      "sha256"
-                  ],
-                  wallet_identity_kind=(
-                      "source_normalized_initiator"
-                  ),
-                  historical_event_scan_complete=True,
-                  wallet_identity_complete=True,
-                  canonical_trade_adapter_complete=True,
-              )
-              if coverage["canonical_trade_rows_sha256"] != (
-                  canonical_manifest["sha256"]
-              ):
-                  raise SystemExit(
-                      f"{source_id}: canonical coverage SHA drift"
+                  "log_index": int(row["log_index"]),
+              }
+              identity_digest.update((
+                  json.dumps(
+                      identity,
+                      sort_keys=True,
+                      separators=(",", ":"),
                   )
-              if int(coverage["canonical_trade_rows"]) != int(
-                  canonical_manifest["records"]
-              ):
-                  raise SystemExit(
-                      f"{source_id}: canonical coverage count drift"
-                  )
-              coverage_path = Path(
-                  f"artifacts/phase3-{source_id}-trade-coverage.jsonl"
-              )
-              coverage_manifest = write_jsonl_snapshot(
-                  [coverage],
-                  output=coverage_path,
-                  provenance={
-                      "source_id": source_id,
-                      "feature_entry_handoff_sha256": entry_handoff_sha,
-                      "universe_handoff_sha256": universe_handoff_sha,
-                      "phase2_research_report_sha256": descriptor[
-                          "report_sha256"
-                      ],
-                      "trade_coverage_complete": True,
-                      "outcome_rows_consumed": False,
-                      "future_state_allowed": False,
-                  },
-              )
-              summary = {
+                  + "\n"
+              ).encode())
+              raw_trade_rows += 1
+
+          canonical_path = Path(
+              f"artifacts/phase3-{source_id}-canonical-trades.jsonl"
+          )
+          canonical_manifest = write_jsonl_snapshot(
+              iter_adapt_pons_trades_to_phase3(trade_stream()),
+              output=canonical_path,
+              provenance={
                   "version": "phase3-pons-trade-coverage-v1",
                   "source_id": source_id,
-                  "snapshot_head_block": int(
-                      entry_handoff["snapshot_head_block"]
+                  "eligible_universe_sha256": universe_manifest["sha256"],
+                  "feature_entry_handoff_sha256": entry_handoff_sha,
+                  "research_run_id": int(
+                      os.environ["RESEARCH_RUN_ID"]
                   ),
-                  "eligible_universe_sha256": universe_manifest[
-                      "sha256"
-                  ],
-                  "eligible_tokens": len(eligible_tokens),
-                  "phase2_research_run_id": descriptor["run_id"],
-                  "phase2_research_artifact_digest": descriptor[
-                      "artifact_digest"
-                  ],
-                  "phase2_research_report_sha256": descriptor[
-                      "report_sha256"
-                  ],
-                  "phase2_research_tapes_sha256": research_sha,
-                  "phase2_research_records": research_records,
-                  "normalized_trade_rows": normalized_manifest[
-                      "records"
-                  ],
-                  "normalized_trade_rows_sha256": normalized_manifest[
-                      "sha256"
-                  ],
-                  "canonical_trade_rows": canonical_manifest[
-                      "records"
-                  ],
-                  "canonical_trade_rows_sha256": canonical_manifest[
-                      "sha256"
-                  ],
-                  "coverage_rows_sha256": coverage_manifest[
-                      "sha256"
-                  ],
-                  "wallet_identity_kind": coverage[
-                      "wallet_identity_kind"
-                  ],
+                  "research_artifact_digest": os.environ[
+                      "EXPECTED_RESEARCH_ARTIFACT_DIGEST"
+                  ].lower(),
+                  "research_report_sha256": research_report_sha,
+                  "normalized_trade_tape_sha256": (
+                      raw_digest.hexdigest()
+                  ),
+                  "wallet_identity_sha256": (
+                      identity_digest.hexdigest()
+                  ),
+                  "wallet_identity_kind": (
+                      "source_normalized_initiator"
+                  ),
                   "historical_event_scan_complete": True,
-                  "wallet_identity_complete": True,
-                  "canonical_trade_adapter_complete": True,
+                  "outcome_rows_consumed": False,
+                  "future_state_allowed": False,
+              },
+          )
+          if int(canonical_manifest["records"]) != raw_trade_rows:
+              raise SystemExit(
+                  f"{source_id} adapter row count drift: "
+                  f"{canonical_manifest['records']} != {raw_trade_rows}"
+              )
+
+          coverage = build_phase3_trade_source_coverage(
+              source_id,
+              iter_validated_jsonl(
+                  canonical_path,
+                  canonical_path.with_suffix(
+                      canonical_path.suffix + ".manifest.json"
+                  ),
+              ),
+              eligible_tokens=eligible_tokens,
+              snapshot_head_block=int(
+                  entry_handoff["snapshot_head_block"]
+              ),
+              market_registry_sha256=report[
+                  "accepted_lifecycle_sha256"
+              ],
+              raw_trade_tape_sha256=raw_digest.hexdigest(),
+              raw_trade_rows=raw_trade_rows,
+              wallet_identity_sha256=identity_digest.hexdigest(),
+              wallet_identity_kind="source_normalized_initiator",
+              historical_event_scan_complete=True,
+              wallet_identity_complete=True,
+              canonical_trade_adapter_complete=True,
+          )
+          if coverage["canonical_trade_rows_sha256"] != (
+              canonical_manifest["sha256"]
+          ):
+              raise SystemExit(
+                  f"{source_id} canonical trade coverage SHA drift"
+              )
+          coverage_path = Path(
+              f"artifacts/phase3-{source_id}-trade-coverage.jsonl"
+          )
+          coverage_manifest = write_jsonl_snapshot(
+              [coverage],
+              output=coverage_path,
+              provenance={
+                  "version": "phase3-pons-trade-coverage-v1",
+                  "source_id": source_id,
+                  "eligible_universe_sha256": universe_manifest["sha256"],
+                  "feature_entry_handoff_sha256": entry_handoff_sha,
+                  "research_report_sha256": research_report_sha,
                   "trade_coverage_complete": True,
                   "outcome_rows_consumed": False,
                   "future_state_allowed": False,
-              }
-              summaries.append(summary)
-              canonical_descriptors.append({
-                  "source_id": source_id,
-                  "artifact_name": "phase3-pons-trade-coverage",
-                  "canonical_file": canonical_path.name,
-                  "coverage_file": coverage_path.name,
-              })
-
-          Path(
-              "artifacts/phase3-pons-trade-coverage-summary.json"
-          ).write_text(
-              json.dumps(
-                  {
-                      "version": "phase3-pons-trade-coverage-v1",
-                      "snapshot_head_block": int(
-                          entry_handoff["snapshot_head_block"]
-                      ),
-                      "eligible_universe_sha256": universe_manifest[
-                          "sha256"
-                      ],
-                      "sources": summaries,
-                      "canonical_trade_descriptor_templates": (
-                          canonical_descriptors
-                      ),
-                      "complete_sources": 2,
-                      "trade_coverage_complete": True,
-                      "outcome_rows_consumed": False,
-                      "future_state_allowed": False,
-                  },
-                  indent=2,
-                  sort_keys=True,
-              )
-              + "\n"
+              },
           )
-          summary_sha = sha256_path(
-              Path(
-                  "artifacts/phase3-pons-trade-coverage-summary.json"
-              )
-          )
-          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
-              handle.write(f"summary_sha256={summary_sha}\n")
-              for summary in summaries:
-                  prefix = summary["source_id"].upper()
-                  handle.write(
-                      f"{summary['source_id']}_canonical_sha="
-                      f"{summary['canonical_trade_rows_sha256']}\n"
-                  )
-                  handle.write(
-                      f"{summary['source_id']}_rows="
-                      f"{summary['canonical_trade_rows']}\n"
-                  )
-          print(json.dumps({
-              "sources": [row["source_id"] for row in summaries],
-              "complete_sources": 2,
+          summary = {
+              "version": "phase3-pons-trade-coverage-v1",
+              "source_id": source_id,
+              "snapshot_head_block": int(
+                  entry_handoff["snapshot_head_block"]
+              ),
+              "eligible_universe_sha256": universe_manifest["sha256"],
+              "eligible_tokens": len(eligible_tokens),
+              "research_run_id": int(
+                  os.environ["RESEARCH_RUN_ID"]
+              ),
+              "research_artifact_digest": os.environ[
+                  "EXPECTED_RESEARCH_ARTIFACT_DIGEST"
+              ].lower(),
+              "research_report_sha256": research_report_sha,
+              "accepted_lifecycle_sha256": report[
+                  "accepted_lifecycle_sha256"
+              ],
+              "normalized_trade_rows": raw_trade_rows,
+              "normalized_trade_tape_sha256": raw_digest.hexdigest(),
+              "wallet_identity_sha256": identity_digest.hexdigest(),
+              "wallet_identity_kind": "source_normalized_initiator",
+              "canonical_trade_rows": int(
+                  canonical_manifest["records"]
+              ),
+              "canonical_trade_rows_sha256": (
+                  canonical_manifest["sha256"]
+              ),
+              "source_coverage_rows_sha256": coverage_manifest["sha256"],
+              "historical_event_scan_complete": True,
+              "wallet_identity_complete": True,
+              "canonical_trade_adapter_complete": True,
               "trade_coverage_complete": True,
-              "summary_sha256": summary_sha,
+              "accepted_lifecycle_replay_equivalent": True,
+              "full_inputs_validated": True,
               "outcome_rows_consumed": False,
               "future_state_allowed": False,
-          }, sort_keys=True))
+              "phase3_pons_trade_coverage_ready": True,
+          }
+          summary_path = Path(
+              f"artifacts/phase3-{source_id}-trade-coverage-summary.json"
+          )
+          summary_path.write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_sha = sha256_path(summary_path)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"canonical_trade_rows_sha256="
+                  f"{canonical_manifest['sha256']}\n"
+              )
+              handle.write(
+                  f"coverage_rows_sha256={coverage_manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(
+                  f"eligible_tokens={len(eligible_tokens)}\n"
+              )
+              handle.write(
+                  f"canonical_trade_rows="
+                  f"{canonical_manifest['records']}\n"
+              )
+          print(json.dumps(summary, sort_keys=True))
           PY
 
       - name: Upload Pons Phase-3 trade coverage
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: phase3-pons-trade-coverage
+          name: phase3-${{ inputs.source_id }}-trade-coverage
           path: artifacts/
           if-no-files-found: error
           retention-days: 90
@@ -688,26 +655,30 @@ jobs:
       - name: Publish Pons trade coverage identity
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CANONICAL_SHA: ${{ steps.coverage.outputs.canonical_trade_rows_sha256 }}
+          COVERAGE_SHA: ${{ steps.coverage.outputs.coverage_rows_sha256 }}
           SUMMARY_SHA: ${{ steps.coverage.outputs.summary_sha256 }}
-          V1_SHA: ${{ steps.coverage.outputs.pons_v1_canonical_sha }}
-          V1_ROWS: ${{ steps.coverage.outputs.pons_v1_rows }}
-          V2_SHA: ${{ steps.coverage.outputs.pons_v2_canonical_sha }}
-          V2_ROWS: ${{ steps.coverage.outputs.pons_v2_rows }}
+          TOKENS: ${{ steps.coverage.outputs.eligible_tokens }}
+          ROWS: ${{ steps.coverage.outputs.canonical_trade_rows }}
         run: |
           set -euo pipefail
           {
-            echo "## Phase-3 Pons trade coverage"
+            echo "## Phase-3 ${SOURCE_ID} trade coverage"
             echo
             echo "- run_id: ${GITHUB_RUN_ID}"
-            echo "- artifact_name: phase3-pons-trade-coverage"
+            echo "- artifact_name: phase3-${SOURCE_ID}-trade-coverage"
             echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- canonical_file: phase3-${SOURCE_ID}-canonical-trades.jsonl"
+            echo "- coverage_file: phase3-${SOURCE_ID}-trade-coverage.jsonl"
+            echo "- canonical_trade_rows_sha256: ${CANONICAL_SHA}"
+            echo "- source_coverage_rows_sha256: ${COVERAGE_SHA}"
             echo "- summary_sha256: ${SUMMARY_SHA}"
-            echo "- pons_v1_canonical_trade_rows_sha256: ${V1_SHA}"
-            echo "- pons_v1_canonical_trade_rows: ${V1_ROWS}"
-            echo "- pons_v2_canonical_trade_rows_sha256: ${V2_SHA}"
-            echo "- pons_v2_canonical_trade_rows: ${V2_ROWS}"
+            echo "- eligible_tokens: ${TOKENS}"
+            echo "- canonical_trade_rows: ${ROWS}"
             echo "- wallet_identity_kind: source_normalized_initiator"
-            echo "- complete_sources: 2"
+            echo "- historical_event_scan_complete: true"
+            echo "- wallet_identity_complete: true"
+            echo "- canonical_trade_adapter_complete: true"
             echo "- trade_coverage_complete: true"
             echo "- outcome_rows_consumed: false"
             echo "- future_state_allowed: false"
