@@ -30,6 +30,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_post_selector_wave_launch_receipt,
     validate_phase2_post_selector_wave_completion_receipt,
     validate_phase2_direct_coverage_completion,
+    validate_phase2_direct_coverage_wave_launch_receipt,
     validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
@@ -1106,3 +1107,54 @@ def test_direct_coverage_completion_rejects_hidden_auto_work():
             verified,
             dispatch,
         )
+
+
+
+def direct_coverage_launch_receipt():
+    return {
+        "version": "phase2-direct-coverage-wave-launch-receipt-v1",
+        "direct_coverage_control_run_id": 22001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "aa" * 20,
+        "canonical_coverage_ledger_sha256": "bb" * 32,
+        "post_selector_completion_run_id": 22002,
+        "post_selector_completion_artifact_digest": "sha256:" + "cc" * 32,
+        "selector_run_id": 22003,
+        "planner_run_id": 22004,
+        "planner_artifact_digest": "sha256:" + "dd" * 32,
+        "node_dispatch_control_run_ids": {
+            node_id: 22100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "target_run_ids": {
+            node_id: 22200 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "auto_node_ids": list(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": 3,
+        "target_runs_waited_for_completion": False,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_direct_coverage_launch_receipt_validates_three_source_handoff():
+    report = validate_phase2_direct_coverage_wave_launch_receipt(
+        direct_coverage_launch_receipt()
+    )
+
+    assert report["direct_coverage_control_run_id"] == 22001
+    assert report["target_runs_created"] == 3
+    assert report["pools_fun_promotion_held_for_operator"] is True
