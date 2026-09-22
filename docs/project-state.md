@@ -561,7 +561,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
 - complete historical backfills and coverage manifests for every material
   source population;
 - only after those are complete: empirical first-major-dump research, detector
-  freeze, and continuous comeback outcome labels.
+  freeze, and continuous comeback outcome labels. The research-only path
+  primitive is now implemented in `phase2_dump_research.py`: it refuses
+  non-frozen universes, derives causal trailing-peak/drawdown geometry from
+  market-cap paths only, and evaluates only explicitly supplied
+  peak/drawdown/rebound candidate specs. It deliberately emits
+  `candidate_selected=false`, `dump_threshold_frozen=false`, and
+  `outcome_labels_computed=false`; a later rally cannot rewrite an already
+  confirmed candidate event. This is plumbing for the post-14/14 study, not a
+  shortcut around the coverage gate or an empirically frozen dump rule.
 
 
 ### Live/current chain access
