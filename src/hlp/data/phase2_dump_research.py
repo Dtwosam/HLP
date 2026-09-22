@@ -52,9 +52,10 @@ def _decimal_text(value: Decimal) -> str:
 
 def _event_key(row: Mapping[str, object]) -> tuple[int, int, int]:
     block = int(row.get("block_number", -1))
-    transaction = int(row.get("transaction_index", -1))
+    raw_transaction = row.get("transaction_index")
+    transaction = -1 if raw_transaction is None else int(raw_transaction)
     log_index = int(row.get("log_index", -1))
-    if min(block, transaction, log_index) < 0:
+    if block < 0 or transaction < -1 or log_index < 0:
         raise ValueError("dump research price row has invalid event position")
     return block, transaction, log_index
 
@@ -147,7 +148,9 @@ def build_phase2_dump_geometry(
         grouped[token].append({
             "token": token,
             "block_number": event[0],
-            "transaction_index": event[1],
+            "transaction_index": (
+                None if event[1] == -1 else event[1]
+            ),
             "log_index": event[2],
             "market_cap_proxy_usd": market_cap,
         })
@@ -165,9 +168,7 @@ def build_phase2_dump_geometry(
         rows = sorted(
             grouped[token],
             key=lambda row: (
-                row["block_number"],
-                row["transaction_index"],
-                row["log_index"],
+                *_event_key(row),
             ),
         )
         token_point_counts[token] = len(rows)
@@ -185,16 +186,16 @@ def build_phase2_dump_geometry(
                 "version": PHASE2_DUMP_GEOMETRY_VERSION,
                 "token": token,
                 "block_number": int(row["block_number"]),
-                "transaction_index": int(row["transaction_index"]),
+                "transaction_index": row["transaction_index"],
                 "log_index": int(row["log_index"]),
                 "market_cap_proxy_usd": _decimal_text(value),
                 "trailing_peak_market_cap_proxy_usd": _decimal_text(
                     peak_value
                 ),
                 "trailing_peak_block": int(peak["block_number"]),
-                "trailing_peak_transaction_index": int(
-                    peak["transaction_index"]
-                ),
+                "trailing_peak_transaction_index": peak[
+                    "transaction_index"
+                ],
                 "trailing_peak_log_index": int(peak["log_index"]),
                 "drawdown_fraction": _decimal_text(drawdown),
                 "is_new_trailing_peak": row is peak,
@@ -322,11 +323,7 @@ def research_phase2_dump_candidates(
         for token in sorted(grouped):
             rows = sorted(
                 grouped[token],
-                key=lambda row: (
-                    int(row["block_number"]),
-                    int(row["transaction_index"]),
-                    int(row["log_index"]),
-                ),
+                key=_event_key,
             )
             threshold_row = None
             peak_row = None
@@ -340,7 +337,12 @@ def research_phase2_dump_candidates(
                     threshold_row = row
                     peak_key = (
                         int(row["trailing_peak_block"]),
-                        int(row["trailing_peak_transaction_index"]),
+                        (
+                            -1
+                            if row.get("trailing_peak_transaction_index")
+                            is None
+                            else int(row["trailing_peak_transaction_index"])
+                        ),
                         int(row["trailing_peak_log_index"]),
                     )
                     peak_row = next(
