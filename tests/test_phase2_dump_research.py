@@ -257,7 +257,6 @@ def test_streaming_dump_geometry_matches_causal_row_semantics(tmp_path):
     ]
     assert streamed["geometry_sha256"] == manifest["sha256"]
     assert streamed["streaming_materialization"] is True
-    assert streamed["candidate_selected"] if False else True
     assert streamed["phase2_dump_detector_frozen"] is False
 
 
@@ -282,3 +281,25 @@ def test_dump_geometry_handoff_keeps_detector_unselected(tmp_path):
     assert handoff["candidate_selected"] is False
     assert handoff["dump_threshold_frozen"] is False
     assert handoff["outcome_labels_computed"] is False
+
+
+
+def test_streaming_dump_geometry_cleans_partial_output_on_missing_token(
+    tmp_path,
+):
+    universe_rows, summary = universe((TOKEN_A, TOKEN_B))
+    output = tmp_path / "geometry-partial.jsonl"
+
+    with pytest.raises(ValueError, match="coverage missing"):
+        materialize_phase2_dump_geometry(
+            universe_rows,
+            iter(price_rows(TOKEN_A)),
+            universe_summary=summary,
+            universe_sha256=SHA,
+            price_path_provenance_sha256=SHA,
+            normalized_price_path_sha256=SHA,
+            output=output,
+        )
+
+    assert not output.exists()
+    assert not output.with_suffix(".jsonl.tmp").exists()

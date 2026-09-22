@@ -15,7 +15,7 @@ from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
-from hlp.data.snapshot import write_jsonl_snapshot
+from hlp.data.snapshot import iter_jsonl_snapshot
 
 
 PHASE2_DUMP_GEOMETRY_VERSION = "phase2-dump-geometry-v1"
@@ -625,7 +625,7 @@ def materialize_phase2_dump_geometry(
                 f"{missing[:20]}"
             )
 
-    manifest = write_jsonl_snapshot(
+    tapped = iter_jsonl_snapshot(
         geometry_rows(),
         output=output,
         provenance={
@@ -641,6 +641,17 @@ def materialize_phase2_dump_geometry(
             "outcome_labels_computed": False,
         },
     )
+    for _ in tapped:
+        pass
+    manifest_path = output.with_suffix(
+        output.suffix + ".manifest.json"
+    )
+    if not manifest_path.is_file():
+        raise ValueError(
+            "dump geometry streaming snapshot did not finalize"
+        )
+    import json
+    manifest = json.loads(manifest_path.read_text())
     summary = {
         "version": PHASE2_DUMP_GEOMETRY_VERSION,
         "snapshot_head_block": snapshot,
