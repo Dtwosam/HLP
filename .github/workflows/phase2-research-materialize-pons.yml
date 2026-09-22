@@ -809,6 +809,8 @@ jobs:
 
           final_report = {
               **report,
+              "component_id": source_id,
+              "source_ids": list(binding["source_ids"]),
               "source_binding_sha256": binding_sha,
               "rehydration_plan_sha256": plan_sha,
               "eligible_universe_sha256": universe_sha,
