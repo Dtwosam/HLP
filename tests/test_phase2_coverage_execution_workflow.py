@@ -106,3 +106,16 @@ def test_phase2_execution_plan_publishes_dispatch_artifact_identity():
     assert "planner_run_id: ${GITHUB_RUN_ID}" in text
     assert "planner_artifact_digest: ${ARTIFACT_DIGEST}" in text
     assert "node-dispatch inputs now require this exact run ID and digest" in text
+
+
+
+def test_phase2_execution_plan_resolves_node_dispatch_receipts():
+    text = WORKFLOW.read_text()
+
+    assert "node_dispatch_run_ids_json:" in text
+    assert "NODE_DISPATCH_RUN_IDS_JSON" in text
+    assert "phase2-execution-node-dispatch.yml" in text
+    assert "validate_phase2_node_dispatch_receipt" in text
+    assert "phase2-execution-node-dispatch.json" in text
+    assert "conflicting target run IDs" in text
+    assert "node_dispatch_receipts_consumed" in text
