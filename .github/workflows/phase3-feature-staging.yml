@@ -39,16 +39,12 @@ on:
         description: Exact SHA-256 of phase3-venue-mechanics-features-handoff.json
         required: true
         type: string
-      holder_feature_run_id:
-        description: Exact phase3-holder-features run ID
+      holder_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-holder-features
         required: true
         type: string
-      expected_holder_feature_artifact_digest:
-        description: Exact phase3-holder-features artifact digest (sha256:...)
-        required: true
-        type: string
-      expected_holder_feature_handoff_sha256:
-        description: Exact SHA-256 of phase3-holder-features-handoff.json
+      lifecycle_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-lifecycle-features
         required: true
         type: string
       redistribution_feature_run_id:
@@ -122,9 +118,8 @@ env:
   VENUE_FEATURE_RUN_ID: ${{ inputs.venue_feature_run_id }}
   EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_venue_feature_artifact_digest }}
   EXPECTED_VENUE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_venue_feature_handoff_sha256 }}
-  HOLDER_FEATURE_RUN_ID: ${{ inputs.holder_feature_run_id }}
-  EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_holder_feature_artifact_digest }}
-  EXPECTED_HOLDER_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_holder_feature_handoff_sha256 }}
+  HOLDER_FEATURE_HANDOFF_JSON: ${{ inputs.holder_feature_handoff_json }}
+  LIFECYCLE_FEATURE_HANDOFF_JSON: ${{ inputs.lifecycle_feature_handoff_json }}
   REDISTRIBUTION_FEATURE_RUN_ID: ${{ inputs.redistribution_feature_run_id }}
   EXPECTED_REDISTRIBUTION_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_redistribution_feature_artifact_digest }}
   EXPECTED_REDISTRIBUTION_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_redistribution_feature_handoff_sha256 }}
@@ -185,6 +180,9 @@ jobs:
           )
           from hlp.data.phase3_holder_features import (
               build_phase3_holder_feature_handoff,
+          )
+          from hlp.data.phase3_lifecycle_features import (
+              build_phase3_lifecycle_feature_handoff,
           )
           from hlp.data.phase3_price_features import (
               build_phase3_price_feature_handoff,
@@ -287,11 +285,71 @@ jobs:
           chain_root = Path("inputs/chain-regime")
           venue_root = Path("inputs/venue")
           holder_root = Path("inputs/holder")
+          lifecycle_root = Path("inputs/lifecycle")
           redistribution_root = Path("inputs/redistribution")
           retention_root = Path("inputs/retention")
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
           trade_size_root = Path("inputs/trade-size-flow")
+          def parse_feature_descriptor(env_name, label):
+              try:
+                  descriptor = json.loads(os.environ[env_name])
+              except (json.JSONDecodeError, KeyError) as exc:
+                  raise SystemExit(
+                      f"{label} descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(descriptor, dict):
+                  raise SystemExit(
+                      f"{label} descriptor must be an object"
+                  )
+              try:
+                  run_id = int(descriptor["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"{label} run_id is invalid"
+                  ) from exc
+              artifact_digest = str(
+                  descriptor.get("artifact_digest") or ""
+              ).lower()
+              handoff_sha = str(
+                  descriptor.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if (
+                  not artifact_digest.startswith("sha256:")
+                  or len(artifact_digest) != 71
+              ):
+                  raise SystemExit(
+                      f"{label} artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      f"{label} handoff_sha256 is invalid"
+                  )
+              try:
+                  int(artifact_digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} SHA/digest is not hexadecimal"
+                  ) from exc
+              return run_id, artifact_digest, handoff_sha
+
+          (
+              holder_run_id,
+              holder_artifact_digest,
+              holder_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "HOLDER_FEATURE_HANDOFF_JSON",
+              "holder-feature",
+          )
+          (
+              lifecycle_run_id,
+              lifecycle_artifact_digest,
+              lifecycle_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "LIFECYCLE_FEATURE_HANDOFF_JSON",
+              "lifecycle-feature",
+          )
           try:
               trade_size_descriptor = json.loads(
                   os.environ["TRADE_SIZE_FLOW_HANDOFF_JSON"]
@@ -358,11 +416,18 @@ jobs:
               os.environ["EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST"],
           )
           download_named(
-              int(os.environ["HOLDER_FEATURE_RUN_ID"]),
+              holder_run_id,
               "phase3-holder-features",
               holder_root,
               "Phase-3 holder features",
-              os.environ["EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST"],
+              holder_artifact_digest,
+          )
+          download_named(
+              lifecycle_run_id,
+              "phase3-lifecycle-features",
+              lifecycle_root,
+              "Phase-3 lifecycle features",
+              lifecycle_artifact_digest,
           )
           download_named(
               int(os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]),
@@ -589,9 +654,7 @@ jobs:
               "phase3-holder-features-handoff.json",
           )
           holder_handoff_sha = sha256_path(holder_handoff_path)
-          if holder_handoff_sha != os.environ[
-              "EXPECTED_HOLDER_FEATURE_HANDOFF_SHA256"
-          ].lower().removeprefix("sha256:"):
+          if holder_handoff_sha != holder_expected_handoff_sha:
               raise SystemExit("Phase-3 holder-feature handoff SHA drift")
           holder_handoff = json.loads(holder_handoff_path.read_text())
           rebuilt_holder = build_phase3_holder_feature_handoff(
@@ -617,6 +680,68 @@ jobs:
           ):
               raise SystemExit(
                   "Phase-3 holder-feature/coverage entry linkage drift"
+              )
+
+          lifecycle_rows_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features.jsonl",
+          )
+          lifecycle_manifest_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features.jsonl.manifest.json",
+          )
+          lifecycle_manifest = json.loads(
+              lifecycle_manifest_path.read_text()
+          )
+          lifecycle_summary_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features-summary.json",
+          )
+          lifecycle_summary = json.loads(
+              lifecycle_summary_path.read_text()
+          )
+          lifecycle_summary_sha = sha256_path(
+              lifecycle_summary_path
+          )
+          lifecycle_handoff_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features-handoff.json",
+          )
+          lifecycle_handoff_sha = sha256_path(
+              lifecycle_handoff_path
+          )
+          if lifecycle_handoff_sha != lifecycle_expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature handoff SHA drift"
+              )
+          lifecycle_handoff = json.loads(
+              lifecycle_handoff_path.read_text()
+          )
+          rebuilt_lifecycle = build_phase3_lifecycle_feature_handoff(
+              lifecycle_summary,
+              feature_summary_sha256=lifecycle_summary_sha,
+              feature_entry_handoff_sha256=lifecycle_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=lifecycle_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_lifecycle != lifecycle_handoff:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature handoff content drift"
+              )
+          if lifecycle_manifest.get("sha256") != lifecycle_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature manifest SHA drift"
+              )
+          if lifecycle_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature/coverage entry linkage drift"
               )
 
           redistribution_rows_path = find_unique(
@@ -917,6 +1042,8 @@ jobs:
               raise SystemExit("Phase-3 venue registry SHA drift")
           if holder_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 holder registry SHA drift")
+          if lifecycle_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 lifecycle registry SHA drift")
           if redistribution_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 redistribution registry SHA drift")
           if retention_handoff["feature_registry_sha256"] != registry_sha:
@@ -948,6 +1075,10 @@ jobs:
                   "holder_state": iter_validated_jsonl(
                       holder_rows_path,
                       holder_manifest_path,
+                  ),
+                  "lifecycle_age": iter_validated_jsonl(
+                      lifecycle_rows_path,
+                      lifecycle_manifest_path,
                   ),
                   "supply_redistribution": iter_validated_jsonl(
                       redistribution_rows_path,
@@ -989,10 +1120,10 @@ jobs:
                   os.environ["VENUE_FEATURE_RUN_ID"]
               ),
               "venue_feature_handoff_sha256": venue_handoff_sha,
-              "holder_feature_run_id": int(
-                  os.environ["HOLDER_FEATURE_RUN_ID"]
-              ),
+              "holder_feature_run_id": holder_run_id,
               "holder_feature_handoff_sha256": holder_handoff_sha,
+              "lifecycle_feature_run_id": lifecycle_run_id,
+              "lifecycle_feature_handoff_sha256": lifecycle_handoff_sha,
               "redistribution_feature_run_id": int(
                   os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]
               ),
@@ -1116,7 +1247,7 @@ jobs:
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
             echo "- features_per_subject: ${FEATURES}"
-            echo "- included_families: chain_regime,holder_state,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
+            echo "- included_families: chain_regime,holder_state,lifecycle_age,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
             echo "- outcome_rows_consumed: false"
             echo "- outcome_fields_exposed: false"
             echo "- future_state_allowed: false"

@@ -14,6 +14,7 @@ def test_phase3_staging_requires_coverage_price_and_trade_artifacts():
     assert "phase3-chain-regime-features" in text
     assert "phase3-venue-mechanics-features" in text
     assert "phase3-holder-features" in text
+    assert "phase3-lifecycle-features" in text
     assert "phase3-redistribution-features" in text
     assert "phase3-retention-features" in text
     assert "phase3-price-features" in text
@@ -31,7 +32,7 @@ def test_phase3_staging_never_claims_final_feature_store():
     assert "future_state_allowed: false" in text
     assert (
         "included_families: "
-        "chain_regime,holder_state,participant_retention,"
+        "chain_regime,holder_state,lifecycle_age,participant_retention,"
         "price_drawdown,supply_redistribution,trade_flow,"
         "trade_size_flow,venue_mechanics"
     ) in text
@@ -46,7 +47,18 @@ def test_phase3_staging_never_claims_final_feature_store():
 def test_phase3_staging_stays_within_dispatch_input_limit():
     text = WORKFLOW.read_text()
 
+    assert "holder_feature_handoff_json:" in text
+    assert "lifecycle_feature_handoff_json:" in text
     assert "trade_size_flow_handoff_json:" in text
     assert "trade_size_flow_run_id:" not in text
     assert "expected_trade_size_flow_artifact_digest:" not in text
     assert "expected_trade_size_flow_handoff_sha256:" not in text
+
+
+
+def test_phase3_staging_compacts_holder_identity():
+    text = WORKFLOW.read_text()
+
+    assert "holder_feature_run_id:" not in text
+    assert "expected_holder_feature_artifact_digest:" not in text
+    assert "expected_holder_feature_handoff_sha256:" not in text
