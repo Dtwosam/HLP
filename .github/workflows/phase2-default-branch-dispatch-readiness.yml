@@ -49,6 +49,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python - <<'PY'
+          import base64
           import json
           import os
           import subprocess
@@ -56,6 +57,8 @@ jobs:
 
           from hlp.data.phase2_dispatch_readiness import (
               evaluate_phase2_default_branch_readiness,
+              required_phase2_manual_workflows,
+              workflow_dispatch_interface_sha256,
           )
 
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -106,9 +109,56 @@ jobs:
                   )
               available = []
 
+          required = required_phase2_manual_workflows()
+          expected_interface_sha256 = {
+              name: workflow_dispatch_interface_sha256(
+                  Path(".github/workflows", name).read_text()
+              )
+              for name in required
+          }
+          available_set = set(available)
+          default_interface_sha256 = {}
+          for name in required:
+              if name not in available_set:
+                  continue
+              workflow_payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/contents/.github/workflows/"
+                          f"{name}?ref={default_branch}"
+                      ),
+                  ])
+              )
+              encoding = str(
+                  workflow_payload.get("encoding") or ""
+              )
+              if encoding != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding changed: {name}"
+                  )
+              raw = base64.b64decode(
+                  str(workflow_payload.get("content") or "").replace(
+                      "\n",
+                      "",
+                  )
+              ).decode("utf-8")
+              default_interface_sha256[name] = (
+                  workflow_dispatch_interface_sha256(raw)
+              )
+
           report = evaluate_phase2_default_branch_readiness(
               available,
               default_branch=default_branch,
+              expected_dispatch_interface_sha256_by_name=(
+                  expected_interface_sha256
+              ),
+              available_dispatch_interface_sha256_by_name=(
+                  default_interface_sha256
+              ),
           )
           path = Path(
               "artifacts/phase2-default-branch-dispatch-readiness.json"
@@ -140,6 +190,10 @@ jobs:
               handle.write(
                   f"missing={report['missing_required_workflows']}\n"
               )
+              handle.write(
+                  "incompatible="
+                  f"{report['incompatible_required_workflows']}\n"
+              )
 
           print(json.dumps({
               "default_branch": report["default_branch"],
@@ -152,6 +206,10 @@ jobs:
               "missing_required_workflows": (
                   report["missing_required_workflows"]
               ),
+              "incompatible_required_workflows": (
+                  report["incompatible_required_workflows"]
+              ),
+              "dispatch_interface_compatibility_checked": True,
               "phase2_first_wave_dispatch_ready": (
                   report["phase2_first_wave_dispatch_ready"]
               ),
@@ -160,6 +218,9 @@ jobs:
               ),
               "first_wave_missing_workflow_names": (
                   report["first_wave_missing_workflow_names"]
+              ),
+              "first_wave_incompatible_workflow_names": (
+                  report["first_wave_incompatible_workflow_names"]
               ),
               "phase2_coverage_state_mutated": False,
           }, sort_keys=True))
@@ -178,6 +239,7 @@ jobs:
           FIRST_WAVE_READY: ${{ steps.readiness.outputs.first_wave_ready }}
           FULL_DAG_READY: ${{ steps.readiness.outputs.full_dag_ready }}
           MISSING: ${{ steps.readiness.outputs.missing }}
+          INCOMPATIBLE: ${{ steps.readiness.outputs.incompatible }}
         run: |
           {
             echo "## Phase-2 default-branch dispatch readiness"
@@ -186,5 +248,7 @@ jobs:
             echo "- first_wave_dispatch_ready: ${FIRST_WAVE_READY}"
             echo "- full_coverage_dag_dispatch_ready: ${FULL_DAG_READY}"
             echo "- missing_required_workflows: ${MISSING}"
+            echo "- incompatible_dispatch_interfaces: ${INCOMPATIBLE}"
+            echo "- dispatch_interface_compatibility_checked: true"
             echo "- coverage_state_mutated: false"
           } >> "${GITHUB_STEP_SUMMARY}"
