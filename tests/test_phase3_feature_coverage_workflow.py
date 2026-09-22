@@ -11,6 +11,7 @@ def test_phase3_feature_coverage_requires_price_trade_and_entry():
     assert "\n  push:" not in text
     assert "\n  pull_request:" not in text
     assert "phase3-feature-entry" in text
+    assert "phase3-early-recipient-features" in text
     assert "phase3-chain-regime-features" in text
     assert "phase3-venue-mechanics-features" in text
     assert "phase3-holder-features" in text
@@ -23,7 +24,8 @@ def test_phase3_feature_coverage_requires_price_trade_and_entry():
     assert "materialize_phase3_feature_coverage" in text
     assert (
         "required_families: "
-        "chain_regime,holder_state,lifecycle_age,participant_retention,"
+        "chain_regime,early_recipient_activity,holder_state,"
+        "lifecycle_age,participant_retention,"
         "price_drawdown,supply_redistribution,trade_flow,"
         "trade_size_flow,venue_mechanics"
     ) in text
@@ -45,6 +47,7 @@ def test_phase3_feature_coverage_stays_outcome_blind():
 def test_phase3_feature_coverage_stays_within_dispatch_input_limit():
     text = WORKFLOW.read_text()
 
+    assert "early_recipient_feature_handoff_json:" in text
     assert "holder_feature_handoff_json:" in text
     assert "lifecycle_feature_handoff_json:" in text
     assert "trade_size_flow_handoff_json:" in text
@@ -60,3 +63,16 @@ def test_phase3_feature_coverage_compacts_holder_identity():
     assert "holder_feature_run_id:" not in text
     assert "expected_holder_feature_artifact_digest:" not in text
     assert "expected_holder_feature_handoff_sha256:" not in text
+
+
+
+def test_phase3_feature_coverage_uses_final_dispatch_slot():
+    text = WORKFLOW.read_text()
+
+    input_lines = [
+        line for line in text.splitlines()
+        if line.startswith("      ")
+        and not line.startswith("        ")
+        and line.endswith(":")
+    ]
+    assert len(input_lines) == 25

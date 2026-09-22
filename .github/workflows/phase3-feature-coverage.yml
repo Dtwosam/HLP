@@ -15,6 +15,10 @@ on:
         description: Exact SHA-256 of phase3-feature-entry-handoff.json
         required: true
         type: string
+      early_recipient_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-early-recipient-features
+        required: true
+        type: string
       chain_regime_run_id:
         description: Exact phase3-chain-regime-features run ID
         required: true
@@ -112,6 +116,7 @@ env:
   FEATURE_ENTRY_RUN_ID: ${{ inputs.feature_entry_run_id }}
   EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
   EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
+  EARLY_RECIPIENT_FEATURE_HANDOFF_JSON: ${{ inputs.early_recipient_feature_handoff_json }}
   CHAIN_REGIME_RUN_ID: ${{ inputs.chain_regime_run_id }}
   EXPECTED_CHAIN_REGIME_ARTIFACT_DIGEST: ${{ inputs.expected_chain_regime_artifact_digest }}
   EXPECTED_CHAIN_REGIME_HANDOFF_SHA256: ${{ inputs.expected_chain_regime_handoff_sha256 }}
@@ -166,6 +171,9 @@ jobs:
           )
           from hlp.data.phase3_chain_regime import (
               build_phase3_chain_regime_handoff,
+          )
+          from hlp.data.phase3_early_recipient_features import (
+              build_phase3_early_recipient_feature_handoff,
           )
           from hlp.data.phase3_feature_coverage import (
               build_phase3_feature_coverage_handoff,
@@ -282,6 +290,7 @@ jobs:
               return matches[0]
 
           entry_root = Path("inputs/entry")
+          early_root = Path("inputs/early-recipient")
           chain_root = Path("inputs/chain-regime")
           venue_root = Path("inputs/venue")
           holder_root = Path("inputs/holder")
@@ -334,6 +343,14 @@ jobs:
                   ) from exc
               return run_id, artifact_digest, handoff_sha
 
+          (
+              early_run_id,
+              early_artifact_digest,
+              early_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "EARLY_RECIPIENT_FEATURE_HANDOFF_JSON",
+              "early-recipient-feature",
+          )
           (
               holder_run_id,
               holder_artifact_digest,
@@ -401,6 +418,13 @@ jobs:
               entry_root,
               "Phase-3 feature entry",
               os.environ["EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              early_run_id,
+              "phase3-early-recipient-features",
+              early_root,
+              "Phase-3 early-recipient features",
+              early_artifact_digest,
           )
           download_named(
               int(os.environ["CHAIN_REGIME_RUN_ID"]),
@@ -513,6 +537,60 @@ jobs:
               "feature_subjects_sha256"
           ]:
               raise SystemExit("Phase-3 subject manifest SHA drift")
+
+          early_rows_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features.jsonl",
+          )
+          early_manifest_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features.jsonl.manifest.json",
+          )
+          early_manifest = json.loads(
+              early_manifest_path.read_text()
+          )
+          early_summary_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features-summary.json",
+          )
+          early_summary = json.loads(early_summary_path.read_text())
+          early_summary_sha = sha256_path(early_summary_path)
+          early_handoff_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features-handoff.json",
+          )
+          early_handoff_sha = sha256_path(early_handoff_path)
+          if early_handoff_sha != early_expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 early-recipient handoff SHA drift"
+              )
+          early_handoff = json.loads(early_handoff_path.read_text())
+          rebuilt_early = build_phase3_early_recipient_feature_handoff(
+              early_summary,
+              feature_summary_sha256=early_summary_sha,
+              feature_entry_handoff_sha256=early_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=early_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_early != early_handoff:
+              raise SystemExit(
+                  "Phase-3 early-recipient handoff content drift"
+              )
+          if early_manifest.get("sha256") != early_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 early-recipient manifest SHA drift"
+              )
+          if early_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 early-recipient/entry linkage drift"
+              )
 
           chain_rows_path = find_unique(
               chain_root,
@@ -1030,6 +1108,10 @@ jobs:
           registry = build_phase3_feature_registry()
           registry_report = validate_phase3_feature_registry(registry)
           registry_sha = registry_report["registry_sha256"]
+          if early_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit(
+                  "Phase-3 early-recipient registry SHA drift"
+              )
           if chain_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 chain-regime registry SHA drift")
           if venue_handoff["feature_registry_sha256"] != registry_sha:
@@ -1058,6 +1140,10 @@ jobs:
                   subjects_manifest_path,
               ),
               {
+                  "early_recipient_activity": iter_validated_jsonl(
+                      early_rows_path,
+                      early_manifest_path,
+                  ),
                   "chain_regime": iter_validated_jsonl(
                       chain_rows_path,
                       chain_manifest_path,
@@ -1096,6 +1182,7 @@ jobs:
                   ),
               },
               {
+                  "early_recipient_activity": early_handoff,
                   "chain_regime": chain_handoff,
                   "venue_mechanics": venue_handoff,
                   "holder_state": holder_handoff,
@@ -1109,6 +1196,7 @@ jobs:
               feature_registry=registry,
               required_families=[
                   "chain_regime",
+                  "early_recipient_activity",
                   "holder_state",
                   "lifecycle_age",
                   "participant_retention",
@@ -1125,6 +1213,8 @@ jobs:
                   os.environ["FEATURE_ENTRY_RUN_ID"]
               ),
               "feature_entry_handoff_sha256": entry_handoff_sha,
+              "early_recipient_feature_run_id": early_run_id,
+              "early_recipient_feature_handoff_sha256": early_handoff_sha,
               "chain_regime_run_id": int(
                   os.environ["CHAIN_REGIME_RUN_ID"]
               ),
@@ -1254,7 +1344,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: chain_regime,holder_state,lifecycle_age,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
+            echo "- required_families: chain_regime,early_recipient_activity,holder_state,lifecycle_age,participant_retention,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
