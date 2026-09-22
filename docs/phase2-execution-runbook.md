@@ -102,7 +102,10 @@ Immediately after GitHub returns a target run ID, the dispatcher writes
 `phase2-execution-node-dispatch-attempt.json`. That attempt artifact is
 uploaded even when later target-run verification fails. A successful control
 run additionally emits `phase2-execution-node-dispatch.json`, whose SHA-bound
-final receipt links back to the attempt.
+final receipt links back to the attempt. Planner refreshes and the one-shot
+first-wave launcher require **both** files, recompute the SHA-256 of the exact
+attempt bytes, and reconcile every shared node/planner/target/input identity
+before the target run can receive completion credit.
 
 Before creating a target run, the dispatcher scans prior same-HEAD dispatcher
 artifacts. Reusing the same planner run for the same node is rejected when a

@@ -540,8 +540,11 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   artifact before later target verification, then SHA-binds the successful
   final receipt back to that attempt. Before dispatch it scans prior same-HEAD
   dispatcher artifacts and refuses to launch the same planner/node twice; a
-  deliberate retry therefore requires a fresh planner identity. It never
-  authorizes selector/manual approval gates or canonical-ledger writes; those
+  deliberate retry therefore requires a fresh planner identity. Planner
+  refreshes and the first-wave launcher require the attempt and final receipt
+  together, recompute the SHA-256 of the exact attempt bytes, and reconcile all
+  shared node/planner/target/input identities before granting target-run credit.
+  It never authorizes selector/manual approval gates or canonical-ledger writes; those
   remain separate explicit workflows. Subsequent planner refreshes may consume
   the dispatcher workflow
   run IDs directly through `node_dispatch_run_ids_json`: the planner downloads
