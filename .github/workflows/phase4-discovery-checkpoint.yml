@@ -94,6 +94,12 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
 
+          raise SystemExit(
+              "Phase-4 discovery checkpoint remains blocked until "
+              "nonlinear, interaction, simple-model and magnitude-strata "
+              "discovery layers are integrated"
+          )
+
           def sha256_path(path):
               return hashlib.sha256(path.read_bytes()).hexdigest()
 
