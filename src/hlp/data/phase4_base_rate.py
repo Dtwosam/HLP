@@ -40,9 +40,11 @@ def _decimal(value: object, *, label: str) -> Decimal:
 
 
 def _decimal_text(value: Decimal) -> str:
-    if value == 0:
-        return "0"
-    return format(value.normalize(), "f")
+    with localcontext() as context:
+        context.prec = 80
+        if value == 0:
+            return "0"
+        return format(value.normalize(context=context), "f")
 
 
 def _share(numerator: int, denominator: int) -> str:
@@ -61,7 +63,11 @@ def _median(values: list[Decimal]) -> Decimal:
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
+    with localcontext() as context:
+        context.prec = 80
+        return (
+            ordered[middle - 1] + ordered[middle]
+        ) / Decimal(2)
 
 
 def build_phase4_base_rate_report(
@@ -197,7 +203,10 @@ def build_phase4_base_rate_report(
     if base_rate != str(handoff.get("comeback_5x_base_rate") or ""):
         raise ValueError("Phase-4 base-rate handoff prevalence drift")
 
-    total_multiple = sum(multiples, Decimal(0))
+    with localcontext() as context:
+        context.prec = 80
+        total_multiple = sum(multiples, Decimal(0))
+        mean_multiple = total_multiple / Decimal(subjects)
     milestone_report = {
         str(milestone): {
             "reached_tokens": reached[milestone],
@@ -227,7 +236,7 @@ def build_phase4_base_rate_report(
         "max_post_dump_multiple_distribution": {
             "minimum": _decimal_text(min(multiples)),
             "median": _decimal_text(_median(multiples)),
-            "mean": _decimal_text(total_multiple / Decimal(subjects)),
+            "mean": _decimal_text(mean_multiple),
             "maximum": _decimal_text(max(multiples)),
             "ge_20x_tokens": ge_20,
             "ge_20x_rate": _share(ge_20, subjects),
