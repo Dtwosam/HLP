@@ -4,9 +4,11 @@ from hlp.data.phase2_dump_research import build_phase2_dump_geometry
 from hlp.data.phase2_research_paths import (
     DIRECT_RESEARCH_COMPONENT_ID,
     PHASE2_RESEARCH_PRICE_PATH_VERSION,
+    PHASE2_RESEARCH_PRICE_PATH_HANDOFF_VERSION,
     build_phase2_research_path_components,
     build_phase2_research_price_path,
     materialize_phase2_research_price_path,
+    build_phase2_research_price_path_handoff,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
 
@@ -253,3 +255,34 @@ def test_streaming_research_price_path_matches_in_memory_contract(tmp_path):
     assert report["streaming_materialization"] is True
     assert report["phase2_dump_detector_frozen"] is False
     assert report["outcome_labels_computed"] is False
+
+
+
+def test_research_price_path_handoff_binds_materialization_without_dump_labels(
+    tmp_path,
+):
+    rows, summary = universe()
+    output = tmp_path / "research.jsonl"
+    _, report = materialize_phase2_research_price_path(
+        {
+            component: iter(component_rows)
+            for component, component_rows in components().items()
+        },
+        universe_rows=rows,
+        universe_summary=summary,
+        universe_sha256=SHA,
+        source_inventory=INVENTORY,
+        component_provenance_sha256=provenance(),
+        output=output,
+    )
+    handoff = build_phase2_research_price_path_handoff(
+        report,
+        report_sha256=SHA,
+        materialization_bundle_sha256=SHA,
+        materialization_handoff_sha256=SHA,
+    )
+
+    assert handoff["version"] == PHASE2_RESEARCH_PRICE_PATH_HANDOFF_VERSION
+    assert handoff["research_price_path_ready"] is True
+    assert handoff["phase2_dump_detector_frozen"] is False
+    assert handoff["outcome_labels_computed"] is False

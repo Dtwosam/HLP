@@ -20,6 +20,9 @@ from hlp.data.snapshot import write_jsonl_snapshot
 
 
 PHASE2_RESEARCH_PRICE_PATH_VERSION = "phase2-research-price-path-v1"
+PHASE2_RESEARCH_PRICE_PATH_HANDOFF_VERSION = (
+    "phase2-research-price-path-handoff-v1"
+)
 DIRECT_RESEARCH_COMPONENT_ID = "direct_canonical"
 
 
@@ -694,3 +697,67 @@ def materialize_phase2_research_price_path(
         "outcome_labels_computed": False,
     }
     return manifest, report
+
+
+
+def build_phase2_research_price_path_handoff(
+    report: Mapping[str, object],
+    *,
+    report_sha256: str,
+    materialization_bundle_sha256: str,
+    materialization_handoff_sha256: str,
+) -> dict:
+    """Bind the normalized path to the complete materialization freeze."""
+
+    report = dict(report)
+    if (
+        str(report.get("version") or "")
+        != PHASE2_RESEARCH_PRICE_PATH_VERSION
+    ):
+        raise ValueError("research price-path report version changed")
+    if report.get("phase2_universe_frozen") is not True:
+        raise ValueError("research price-path universe is not frozen")
+    if report.get("streaming_materialization") is not True:
+        raise ValueError("research price path is not streaming-materialized")
+    if report.get("dump_threshold_frozen") is not False:
+        raise ValueError("research price-path handoff cannot freeze dump threshold")
+    if report.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError("research price-path handoff cannot freeze dump detector")
+    if report.get("outcome_labels_computed") is not False:
+        raise ValueError("research price-path handoff cannot contain labels")
+    if report.get("universe_source_membership_verified") is not True:
+        raise ValueError("research price-path source membership is unverified")
+
+    return {
+        "version": PHASE2_RESEARCH_PRICE_PATH_HANDOFF_VERSION,
+        "snapshot_head_block": int(report["snapshot_head_block"]),
+        "universe_sha256": _sha256(
+            report.get("universe_sha256"),
+            label="research price-path universe",
+        ),
+        "normalized_price_path_sha256": _sha256(
+            report.get("normalized_price_path_sha256"),
+            label="research normalized price path",
+        ),
+        "price_path_report_sha256": _sha256(
+            report_sha256,
+            label="research price-path report",
+        ),
+        "materialization_bundle_sha256": _sha256(
+            materialization_bundle_sha256,
+            label="research materialization bundle",
+        ),
+        "materialization_handoff_sha256": _sha256(
+            materialization_handoff_sha256,
+            label="research materialization handoff",
+        ),
+        "components": int(report["components"]),
+        "eligible_tokens": int(report["eligible_tokens"]),
+        "price_points": int(report["price_points"]),
+        "canonical_market_cap_proxy": True,
+        "universe_source_membership_verified": True,
+        "research_price_path_ready": True,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
