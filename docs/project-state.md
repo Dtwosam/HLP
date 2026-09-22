@@ -590,6 +590,23 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   labeled failures. These are guarded workflows only; they do not bypass the
   still-required real 14/14 coverage completion or empirically choose a dump
   rule before those artifacts exist.
+- guarded Phase-3 entry plumbing is also now prepared, but Phase 2 remains the
+  current phase until those real artifacts are executed. The final Phase-2
+  dataset checkpoint is `hlp-v1-phase2-universe-labels`; the Phase-3 entry
+  workflow consumes only its compact handoff plus the exact frozen universe
+  and frozen detector, never the outcome-label rows or full labeled dataset.
+  Confirmed first-major-dump tokens become feature subjects at the exact
+  confirmation block/transaction/log position with an inclusive cutoff.
+  `phase3_feature_registry.py` now gives every implemented feature a versioned
+  formula, snapshot semantics, data dependency, dtype and missingness policy;
+  registry definitions are SHA-bound and explicitly forbid future state or
+  outcome dependence. The first implemented family is causal
+  `price_drawdown`: 11 price/path features are computed in one streaming pass
+  over the canonical research price path, require an exact canonical point at
+  the confirmation cutoff, validate the full source tape, and count later
+  subject rows only as ignored. No Phase-3 feature-store checkpoint is claimed
+  yet; broader trade-flow, participant, holder, liquidity, relationship and
+  regime families still remain to be implemented and coverage-tested.
 
 
 ### Live/current chain access
