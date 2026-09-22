@@ -10,15 +10,22 @@ required workflow surface, permits only the planner's documented automatic-
 trigger removal, and publishes an exact workflow-surface digest plus the
 bootstrap HEAD it inspected.
 
-The bootstrap currently contains 48 Phase 2 workflow files:
+The bootstrap currently contains **58 Phase 2 workflow files**:
 
-- 47 are byte-for-byte identical to the compatibility target;
+- **57** are byte-for-byte identical to the working branch;
 - `phase2-coverage-execution-plan.yml` keeps the exact same
   `workflow_dispatch` interface but intentionally removes its feature-branch
   `push` and `pull_request` triggers in this default-branch bootstrap copy.
 
-All 48 workflow files are manual-only on this branch: `workflow_dispatch`
+All 58 workflow files are manual-only on this branch: `workflow_dispatch`
 is present and no `push` or `pull_request` trigger is enabled.
+
+The current surface exposes the fail-closed execution path from the initial
+2/14 planner state through authenticated first-wave acquisition, archive
+fan-out, generated-input follow-up waves, explicit direct-selector review and
+human-approved freeze, post-selector acquisition, and the three direct DEX
+coverage jobs. That automatic acquisition path stops at the serialized source-
+promotion frontier; it does not approve or commit source coverage.
 
 After this bootstrap is merged, dispatch Phase 2 workflows against
 `phase1/data-acquisition-spike` (or a later branch whose manual-dispatch
@@ -32,7 +39,9 @@ not an execution path yet.
 This bootstrap does not:
 
 - advance the Phase 2 source-coverage ledger;
-- run a historical backfill;
+- run a historical backfill by itself;
+- make the direct-selector research decision without explicit human approval;
+- approve a source-coverage promotion or canonical-ledger write;
 - freeze the Phase 2 universe;
 - claim any Phase 3 or Phase 4 checkpoint;
 - merge the main project-development branch.
