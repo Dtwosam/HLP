@@ -1,0 +1,404 @@
+name: phase2-source-coverage-ledger-commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      promotion_run_id:
+        description: Exact phase2-source-coverage-promotion run ID
+        required: true
+        type: string
+      expected_artifact_digest:
+        description: Exact promotion artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_handoff_sha256:
+        description: Exact SHA-256 of phase2-source-coverage-promotion.json
+        required: true
+        type: string
+      expected_proposed_ledger_sha256:
+        description: Exact SHA-256 of phase2-source-coverage.proposed.json
+        required: true
+        type: string
+      expected_source_id:
+        description: Source ID this commit is allowed to promote
+        required: true
+        type: string
+      apply_proposed_ledger:
+        description: Explicitly approve writing the proposed canonical ledger
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: phase2-source-coverage-ledger-commit-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROMOTION_RUN_ID: ${{ inputs.promotion_run_id }}
+  EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
+  EXPECTED_HANDOFF_SHA256: ${{ inputs.expected_handoff_sha256 }}
+  EXPECTED_PROPOSED_LEDGER_SHA256: ${{ inputs.expected_proposed_ledger_sha256 }}
+  EXPECTED_SOURCE_ID: ${{ inputs.expected_source_id }}
+  APPLY_PROPOSED_LEDGER: ${{ inputs.apply_proposed_ledger }}
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit canonical-ledger approval
+        run: |
+          set -euo pipefail
+          if [ "${APPLY_PROPOSED_LEDGER}" != "true" ]; then
+            echo "canonical Phase-2 ledger write requires explicit approval" >&2
+            exit 1
+          fi
+
+      - id: apply
+        name: Verify exact proposal and atomically update canonical ledger
+        run: |
+          mkdir -p upstream artifacts
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import (
+              validate_phase2_coverage_ledger,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          ref = os.environ["GITHUB_REF_NAME"]
+          source = os.environ["EXPECTED_SOURCE_ID"]
+          run_id = int(os.environ["PROMOTION_RUN_ID"])
+          artifact_name = (
+              f"phase2-source-coverage-promotion-{source}"
+          )
+
+          expected_digest = os.environ[
+              "EXPECTED_ARTIFACT_DIGEST"
+          ].lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_artifact_digest must be sha256:<hex>"
+              )
+          try:
+              int(expected_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_artifact_digest is not hexadecimal"
+              ) from exc
+
+          def sha(value, label):
+              text = str(value or "").lower().removeprefix("sha256:")
+              if len(text) != 64:
+                  raise SystemExit(f"{label} must be 64 hex chars")
+              try:
+                  int(text, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} is not hexadecimal"
+                  ) from exc
+              return text
+
+          expected_handoff_sha = sha(
+              os.environ["EXPECTED_HANDOFF_SHA256"],
+              "expected_handoff_sha256",
+          )
+          expected_proposed_sha = sha(
+              os.environ["EXPECTED_PROPOSED_LEDGER_SHA256"],
+              "expected_proposed_ledger_sha256",
+          )
+
+          artifact_payload = json.loads(
+              subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                      f"name={artifact_name}"
+                  ),
+              ])
+          )
+          matches = [
+              row
+              for row in artifact_payload.get("artifacts", [])
+              if row.get("name") == artifact_name
+              and not row.get("expired")
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected one live promotion artifact; found "
+                  f"{len(matches)}"
+              )
+          actual_digest = str(
+              matches[0].get("digest") or ""
+          ).lower()
+          if actual_digest != expected_digest:
+              raise SystemExit(
+                  "promotion artifact digest drift: "
+                  f"{actual_digest} != {expected_digest}"
+              )
+
+          subprocess.check_call([
+              "gh",
+              "run",
+              "download",
+              str(run_id),
+              "--repo",
+              repo,
+              "--name",
+              artifact_name,
+              "--dir",
+              "upstream",
+          ])
+
+          handoff_path = Path(
+              "upstream/phase2-source-coverage-promotion.json"
+          )
+          proposed_path = Path(
+              "upstream/phase2-source-coverage.proposed.json"
+          )
+          validation_path = Path(
+              "upstream/phase2-source-coverage-validation.json"
+          )
+          for path in (
+              handoff_path,
+              proposed_path,
+              validation_path,
+          ):
+              if not path.is_file():
+                  raise SystemExit(
+                      f"promotion artifact missing {path.name}"
+                  )
+
+          handoff_bytes = handoff_path.read_bytes()
+          handoff_sha = hashlib.sha256(handoff_bytes).hexdigest()
+          if handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "promotion handoff SHA drift: "
+                  f"{handoff_sha} != {expected_handoff_sha}"
+              )
+          handoff = json.loads(handoff_bytes)
+          if (
+              handoff.get("version")
+              != "phase2-source-coverage-promotion-v1"
+          ):
+              raise SystemExit("promotion handoff version changed")
+          if handoff.get("source_id") != source:
+              raise SystemExit("promotion source identity drift")
+          if handoff.get("proposal_only") is not True:
+              raise SystemExit("promotion is not proposal-only")
+          if handoff.get("canonical_ledger_mutated") is not False:
+              raise SystemExit(
+                  "promotion unexpectedly claims ledger mutation"
+              )
+
+          proposed_bytes = proposed_path.read_bytes()
+          proposed_sha = hashlib.sha256(
+              proposed_bytes
+          ).hexdigest()
+          if proposed_sha != expected_proposed_sha:
+              raise SystemExit(
+                  "proposed ledger SHA drift: "
+                  f"{proposed_sha} != {expected_proposed_sha}"
+              )
+          if proposed_sha != handoff.get(
+              "proposed_ledger_sha256"
+          ):
+              raise SystemExit(
+                  "proposed ledger/handoff SHA linkage drift"
+              )
+
+          metadata = json.loads(
+              subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{repo}/contents/"
+                      ".github/phase2-source-coverage.json"
+                      f"?ref={ref}"
+                  ),
+              ])
+          )
+          current_bytes = base64.b64decode(
+              str(metadata["content"]).replace("\n", "")
+          )
+          current_sha = hashlib.sha256(current_bytes).hexdigest()
+          base_ledger_sha = sha(
+              handoff.get("base_ledger_sha256"),
+              "promotion base_ledger_sha256",
+          )
+          if current_sha != base_ledger_sha:
+              raise SystemExit(
+                  "current canonical ledger SHA drift; promotion is stale: "
+                  f"{current_sha} != {base_ledger_sha}"
+              )
+
+          inventory = build_phase2_source_inventory()
+          before = validate_phase2_coverage_ledger(
+              json.loads(current_bytes),
+              inventory,
+          )
+          proposed = json.loads(proposed_bytes)
+          after = validate_phase2_coverage_ledger(
+              proposed,
+              inventory,
+          )
+          before_ids = set(before["complete_source_ids"])
+          after_ids = set(after["complete_source_ids"])
+          if not before_ids.issubset(after_ids):
+              raise SystemExit(
+                  "proposed ledger regresses complete sources"
+              )
+          newly_complete = sorted(after_ids - before_ids)
+          if newly_complete != [source]:
+              raise SystemExit(
+                  "proposed ledger must complete exactly the expected "
+                  f"source; got {newly_complete}"
+              )
+          if handoff.get("complete_source_ids_before") != sorted(
+              before_ids
+          ):
+              raise SystemExit(
+                  "promotion handoff before-set drift"
+              )
+          if handoff.get("complete_source_ids_after") != sorted(
+              after_ids
+          ):
+              raise SystemExit(
+                  "promotion handoff after-set drift"
+              )
+
+          validation = json.loads(validation_path.read_text())
+          if sorted(validation.get("complete_source_ids") or []) != (
+              sorted(after_ids)
+          ):
+              raise SystemExit(
+                  "promotion validation/ledger complete-set drift"
+              )
+          if validation.get(
+              "phase2_universe_coverage_complete"
+          ) != after["phase2_universe_coverage_complete"]:
+              raise SystemExit(
+                  "promotion validation completeness drift"
+              )
+
+          payload = {
+              "message": f"promote Phase 2 coverage: {source}",
+              "content": base64.b64encode(
+                  proposed_bytes
+              ).decode(),
+              "sha": metadata["sha"],
+              "branch": ref,
+          }
+          result = subprocess.run(
+              [
+                  "gh",
+                  "api",
+                  "--method",
+                  "PUT",
+                  (
+                      f"/repos/{repo}/contents/"
+                      ".github/phase2-source-coverage.json"
+                  ),
+                  "--input",
+                  "-",
+              ],
+              input=json.dumps(payload).encode(),
+              stdout=subprocess.PIPE,
+              check=True,
+          )
+          response = json.loads(result.stdout)
+          commit_sha = str(
+              (response.get("commit") or {}).get("sha") or ""
+          )
+          if len(commit_sha) != 40:
+              raise SystemExit(
+                  "canonical ledger update did not return commit SHA"
+              )
+
+          receipt = {
+              "version": "phase2-source-coverage-ledger-commit-v1",
+              "source_id": source,
+              "promotion_run_id": run_id,
+              "promotion_artifact_name": artifact_name,
+              "promotion_artifact_digest": actual_digest,
+              "promotion_handoff_sha256": handoff_sha,
+              "base_ledger_sha256": base_ledger_sha,
+              "proposed_ledger_sha256": proposed_sha,
+              "complete_source_ids_before": sorted(before_ids),
+              "complete_source_ids_after": sorted(after_ids),
+              "phase2_universe_coverage_complete": after[
+                  "phase2_universe_coverage_complete"
+              ],
+              "canonical_ledger_commit_sha": commit_sha,
+              "explicit_approval": True,
+              "canonical_ledger_mutated": True,
+          }
+          Path(
+              "artifacts/phase2-source-coverage-ledger-commit.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"source_id={source}\n")
+              handle.write(f"commit_sha={commit_sha}\n")
+              handle.write(
+                  f"complete={len(after_ids)}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload canonical-ledger commit receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-source-coverage-ledger-commit-${{ steps.apply.outputs.source_id }}
+          path: artifacts/phase2-source-coverage-ledger-commit.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish canonical-ledger commit summary
+        env:
+          SOURCE_ID: ${{ steps.apply.outputs.source_id }}
+          COMMIT_SHA: ${{ steps.apply.outputs.commit_sha }}
+          COMPLETE: ${{ steps.apply.outputs.complete }}
+        run: |
+          {
+            echo "## Phase-2 canonical coverage ledger update"
+            echo
+            echo "- source_id: ${SOURCE_ID}"
+            echo "- canonical_ledger_commit_sha: ${COMMIT_SHA}"
+            echo "- complete_sources_after: ${COMPLETE}/14"
+            echo "- explicit_approval: true"
+            echo "- canonical_ledger_mutated: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
