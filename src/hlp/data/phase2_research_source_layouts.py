@@ -273,7 +273,7 @@ def build_phase2_research_source_layouts() -> dict[str, dict]:
                     "manifest_path": (
                         "direct-canonical-market-cap-points.jsonl.manifest.json"
                     ),
-                    "logical_sha_field": "canonical_points_sha256",
+                    "logical_sha_field": "canonical_market_points_sha256",
                 },
             ],
         },
