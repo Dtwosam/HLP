@@ -266,10 +266,22 @@ def build_direct_eligibility_handoff(
                 f"{source_id}"
             )
         groups[source_id] = normalized
+        coverage = coverage_reports[source_id]
         source_summaries[source_id] = {
+            "source_id": source_id,
+            "source_readiness": str(
+                inventory[source_id].get("readiness") or ""
+            ),
+            "snapshot_head_block": snapshot,
             "tokens": len(normalized),
             "coverage_provenance_sha256": (
                 coverage_provenance_by_source[source_id]
+            ),
+            "coverage_price_points": int(
+                coverage.get("price_points", -1)
+            ),
+            "coverage_priced_points": int(
+                coverage.get("priced_points", -1)
             ),
             "canonical_price_points": sum(
                 int(row["price_points"]) for row in normalized
@@ -277,6 +289,10 @@ def build_direct_eligibility_handoff(
             "eligible_tokens": sum(
                 bool(row["crossed_100k"]) for row in normalized
             ),
+            "canonical_price_series": True,
+            "source_coverage_complete": True,
+            "phase2_universe_source_ready": True,
+            "phase2_universe_frozen": False,
         }
 
     summary = {

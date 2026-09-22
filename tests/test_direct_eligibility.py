@@ -124,6 +124,12 @@ def test_direct_eligibility_splits_one_canonical_series_by_population():
     assert summary["coverage_provenance_sha256"] == {
         source: SHA for source in SOURCES
     }
+    assert summary["source_summaries"]["direct_uniswap_v3"][
+        "coverage_price_points"
+    ] == 10
+    assert summary["source_summaries"]["direct_uniswap_v3"][
+        "phase2_universe_source_ready"
+    ] is True
     assert summary["phase2_universe_source_ready"] is True
 
 

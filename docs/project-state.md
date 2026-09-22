@@ -457,7 +457,18 @@ Implemented foundation:
   output is SHA-bound and `canonical_price_series=true`, but remains
   `phase2_universe_frozen=false`. Direct DEX sources are deliberately rejected
   by the launchpad handoff because their three venue histories require the
-  frozen cross-venue selector before becoming canonical;
+  frozen cross-venue selector before becoming canonical. A common source-bundle
+  validator now requires every one of the **14** universe-source handoffs to
+  match the promoted ledger row by source/readiness, snapshot, token count,
+  complete price-point accounting and exact coverage `provenance_sha256`.
+  A final dispatch-only Phase-2 universe freeze workflow is prepared on top of
+  that contract. It accepts a compact manifest for all 11 launchpad handoffs,
+  the exact three-source direct eligibility handoff and the deterministic
+  exclusion registry, verifies every artifact/file SHA, then invokes the
+  canonical universe assembler. It cannot succeed against today's 2/14 ledger;
+  only a genuine 14/14 ledger can produce the address-deduplicated >=$100k
+  eligible universe, rejected/excluded population, summary and immutable freeze
+  handoff with `phase2_universe_frozen=true`;
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
