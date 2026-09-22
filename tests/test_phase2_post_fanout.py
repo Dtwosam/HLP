@@ -14,6 +14,7 @@ from hlp.data.phase2_post_fanout import (
     PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS,
     PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS,
     PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS,
+    PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS,
     PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS,
     PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS,
     PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
@@ -28,6 +29,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_post_selector_wave_completion,
     validate_phase2_post_selector_wave_launch_receipt,
     validate_phase2_post_selector_wave_completion_receipt,
+    validate_phase2_direct_coverage_completion,
     validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
@@ -1019,3 +1021,88 @@ def test_post_selector_completion_receipt_validates_direct_boundary():
     assert len(report["auto_node_ids"]) == 3
     assert report["selector_freeze_completed"] is True
     assert report["pools_fun_promotion_held_for_operator"] is True
+
+
+
+def direct_coverage_completed_plans():
+    completed = (
+        list(PHASE2_FIRST_WAVE_NODE_IDS)
+        + list(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        + list(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        + list(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        + list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        + ["shared:direct_selector_freeze"]
+        + list(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        + list(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    execution = {
+        "canonical_complete_source_ids": ["pons_v1", "pons_v2"],
+        "complete_sources": 2,
+        "incomplete_sources": 12,
+        "completed_node_ids": completed,
+        "ready_to_dispatch_node_ids": ["promote:pools_fun"],
+        "awaiting_explicit_approval_node_ids": [],
+        "manual_ledger_commit_node_ids": [],
+    }
+    verified = {
+        "all_runs_current_or_ledger_only_ancestors": True,
+        "completed_node_ids": completed,
+        "node_dispatch_run_ids_consumed": list(range(21000, 21040)),
+    }
+    dispatch = {
+        "run_id_inputs_generated_from_verified_receipts": True,
+        "non_run_inputs_left_explicit": True,
+        "workflow_dispatch_performed": False,
+        "nodes": [{
+            "node_id": "promote:pools_fun",
+            "workflow": "phase2-source-coverage-promotion.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"coverage_run_id": "21999"},
+            "remaining_manual_inputs": [
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+            "all_dispatch_input_names": [
+                "coverage_run_id",
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+            "requires_explicit_approval": False,
+        }],
+    }
+    return execution, verified, dispatch
+
+
+def test_direct_coverage_completion_reaches_manual_promotion_frontier():
+    execution, verified, dispatch = direct_coverage_completed_plans()
+    report = validate_phase2_direct_coverage_completion(
+        execution,
+        verified,
+        dispatch,
+    )
+
+    assert report["completed_execution_nodes"] == 41
+    assert report["node_dispatch_control_runs_consumed"] == 40
+    assert report["auto_node_ids"] == []
+    assert report["manual_promotion_node_ids"] == ["promote:pools_fun"]
+    assert report["automatic_acquisition_complete"] is True
+    assert report["pools_fun_promotion_ready"] is True
+
+
+def test_direct_coverage_completion_rejects_hidden_auto_work():
+    execution, verified, dispatch = direct_coverage_completed_plans()
+    execution["ready_to_dispatch_node_ids"].append(
+        "coverage:direct_uniswap_v3"
+    )
+    with pytest.raises(ValueError, match="promotion-frontier ready-node"):
+        validate_phase2_direct_coverage_completion(
+            execution,
+            verified,
+            dispatch,
+        )

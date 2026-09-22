@@ -79,6 +79,9 @@ PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS = (
 PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS = (
     "promote:pools_fun",
 )
+PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS = (
+    "promote:pools_fun",
+)
 
 
 def validate_phase2_post_fanout_stage(
@@ -2270,5 +2273,165 @@ def validate_phase2_post_selector_wave_completion_receipt(
         "selector_freeze_completed": True,
         "coverage_promotion_performed": False,
         "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+
+def validate_phase2_direct_coverage_completion(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Prove all automatic acquisition work is complete before promotion."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion changed canonical sources"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 direct coverage completion changed source count"
+        )
+    if int(execution.get("incomplete_sources", -1)) != 12:
+        raise ValueError(
+            "Phase-2 direct coverage completion incomplete count drift"
+        )
+
+    expected_completed = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    approval = execution.get("awaiting_explicit_approval_node_ids")
+    manual_commits = execution.get("manual_ledger_commit_node_ids")
+    if (
+        not isinstance(completed, list)
+        or not isinstance(ready, list)
+        or not isinstance(approval, list)
+        or not isinstance(manual_commits, list)
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion lacks node-state lists"
+        )
+    if set(completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 direct coverage completion node-credit drift"
+        )
+    if set(ready) != set(PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 promotion-frontier ready-node set drift: "
+            f"{sorted(ready)}"
+        )
+    if approval:
+        raise ValueError(
+            "Phase-2 promotion frontier unexpectedly has approval nodes"
+        )
+    if manual_commits:
+        raise ValueError(
+            "Phase-2 promotion frontier unexpectedly has manual ledger commits"
+        )
+
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError(
+            "Phase-2 direct coverage completion lacks lineage proof"
+        )
+    receipt_completed = verified.get("completed_node_ids")
+    if not isinstance(receipt_completed, list):
+        raise ValueError(
+            "Phase-2 direct coverage verified node list is missing"
+        )
+    if set(receipt_completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 direct coverage verified node-credit drift"
+        )
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 40
+        or len(set(int(value) for value in control_ids)) != 40
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion requires exactly 40 "
+            "dispatcher control runs"
+        )
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError(
+            "Phase-2 promotion-frontier dispatch rows are missing"
+        )
+    by_id = {
+        str(row.get("node_id") or ""): dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != set(PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 promotion-frontier dispatch row set drift"
+        )
+
+    promotion = by_id["promote:pools_fun"]
+    if str(promotion.get("status") or "") != "ready_to_dispatch":
+        raise ValueError(
+            "Phase-2 pools.fun promotion is not ready at promotion frontier"
+        )
+    if str(promotion.get("workflow") or "") != (
+        "phase2-source-coverage-promotion.yml"
+    ):
+        raise ValueError(
+            "Phase-2 promotion-frontier workflow identity drift"
+        )
+    if set(dict(promotion.get("run_id_inputs") or {})) != {
+        "coverage_run_id"
+    }:
+        raise ValueError(
+            "Phase-2 promotion-frontier coverage-run binding drift"
+        )
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value)
+        for value in promotion.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError(
+            "Phase-2 promotion-frontier manual-input contract drift"
+        )
+
+    return {
+        "version": "phase2-direct-coverage-completion-v1",
+        "completed_execution_node_ids": sorted(expected_completed),
+        "completed_execution_nodes": len(expected_completed),
+        "node_dispatch_control_runs_consumed": len(control_ids),
+        "auto_node_ids": [],
+        "manual_promotion_node_ids": list(
+            PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS
+        ),
+        "manual_promotion_inputs": actual_manual,
+        "pools_fun_promotion_ready": True,
+        "automatic_acquisition_complete": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "canonical_coverage_sources_unchanged": True,
+        "coverage_promotion_performed": False,
         "canonical_ledger_write_authorized": False,
     }
