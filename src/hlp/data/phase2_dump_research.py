@@ -29,6 +29,9 @@ PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION = (
 PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION = (
     "phase2-dump-candidate-diagnostics-v1"
 )
+PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION = (
+    "phase2-dump-candidate-diagnostics-handoff-v1"
+)
 PEAK_DRAWDOWN_REBOUND_FAMILY = "peak_drawdown_rebound"
 
 
@@ -1473,3 +1476,95 @@ def build_phase2_dump_candidate_diagnostics(
         "outcome_labels_computed": False,
     }
     return diagnostics, diagnostic_summary
+
+
+
+def build_phase2_dump_candidate_diagnostics_handoff(
+    diagnostics_summary: Mapping[str, object],
+    *,
+    diagnostics_sha256: str,
+    diagnostics_summary_sha256: str,
+    candidate_research_handoff_sha256: str,
+) -> dict:
+    """Bind structural candidate diagnostics without approving a detector."""
+
+    summary = dict(diagnostics_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION
+    ):
+        raise ValueError(
+            "dump candidate diagnostics handoff version changed"
+        )
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError(
+            "dump candidate diagnostics handoff is not price-path only"
+        )
+    if summary.get("uses_outcome_labels") is not False:
+        raise ValueError(
+            "dump candidate diagnostics handoff uses outcome labels"
+        )
+    if summary.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump candidate diagnostics handoff is not point-in-time"
+        )
+    if summary.get("candidate_selected") is not False:
+        raise ValueError(
+            "dump candidate diagnostics handoff cannot select a detector"
+        )
+    if summary.get("detector_freeze_ready") is not False:
+        raise ValueError(
+            "dump candidate diagnostics cannot self-approve detector freeze"
+        )
+    if summary.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError(
+            "dump candidate diagnostics handoff cannot freeze detector"
+        )
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError(
+            "dump candidate diagnostics handoff cannot contain labels"
+        )
+
+    return {
+        "version": (
+            PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION
+        ),
+        "snapshot_head_block": int(
+            summary["snapshot_head_block"]
+        ),
+        "universe_sha256": _sha256(
+            summary.get("universe_sha256"),
+            label="dump diagnostics universe",
+        ),
+        "geometry_sha256": _sha256(
+            summary.get("geometry_sha256"),
+            label="dump diagnostics geometry",
+        ),
+        "candidate_specs_sha256": _sha256(
+            summary.get("candidate_specs_sha256"),
+            label="dump diagnostics candidate specs",
+        ),
+        "candidate_rows_sha256": _sha256(
+            summary.get("candidate_rows_sha256"),
+            label="dump diagnostics candidate rows",
+        ),
+        "candidate_research_handoff_sha256": _sha256(
+            candidate_research_handoff_sha256,
+            label="dump diagnostics candidate handoff",
+        ),
+        "diagnostics_sha256": _sha256(
+            diagnostics_sha256,
+            label="dump diagnostics rows",
+        ),
+        "diagnostics_summary_sha256": _sha256(
+            diagnostics_summary_sha256,
+            label="dump diagnostics summary",
+        ),
+        "tokens": int(summary["tokens"]),
+        "candidates": int(summary["candidates"]),
+        "candidate_selected": False,
+        "detector_freeze_ready": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }

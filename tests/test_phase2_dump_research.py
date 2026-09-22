@@ -6,6 +6,7 @@ from hlp.data.phase2_dump_research import (
     PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
     PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION,
     PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION,
+    PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION,
     PHASE2_DUMP_GEOMETRY_VERSION,
     PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
     build_phase2_dump_geometry,
@@ -14,6 +15,7 @@ from hlp.data.phase2_dump_research import (
     materialize_phase2_dump_candidate_research,
     build_phase2_dump_candidate_handoff,
     build_phase2_dump_candidate_diagnostics,
+    build_phase2_dump_candidate_diagnostics_handoff,
     research_phase2_dump_candidates,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
@@ -423,3 +425,43 @@ def test_candidate_diagnostics_report_live_structure_without_outcomes(tmp_path):
     ]
     assert summary["candidate_selected"] is False
     assert summary["outcome_labels_computed"] is False
+
+
+
+def test_candidate_diagnostics_handoff_cannot_self_approve_freeze(tmp_path):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    output = tmp_path / "candidate.jsonl"
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [candidate()],
+        geometry_summary=geometry_summary,
+        output=output,
+    )
+    import json
+    candidate_rows = [
+        json.loads(line)
+        for line in output.read_text().splitlines()
+        if line.strip()
+    ]
+    _, diagnostics_summary = build_phase2_dump_candidate_diagnostics(
+        candidate_rows,
+        research_summary=research,
+    )
+    handoff = build_phase2_dump_candidate_diagnostics_handoff(
+        diagnostics_summary,
+        diagnostics_sha256=SHA,
+        diagnostics_summary_sha256=SHA,
+        candidate_research_handoff_sha256=SHA,
+    )
+    assert handoff[
+        "version"
+    ] == PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_HANDOFF_VERSION
+    assert handoff["candidate_selected"] is False
+    assert handoff["detector_freeze_ready"] is False
+    assert handoff["phase2_dump_detector_frozen"] is False
+    assert handoff["outcome_labels_computed"] is False
