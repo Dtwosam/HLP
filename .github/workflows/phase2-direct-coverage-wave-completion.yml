@@ -1,0 +1,538 @@
+name: phase2-direct-coverage-wave-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      direct_coverage_wave_launch_run_id:
+        description: Exact successful phase2-direct-coverage-wave-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_wave_artifact_digest:
+        description: Exact direct-coverage wave artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_completion_refresh:
+        description: Explicitly verify all three direct sources and freeze the promotion frontier
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-direct-coverage-wave-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DIRECT_COVERAGE_WAVE_LAUNCH_RUN_ID: ${{ inputs.direct_coverage_wave_launch_run_id }}
+  EXPECTED_WAVE_ARTIFACT_DIGEST: ${{ inputs.expected_wave_artifact_digest }}
+  CONFIRM_COMPLETION_REFRESH: ${{ inputs.confirm_completion_refresh }}
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit completion refresh approval
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_COMPLETION_REFRESH}" != "true" ]; then
+            echo "direct coverage completion requires confirm_completion_refresh=true" >&2
+            exit 1
+          fi
+
+      - id: complete
+        name: Verify three direct sources and freeze promotion frontier
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_post_fanout import (
+              PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS,
+              validate_phase2_direct_coverage_completion,
+              validate_phase2_direct_coverage_wave_launch_receipt,
+              validate_phase2_post_selector_wave_completion_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh", "api",
+                  "-H", "Accept: application/vnd.github+json",
+                  "-H", f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(f"run {run_id} workflow identity drift")
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(f"run {run_id} is not workflow_dispatch")
+              if run.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} branch identity drift")
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(f"run {run_id} HEAD identity drift")
+
+          def wait_run(run_id, *, workflow, timeout_seconds=900):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(path),
+              ])
+              return path
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method", "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input", "-",
+                  ],
+                  payload={"ref": branch, "inputs": inputs},
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          try:
+              launch_run_id = int(
+                  os.environ["DIRECT_COVERAGE_WAVE_LAUNCH_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "direct_coverage_wave_launch_run_id is invalid"
+              ) from exc
+          if launch_run_id <= 0:
+              raise SystemExit(
+                  "direct_coverage_wave_launch_run_id must be positive"
+              )
+          expected_digest = str(
+              os.environ["EXPECTED_WAVE_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_wave_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+
+          ledger_sha = hashlib.sha256(
+              Path(".github/phase2-source-coverage.json").read_bytes()
+          ).hexdigest()
+
+          launch_workflow = "phase2-direct-coverage-wave-launch.yml"
+          launch_run = get_run(launch_run_id)
+          assert_run_identity(
+              launch_run,
+              workflow=launch_workflow,
+              run_id=launch_run_id,
+          )
+          if launch_run.get("status") != "completed":
+              raise SystemExit(
+                  "direct coverage wave run is not completed"
+              )
+          if launch_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "direct coverage wave run did not succeed"
+              )
+          launch_artifact = artifact_row(
+              launch_run_id,
+              "phase2-direct-coverage-wave-launch",
+          )
+          actual_digest = str(
+              launch_artifact.get("digest") or ""
+          ).lower()
+          if actual_digest != expected_digest:
+              raise SystemExit(
+                  "direct coverage wave artifact digest drift"
+              )
+          launch_dir = download_artifact(
+              launch_run_id,
+              "phase2-direct-coverage-wave-launch",
+              "upstream/direct-coverage-wave",
+          )
+          launch_path = (
+              launch_dir
+              / "phase2-direct-coverage-wave-launch-receipt.json"
+          )
+          try:
+              launch_receipt = (
+                  validate_phase2_direct_coverage_wave_launch_receipt(
+                      json.loads(launch_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if launch_receipt[
+              "direct_coverage_control_run_id"
+          ] != launch_run_id:
+              raise SystemExit(
+                  "direct coverage receipt/control run identity drift"
+              )
+          if launch_receipt["execution_branch"] != branch:
+              raise SystemExit(
+                  "direct coverage receipt branch drift"
+              )
+          if launch_receipt["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "direct coverage receipt HEAD drift"
+              )
+          if launch_receipt[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "direct coverage receipt ledger SHA drift"
+              )
+
+          for node_id in PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS:
+              target_run_id = launch_receipt["target_run_ids"][node_id]
+              run = get_run(target_run_id)
+              assert_run_identity(
+                  run,
+                  workflow="phase2-direct-source-coverage.yml",
+                  run_id=target_run_id,
+              )
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      f"direct coverage target not completed: "
+                      f"{node_id} -> {target_run_id}"
+                  )
+              if run.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"direct coverage target failed: {node_id} -> "
+                      f"{target_run_id}: {run.get('conclusion')!r}"
+                  )
+
+          prior_run_id = int(
+              launch_receipt["post_selector_completion_run_id"]
+          )
+          prior_digest = str(
+              launch_receipt[
+                  "post_selector_completion_artifact_digest"
+              ]
+          )
+          prior_run = get_run(prior_run_id)
+          assert_run_identity(
+              prior_run,
+              workflow="phase2-post-selector-wave-completion.yml",
+              run_id=prior_run_id,
+          )
+          if prior_run.get("status") != "completed":
+              raise SystemExit(
+                  "post-selector completion run is not completed"
+              )
+          if prior_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "post-selector completion run did not succeed"
+              )
+          prior_artifact = artifact_row(
+              prior_run_id,
+              "phase2-post-selector-wave-completion",
+          )
+          if str(
+              prior_artifact.get("digest") or ""
+          ).lower() != prior_digest:
+              raise SystemExit(
+                  "post-selector completion artifact digest drift"
+              )
+          prior_dir = download_artifact(
+              prior_run_id,
+              "phase2-post-selector-wave-completion",
+              "upstream/post-selector-completion",
+          )
+          prior_path = (
+              prior_dir
+              / "phase2-post-selector-wave-completion-receipt.json"
+          )
+          try:
+              prior_receipt = (
+                  validate_phase2_post_selector_wave_completion_receipt(
+                      json.loads(prior_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if prior_receipt[
+              "post_selector_completion_control_run_id"
+          ] != prior_run_id:
+              raise SystemExit(
+                  "post-selector completion receipt/control drift"
+              )
+          if prior_receipt["selector_run_id"] != launch_receipt[
+              "selector_run_id"
+          ]:
+              raise SystemExit(
+                  "direct coverage selector-run linkage drift"
+              )
+
+          all_control_ids = sorted(
+              list(
+                  prior_receipt[
+                      "node_dispatch_control_run_ids_consumed"
+                  ]
+              )
+              + list(
+                  launch_receipt[
+                      "node_dispatch_control_run_ids"
+                  ].values()
+              )
+          )
+          if (
+              len(all_control_ids) != 40
+              or len(set(all_control_ids)) != 40
+          ):
+              raise SystemExit(
+                  "direct coverage completion requires exactly 40 unique "
+                  "dispatcher control runs"
+              )
+
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          planner_run_id = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": json.dumps(
+                      {
+                          "shared:direct_selector_freeze": int(
+                              launch_receipt["selector_run_id"]
+                          )
+                      },
+                      separators=(",", ":"),
+                  ),
+                  "node_dispatch_run_ids_json": json.dumps(
+                      all_control_ids,
+                      separators=(",", ":"),
+                  ),
+              },
+          )
+          wait_run(
+              planner_run_id,
+              workflow=planner_workflow,
+          )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/promotion-frontier-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit(
+                  "promotion-frontier planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "promotion-frontier planner canonical-ledger SHA drift"
+              )
+          try:
+              frontier = validate_phase2_direct_coverage_completion(
+                  execution_plan,
+                  verified_receipts,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          receipt = {
+              "version": "phase2-direct-coverage-wave-completion-receipt-v1",
+              "direct_coverage_completion_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+              "direct_coverage_wave_launch_run_id": launch_run_id,
+              "direct_coverage_wave_artifact_digest": actual_digest,
+              "selector_run_id": launch_receipt["selector_run_id"],
+              "verified_target_run_ids": launch_receipt[
+                  "target_run_ids"
+              ],
+              "node_dispatch_control_run_ids_consumed": all_control_ids,
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": planner_digest,
+              "auto_node_ids": [],
+              "manual_promotion_node_ids": frontier[
+                  "manual_promotion_node_ids"
+              ],
+              "pools_fun_promotion_ready": True,
+              "automatic_acquisition_complete": True,
+              "selector_approval_performed": True,
+              "selector_freeze_completed": True,
+              "coverage_promotion_performed": False,
+              "canonical_coverage_ledger_mutated": False,
+              "canonical_ledger_write_authorized": False,
+          }
+          Path(
+              "artifacts/phase2-direct-coverage-wave-completion-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"planner_run_id={planner_run_id}\n")
+              handle.write(f"planner_digest={planner_digest}\n")
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload promotion-frontier receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-coverage-wave-completion
+          path: artifacts/phase2-direct-coverage-wave-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish promotion frontier
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          PLANNER_RUN_ID: ${{ steps.complete.outputs.planner_run_id }}
+          PLANNER_DIGEST: ${{ steps.complete.outputs.planner_digest }}
+        run: |
+          {
+            echo "## Phase-2 promotion frontier"
+            echo
+            echo "- completion_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- automatic_acquisition_complete: true"
+            echo "- completed_execution_nodes: 41"
+            echo "- node_dispatch_control_runs_consumed: 40"
+            echo "- planner_run_id: ${PLANNER_RUN_ID}"
+            echo "- planner_artifact_digest: ${PLANNER_DIGEST}"
+            echo "- auto_node_ids: []"
+            echo "- manual_promotion_node_ids: [promote:pools_fun]"
+            echo "- pools_fun_promotion_ready: true"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
