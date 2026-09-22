@@ -4,8 +4,11 @@ This branch is intentionally narrow. It exposes only the Phase 2 manual
 workflow surface on the repository default-branch lineage, which GitHub
 requires before `workflow_dispatch` can be used.
 
-Compatibility target:
-`phase1/data-acquisition-spike@97db1b0420de574cd33290cc4e3ca291131c7888`
+Compatibility is enforced by the working branch's
+`phase2-bootstrap-workflow-compatibility` gate. That gate compares the full
+required workflow surface, permits only the planner's documented automatic-
+trigger removal, and publishes an exact workflow-surface digest plus the
+bootstrap HEAD it inspected.
 
 The bootstrap currently contains 45 Phase 2 workflow files:
 
