@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Mapping
 
+from hlp.data.phase2_coverage_execution import COVERAGE_NODE_BY_SOURCE
+
 
 PHASE2_DISPATCH_INPUT_PLAN_VERSION = "phase2-dispatch-input-plan-v1"
 
@@ -150,6 +152,31 @@ RUN_ID_INPUT_BINDINGS: dict[str, dict[str, str]] = {
 _INPUT_KEY = re.compile(r"^      ([A-Za-z0-9_]+):\s*$")
 
 
+def _bindings_for_node(node_id: str) -> dict[str, str]:
+    bindings = RUN_ID_INPUT_BINDINGS.get(node_id)
+    if bindings is not None:
+        return dict(bindings)
+    if node_id.startswith("promote:"):
+        source_id = node_id.split(":", 1)[1]
+        if source_id not in COVERAGE_NODE_BY_SOURCE:
+            raise ValueError(
+                f"unknown Phase-2 promotion source: {source_id}"
+            )
+        return {
+            "coverage_run_id": COVERAGE_NODE_BY_SOURCE[source_id],
+        }
+    if node_id.startswith("ledger_commit:"):
+        source_id = node_id.split(":", 1)[1]
+        if source_id not in COVERAGE_NODE_BY_SOURCE:
+            raise ValueError(
+                f"unknown Phase-2 ledger-commit source: {source_id}"
+            )
+        return {
+            "promotion_run_id": f"promote:{source_id}",
+        }
+    return {}
+
+
 def extract_workflow_dispatch_inputs(text: str) -> list[str]:
     """Extract top-level workflow_dispatch input names from workflow YAML."""
 
@@ -247,7 +274,7 @@ def build_phase2_dispatch_input_plan(
         dispatch_inputs = extract_workflow_dispatch_inputs(
             workflow_text_by_name[workflow]
         )
-        bindings = RUN_ID_INPUT_BINDINGS.get(node_id, {})
+        bindings = _bindings_for_node(node_id)
         dependencies = set(
             str(value)
             for value in row.get("depends_on") or []
