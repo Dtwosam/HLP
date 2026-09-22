@@ -490,6 +490,8 @@ def build_phase4_univariate_report(
         "winner_failure_frequencies_reported": True,
         "missingness_compared_by_outcome": True,
         "univariate_relationships_tested": True,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
         "candidate_features_ranked": False,
         "signal_promoted": False,
         "unseen_slice_validation_complete": False,
@@ -526,6 +528,8 @@ def build_phase4_univariate_handoff(
         if row.get(flag) is not True:
             raise ValueError(f"Phase-4 univariate handoff lacks {flag}")
     for flag in (
+        "validation_rows_consumed",
+        "final_test_rows_consumed",
         "candidate_features_ranked",
         "signal_promoted",
         "unseen_slice_validation_complete",
@@ -577,6 +581,8 @@ def build_phase4_univariate_handoff(
         "winner_failure_frequencies_reported": True,
         "missingness_compared_by_outcome": True,
         "univariate_relationships_tested": True,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
         "candidate_features_ranked": False,
         "signal_promoted": False,
         "unseen_slice_validation_complete": False,
