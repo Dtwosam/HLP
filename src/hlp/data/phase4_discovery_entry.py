@@ -64,9 +64,9 @@ def _share(numerator: int, denominator: int) -> str:
     with localcontext() as context:
         context.prec = 80
         value = Decimal(numerator) / Decimal(denominator)
-    if value == 0:
-        return "0"
-    return format(value.normalize(), "f")
+        if value == 0:
+            return "0"
+        return format(value.normalize(context=context), "f")
 
 
 def _event(
