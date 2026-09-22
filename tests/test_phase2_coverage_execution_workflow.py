@@ -34,3 +34,7 @@ def test_phase2_execution_plan_reports_secret_and_manual_gates():
     assert "ready_without_archive_secret_node_ids" in text
     assert "awaiting_explicit_approval_node_ids" in text
     assert "manual_ledger_commit_node_ids" in text
+    assert "ledger_commit_approval_node_ids" in text
+    assert "canonical_ledger_commit_workflow_available" in text
+    assert "ledger_commit_requires_explicit_approval" in text
+    assert "phase2-source-coverage-ledger-commit.yml" in text
