@@ -623,12 +623,18 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   ERC-20 supply at the exact feature cutoff, so mixed quote decimals cannot
   leak into the feature scale. The canonical trade-tape assembler
   binds exact frozen source membership, requires complete historical event scan
-  + transaction identity + adapter evidence for all 14 sources, and collapses
+  + wallet-identity + adapter evidence for all 14 sources, and collapses
   only economically identical cross-source duplicate swaps. The current
-  trade-source readiness plan is **13/14 adapter-ready**;
-  `pools_trade_lbp` remains explicitly blocked because the frozen CCA/LBP
-  surface contains aggregate clearing/checkpoint state rather than verified
-  wallet-level fill attribution. Holder and supply-redistribution features
+  trade-source readiness plan is now **14/14 adapter-ready**. The former
+  `pools_trade_lbp` blocker has an evidence-backed CCA path:
+  `BidSubmitted.owner` supplies wallet identity, `BidExited` supplies the
+  first exact finalized token-fill/refund accounting, unresolved bids stay
+  fail-closed, and finalized fills are adapted at the exit event rather than
+  backdated. A sharded full-history CCA bid/exit backfill plus exact
+  frozen-universe LBP source-coverage workflow is prepared and tested. This is
+  adapter/readiness completion only; actual canonical trade coverage remains
+  unclaimed until those workflows and the other source backfills are executed
+  successfully. Holder and supply-redistribution features
   share a complete guarded transfer-acquisition architecture: every eligible
   token's first code block is binary-searched and boundary-verified against
   archive `eth_getCode`, transfer batches begin at or before the earliest
