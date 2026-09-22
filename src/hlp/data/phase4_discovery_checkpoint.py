@@ -660,6 +660,16 @@ def build_phase4_discovery_ledger(
     hypothesis_freeze_handoff: Mapping[str, object],
     hypothesis_freeze_handoff_sha256: str,
     validation_handoff: Mapping[str, object],
+    magnitude_strata_handoff: Mapping[str, object],
+    magnitude_strata_handoff_sha256: str,
+    nonlinear_handoff: Mapping[str, object],
+    nonlinear_handoff_sha256: str,
+    interaction_handoff: Mapping[str, object],
+    interaction_handoff_sha256: str,
+    simple_model_handoff: Mapping[str, object],
+    simple_model_handoff_sha256: str,
+    stability_handoff: Mapping[str, object],
+    stability_handoff_sha256: str,
 ) -> dict:
     """Close Phase 4 only after every frozen hypothesis has a disposition."""
 
@@ -677,6 +687,23 @@ def build_phase4_discovery_ledger(
             hypothesis_freeze_handoff_sha256
         ),
         validation_handoff=validation_handoff,
+    )
+    experiment_suite = _validate_experiment_suite(
+        split=split,
+        split_handoff_sha256=chronological_split_handoff_sha256,
+        freeze=freeze,
+        freeze_handoff_sha256=hypothesis_freeze_handoff_sha256,
+        validation=validation,
+        magnitude_strata_handoff=magnitude_strata_handoff,
+        magnitude_strata_handoff_sha256=magnitude_strata_handoff_sha256,
+        nonlinear_handoff=nonlinear_handoff,
+        nonlinear_handoff_sha256=nonlinear_handoff_sha256,
+        interaction_handoff=interaction_handoff,
+        interaction_handoff_sha256=interaction_handoff_sha256,
+        simple_model_handoff=simple_model_handoff,
+        simple_model_handoff_sha256=simple_model_handoff_sha256,
+        stability_handoff=stability_handoff,
+        stability_handoff_sha256=stability_handoff_sha256,
     )
 
     freeze_report = dict(hypothesis_freeze_report)
@@ -939,12 +966,31 @@ def build_phase4_discovery_ledger(
         "rejected_hypothesis_ids": rejected,
         "feature_ledger": feature_ledger,
         "hypothesis_ledger": hypothesis_ledger,
+        **experiment_suite,
+        "sequence_analysis_performed": False,
+        "sequence_analysis_disposition": (
+            "not_applicable_point_in_time_feature_store_has_no_"
+            "sequence_valued_inputs"
+        ),
+        "cluster_analysis_performed": False,
+        "cluster_analysis_disposition": (
+            "not_run_optional_where_useful_task_without_predefined_"
+            "cluster_research_question"
+        ),
+        "optional_cluster_sequence_disposition_recorded": True,
         "winner_failure_frequencies_reported": True,
         "all_feature_dispositions_logged": True,
         "all_hypothesis_dispositions_logged": True,
         "rejected_hypotheses_logged": True,
         "unseen_slice_validation_complete": True,
         "multiple_testing_control_applied": True,
+        "magnitude_strata_examined": True,
+        "nonlinear_relationships_examined": True,
+        "pairwise_interactions_examined": True,
+        "transparent_simple_models_examined": True,
+        "repeated_sampling_stability_examined": True,
+        "chronological_stability_examined": True,
+        "optional_cluster_sequence_disposition_recorded": True,
         "validated_relationships_present": bool(surviving),
         "final_test_rows_consumed": False,
         "signal_promoted": False,
