@@ -479,13 +479,18 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   PoolCreated, supply-delta and quote spine across all dependent launchpads and
   the three direct DEX sources, and identifies exactly which workflow nodes are
   ready, blocked, archive-secret dependent, awaiting explicit selector
-  approval, or waiting for a manual canonical-ledger commit. Coverage
-  acquisition/derivation can run in parallel; canonical source promotion is
-  deliberately serialized only among coverage reports that are actually ready,
-  because `phase2-source-coverage-promotion` emits a proposed ledger artifact
-  but never mutates `.github/phase2-source-coverage.json`. After each accepted
-  proposal, the canonical ledger must be reviewed/committed and the plan
-  regenerated before the next serialized promotion;
+  approval, or waiting for an explicitly approved canonical-ledger write.
+  Coverage acquisition/derivation can run in parallel; canonical source
+  promotion is deliberately serialized only among coverage reports that are
+  actually ready. `phase2-source-coverage-promotion` remains read-only and now
+  SHA-binds both the base canonical ledger and its proposed replacement. A
+  separate `phase2-source-coverage-ledger-commit` workflow requires the exact
+  promotion run/artifact/handoff/proposed-ledger identities plus an explicit
+  approval boolean, rejects stale base-ledger bytes or any proposal that does
+  not complete exactly the expected one source, and uses the GitHub contents
+  API's current blob SHA for an atomic canonical update. After each successful
+  commit the execution plan must be regenerated from the newly canonical
+  `.github/phase2-source-coverage.json` before the next serialized promotion;
 - the keyless SolidRPC filtered log cap is now **200 blocks** (observed
   2026-09-21). Chain-wide source execution now fails closed on missing
   `ROBINHOOD_ARCHIVE_RPC_API_KEY` rather than quietly falling back to
