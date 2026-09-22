@@ -45,6 +45,14 @@ def sharded(tmp_path, name, rows):
         f"{name}-000.jsonl",
         rows,
     )
+    sidecar_payload = json.loads(sidecar.read_text())
+    sidecar_payload["provenance"].update({
+        "from_block": 20,
+        "to_block": 20,
+    })
+    sidecar.write_text(
+        json.dumps(sidecar_payload, indent=2, sort_keys=True) + "\n"
+    )
     aggregate_sha = shard_manifest["sha256"]
     aggregate_path = tmp_path / f"{name}.manifest.json"
     aggregate = write_virtual_jsonl_manifest(
@@ -137,11 +145,15 @@ def test_materialize_v1_research_replays_accepted_eligible_summary(tmp_path):
             "unpriced_points": 0,
             "first_priced_block": 20,
             "last_priced_block": 20,
+            "first_unpriced_block": None,
+            "last_unpriced_block": None,
             "max_market_cap_proxy_usd": "200000000",
             "max_market_cap_block": 20,
             "crossed_100k": True,
             "v3_swap_max_market_cap_proxy_usd": None,
             "v3_swap_max_market_cap_block": None,
+            "pricing_complete": True,
+            "eligibility_status": "eligible",
         }],
     )
 
