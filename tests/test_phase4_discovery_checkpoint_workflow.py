@@ -48,8 +48,24 @@ def test_phase4_checkpoint_closes_discovery_without_opening_final_test():
 
 
 
-def test_phase4_checkpoint_stays_blocked_until_experiment_suite_is_complete():
+def test_phase4_checkpoint_requires_complete_experiment_suite():
     text = WORKFLOW.read_text()
 
-    assert "Phase-4 discovery checkpoint remains blocked until" in text
-    assert "nonlinear, interaction, simple-model and magnitude-strata" in text
+    assert "magnitude_strata_handoff_json:" in text
+    assert "nonlinear_handoff_json:" in text
+    assert "interaction_handoff_json:" in text
+    assert "simple_model_handoff_json:" in text
+    assert "stability_handoff_json:" in text
+    assert "build_phase4_magnitude_strata_handoff" in text
+    assert "build_phase4_nonlinear_handoff" in text
+    assert "build_phase4_interaction_handoff" in text
+    assert "build_phase4_simple_model_handoff" in text
+    assert "build_phase4_stability_handoff" in text
+    assert "magnitude_strata_examined: true" in text
+    assert "nonlinear_relationships_examined: true" in text
+    assert "pairwise_interactions_examined: true" in text
+    assert "transparent_simple_models_examined: true" in text
+    assert "repeated_sampling_stability_examined: true" in text
+    assert "chronological_stability_examined: true" in text
+    assert "optional_cluster_sequence_disposition_recorded: true" in text
+    assert "Phase-4 discovery checkpoint remains blocked until" not in text
