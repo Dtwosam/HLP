@@ -46,6 +46,24 @@ PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS = (
 PHASE2_AFTER_POST_FANOUT_NEXT_MANUAL_NODE_IDS = (
     "promote:pools_fun",
 )
+PHASE2_PRE_SELECTOR_AUTO_NODE_IDS = (
+    "shared:direct_quality_evidence",
+    "shared:direct_launch_population",
+    "coverage:pools_trade_lbp",
+    "derive:trench_handoff_freeze",
+)
+PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS = (
+    "promote:pools_fun",
+)
+PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS = (
+    "coverage:trench_today",
+)
+PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS = (
+    "promote:pools_fun",
+)
+PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS = (
+    "shared:direct_selector_freeze",
+)
 
 
 def validate_phase2_post_fanout_stage(
@@ -1027,4 +1045,324 @@ def validate_phase2_after_post_fanout_wave_launch_receipt(
         "canonical_coverage_ledger_mutated": False,
         "canonical_ledger_write_authorized": False,
         "workflow_dispatch_performed": True,
+    }
+
+
+
+def validate_phase2_after_post_fanout_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff after the seven-node wave completes."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-after-post-fanout-wave-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 seven-node completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("after_post_fanout_completion_control_run_id") or 0
+    )
+    launch_run_id = int(
+        row.get("after_post_fanout_wave_launch_run_id") or 0
+    )
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(control_run_id, launch_run_id, planner_run_id) <= 0:
+        raise ValueError(
+            "Phase-2 seven-node completion receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 seven-node completion receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 seven-node completion head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 seven-node completion coverage ledger",
+    )
+    launch_digest = _post_fanout_artifact_digest(
+        row.get("after_post_fanout_wave_artifact_digest"),
+        label="Phase-2 seven-node launch artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 seven-node completion planner artifact",
+    )
+
+    targets = _post_fanout_run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 seven-node verified target runs",
+        expected_nodes=PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS,
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "Phase-2 seven-node completion control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 31
+        or len(set(controls)) != 31
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "Phase-2 seven-node completion requires exactly 31 unique "
+            "positive dispatcher control runs"
+        )
+
+    auto_nodes = row.get("auto_node_ids")
+    if (
+        not isinstance(auto_nodes, list)
+        or sorted(str(value) for value in auto_nodes)
+        != sorted(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+    ):
+        raise ValueError(
+            "Phase-2 seven-node completion pre-selector auto-node drift"
+        )
+    manual_nodes = row.get("manual_promotion_node_ids")
+    if manual_nodes != list(PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 seven-node completion promotion-hold drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 seven-node completion did not hold pools.fun promotion"
+        )
+
+    for field in (
+        "after_post_fanout_targets_completed_successfully",
+        "planner_refreshed",
+    ):
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 seven-node completion receipt violates {field}"
+            )
+    for field in (
+        "coverage_promotion_performed",
+        "selector_approval_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 seven-node completion receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-after-post-fanout-wave-completion-receipt-v1",
+        "after_post_fanout_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "after_post_fanout_wave_launch_run_id": launch_run_id,
+        "after_post_fanout_wave_artifact_digest": launch_digest,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "auto_node_ids": list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_PRE_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "after_post_fanout_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_pre_selector_wave_completion(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze the exact planner boundary immediately before selector approval."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector completion changed canonical sources"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 pre-selector completion changed source count"
+        )
+    if int(execution.get("incomplete_sources", -1)) != 12:
+        raise ValueError(
+            "Phase-2 pre-selector completion incomplete count drift"
+        )
+
+    expected_completed = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+    )
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    approval = execution.get("awaiting_explicit_approval_node_ids")
+    if (
+        not isinstance(completed, list)
+        or not isinstance(ready, list)
+        or not isinstance(approval, list)
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector completion lacks node-state lists"
+        )
+    if set(completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 pre-selector completion node-credit drift"
+        )
+    expected_ready = set(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS) | set(
+        PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS
+    )
+    if set(ready) != expected_ready:
+        raise ValueError(
+            "Phase-2 pre-selector ready-node set drift: "
+            f"{sorted(ready)}"
+        )
+    if set(approval) != set(PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 pre-selector approval-node set drift: "
+            f"{sorted(approval)}"
+        )
+
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError(
+            "Phase-2 pre-selector completion lacks lineage proof"
+        )
+    receipt_completed = verified.get("completed_node_ids")
+    if not isinstance(receipt_completed, list):
+        raise ValueError(
+            "Phase-2 pre-selector verified node list is missing"
+        )
+    if set(receipt_completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 pre-selector verified node-credit drift"
+        )
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 35
+        or len(set(int(value) for value in control_ids)) != 35
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector completion requires exactly 35 "
+            "dispatcher control runs"
+        )
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError(
+            "Phase-2 pre-selector dispatch rows are missing"
+        )
+    expected_rows = (
+        set(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS)
+        | set(PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS)
+    )
+    by_id = {
+        str(row.get("node_id") or ""): dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != expected_rows:
+        raise ValueError(
+            "Phase-2 pre-selector dispatch row set drift"
+        )
+
+    trench = by_id["coverage:trench_today"]
+    if str(trench.get("status") or "") != "ready_to_dispatch":
+        raise ValueError("Phase-2 trench coverage is not ready")
+    trench_inputs = trench.get("run_id_inputs")
+    if not isinstance(trench_inputs, Mapping) or not trench_inputs:
+        raise ValueError(
+            "Phase-2 trench coverage lacks generated run inputs"
+        )
+    if list(trench.get("remaining_manual_inputs") or []):
+        raise ValueError(
+            "Phase-2 trench coverage unexpectedly has manual inputs"
+        )
+
+    promotion = by_id["promote:pools_fun"]
+    if str(promotion.get("status") or "") != "ready_to_dispatch":
+        raise ValueError("Phase-2 pools.fun promotion is not ready")
+    expected_promotion_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_promotion_manual = sorted(
+        str(value)
+        for value in promotion.get("remaining_manual_inputs") or []
+    )
+    if actual_promotion_manual != expected_promotion_manual:
+        raise ValueError(
+            "Phase-2 pools.fun promotion manual-input drift"
+        )
+
+    selector = by_id["shared:direct_selector_freeze"]
+    if str(selector.get("status") or "") != "awaiting_explicit_approval":
+        raise ValueError(
+            "Phase-2 direct selector is not awaiting explicit approval"
+        )
+    if selector.get("requires_explicit_approval") is not True:
+        raise ValueError(
+            "Phase-2 direct selector lost explicit-approval gate"
+        )
+    if set(dict(selector.get("run_id_inputs") or {})) != {
+        "evidence_run_id"
+    }:
+        raise ValueError(
+            "Phase-2 direct selector evidence-run binding drift"
+        )
+    expected_selector_manual = sorted([
+        "expected_artifact_digest",
+        "expected_handoff_sha256",
+        "freeze_active_quote_liquidity_causal_v1",
+    ])
+    actual_selector_manual = sorted(
+        str(value)
+        for value in selector.get("remaining_manual_inputs") or []
+    )
+    if actual_selector_manual != expected_selector_manual:
+        raise ValueError(
+            "Phase-2 direct selector manual-input contract drift"
+        )
+
+    return {
+        "version": "phase2-pre-selector-wave-completion-v1",
+        "completed_execution_node_ids": sorted(expected_completed),
+        "completed_execution_nodes": len(expected_completed),
+        "node_dispatch_control_runs_consumed": len(control_ids),
+        "auto_node_ids": list(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "approval_node_ids": list(
+            PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS
+        ),
+        "selector_manual_inputs": actual_selector_manual,
+        "pools_fun_promotion_held_for_operator": True,
+        "selector_approval_performed": False,
+        "coverage_promotion_performed": False,
+        "canonical_ledger_write_authorized": False,
     }

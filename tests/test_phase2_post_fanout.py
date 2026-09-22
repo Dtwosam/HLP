@@ -9,10 +9,16 @@ from hlp.data.phase2_post_fanout import (
     PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS,
     PHASE2_AFTER_POST_FANOUT_NEXT_AUTO_NODE_IDS,
     PHASE2_AFTER_POST_FANOUT_NEXT_MANUAL_NODE_IDS,
+    PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS,
+    PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS,
+    PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS,
+    PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
     PHASE2_POST_FANOUT_AUTO_NODE_IDS,
     PHASE2_POST_FANOUT_MANUAL_NODE_IDS,
     validate_phase2_after_post_fanout_wave_completion,
+    validate_phase2_after_post_fanout_wave_completion_receipt,
     validate_phase2_after_post_fanout_wave_launch_receipt,
+    validate_phase2_pre_selector_wave_completion,
     validate_phase2_post_fanout_stage,
     validate_phase2_post_fanout_wave_completion,
     validate_phase2_post_fanout_wave_completion_receipt,
@@ -453,3 +459,154 @@ def test_after_post_fanout_launch_receipt_validates_seven_node_handoff():
     assert report["after_post_fanout_control_run_id"] == 13001
     assert report["target_runs_created"] == 7
     assert report["pools_fun_promotion_held_for_operator"] is True
+
+
+
+def seven_node_completion_receipt():
+    return {
+        "version": "phase2-after-post-fanout-wave-completion-receipt-v1",
+        "after_post_fanout_completion_control_run_id": 14001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "after_post_fanout_wave_launch_run_id": 14002,
+        "after_post_fanout_wave_artifact_digest": "sha256:" + "ef" * 32,
+        "verified_target_run_ids": {
+            node_id: 14100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS
+            )
+        },
+        "node_dispatch_control_run_ids_consumed": list(range(14200, 14231)),
+        "planner_run_id": 14003,
+        "planner_artifact_digest": "sha256:" + "12" * 32,
+        "auto_node_ids": list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": ["promote:pools_fun"],
+        "pools_fun_promotion_held_for_operator": True,
+        "after_post_fanout_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_seven_node_completion_receipt_validates_pre_selector_handoff():
+    report = validate_phase2_after_post_fanout_wave_completion_receipt(
+        seven_node_completion_receipt()
+    )
+    assert report["after_post_fanout_completion_control_run_id"] == 14001
+    assert len(report["auto_node_ids"]) == 4
+    assert report["manual_promotion_node_ids"] == ["promote:pools_fun"]
+
+
+def pre_selector_completed_plans():
+    completed = (
+        list(PHASE2_FIRST_WAVE_NODE_IDS)
+        + list(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        + list(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        + list(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        + list(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+    )
+    execution = {
+        "canonical_complete_source_ids": ["pons_v1", "pons_v2"],
+        "complete_sources": 2,
+        "incomplete_sources": 12,
+        "completed_node_ids": completed,
+        "ready_to_dispatch_node_ids": (
+            list(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS)
+            + list(PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS)
+        ),
+        "awaiting_explicit_approval_node_ids": list(
+            PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS
+        ),
+    }
+    verified = {
+        "all_runs_current_or_ledger_only_ancestors": True,
+        "completed_node_ids": completed,
+        "node_dispatch_run_ids_consumed": list(range(15000, 15035)),
+    }
+    rows = [
+        {
+            "node_id": "coverage:trench_today",
+            "workflow": "phase2-trench-source-coverage.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"registry_run_id": "15100"},
+            "remaining_manual_inputs": [],
+            "all_dispatch_input_names": ["registry_run_id"],
+            "requires_explicit_approval": False,
+        },
+        {
+            "node_id": "promote:pools_fun",
+            "workflow": "phase2-source-coverage-promotion.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"coverage_run_id": "15101"},
+            "remaining_manual_inputs": [
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+            "all_dispatch_input_names": [
+                "coverage_run_id",
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+            "requires_explicit_approval": False,
+        },
+        {
+            "node_id": "shared:direct_selector_freeze",
+            "workflow": "phase2-direct-market-selector-freeze.yml",
+            "status": "awaiting_explicit_approval",
+            "run_id_inputs": {"evidence_run_id": "15102"},
+            "remaining_manual_inputs": [
+                "expected_artifact_digest",
+                "expected_handoff_sha256",
+                "freeze_active_quote_liquidity_causal_v1",
+            ],
+            "all_dispatch_input_names": [
+                "evidence_run_id",
+                "expected_artifact_digest",
+                "expected_handoff_sha256",
+                "freeze_active_quote_liquidity_causal_v1",
+            ],
+            "requires_explicit_approval": True,
+        },
+    ]
+    dispatch = {
+        "run_id_inputs_generated_from_verified_receipts": True,
+        "nodes": rows,
+    }
+    return execution, verified, dispatch
+
+
+def test_pre_selector_completion_freezes_auto_promotion_and_approval():
+    execution, verified, dispatch = pre_selector_completed_plans()
+    report = validate_phase2_pre_selector_wave_completion(
+        execution,
+        verified,
+        dispatch,
+    )
+    assert report["completed_execution_nodes"] == 35
+    assert report["auto_node_ids"] == ["coverage:trench_today"]
+    assert report["manual_promotion_node_ids"] == ["promote:pools_fun"]
+    assert report["approval_node_ids"] == [
+        "shared:direct_selector_freeze"
+    ]
+    assert report["selector_approval_performed"] is False
+
+
+def test_pre_selector_completion_rejects_missing_selector_approval_gate():
+    execution, verified, dispatch = pre_selector_completed_plans()
+    execution["awaiting_explicit_approval_node_ids"] = []
+    with pytest.raises(ValueError, match="approval-node set drift"):
+        validate_phase2_pre_selector_wave_completion(
+            execution,
+            verified,
+            dispatch,
+        )
