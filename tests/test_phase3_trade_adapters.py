@@ -3,6 +3,7 @@ from hlp.data.phase3_trade_adapters import (
     PHASE3_PONS_TRADE_ADAPTER_VERSION,
     adapt_pools_trade_cca_fills_to_phase3,
     adapt_pons_trades_to_phase3,
+    iter_adapt_pons_trades_to_phase3,
 )
 from hlp.data.phase3_trade_features import (
     PHASE3_CANONICAL_TRADE_VERSION,
@@ -137,3 +138,21 @@ def test_pools_trade_cca_adapter_rejects_unfinalized_fill():
                 "quote_token": QUOTE,
             }],
         )
+
+
+
+def test_pons_phase3_iterator_is_lazy_and_keeps_input_order():
+    rows = [
+        {
+            **pons_row("v1"),
+            "block_number": 12,
+        },
+        {
+            **pons_row("v1"),
+            "block_number": 10,
+            "transaction_hash": "0x" + "dd" * 32,
+        },
+    ]
+    streamed = list(iter_adapt_pons_trades_to_phase3(iter(rows)))
+    assert [row["block_number"] for row in streamed] == [12, 10]
+    assert all(row["source_id"] == "pons_v1" for row in streamed)

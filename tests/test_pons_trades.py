@@ -1,6 +1,9 @@
 import pytest
 
-from hlp.data.pons_trades import normalize_pons_trades
+from hlp.data.pons_trades import (
+    iter_normalized_pons_trades,
+    normalize_pons_trades,
+)
 
 
 TOKEN = "0x" + "11" * 20
@@ -91,3 +94,18 @@ def test_protocol_buyback_and_initialization_are_not_wallet_trades():
 def test_amm_side_invariant_fails_if_both_legs_same_direction():
     with pytest.raises(ValueError):
         normalize_pons_trades([base(amount0=-100, amount1=-20)])
+
+
+
+def test_iter_normalized_pons_trades_preserves_input_stream_order():
+    rows = [
+        base(block_number=12, log_index=1),
+        base(
+            block_number=10,
+            log_index=2,
+            transaction_hash="0x" + "bb" * 32,
+        ),
+    ]
+    streamed = list(iter_normalized_pons_trades(iter(rows)))
+    assert [row["block_number"] for row in streamed] == [12, 10]
+    assert [row["side"] for row in streamed] == ["buy", "buy"]

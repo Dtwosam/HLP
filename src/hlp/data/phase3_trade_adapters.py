@@ -30,13 +30,11 @@ def _event_key(row: Mapping[str, object]) -> tuple[int, int, int]:
     return block, tx, log
 
 
-def adapt_pons_trades_to_phase3(
+def iter_adapt_pons_trades_to_phase3(
     rows: Iterable[Mapping[str, object]],
-) -> list[dict]:
-    """Strip Pons-normalized trades to the minimal source-agnostic trade tape."""
+):
+    """Yield canonical Pons trades without buffering the source tape."""
 
-    output = []
-    seen = set()
     for raw in rows:
         row = dict(raw)
         version = str(row.get("pons_version") or "").lower()
@@ -48,12 +46,6 @@ def adapt_pons_trades_to_phase3(
         token = normalize_address(str(row.get("token") or ""))
         initiator = normalize_address(str(row.get("initiator") or ""))
         event = _event_key(row)
-        identity = (token, *event)
-        if identity in seen:
-            raise ValueError(
-                f"Pons Phase-3 trade repeats token event: {identity}"
-            )
-        seen.add(identity)
         transaction_hash = str(
             row.get("transaction_hash") or ""
         ).lower()
@@ -98,10 +90,24 @@ def adapt_pons_trades_to_phase3(
             "canonical_phase3_trade": True,
             "outcome_derived": False,
         }
-        output.append(
-            validate_phase3_canonical_trade_row(canonical)
-        )
+        yield validate_phase3_canonical_trade_row(canonical)
 
+
+def adapt_pons_trades_to_phase3(
+    rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Return sorted canonical Pons trades for compatibility callers."""
+
+    output = []
+    seen = set()
+    for row in iter_adapt_pons_trades_to_phase3(rows):
+        identity = (row["token"], *_event_key(row))
+        if identity in seen:
+            raise ValueError(
+                f"Pons Phase-3 trade repeats token event: {identity}"
+            )
+        seen.add(identity)
+        output.append(row)
     output.sort(
         key=lambda row: (
             *_event_key(row),

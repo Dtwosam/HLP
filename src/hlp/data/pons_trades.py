@@ -40,9 +40,10 @@ def _signed_amm_trade(row: dict) -> tuple[str, int, int]:
     return side, abs(token_leg), abs(quote_leg)
 
 
-def normalize_pons_trades(points: Iterable[dict]) -> list[dict]:
-    """Return one common trade schema across Pons V1, V2 curve and V4."""
-    output = []
+def iter_normalized_pons_trades(
+    points: Iterable[dict],
+):
+    """Yield common wallet-trade rows without buffering the research tape."""
     for source in points:
         row = dict(source)
         event_type = row.get("event_type")
@@ -54,8 +55,7 @@ def normalize_pons_trades(points: Iterable[dict]) -> list[dict]:
         phase = row["phase"]
         if phase == "curve":
             if event_type not in {"curve_buy", "curve_sell"}:
-                # Buyback is a protocol-internal price-changing action rather
-                # than a user's directional trade. Keep it out of wallet flow.
+                # Buyback is protocol-internal, not user directional flow.
                 if event_type == "curve_buyback":
                     continue
                 raise ValueError(f"unknown Pons curve trade event: {event_type}")
@@ -77,34 +77,36 @@ def normalize_pons_trades(points: Iterable[dict]) -> list[dict]:
             raise ValueError("Pons normalized trade amounts must be positive")
 
         market_cap = Decimal(row["market_cap_proxy_usd"])
-        output.append(
-            {
-                "token": row["token"].lower(),
-                "pons_version": row["pons_version"],
-                "phase": phase,
-                "side": side,
-                "initiator": row["initiator"].lower(),
-                "transaction_hash": row["transaction_hash"].lower(),
-                "transaction_to": row.get("transaction_to"),
-                "input_selector": row.get("input_selector"),
-                "block_number": int(row["block_number"]),
-                "block_timestamp": row.get("block_timestamp"),
-                "transaction_index": row.get("transaction_index"),
-                "log_index": int(row["log_index"]),
-                "token_amount_raw": token_amount_raw,
-                "quote_amount_raw": quote_amount_raw,
-                "fee_raw": fee_raw,
-                "tax_raw": tax_raw,
-                "quote_token": row["quote_token"].lower(),
-                "market_cap_proxy_usd": str(market_cap),
-                "drawdown_from_running_peak": row.get(
-                    "drawdown_from_running_peak"
-                ),
-                "seconds_since_first_priced_point": row.get(
-                    "seconds_since_first_priced_point"
-                ),
-            }
-        )
+        yield {
+            "token": row["token"].lower(),
+            "pons_version": row["pons_version"],
+            "phase": phase,
+            "side": side,
+            "initiator": row["initiator"].lower(),
+            "transaction_hash": row["transaction_hash"].lower(),
+            "transaction_to": row.get("transaction_to"),
+            "input_selector": row.get("input_selector"),
+            "block_number": int(row["block_number"]),
+            "block_timestamp": row.get("block_timestamp"),
+            "transaction_index": row.get("transaction_index"),
+            "log_index": int(row["log_index"]),
+            "token_amount_raw": token_amount_raw,
+            "quote_amount_raw": quote_amount_raw,
+            "fee_raw": fee_raw,
+            "tax_raw": tax_raw,
+            "quote_token": row["quote_token"].lower(),
+            "market_cap_proxy_usd": str(market_cap),
+            "drawdown_from_running_peak": row.get(
+                "drawdown_from_running_peak"
+            ),
+            "seconds_since_first_priced_point": row.get(
+                "seconds_since_first_priced_point"
+            ),
+        }
 
+
+def normalize_pons_trades(points: Iterable[dict]) -> list[dict]:
+    """Return one common trade schema across Pons V1, V2 curve and V4."""
+    output = list(iter_normalized_pons_trades(points))
     output.sort(key=lambda row: (event_order(row), row["token"]))
     return output
