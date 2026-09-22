@@ -6,6 +6,7 @@ from hlp.data.phase2_research_paths import (
     PHASE2_RESEARCH_PRICE_PATH_VERSION,
     build_phase2_research_path_components,
     build_phase2_research_price_path,
+    materialize_phase2_research_price_path,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
 
@@ -205,3 +206,50 @@ def test_research_price_path_rejects_unfrozen_or_incomplete_source_set():
             source_inventory=INVENTORY,
             component_provenance_sha256=provenance(),
         )
+
+
+
+def test_streaming_research_price_path_matches_in_memory_contract(tmp_path):
+    rows, summary = universe(overlap=True)
+    data = components(overlap=True)
+    expected_rows, expected_report = build_phase2_research_price_path(
+        data,
+        universe_rows=rows,
+        universe_summary=summary,
+        universe_sha256=SHA,
+        source_inventory=INVENTORY,
+        component_provenance_sha256=provenance(),
+    )
+
+    output = tmp_path / "research.jsonl"
+    manifest, report = materialize_phase2_research_price_path(
+        {
+            component: iter(component_rows)
+            for component, component_rows in data.items()
+        },
+        universe_rows=rows,
+        universe_summary=summary,
+        universe_sha256=SHA,
+        source_inventory=INVENTORY,
+        component_provenance_sha256=provenance(),
+        output=output,
+    )
+
+    import json
+    actual_rows = [
+        json.loads(line)
+        for line in output.read_text().splitlines()
+        if line.strip()
+    ]
+    assert actual_rows == expected_rows
+    assert manifest["sha256"] == expected_report[
+        "normalized_price_path_sha256"
+    ]
+    assert report["normalized_price_path_sha256"] == manifest["sha256"]
+    assert report["price_points"] == expected_report["price_points"]
+    assert report["token_price_points"] == expected_report[
+        "token_price_points"
+    ]
+    assert report["streaming_materialization"] is True
+    assert report["phase2_dump_detector_frozen"] is False
+    assert report["outcome_labels_computed"] is False
