@@ -690,26 +690,44 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   liquidity/depth and price-impact/absorption families remain deferred until
   their required historical inputs can be represented without weak proxies or
   future leakage.
-- guarded Phase-4 entry and base-rate plumbing is now prepared behind the final
-  Phase-3 checkpoint; this does **not** advance the current execution phase or
-  claim `hlp-v1-phase4-discovery`. Phase 4 is the first place outcome labels
-  may meet feature values. `phase4_discovery_entry.py` and its dispatch-only
-  workflow rebuild and SHA-check the exact Phase-2 dataset, Phase-3 feature
-  entry, equal-coverage and final feature-store handoffs before joining them.
-  The join requires the feature-store subject set to equal the confirmed-dump /
-  outcome-eligible set, requires every feature cutoff to equal the exact
-  confirmation block/transaction/log event, preserves Phase-2 universe context
-  outside `feature_values`, and records
-  `labels_joined_after_feature_freeze=true`,
-  `feature_values_mutated=false` and
-  `phase4_discovery_checkpoint_claimed=false`. A separate guarded
-  `phase4-base-rate` artifact reports winner/failure frequency, 2x/3x/5x/10x
-  milestone prevalence, the observed continuous maximum post-dump-multiple
-  distribution and snapshot censoring before testing any feature relationship.
-  That report explicitly keeps `feature_relationships_tested=false` and
-  `signal_promoted=false`; univariate/interaction discovery and chronological
-  unseen-slice validation remain future Phase-4 work after the real upstream
-  checkpoints exist.
+- the guarded Phase-4 research architecture is now prepared end-to-end behind
+  the final Phase-3 checkpoint; this does **not** advance the current execution
+  phase or claim `hlp-v1-phase4-discovery`. Phase 4 remains the first place
+  outcome labels may meet feature values. `phase4_discovery_entry.py` rebuilds
+  and SHA-checks the exact Phase-2 dataset plus the final Phase-3 feature-store
+  chain before joining them, requires every feature cutoff to equal the exact
+  confirmation block/transaction/log event, and records
+  `labels_joined_after_feature_freeze=true` with
+  `feature_values_mutated=false`. Guarded discovery-only workflows now cover
+  the full research build order: population/base-rate diagnostics; matched
+  winner/failure univariate distributions and missingness; an explicit
+  chronological discovery/validation/final-test split; manual hypothesis
+  freezing before validation; 10x/20x+ magnitude-strata comparisons;
+  deterministic nonlinear numeric bins; pairwise binary interaction tables;
+  transparent L2-logistic and depth-2 tree baselines fit only on discovery and
+  evaluated on validation; deterministic permutation tests with
+  Benjamini-Hochberg FDR control; and repeated-sampling plus chronological-fold
+  stability diagnostics. Validation and final-test artifacts remain physically
+  separated; descriptive discovery workflows cannot download either unseen
+  slice, validation workflows cannot download the final-test slice, and no
+  Phase-4 workflow promotes a production signal or chooses a Phase-5 signal
+  threshold. Sequence analysis is explicitly non-applicable to the current
+  point-in-time feature store because it contains no sequence-valued inputs;
+  optional clustering is recorded as not run because no predefined cluster
+  research question is required by the Phase-4 acceptance criteria.
+- a fail-closed `phase4-discovery-checkpoint` workflow is also prepared. It
+  rebuilds the chronological split, base-rate, univariate, hypothesis-freeze,
+  unseen-validation, magnitude-strata, nonlinear, interaction, simple-model and
+  stability handoffs; requires exact registry, discovery-slice, validation-slice
+  and parent-SHA reconciliation; logs every selected, rejected and unselected
+  hypothesis/feature disposition; and refuses to touch the final-test artifact.
+  Only that fully reconciled workflow may emit
+  `phase4_discovery_checkpoint_claimed=true`. A valid Phase-4 outcome may
+  contain zero surviving hypotheses: "no validated relationship found" is
+  preserved as a legitimate research result rather than forcing a signal.
+  None of these Phase-4 workflows can execute to a real checkpoint yet because
+  the real Phase-2 dataset and final Phase-3 feature-store checkpoints have not
+  been completed and accepted.
 
 
 ### Live/current chain access
