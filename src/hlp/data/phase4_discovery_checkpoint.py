@@ -245,6 +245,20 @@ def _validate_parent_chain(
         raise ValueError("Phase-4 discovery feature-registry lineage drift")
 
     if _sha256(
+        base.get("discovery_rows_sha256"),
+        label="Phase-4 discovery base-rate source rows",
+    ) != _sha256(
+        split.get("discovery_rows_sha256"),
+        label="Phase-4 discovery split source rows",
+    ):
+        raise ValueError("Phase-4 discovery base-rate population drift")
+    if int(base.get("discovery_subjects", -1)) != int(
+        split.get("discovery_subjects", -2)
+    ):
+        raise ValueError(
+            "Phase-4 discovery base-rate subject-count drift"
+        )
+    if _sha256(
         univariate.get("source_discovery_rows_sha256"),
         label="Phase-4 discovery univariate source rows",
     ) != _sha256(
