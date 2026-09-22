@@ -155,6 +155,8 @@ def test_univariate_reports_winner_and_failure_distributions():
     assert categories["b"]["winner_count"] == 1
     assert categories["b"]["failure_count"] == 0
 
+    assert report["validation_rows_consumed"] is False
+    assert report["final_test_rows_consumed"] is False
     assert report["candidate_features_ranked"] is False
     assert report["signal_promoted"] is False
     assert report["unseen_slice_validation_complete"] is False
@@ -196,6 +198,8 @@ def test_univariate_handoff_never_ranks_or_promotes():
         "winner_failure_frequencies_reported": True,
         "missingness_compared_by_outcome": True,
         "univariate_relationships_tested": True,
+        "validation_rows_consumed": False,
+        "final_test_rows_consumed": False,
         "candidate_features_ranked": False,
         "signal_promoted": False,
         "unseen_slice_validation_complete": False,
@@ -211,6 +215,8 @@ def test_univariate_handoff_never_ranks_or_promotes():
         feature_registry_file_sha256=SHA,
     )
     assert handoff["version"] == PHASE4_UNIVARIATE_HANDOFF_VERSION
+    assert handoff["validation_rows_consumed"] is False
+    assert handoff["final_test_rows_consumed"] is False
     assert handoff["candidate_features_ranked"] is False
     assert handoff["signal_promoted"] is False
     assert handoff["unseen_slice_validation_complete"] is False
