@@ -1,0 +1,387 @@
+name: phase4-magnitude-strata
+
+on:
+  workflow_dispatch:
+    inputs:
+      chronological_split_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-chronological-split
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-magnitude-strata-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHRONOLOGICAL_SPLIT_HANDOFF_JSON: ${{ inputs.chronological_split_handoff_json }}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: magnitude
+        name: Compare outcome-magnitude strata on discovery rows
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_feature_registry import (
+              validate_phase3_feature_registry,
+          )
+          from hlp.data.phase4_chronological_split import (
+              build_phase4_chronological_split_handoff,
+          )
+          from hlp.data.phase4_magnitude_strata import (
+              build_phase4_magnitude_strata_handoff,
+              build_phase4_magnitude_strata_report,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor():
+              try:
+                  value = json.loads(
+                      os.environ["CHRONOLOGICAL_SPLIT_HANDOFF_JSON"]
+                  )
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(
+                      "Phase-4 split descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(
+                      "Phase-4 split descriptor must be an object"
+                  )
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      "Phase-4 split run_id is invalid"
+                  ) from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      "Phase-4 split artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      "Phase-4 split handoff_sha256 is invalid"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "Phase-4 split digest/SHA is not hexadecimal"
+                  ) from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(
+              run_id,
+              destination,
+              expected_digest,
+          ):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "")
+                  == "phase4-chronological-split"
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label="Phase-4 chronological split",
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"Phase-4 chronological split: {exc}"
+                  ) from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      "Phase-4 split artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  "phase4-chronological-split",
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          run_id, digest, expected_handoff_sha = descriptor()
+          root = Path("inputs/chronological-split")
+          download_named(run_id, root, digest)
+
+          if list(root.rglob("phase4-validation.jsonl")):
+              raise SystemExit(
+                  "Phase-4 magnitude artifact exposes validation rows"
+              )
+          if list(root.rglob("phase4-final-test.jsonl")):
+              raise SystemExit(
+                  "Phase-4 magnitude artifact exposes final-test rows"
+              )
+
+          rows_path = find_unique(
+              root,
+              "phase4-discovery-train.jsonl",
+          )
+          manifest_path = find_unique(
+              root,
+              "phase4-discovery-train.jsonl.manifest.json",
+          )
+          manifest = json.loads(manifest_path.read_text())
+          summary_path = find_unique(
+              root,
+              "phase4-chronological-split-summary.json",
+          )
+          summary = json.loads(summary_path.read_text())
+          summary_sha = sha256_path(summary_path)
+          handoff_path = find_unique(
+              root,
+              "phase4-chronological-split-handoff.json",
+          )
+          split_handoff_sha = sha256_path(handoff_path)
+          if split_handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff SHA drift"
+              )
+          split_handoff = json.loads(handoff_path.read_text())
+
+          registry_path = find_unique(
+              root,
+              "phase4-feature-registry.json",
+          )
+          registry_file_sha = sha256_path(registry_path)
+          registry = json.loads(registry_path.read_text())
+          if not isinstance(registry, list):
+              raise SystemExit(
+                  "Phase-4 feature registry is not a JSON list"
+              )
+          registry_report = validate_phase3_feature_registry(
+              registry
+          )
+          if registry_file_sha != split_handoff[
+              "feature_registry_file_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 registry-file SHA drift"
+              )
+          if registry_report["registry_sha256"] != split_handoff[
+              "feature_registry_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 registry definition drift"
+              )
+
+          rebuilt_split = build_phase4_chronological_split_handoff(
+              summary,
+              split_summary_sha256=summary_sha,
+              discovery_entry_handoff_sha256=summary[
+                  "discovery_entry_handoff_sha256"
+              ],
+              feature_registry_file_sha256=registry_file_sha,
+          )
+          if rebuilt_split != split_handoff:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff content drift"
+              )
+          if manifest.get("sha256") != split_handoff[
+              "discovery_split_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 discovery-slice manifest SHA drift"
+              )
+
+          report = build_phase4_magnitude_strata_report(
+              iter_validated_jsonl(
+                  rows_path,
+                  manifest_path,
+              ),
+              registry,
+              chronological_split_handoff=split_handoff,
+          )
+          report.update({
+              "chronological_split_run_id": run_id,
+              "chronological_split_handoff_sha256": (
+                  split_handoff_sha
+              ),
+              "feature_registry_file_sha256": registry_file_sha,
+          })
+          report_path = Path(
+              "artifacts/phase4-magnitude-strata-report.json"
+          )
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(
+              report_text.encode()
+          ).hexdigest()
+
+          output_handoff = build_phase4_magnitude_strata_handoff(
+              report,
+              report_sha256=report_sha,
+              chronological_split_handoff_sha256=split_handoff_sha,
+              feature_registry_file_sha256=registry_file_sha,
+          )
+          output_handoff_path = Path(
+              "artifacts/phase4-magnitude-strata-handoff.json"
+          )
+          output_handoff_text = (
+              json.dumps(
+                  output_handoff,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          output_handoff_path.write_text(output_handoff_text)
+          output_handoff_sha = hashlib.sha256(
+              output_handoff_text.encode()
+          ).hexdigest()
+
+          shutil.copyfile(
+              registry_path,
+              Path("artifacts/phase4-feature-registry.json"),
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+              handle.write(
+                  f"handoff_sha256={output_handoff_sha}\n"
+              )
+              handle.write(
+                  f"subjects={report['analysis_subjects']}\n"
+              )
+              handle.write(
+                  f"features={report['features_analyzed']}\n"
+              )
+          print(json.dumps({
+              "analysis_subjects": report["analysis_subjects"],
+              "features_analyzed": report["features_analyzed"],
+              "strata_counts": report["strata_counts"],
+              "ordinary_5x_vs_10x_plus_compared": True,
+              "ordinary_5x_vs_20x_plus_compared": True,
+              "validation_rows_consumed": False,
+              "final_test_rows_consumed": False,
+              "candidate_features_ranked": False,
+              "signal_promoted": False,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-4 magnitude-strata diagnostics
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-magnitude-strata
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 magnitude-strata identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.magnitude.outputs.report_sha256 }}
+          HANDOFF_SHA256: ${{ steps.magnitude.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.magnitude.outputs.subjects }}
+          FEATURES: ${{ steps.magnitude.outputs.features }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 magnitude-strata diagnostics"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-magnitude-strata"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- report_sha256: ${REPORT_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- analysis_subjects: ${SUBJECTS}"
+            echo "- features_analyzed: ${FEATURES}"
+            echo "- ordinary_5x_vs_10x_plus_compared: true"
+            echo "- ordinary_5x_vs_20x_plus_compared: true"
+            echo "- validation_rows_consumed: false"
+            echo "- final_test_rows_consumed: false"
+            echo "- candidate_features_ranked: false"
+            echo "- signal_promoted: false"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
