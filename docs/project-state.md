@@ -600,12 +600,14 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3_feature_registry.py` now gives every implemented feature a versioned
   formula, snapshot semantics, data dependency, dtype and missingness policy;
   registry definitions are SHA-bound and explicitly forbid future state or
-  outcome dependence. The first implemented family is causal
-  `price_drawdown`: 11 price/path features are computed in one streaming pass
-  over the canonical research price path, require an exact canonical point at
-  the confirmation cutoff, validate the full source tape, and count later
-  subject rows only as ignored. A second 11-feature `trade_flow` /
-  participant family is now implemented behind a fail-closed canonical
+  outcome dependence. The registry now contains **35 causal features across
+  four families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  8 `holder_state` / concentration, and 5 `chain_regime` features.
+  `price_drawdown` and `chain_regime` both use the canonical research price
+  path and enforce the exact confirmation event as an inclusive cutoff; chain
+  regime additionally replays the full cross-sectional price tape and derives
+  1000-block activity plus contemporaneous market-cap state without consuming
+  later rows. The trade family remains behind a fail-closed canonical
   wallet-trade tape. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and
   trench.today all have source-specific adapters that use transaction
   initiator identity rather than router/protocol sender identity. The
@@ -615,17 +617,25 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   cross-source duplicate swaps. The current trade-source readiness plan is
   **13/14 adapter-ready**; `pools_trade_lbp` remains explicitly blocked
   because the frozen CCA/LBP surface contains aggregate clearing/checkpoint
-  state rather than verified wallet-level fill attribution. Downstream trade
-  feature, equal-family-coverage and feature-staging workflows are prepared
-  but cannot bypass that gap. The staging bundle combines only equal-coverage,
-  exact-cutoff feature rows, validates each value against the registry dtype
-  and missingness policy, preserves per-family data-quality flags, consumes no
-  outcome rows, and explicitly publishes
+  state rather than verified wallet-level fill attribution. Holder features
+  now have a separate fail-closed canonical ERC-20 transfer contract: every
+  token tape must be continuous through the frozen snapshot, begin with
+  positive initial-mint evidence, reconcile balances to accounted supply, and
+  ignore transfers after the feature cutoff. The holder and transfer
+  contracts are tested, but a full transfer-acquisition workflow is not yet
+  claimed because the build has not frozen a provably complete historical
+  start strategy for every Phase-3 subject token. Downstream trade feature,
+  equal-family-coverage and feature-staging workflows are prepared; the
+  coverage/staging path now includes `chain_regime`, `price_drawdown` and
+  `trade_flow`, while holder state stays outside that runnable path until
+  transfer backfill evidence exists. The staging bundle combines only
+  equal-coverage, exact-cutoff feature rows, validates each value against the
+  registry dtype and missingness policy, preserves per-family data-quality
+  flags, consumes no outcome rows, and explicitly publishes
   `final_checkpoint_claimed=false`. No
-  `hlp-v1-phase3-feature-store` checkpoint is claimed yet; holder,
-  concentration/redistribution, creator/early-wallet, relationship, liquidity,
-  absorption, retention, venue-mechanics and chain-regime families still
-  remain to be implemented and coverage-tested.
+  `hlp-v1-phase3-feature-store` checkpoint is claimed yet; creator/early
+  wallet, relationship, liquidity, absorption, retention and venue-mechanics
+  families still remain to be implemented and coverage-tested.
 
 
 ### Live/current chain access
