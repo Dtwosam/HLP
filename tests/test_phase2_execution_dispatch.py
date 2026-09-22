@@ -367,6 +367,7 @@ def dispatch_receipt():
         "canonical_coverage_ledger_sha256": "ef" * 32,
         "dispatch_input_names": [],
         "dispatch_inputs_sha256": "12" * 32,
+        "dispatch_attempt_sha256": "34" * 32,
         "dispatched_run_id": 202,
         "requires_explicit_approval": False,
         "canonical_ledger_write_authorized": False,
@@ -381,6 +382,7 @@ def test_node_dispatch_receipt_validates_immutable_mapping():
     assert row["node_dispatch_control_run_id"] == 99
     assert row["dispatched_run_id"] == 202
     assert row["target_workflow"] == "phase2-direct-quote-registry.yml"
+    assert row["dispatch_attempt_sha256"] == "34" * 32
     assert row["canonical_ledger_write_authorized"] is False
 
 

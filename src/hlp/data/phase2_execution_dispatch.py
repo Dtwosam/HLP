@@ -676,6 +676,10 @@ def validate_phase2_node_dispatch_receipt(
         row.get("dispatch_inputs_sha256"),
         label="Phase-2 node-dispatch inputs",
     )
+    attempt_sha = _sha256_hex(
+        row.get("dispatch_attempt_sha256"),
+        label="Phase-2 node-dispatch attempt file",
+    )
 
     if row.get("requires_explicit_approval") is not False:
         raise ValueError(
@@ -702,6 +706,7 @@ def validate_phase2_node_dispatch_receipt(
         "canonical_coverage_ledger_sha256": ledger_sha,
         "dispatch_input_names": sorted(normalized_names),
         "dispatch_inputs_sha256": inputs_sha,
+        "dispatch_attempt_sha256": attempt_sha,
         "dispatched_run_id": dispatched_run_id,
         "requires_explicit_approval": False,
         "canonical_ledger_write_authorized": False,
