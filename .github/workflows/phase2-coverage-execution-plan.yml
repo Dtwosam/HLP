@@ -264,6 +264,12 @@ jobs:
                   raise SystemExit(
                       "node-dispatch receipt target ref drift"
                   )
+              if dispatch_receipt[
+                  "node_dispatch_control_run_id"
+              ] != dispatch_run_id:
+                  raise SystemExit(
+                      "node-dispatch receipt/control run identity drift"
+                  )
               node_id = dispatch_receipt["node_id"]
               target_run_id = int(
                   dispatch_receipt["dispatched_run_id"]
