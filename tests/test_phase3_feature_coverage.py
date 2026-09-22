@@ -180,6 +180,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
         "holder_state",
         "lifecycle_age",
         "participant_retention",
+        "participant_type",
         "price_drawdown",
         "supply_redistribution",
         "trade_flow",
@@ -251,4 +252,14 @@ def test_feature_coverage_contract_supports_early_recipient_activity():
     assert FAMILY_HANDOFF_CONTRACTS["early_recipient_activity"] == (
         "phase3-early-recipient-features-handoff-v1",
         "phase3_early_recipient_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_participant_type():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["participant_type"] == (
+        "phase3-participant-type-features-handoff-v1",
+        "phase3_participant_type_features_ready",
     )
