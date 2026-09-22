@@ -179,6 +179,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
         "holder_state",
         "participant_retention",
         "price_drawdown",
+        "supply_redistribution",
         "trade_flow",
         "venue_mechanics",
     }
@@ -207,4 +208,14 @@ def test_feature_coverage_contract_supports_participant_retention():
     assert FAMILY_HANDOFF_CONTRACTS["participant_retention"] == (
         "phase3-retention-features-handoff-v1",
         "phase3_retention_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_supply_redistribution():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["supply_redistribution"] == (
+        "phase3-supply-redistribution-features-handoff-v1",
+        "phase3_redistribution_features_ready",
     )

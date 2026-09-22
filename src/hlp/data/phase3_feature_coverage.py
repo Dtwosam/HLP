@@ -26,6 +26,9 @@ from hlp.data.phase3_price_features import (
 from hlp.data.phase3_retention_features import (
     PHASE3_RETENTION_FEATURE_HANDOFF_VERSION,
 )
+from hlp.data.phase3_redistribution_features import (
+    PHASE3_REDISTRIBUTION_FEATURE_HANDOFF_VERSION,
+)
 from hlp.data.phase3_trade_features import (
     PHASE3_TRADE_FEATURE_HANDOFF_VERSION,
 )
@@ -56,6 +59,10 @@ FAMILY_HANDOFF_CONTRACTS = {
     "price_drawdown": (
         PHASE3_PRICE_FEATURE_HANDOFF_VERSION,
         "phase3_price_features_ready",
+    ),
+    "supply_redistribution": (
+        PHASE3_REDISTRIBUTION_FEATURE_HANDOFF_VERSION,
+        "phase3_redistribution_features_ready",
     ),
     "trade_flow": (
         PHASE3_TRADE_FEATURE_HANDOFF_VERSION,
