@@ -181,6 +181,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
         "price_drawdown",
         "supply_redistribution",
         "trade_flow",
+        "trade_size_flow",
         "venue_mechanics",
     }
     assert FAMILY_HANDOFF_CONTRACTS["chain_regime"][1] == (
@@ -218,4 +219,14 @@ def test_feature_coverage_contract_supports_supply_redistribution():
     assert FAMILY_HANDOFF_CONTRACTS["supply_redistribution"] == (
         "phase3-supply-redistribution-features-handoff-v1",
         "phase3_redistribution_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_trade_size_flow():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["trade_size_flow"] == (
+        "phase3-trade-size-flow-features-handoff-v1",
+        "phase3_trade_size_flow_features_ready",
     )
