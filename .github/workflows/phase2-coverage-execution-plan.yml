@@ -150,9 +150,22 @@ jobs:
                   lineage_status = str(
                       comparison.get("status") or ""
                   )
+                  comparison_files = comparison.get(
+                      "files",
+                      [],
+                  )
+                  if not isinstance(comparison_files, list):
+                      raise SystemExit(
+                          f"compare files are invalid for {node_id}"
+                      )
+                  if len(comparison_files) >= 300:
+                      raise SystemExit(
+                          f"compare file list reached API cap for "
+                          f"{node_id}; rerun the dependency"
+                      )
                   changed_paths = sorted(
                       str(row.get("filename") or "")
-                      for row in comparison.get("files", [])
+                      for row in comparison_files
                       if isinstance(row, dict)
                       and str(row.get("filename") or "")
                   )
