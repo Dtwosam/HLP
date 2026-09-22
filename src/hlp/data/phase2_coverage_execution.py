@@ -176,6 +176,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:v4_swap",
                 "shared:supply_delta",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Measure active quote liquidity and causal market quality "
                 "on the frozen competition cohort."
@@ -243,6 +244,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:v3_swap",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes="Reconstruct and price complete pools.fun history.",
         ),
         _node(
@@ -277,6 +279,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Replay and price pools.trade Instant through the snapshot."
             ),
@@ -298,6 +301,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Reconstruct finalized CCA bid/exit history and exact "
                 "token-fill/refund accounting."
@@ -312,6 +316,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:v4_initialize",
                 "shared:v4_swap",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Combine CCA and migrated-V4 history into complete LBP "
                 "coverage."
@@ -338,6 +343,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes="Replay and price complete Doppler history.",
         ),
         _node(
@@ -356,6 +362,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "registry:flap",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes="Reconstruct and price Flap bonding-curve history.",
         ),
         _node(
@@ -369,6 +376,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:v3_swap",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Join curve and any post-curve direct V3 lifecycle into "
                 "complete Flap coverage."
@@ -393,6 +401,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "registry:trench",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Reconstruct priced trench curve history through LimitReach."
             ),
@@ -435,6 +444,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Combine complete curve and selected post-limit direct-market "
                 "history for trench.today."
@@ -492,6 +502,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes="Replay and price complete NOXA V3 history.",
         ),
         _node(
@@ -505,6 +516,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Reconstruct the selected direct Uniswap V3 source population."
             ),
@@ -520,6 +532,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Reconstruct the selected direct Uniswap V4 source population."
             ),
@@ -535,6 +548,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
                 "shared:supply_delta",
                 "shared:quote_registry",
             ),
+            requires_archive_secret=True,
             notes=(
                 "Reconstruct the selected direct SushiSwap V3 source "
                 "population."
