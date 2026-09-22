@@ -610,6 +610,10 @@ jobs:
               "source_binding_sha256": binding_sha,
               "rehydration_plan_sha256": plan_sha,
               "eligible_universe_sha256": universe_sha,
+              "snapshot_head_block": int(plan["snapshot_head_block"]),
+              "market_registry_sha256": resolved[
+                  "validated_manifests"
+              ]["registry"]["sha256"],
               "accepted_lifecycle_run_id": int(
                   binding["eligibility_run_id"]
               ),
@@ -814,6 +818,10 @@ jobs:
               "source_binding_sha256": binding_sha,
               "rehydration_plan_sha256": plan_sha,
               "eligible_universe_sha256": universe_sha,
+              "snapshot_head_block": int(plan["snapshot_head_block"]),
+              "market_registry_sha256": resolved[
+                  "validated_manifests"
+              ]["registry"]["sha256"],
               "accepted_lifecycle_run_id": int(
                   binding["eligibility_run_id"]
               ),
