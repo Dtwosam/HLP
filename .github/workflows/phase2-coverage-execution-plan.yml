@@ -8,6 +8,11 @@ on:
         required: false
         default: '{}'
         type: string
+      node_dispatch_run_ids_json:
+        description: JSON array of successful phase2-execution-node-dispatch run IDs
+        required: false
+        default: '[]'
+        type: string
   push:
     branches:
       - phase1/data-acquisition-spike
@@ -43,6 +48,7 @@ concurrency:
 
 env:
   COMPLETED_NODE_RUNS_JSON: ${{ inputs.completed_node_runs_json }}
+  NODE_DISPATCH_RUN_IDS_JSON: ${{ inputs.node_dispatch_run_ids_json }}
 
 jobs:
   plan:
@@ -67,6 +73,7 @@ jobs:
           import hashlib
           import json
           import os
+          import shutil
           import subprocess
           from pathlib import Path
 
@@ -75,6 +82,7 @@ jobs:
           )
           from hlp.data.phase2_execution_dispatch import (
               build_phase2_dispatch_input_plan,
+              validate_phase2_node_dispatch_receipt,
           )
           from hlp.data.phase2_execution_runs import (
               validate_phase2_execution_run_receipts,
@@ -113,12 +121,169 @@ jobs:
                   )
               completed_runs[node_id] = parsed
 
+          dispatch_raw = os.environ.get(
+              "NODE_DISPATCH_RUN_IDS_JSON",
+              "",
+          ).strip()
+          if not dispatch_raw:
+              dispatch_raw = "[]"
+          try:
+              dispatch_run_ids = json.loads(dispatch_raw)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "node_dispatch_run_ids_json must be valid JSON"
+              ) from exc
+          if not isinstance(dispatch_run_ids, list):
+              raise SystemExit(
+                  "node_dispatch_run_ids_json must be a JSON array"
+              )
+          normalized_dispatch_run_ids = []
+          for value in dispatch_run_ids:
+              try:
+                  parsed = int(value)
+              except (TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"invalid node-dispatch run ID: {value!r}"
+                  ) from exc
+              if parsed <= 0:
+                  raise SystemExit(
+                      "node-dispatch run IDs must be positive"
+                  )
+              normalized_dispatch_run_ids.append(parsed)
+          if len(normalized_dispatch_run_ids) != len(
+              set(normalized_dispatch_run_ids)
+          ):
+              raise SystemExit(
+                  "node_dispatch_run_ids_json repeats a run ID"
+              )
+
           repo = os.environ["GITHUB_REPOSITORY"]
           branch = os.environ["GITHUB_REF_NAME"]
           current_head = subprocess.check_output(
               ["git", "rev-parse", "HEAD"],
               text=True,
           ).strip().lower()
+
+          resolved_dispatch_receipts = []
+          for dispatch_run_id in normalized_dispatch_run_ids:
+              control_run = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/actions/runs/{dispatch_run_id}",
+                  ])
+              )
+              if control_run.get("path") != (
+                  ".github/workflows/"
+                  "phase2-execution-node-dispatch.yml"
+              ):
+                  raise SystemExit(
+                      "node-dispatch control run workflow identity drift"
+                  )
+              if control_run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      "node-dispatch control run was not workflow_dispatch"
+                  )
+              if control_run.get("status") != "completed":
+                  raise SystemExit(
+                      "node-dispatch control run is not completed"
+                  )
+              if control_run.get("conclusion") != "success":
+                  raise SystemExit(
+                      "node-dispatch control run did not succeed"
+                  )
+              if control_run.get("head_branch") != branch:
+                  raise SystemExit(
+                      "node-dispatch control run branch drift"
+                  )
+
+              artifact_name = "phase2-execution-node-dispatch"
+              artifact_payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/"
+                          f"{dispatch_run_id}/artifacts?"
+                          f"name={artifact_name}"
+                      ),
+                  ])
+              )
+              matches = [
+                  row
+                  for row in artifact_payload.get("artifacts", [])
+                  if row.get("name") == artifact_name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "expected exactly one live node-dispatch artifact "
+                      f"for run {dispatch_run_id}; found {len(matches)}"
+                  )
+
+              destination = Path(
+                  "upstream",
+                  f"node-dispatch-{dispatch_run_id}",
+              )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(dispatch_run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  artifact_name,
+                  "--dir",
+                  str(destination),
+              ])
+              receipt_path = (
+                  destination
+                  / "phase2-execution-node-dispatch.json"
+              )
+              if not receipt_path.is_file():
+                  raise SystemExit(
+                      "node-dispatch artifact lacks immutable receipt"
+                  )
+              try:
+                  dispatch_receipt = (
+                      validate_phase2_node_dispatch_receipt(
+                          json.loads(receipt_path.read_text())
+                      )
+                  )
+              except ValueError as exc:
+                  raise SystemExit(str(exc)) from exc
+              if dispatch_receipt["target_ref"] != branch:
+                  raise SystemExit(
+                      "node-dispatch receipt target ref drift"
+                  )
+              node_id = dispatch_receipt["node_id"]
+              target_run_id = int(
+                  dispatch_receipt["dispatched_run_id"]
+              )
+              existing = completed_runs.get(node_id)
+              if (
+                  existing is not None
+                  and int(existing) != target_run_id
+              ):
+                  raise SystemExit(
+                      f"conflicting target run IDs for {node_id}: "
+                      f"{existing} != {target_run_id}"
+                  )
+              completed_runs[node_id] = target_run_id
+              resolved_dispatch_receipts.append({
+                  "control_run_id": dispatch_run_id,
+                  "node_id": node_id,
+                  "target_run_id": target_run_id,
+              })
+
           receipts = []
           for node_id, run_id in sorted(completed_runs.items()):
               payload = json.loads(
@@ -199,6 +364,13 @@ jobs:
               repository_full_name=repo,
               branch=branch,
               current_head_sha=current_head,
+          )
+          verified["node_dispatch_run_ids_consumed"] = sorted(
+              normalized_dispatch_run_ids
+          )
+          verified["node_dispatch_receipts_consumed"] = sorted(
+              resolved_dispatch_receipts,
+              key=lambda row: row["node_id"],
           )
           verified_path = Path(
               "artifacts/phase2-execution-run-receipts.json"
@@ -306,6 +478,9 @@ jobs:
               "canonical_ledger_commit_workflow_available": True,
               "ledger_commit_requires_explicit_approval": True,
               "verified_completed_runs": verified["verified_runs"],
+              "node_dispatch_receipts_consumed": len(
+                  resolved_dispatch_receipts
+              ),
               "all_runs_current_or_ledger_only_ancestors": verified[
                   "all_runs_current_or_ledger_only_ancestors"
               ],
@@ -360,6 +535,10 @@ jobs:
                   handle.write(
                       f"- verified successful workflow runs: "
                       f"{verified['verified_runs']}\n"
+                  )
+                  handle.write(
+                      f"- node-dispatch receipts consumed: "
+                      f"{len(resolved_dispatch_receipts)}\n"
                   )
                   handle.write(
                       "- verified run lineage: current HEAD or "
