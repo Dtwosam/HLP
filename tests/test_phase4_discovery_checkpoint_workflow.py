@@ -45,3 +45,11 @@ def test_phase4_checkpoint_closes_discovery_without_opening_final_test():
     assert "phase4_discovery_checkpoint_claimed: true" in text
     assert "phase4_discovery_complete: true" in text
     assert "phase4-final-test-slice" not in text
+
+
+
+def test_phase4_checkpoint_stays_blocked_until_experiment_suite_is_complete():
+    text = WORKFLOW.read_text()
+
+    assert "Phase-4 discovery checkpoint remains blocked until" in text
+    assert "nonlinear, interaction, simple-model and magnitude-strata" in text
