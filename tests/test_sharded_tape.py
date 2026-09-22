@@ -291,3 +291,21 @@ def test_iter_validated_jsonl_streams_all_rows_and_validates_sha(tmp_path):
     path.write_text('{"a":1}\n{"a":3}\n')
     with pytest.raises(ValueError, match="JSONL SHA changed"):
         list(iter_validated_jsonl(path, manifest))
+
+
+
+def test_validate_jsonl_snapshot_checks_bytes_without_decoding(tmp_path):
+    from hlp.data.sharded_tape import validate_jsonl_snapshot
+    from hlp.data.snapshot import write_jsonl_snapshot
+
+    path = tmp_path / "raw.jsonl"
+    manifest = write_jsonl_snapshot(
+        [{"a": 1}, {"a": 2}],
+        output=path,
+        provenance={"source": "unit"},
+    )
+    sidecar = path.with_suffix(".jsonl.manifest.json")
+
+    validated = validate_jsonl_snapshot(path, sidecar)
+    assert validated["sha256"] == manifest["sha256"]
+    assert validated["records"] == 2

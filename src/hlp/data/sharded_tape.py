@@ -107,6 +107,29 @@ def _field_value_matcher(
     return matches
 
 
+def validate_jsonl_snapshot(
+    path: Path,
+    manifest_path: Path,
+) -> dict:
+    """Validate complete JSONL bytes/count without decoding individual rows."""
+    manifest = json.loads(manifest_path.read_text())
+    records = 0
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if raw.strip():
+                records += 1
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+    return manifest
+
+
 def iter_validated_jsonl(
     path: Path,
     manifest_path: Path,
