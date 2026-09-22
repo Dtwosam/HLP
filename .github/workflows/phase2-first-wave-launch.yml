@@ -1,0 +1,598 @@
+name: phase2-first-wave-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_first_wave:
+        description: Explicitly launch the exact initial archive preflight + quote-registry wave
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-first-wave-launch-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CONFIRM_FIRST_WAVE: ${{ inputs.confirm_first_wave }}
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit approval and authenticated archive secret
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_FIRST_WAVE}" != "true" ]; then
+            echo "Phase-2 first wave requires confirm_first_wave=true" >&2
+            exit 1
+          fi
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is not configured" >&2
+            exit 1
+          fi
+
+      - id: launch
+        name: Plan, dispatch, verify, and replan the exact first wave
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_dispatch_readiness import (
+              workflow_dispatch_interface_sha256,
+          )
+          from hlp.data.phase2_execution_dispatch import (
+              validate_phase2_node_dispatch_receipt,
+          )
+          from hlp.data.phase2_first_wave import (
+              PHASE2_FIRST_WAVE_NODE_IDS,
+              validate_phase2_first_wave_completion,
+              validate_phase2_first_wave_launch,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([
+                  f"/repos/{repo}/actions/runs/{run_id}",
+              ])
+
+          def assert_run_identity(
+              run,
+              *,
+              workflow,
+              run_id,
+          ):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift: "
+                      f"{run.get('path')!r} != {expected_path!r}"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def wait_run(run_id, *, workflow, timeout_seconds):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  status = str(run.get("status") or "")
+                  if status == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method",
+                      "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input",
+                      "-",
+                  ],
+                  payload={
+                      "ref": branch,
+                      "inputs": inputs,
+                  },
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id, response
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(path),
+              ])
+              return path
+
+          def default_workflow_text(workflow):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/contents/.github/workflows/"
+                      f"{workflow}?ref={default_branch}"
+                  ),
+              ])
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding drift: {workflow}"
+                  )
+              return base64.b64decode(
+                  str(payload.get("content") or "").replace("\n", "")
+              ).decode("utf-8")
+
+          metadata = gh_json([f"/repos/{repo}"])
+          default_branch = str(metadata.get("default_branch") or "")
+          if not default_branch:
+              raise SystemExit("repository default branch is unavailable")
+
+          required_workflows = [
+              "phase2-coverage-execution-plan.yml",
+              "phase2-execution-node-dispatch.yml",
+              "phase2-archive-rpc-preflight.yml",
+              "phase2-direct-quote-registry.yml",
+          ]
+          for workflow in required_workflows:
+              local_path = Path(".github/workflows", workflow)
+              if not local_path.is_file():
+                  raise SystemExit(
+                      f"execution branch lacks required workflow: {workflow}"
+                  )
+              expected = workflow_dispatch_interface_sha256(
+                  local_path.read_text()
+              )
+              actual = workflow_dispatch_interface_sha256(
+                  default_workflow_text(workflow)
+              )
+              if actual != expected:
+                  raise SystemExit(
+                      f"default-branch dispatch interface drift: {workflow}"
+                  )
+
+          ledger_sha = hashlib.sha256(
+              Path(".github/phase2-source-coverage.json").read_bytes()
+          ).hexdigest()
+
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          planner_run_id, planner_response = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": "{}",
+                  "node_dispatch_run_ids_json": "[]",
+              },
+          )
+          wait_run(
+              planner_run_id,
+              workflow=planner_workflow,
+              timeout_seconds=900,
+          )
+
+          planner_artifact_name = "phase2-coverage-execution-plan"
+          planner_artifact = artifact_row(
+              planner_run_id,
+              planner_artifact_name,
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          if (
+              not planner_digest.startswith("sha256:")
+              or len(planner_digest) != 71
+          ):
+              raise SystemExit(
+                  "initial planner artifact digest is invalid"
+              )
+
+          initial_dir = download_artifact(
+              planner_run_id,
+              planner_artifact_name,
+              "upstream/initial-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  initial_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  initial_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          verified_initial = json.loads(
+              (
+                  initial_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit("initial planner HEAD linkage drift")
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "initial planner canonical-ledger SHA drift"
+              )
+          if int(verified_initial.get("verified_runs", -1)) != 0:
+              raise SystemExit(
+                  "initial first-wave planner unexpectedly credited runs"
+              )
+          try:
+              launch_contract = validate_phase2_first_wave_launch(
+                  execution_plan,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          dispatcher_workflow = "phase2-execution-node-dispatch.yml"
+          control_run_ids = []
+          dispatch_responses = {}
+          for node_id in PHASE2_FIRST_WAVE_NODE_IDS:
+              control_run_id, response = dispatch(
+                  dispatcher_workflow,
+                  {
+                      "planner_run_id": str(planner_run_id),
+                      "expected_planner_artifact_digest": planner_digest,
+                      "node_id": node_id,
+                      "manual_inputs_json": "{}",
+                      "confirm_dispatch": True,
+                  },
+              )
+              control_run_ids.append(control_run_id)
+              dispatch_responses[node_id] = response
+
+          control_receipts = {}
+          target_run_ids = {}
+          for node_id, control_run_id in zip(
+              PHASE2_FIRST_WAVE_NODE_IDS,
+              control_run_ids,
+          ):
+              wait_run(
+                  control_run_id,
+                  workflow=dispatcher_workflow,
+                  timeout_seconds=900,
+              )
+              control_dir = download_artifact(
+                  control_run_id,
+                  "phase2-execution-node-dispatch",
+                  f"upstream/control-{control_run_id}",
+              )
+              receipt_path = (
+                  control_dir
+                  / "phase2-execution-node-dispatch.json"
+              )
+              if not receipt_path.is_file():
+                  raise SystemExit(
+                      f"dispatcher run {control_run_id} lacks receipt"
+                  )
+              try:
+                  receipt = validate_phase2_node_dispatch_receipt(
+                      json.loads(receipt_path.read_text())
+                  )
+              except ValueError as exc:
+                  raise SystemExit(str(exc)) from exc
+              if receipt["node_dispatch_control_run_id"] != control_run_id:
+                  raise SystemExit(
+                      "first-wave dispatcher control-run identity drift"
+                  )
+              if receipt["node_id"] != node_id:
+                  raise SystemExit(
+                      "first-wave dispatcher node identity drift"
+                  )
+              if receipt["planner_run_id"] != planner_run_id:
+                  raise SystemExit(
+                      "first-wave dispatcher planner identity drift"
+                  )
+              if receipt["planner_artifact_digest"] != planner_digest:
+                  raise SystemExit(
+                      "first-wave dispatcher planner digest drift"
+                  )
+              if receipt["canonical_coverage_ledger_sha256"] != ledger_sha:
+                  raise SystemExit(
+                      "first-wave dispatcher canonical-ledger SHA drift"
+                  )
+              if receipt["target_ref"] != branch:
+                  raise SystemExit(
+                      "first-wave dispatcher target-ref drift"
+                  )
+              if receipt["target_head_sha"] != current_head:
+                  raise SystemExit(
+                      "first-wave dispatcher target-HEAD drift"
+                  )
+              control_receipts[node_id] = receipt
+              target_run_ids[node_id] = int(
+                  receipt["dispatched_run_id"]
+              )
+
+          target_workflow_by_node = {
+              "preflight:archive_authenticated": (
+                  "phase2-archive-rpc-preflight.yml"
+              ),
+              "shared:quote_registry": (
+                  "phase2-direct-quote-registry.yml"
+              ),
+          }
+          for node_id in PHASE2_FIRST_WAVE_NODE_IDS:
+              wait_run(
+                  target_run_ids[node_id],
+                  workflow=target_workflow_by_node[node_id],
+                  timeout_seconds=1500,
+              )
+
+          refreshed_planner_run_id, refreshed_response = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": "{}",
+                  "node_dispatch_run_ids_json": json.dumps(
+                      control_run_ids,
+                      separators=(",", ":"),
+                  ),
+              },
+          )
+          wait_run(
+              refreshed_planner_run_id,
+              workflow=planner_workflow,
+              timeout_seconds=900,
+          )
+          refreshed_artifact = artifact_row(
+              refreshed_planner_run_id,
+              planner_artifact_name,
+          )
+          refreshed_digest = str(
+              refreshed_artifact.get("digest") or ""
+          ).lower()
+          refreshed_dir = download_artifact(
+              refreshed_planner_run_id,
+              planner_artifact_name,
+              "upstream/refreshed-planner",
+          )
+          refreshed_execution = json.loads(
+              (
+                  refreshed_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          refreshed_verified = json.loads(
+              (
+                  refreshed_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          if refreshed_execution.get("planner_head_sha") != current_head:
+              raise SystemExit("refreshed planner HEAD linkage drift")
+          if refreshed_execution.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "first wave unexpectedly changed canonical coverage ledger"
+              )
+          try:
+              completion_contract = (
+                  validate_phase2_first_wave_completion(
+                      refreshed_execution,
+                      refreshed_verified,
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          receipt = {
+              "version": "phase2-first-wave-launch-receipt-v1",
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+              "initial_planner_run_id": planner_run_id,
+              "initial_planner_artifact_digest": planner_digest,
+              "node_dispatch_control_run_ids": {
+                  node_id: control_run_id
+                  for node_id, control_run_id in zip(
+                      PHASE2_FIRST_WAVE_NODE_IDS,
+                      control_run_ids,
+                  )
+              },
+              "target_run_ids": target_run_ids,
+              "refreshed_planner_run_id": refreshed_planner_run_id,
+              "refreshed_planner_artifact_digest": refreshed_digest,
+              "ready_after_first_wave": refreshed_execution[
+                  "ready_to_dispatch_node_ids"
+              ],
+              "launch_contract": launch_contract,
+              "completion_contract": completion_contract,
+              "first_wave_targets_completed_successfully": True,
+              "archive_fanout_unlocked": True,
+              "canonical_coverage_ledger_mutated": False,
+              "selector_approval_performed": False,
+              "canonical_ledger_write_authorized": False,
+              "workflow_dispatch_performed": True,
+          }
+          Path(
+              "artifacts/phase2-first-wave-launch-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"planner_run_id={planner_run_id}\n"
+              )
+              handle.write(
+                  f"archive_preflight_run_id="
+                  f"{target_run_ids['preflight:archive_authenticated']}\n"
+              )
+              handle.write(
+                  f"quote_registry_run_id="
+                  f"{target_run_ids['shared:quote_registry']}\n"
+              )
+              handle.write(
+                  f"refreshed_planner_run_id="
+                  f"{refreshed_planner_run_id}\n"
+              )
+              handle.write(
+                  f"refreshed_planner_digest={refreshed_digest}\n"
+              )
+              handle.write(
+                  f"ready_after={len(receipt['ready_after_first_wave'])}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload first-wave launch receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-first-wave-launch
+          path: artifacts/phase2-first-wave-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish first-wave completion summary
+        env:
+          INITIAL_PLANNER_RUN_ID: ${{ steps.launch.outputs.planner_run_id }}
+          ARCHIVE_PREFLIGHT_RUN_ID: ${{ steps.launch.outputs.archive_preflight_run_id }}
+          QUOTE_REGISTRY_RUN_ID: ${{ steps.launch.outputs.quote_registry_run_id }}
+          REFRESHED_PLANNER_RUN_ID: ${{ steps.launch.outputs.refreshed_planner_run_id }}
+          REFRESHED_PLANNER_DIGEST: ${{ steps.launch.outputs.refreshed_planner_digest }}
+          READY_AFTER: ${{ steps.launch.outputs.ready_after }}
+        run: |
+          {
+            echo "## Phase-2 first wave"
+            echo
+            echo "- first_wave_completed: true"
+            echo "- initial_planner_run_id: ${INITIAL_PLANNER_RUN_ID}"
+            echo "- archive_preflight_run_id: ${ARCHIVE_PREFLIGHT_RUN_ID}"
+            echo "- quote_registry_run_id: ${QUOTE_REGISTRY_RUN_ID}"
+            echo "- refreshed_planner_run_id: ${REFRESHED_PLANNER_RUN_ID}"
+            echo "- refreshed_planner_artifact_digest: ${REFRESHED_PLANNER_DIGEST}"
+            echo "- ready_nodes_after_first_wave: ${READY_AFTER}"
+            echo "- canonical_coverage_ledger_mutated: false"
+            echo "- selector_approval_performed: false"
+            echo "- next step: review the refreshed planner before launching archive fan-out"
+          } >> "${GITHUB_STEP_SUMMARY}"
