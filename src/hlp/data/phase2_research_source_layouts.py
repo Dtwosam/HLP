@@ -97,6 +97,9 @@ def build_phase2_research_source_layouts() -> dict[str, dict]:
         },
         "pools_trade_lbp": {
             "strategy": "composite",
+            "source_provenance_path": (
+                "pools-trade-lbp-source-provenance.json"
+            ),
             "segments": [
                 {
                     "segment_id": "pools_trade_lbp_cca",
@@ -110,7 +113,7 @@ def build_phase2_research_source_layouts() -> dict[str, dict]:
                         "lbp-cca-points-sharded.manifest.json"
                     ),
                     "shard_artifact_patterns": [
-                        "phase2-pools-trade-lbp-cca-*"
+                        "phase2-pools-trade-lbp-cca-[0-9][0-9][0-9]"
                     ],
                     "logical_sha_field": "cca_market_points_sha256",
                 },
@@ -147,6 +150,7 @@ def build_phase2_research_source_layouts() -> dict[str, dict]:
         },
         "flap": {
             "strategy": "composite",
+            "source_provenance_path": "flap-source-provenance.json",
             "segments": [
                 {
                     "segment_id": "flap_curve",
@@ -172,12 +176,18 @@ def build_phase2_research_source_layouts() -> dict[str, dict]:
                     "shard_artifact_patterns": [
                         "phase2-flap-v3-price-*"
                     ],
+                    "point_file_pattern": "flap-v3-points-*.jsonl",
+                    "report_template": (
+                        "flap-v3-report-{suffix}.json"
+                    ),
+                    "report_records_field": "market_cap_points",
                     "logical_sha_field": "v3_points_sha256",
                 },
             ],
         },
         "trench_today": {
             "strategy": "composite",
+            "source_provenance_path": "trench-source-provenance.json",
             "segments": [
                 {
                     "segment_id": "trench_curve",
