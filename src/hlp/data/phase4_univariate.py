@@ -46,9 +46,11 @@ def _decimal(value: object, *, label: str) -> Decimal:
 
 
 def _text(value: Decimal) -> str:
-    if value == 0:
-        return "0"
-    return format(value.normalize(), "f")
+    with localcontext() as context:
+        context.prec = 80
+        if value == 0:
+            return "0"
+        return format(value.normalize(context=context), "f")
 
 
 def _share(numerator: int, denominator: int) -> str | None:
@@ -74,7 +76,11 @@ def _median(values: list[Decimal]) -> Decimal | None:
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
+    with localcontext() as context:
+        context.prec = 80
+        return (
+            ordered[middle - 1] + ordered[middle]
+        ) / Decimal(2)
 
 
 def _cliffs_delta(
@@ -114,7 +120,20 @@ def _difference(
 ) -> str | None:
     if left is None or right is None:
         return None
-    return _text(left - right)
+    with localcontext() as context:
+        context.prec = 80
+        return _text(left - right)
+
+
+def _ratio_decimal(
+    numerator: int,
+    denominator: int,
+) -> Decimal | None:
+    if denominator <= 0:
+        return None
+    with localcontext() as context:
+        context.prec = 80
+        return Decimal(numerator) / Decimal(denominator)
 
 
 def _validate_parent_handoffs(
@@ -365,12 +384,8 @@ def build_phase4_univariate_report(
                 failure_tokens,
             ),
             "missing_rate_difference_winner_minus_failure": _difference(
-                None
-                if winner_tokens <= 0
-                else Decimal(winner_missing) / Decimal(winner_tokens),
-                None
-                if failure_tokens <= 0
-                else Decimal(failure_missing) / Decimal(failure_tokens),
+                _ratio_decimal(winner_missing, winner_tokens),
+                _ratio_decimal(failure_missing, failure_tokens),
             ),
         }
 
@@ -423,8 +438,9 @@ def build_phase4_univariate_report(
                 "true_rate_difference_winner_minus_failure": (
                     None
                     if winner_rate is None or failure_rate is None
-                    else _text(
-                        Decimal(winner_rate) - Decimal(failure_rate)
+                    else _difference(
+                        Decimal(winner_rate),
+                        Decimal(failure_rate),
                     )
                 ),
                 "effect_available": bool(
