@@ -1993,3 +1993,140 @@ def validate_phase2_post_selector_wave_completion(
         "coverage_promotion_performed": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def validate_phase2_post_selector_wave_launch_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable two-node post-selector launch handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-post-selector-wave-launch-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 post-selector launch receipt version changed"
+        )
+
+    control_run_id = int(row.get("post_selector_control_run_id") or 0)
+    freeze_run_id = int(row.get("approved_freeze_run_id") or 0)
+    selector_run_id = int(row.get("selector_run_id") or 0)
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(
+        control_run_id,
+        freeze_run_id,
+        selector_run_id,
+        planner_run_id,
+    ) <= 0:
+        raise ValueError(
+            "Phase-2 post-selector launch receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 post-selector launch receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 post-selector launch head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 post-selector launch coverage ledger",
+    )
+    freeze_digest = _post_fanout_artifact_digest(
+        row.get("approved_freeze_artifact_digest"),
+        label="Phase-2 approved selector freeze artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 post-selector planner artifact",
+    )
+    controls = _post_fanout_run_map(
+        row.get("node_dispatch_control_run_ids"),
+        label="Phase-2 post-selector control runs",
+        expected_nodes=PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS,
+    )
+    targets = _post_fanout_run_map(
+        row.get("target_run_ids"),
+        label="Phase-2 post-selector target runs",
+        expected_nodes=PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS,
+    )
+
+    if row.get("auto_node_ids") != list(
+        PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector launch auto-node drift"
+        )
+    if row.get("manual_promotion_node_ids") != list(
+        PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector launch promotion-hold drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 post-selector launch did not hold pools.fun promotion"
+        )
+    if int(row.get("target_runs_created", -1)) != len(
+        PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector launch target count drift"
+        )
+    if row.get("target_runs_waited_for_completion") is not False:
+        raise ValueError(
+            "Phase-2 post-selector launch unexpectedly waited for targets"
+        )
+    if row.get("selector_approval_performed") is not True:
+        raise ValueError(
+            "Phase-2 post-selector launch lost selector approval proof"
+        )
+    if row.get("selector_freeze_completed") is not True:
+        raise ValueError(
+            "Phase-2 post-selector launch lost selector freeze proof"
+        )
+    if row.get("workflow_dispatch_performed") is not True:
+        raise ValueError(
+            "Phase-2 post-selector launch lacks workflow-dispatch proof"
+        )
+    for field in (
+        "coverage_promotion_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 post-selector launch receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-post-selector-wave-launch-receipt-v1",
+        "post_selector_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "approved_freeze_run_id": freeze_run_id,
+        "approved_freeze_artifact_digest": freeze_digest,
+        "selector_run_id": selector_run_id,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "node_dispatch_control_run_ids": controls,
+        "target_run_ids": targets,
+        "auto_node_ids": list(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": len(targets),
+        "target_runs_waited_for_completion": False,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }

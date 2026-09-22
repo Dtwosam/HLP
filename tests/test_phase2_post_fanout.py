@@ -26,6 +26,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_pre_selector_wave_completion,
     validate_phase2_selector_freeze_completion,
     validate_phase2_post_selector_wave_completion,
+    validate_phase2_post_selector_wave_launch_receipt,
     validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
@@ -918,3 +919,55 @@ def test_post_selector_completion_rejects_direct_ready_drift():
             verified,
             dispatch,
         )
+
+
+
+def post_selector_launch_receipt():
+    return {
+        "version": "phase2-post-selector-wave-launch-receipt-v1",
+        "post_selector_control_run_id": 19001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "aa" * 20,
+        "canonical_coverage_ledger_sha256": "bb" * 32,
+        "approved_freeze_run_id": 19002,
+        "approved_freeze_artifact_digest": "sha256:" + "cc" * 32,
+        "selector_run_id": 19003,
+        "planner_run_id": 19004,
+        "planner_artifact_digest": "sha256:" + "dd" * 32,
+        "node_dispatch_control_run_ids": {
+            node_id: 19100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "target_run_ids": {
+            node_id: 19200 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "auto_node_ids": list(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": 2,
+        "target_runs_waited_for_completion": False,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_post_selector_launch_receipt_validates_two_node_handoff():
+    report = validate_phase2_post_selector_wave_launch_receipt(
+        post_selector_launch_receipt()
+    )
+
+    assert report["post_selector_control_run_id"] == 19001
+    assert report["target_runs_created"] == 2
+    assert report["selector_approval_performed"] is True
+    assert report["pools_fun_promotion_held_for_operator"] is True
