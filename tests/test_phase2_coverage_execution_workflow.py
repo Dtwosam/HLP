@@ -95,3 +95,14 @@ def test_phase2_execution_plan_fails_closed_on_compare_file_cap():
     assert "len(comparison_files) >= 300" in text
     assert "compare file list reached API cap" in text
     assert "rerun the dependency" in text
+
+
+
+def test_phase2_execution_plan_publishes_dispatch_artifact_identity():
+    text = WORKFLOW.read_text()
+
+    assert "id: upload" in text
+    assert "steps.upload.outputs.artifact-digest" in text
+    assert "planner_run_id: ${GITHUB_RUN_ID}" in text
+    assert "planner_artifact_digest: ${ARTIFACT_DIGEST}" in text
+    assert "node-dispatch inputs now require this exact run ID and digest" in text
