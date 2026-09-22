@@ -1,12 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from hlp.data.phase2_coverage_execution import (
     build_phase2_coverage_execution_plan,
 )
 from hlp.data.phase2_execution_dispatch import (
     PHASE2_DISPATCH_INPUT_PLAN_VERSION,
+    PHASE2_NODE_DISPATCH_REQUEST_VERSION,
     RUN_ID_INPUT_BINDINGS,
     build_phase2_dispatch_input_plan,
+    build_phase2_node_dispatch_request,
     extract_workflow_dispatch_inputs,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
@@ -236,3 +240,110 @@ def test_ledger_commit_binding_uses_promotion_run():
     assert "apply_proposed_ledger" in commit[
         "remaining_manual_inputs"
     ]
+
+
+
+def test_node_dispatch_request_authorizes_ready_no_input_node():
+    plan = build_phase2_coverage_execution_plan(
+        ledger(),
+        build_phase2_source_inventory(),
+    )
+    dispatch = build_phase2_dispatch_input_plan(
+        plan,
+        receipts([]),
+        workflow_text_by_name=workflow_texts(plan),
+    )
+    request = build_phase2_node_dispatch_request(
+        dispatch,
+        node_id="shared:quote_registry",
+        manual_inputs={},
+    )
+
+    assert request["version"] == PHASE2_NODE_DISPATCH_REQUEST_VERSION
+    assert request["workflow"] == "phase2-direct-quote-registry.yml"
+    assert request["inputs"] == {}
+    assert request["workflow_dispatch_authorized"] is True
+    assert request["canonical_ledger_write_authorized"] is False
+
+
+def test_node_dispatch_request_requires_all_manual_inputs_exactly():
+    completed = {
+        "preflight:archive_authenticated",
+        "shared:quote_registry",
+        "shared:v3_initialize",
+        "shared:v3_swap",
+        "registry:pools_fun",
+        "coverage:pools_fun",
+    }
+    plan = build_phase2_coverage_execution_plan(
+        ledger(),
+        build_phase2_source_inventory(),
+        completed_node_ids=completed,
+    )
+    dispatch = build_phase2_dispatch_input_plan(
+        plan,
+        receipts(completed),
+        workflow_text_by_name=workflow_texts(plan),
+    )
+    promote = next(
+        row
+        for row in dispatch["nodes"]
+        if row["node_id"] == "promote:pools_fun"
+    )
+
+    with pytest.raises(ValueError, match="manual input mismatch"):
+        build_phase2_node_dispatch_request(
+            dispatch,
+            node_id="promote:pools_fun",
+            manual_inputs={},
+        )
+
+    manual = {
+        name: "unit-value"
+        for name in promote["remaining_manual_inputs"]
+    }
+    request = build_phase2_node_dispatch_request(
+        dispatch,
+        node_id="promote:pools_fun",
+        manual_inputs=manual,
+    )
+    assert request["inputs"]["coverage_run_id"] == str(
+        receipts(completed)["receipts"][
+            sorted(completed).index("coverage:pools_fun")
+        ]["run_id"]
+    )
+    assert set(request["inputs"]) == set(
+        promote["all_dispatch_input_names"]
+    )
+
+
+def test_node_dispatch_request_rejects_approval_gated_nodes():
+    dispatch = {
+        "version": PHASE2_DISPATCH_INPUT_PLAN_VERSION,
+        "run_id_inputs_generated_from_verified_receipts": True,
+        "non_run_inputs_left_explicit": True,
+        "workflow_dispatch_performed": False,
+        "nodes": [
+            {
+                "node_id": "ledger_commit:pools_fun",
+                "workflow": "phase2-source-coverage-ledger-commit.yml",
+                "status": "ledger_commit_approval_required",
+                "run_id_inputs": {"promotion_run_id": "123"},
+                "remaining_manual_inputs": [
+                    "apply_proposed_ledger",
+                ],
+                "all_dispatch_input_names": [
+                    "promotion_run_id",
+                    "apply_proposed_ledger",
+                ],
+                "requires_archive_secret": False,
+                "requires_explicit_approval": True,
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="not ready_to_dispatch"):
+        build_phase2_node_dispatch_request(
+            dispatch,
+            node_id="ledger_commit:pools_fun",
+            manual_inputs={"apply_proposed_ledger": True},
+        )
