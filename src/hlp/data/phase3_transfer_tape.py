@@ -209,6 +209,11 @@ def build_phase3_transfer_token_coverage(
         "first_code_block": first_code,
         "deployment_boundary_verified": True,
         "search_to_block": snapshot,
+        "initial_mint_block": int(first_positive["block_number"]),
+        "initial_mint_transaction_index": (
+            first_positive.get("transaction_index")
+        ),
+        "initial_mint_log_index": int(first_positive["log_index"]),
         "continuous": complete,
         "missing_ranges": [],
         "raw_transfer_tape_sha256": _sha256(
@@ -313,6 +318,19 @@ def materialize_phase3_canonical_transfer_tape(
         ):
             raise ValueError(
                 f"Phase-3 transfer deployment coverage drift: {token}"
+            )
+        mint_block = int(row.get("initial_mint_block", -1))
+        raw_mint_tx = row.get("initial_mint_transaction_index")
+        mint_tx = -1 if raw_mint_tx is None else int(raw_mint_tx)
+        mint_log = int(row.get("initial_mint_log_index", -1))
+        if (
+            mint_block < first_code
+            or mint_block > snapshot
+            or mint_tx < -1
+            or mint_log < 0
+        ):
+            raise ValueError(
+                f"Phase-3 transfer initial-mint boundary drift: {token}"
             )
         if row.get("deployment_boundary_verified") is not True:
             raise ValueError(

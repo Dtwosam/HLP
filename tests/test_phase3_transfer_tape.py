@@ -57,6 +57,9 @@ def test_transfer_adapter_and_token_coverage_require_initial_mint():
     )
     assert coverage["version"] == PHASE3_TRANSFER_TOKEN_COVERAGE_VERSION
     assert coverage["canonical_transfer_rows"] == 2
+    assert coverage["initial_mint_block"] == 1
+    assert coverage["initial_mint_transaction_index"] == 0
+    assert coverage["initial_mint_log_index"] == 0
     assert coverage["initial_mint_coverage_complete"] is True
     assert coverage["transfer_coverage_complete"] is True
 
@@ -156,4 +159,50 @@ def test_transfer_coverage_rejects_scan_start_after_deployment():
             deployment_boundary_verified=True,
             raw_transfer_tape_sha256=SHA,
             historical_event_scan_complete=True,
+        )
+
+
+
+def test_transfer_coverage_records_mint_after_deployment():
+    rows = adapt_erc20_transfers_to_phase3([
+        decoded(12, ZERO, A, 1000),
+    ])
+    coverage = build_phase3_transfer_token_coverage(
+        TOKEN,
+        rows,
+        snapshot_head_block=100,
+        search_from_block=5,
+        first_code_block=10,
+        deployment_boundary_verified=True,
+        raw_transfer_tape_sha256=SHA,
+        historical_event_scan_complete=True,
+    )
+    assert coverage["first_code_block"] == 10
+    assert coverage["initial_mint_block"] == 12
+
+
+def test_canonical_transfer_tape_rejects_mint_before_deployment(tmp_path):
+    import pytest
+
+    rows = adapt_erc20_transfers_to_phase3([
+        decoded(9, ZERO, A, 1000),
+    ])
+    coverage = build_phase3_transfer_token_coverage(
+        TOKEN,
+        rows,
+        snapshot_head_block=100,
+        search_from_block=1,
+        first_code_block=1,
+        deployment_boundary_verified=True,
+        raw_transfer_tape_sha256=SHA,
+        historical_event_scan_complete=True,
+    )
+    coverage["first_code_block"] = 10
+    with pytest.raises(ValueError, match="initial-mint boundary drift"):
+        materialize_phase3_canonical_transfer_tape(
+            [{"token": TOKEN, "universe_status": "eligible"}],
+            {TOKEN: rows},
+            [coverage],
+            feature_entry_handoff=entry(),
+            output=tmp_path / "bad-transfers.jsonl",
         )
