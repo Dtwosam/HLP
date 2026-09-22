@@ -14,6 +14,21 @@ PHASE2_INITIAL_COMPLETE_SOURCE_IDS = (
     "pons_v1",
     "pons_v2",
 )
+PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS = (
+    "shared:v3_pool_created",
+    "shared:v3_initialize",
+    "shared:v4_initialize",
+    "shared:v3_swap",
+    "shared:v4_swap",
+    "shared:supply_delta",
+    "registry:pools_fun",
+    "registry:pools_trade_launcher",
+    "registry:flap",
+    "registry:trench",
+    "coverage:hood_fun_current",
+    "derive:hood_fun_previous_semantics",
+    "registry:noxa",
+)
 
 
 def validate_phase2_first_wave_launch(
@@ -138,4 +153,115 @@ def validate_phase2_first_wave_launch(
         "approval_gated_nodes_present": False,
         "canonical_ledger_write_authorized": False,
         "first_wave_launch_authorized": True,
+    }
+
+
+
+def validate_phase2_first_wave_completion(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+) -> dict:
+    """Prove both initial target runs were credited and fan-out unlocked."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 first-wave completion changed canonical source state"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 first-wave completion unexpectedly changed source count"
+        )
+
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    if not isinstance(completed, list) or not isinstance(ready, list):
+        raise ValueError(
+            "Phase-2 first-wave completion plan lacks node-state lists"
+        )
+    missing_completed = sorted(
+        set(PHASE2_FIRST_WAVE_NODE_IDS) - set(completed)
+    )
+    if missing_completed:
+        raise ValueError(
+            f"Phase-2 first-wave nodes were not credited: {missing_completed}"
+        )
+    still_ready = sorted(
+        set(PHASE2_FIRST_WAVE_NODE_IDS) & set(ready)
+    )
+    if still_ready:
+        raise ValueError(
+            f"Phase-2 credited first-wave nodes remain ready: {still_ready}"
+        )
+
+    missing_fanout = sorted(
+        set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS) - set(ready)
+    )
+    if missing_fanout:
+        raise ValueError(
+            f"Phase-2 first wave did not unlock expected archive fan-out: "
+            f"{missing_fanout}"
+        )
+
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError(
+            "Phase-2 first-wave receipts lack verified run lineage"
+        )
+    receipt_completed = verified.get("completed_node_ids")
+    if not isinstance(receipt_completed, list):
+        raise ValueError(
+            "Phase-2 first-wave verified receipt node list is missing"
+        )
+    missing_receipts = sorted(
+        set(PHASE2_FIRST_WAVE_NODE_IDS) - set(receipt_completed)
+    )
+    if missing_receipts:
+        raise ValueError(
+            f"Phase-2 first-wave target receipts are missing: "
+            f"{missing_receipts}"
+        )
+
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    control_receipts = verified.get("node_dispatch_receipts_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 2
+        or len(set(control_ids)) != 2
+    ):
+        raise ValueError(
+            "Phase-2 first-wave completion requires exactly two "
+            "node-dispatch control runs"
+        )
+    if not isinstance(control_receipts, list):
+        raise ValueError(
+            "Phase-2 first-wave dispatch receipt list is missing"
+        )
+    receipt_nodes = sorted(
+        str(row.get("node_id") or "")
+        for row in control_receipts
+        if isinstance(row, Mapping)
+    )
+    if receipt_nodes != sorted(PHASE2_FIRST_WAVE_NODE_IDS):
+        raise ValueError(
+            "Phase-2 first-wave dispatch receipts do not match first-wave "
+            f"nodes: {receipt_nodes}"
+        )
+
+    return {
+        "version": "phase2-first-wave-completion-v1",
+        "first_wave_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
+        "node_dispatch_control_run_ids": sorted(
+            int(value) for value in control_ids
+        ),
+        "expected_archive_fanout_node_ids": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+        "first_wave_targets_credited": True,
+        "archive_fanout_unlocked": True,
+        "canonical_coverage_sources_unchanged": True,
+        "canonical_ledger_write_authorized": False,
     }

@@ -4,7 +4,9 @@ import pytest
 
 from hlp.data.phase2_first_wave import (
     PHASE2_FIRST_WAVE_LAUNCH_VERSION,
+    PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS,
     PHASE2_FIRST_WAVE_NODE_IDS,
+    validate_phase2_first_wave_completion,
     validate_phase2_first_wave_launch,
 )
 
@@ -109,3 +111,64 @@ def test_first_wave_rejects_archive_secret_contract_drift():
     dispatch["nodes"][0]["requires_archive_secret"] = False
     with pytest.raises(ValueError, match="archive-secret contract drift"):
         validate_phase2_first_wave_launch(execution, dispatch)
+
+
+
+def completed_plans():
+    execution = {
+        "canonical_complete_source_ids": ["pons_v1", "pons_v2"],
+        "complete_sources": 2,
+        "completed_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
+        "ready_to_dispatch_node_ids": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+    }
+    verified = {
+        "all_runs_current_or_ledger_only_ancestors": True,
+        "completed_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
+        "node_dispatch_run_ids_consumed": [501, 502],
+        "node_dispatch_receipts_consumed": [
+            {
+                "control_run_id": 501,
+                "node_id": "preflight:archive_authenticated",
+                "target_run_id": 601,
+            },
+            {
+                "control_run_id": 502,
+                "node_id": "shared:quote_registry",
+                "target_run_id": 602,
+            },
+        ],
+    }
+    return execution, verified
+
+
+def test_first_wave_completion_requires_credited_targets_and_fanout():
+    execution, verified = completed_plans()
+    report = validate_phase2_first_wave_completion(
+        execution,
+        verified,
+    )
+
+    assert report["first_wave_targets_credited"] is True
+    assert report["archive_fanout_unlocked"] is True
+    assert report["canonical_coverage_sources_unchanged"] is True
+    assert report["canonical_ledger_write_authorized"] is False
+
+
+def test_first_wave_completion_rejects_missing_archive_fanout():
+    execution, verified = completed_plans()
+    execution["ready_to_dispatch_node_ids"].remove(
+        "shared:v3_initialize"
+    )
+    with pytest.raises(ValueError, match="archive fan-out"):
+        validate_phase2_first_wave_completion(execution, verified)
+
+
+def test_first_wave_completion_rejects_wrong_dispatch_receipts():
+    execution, verified = completed_plans()
+    verified["node_dispatch_receipts_consumed"][1]["node_id"] = (
+        "registry:pools_fun"
+    )
+    with pytest.raises(ValueError, match="do not match first-wave"):
+        validate_phase2_first_wave_completion(execution, verified)
