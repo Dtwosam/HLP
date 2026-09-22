@@ -649,9 +649,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   against registry dtype and missingness policy, preserves per-family
   data-quality flags, consumes no outcome rows, and explicitly publishes
   `final_checkpoint_claimed=false`. No
-  `hlp-v1-phase3-feature-store` checkpoint is claimed yet; creator/early
-  wallet, relationship, liquidity and absorption families still remain to be
-  implemented and coverage-tested.
+  `hlp-v1-phase3-feature-store` checkpoint is claimed yet. A separate
+  fail-closed finalizer is now prepared: it rebuilds the exact staging and
+  coverage handoffs, requires every currently registered family and feature,
+  revalidates row types, missingness, data-quality coverage and causal flags,
+  and only an actually executed successful finalizer may emit
+  `final_checkpoint_claimed=true`. The existence of that workflow is not a
+  checkpoint claim. Creator/early-wallet, relationship, liquidity and
+  absorption families remain deferred until their required historical inputs
+  can be represented without weak proxies or future leakage.
 
 
 ### Live/current chain access
