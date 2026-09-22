@@ -633,3 +633,35 @@ def test_detector_freeze_rejects_unknown_candidate_and_outcome_contamination(
             selected_candidate_id="chosen",
             output=tmp_path / "contaminated.jsonl",
         )
+
+
+
+def test_candidate_research_preserves_exact_event_positions(tmp_path):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    output = tmp_path / "candidate-positions.jsonl"
+    manifest, _ = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [candidate("positioned", "0.4", "0.25")],
+        geometry_summary=geometry_summary,
+        output=output,
+    )
+    import json
+    event = json.loads(output.read_text())
+    assert manifest["records"] == 1
+    assert event["peak_block"] == 2
+    assert event["peak_transaction_index"] == 0
+    assert event["peak_log_index"] == 0
+    assert event["threshold_cross_block"] == 3
+    assert event["threshold_cross_transaction_index"] == 0
+    assert event["threshold_cross_log_index"] == 0
+    assert event["trough_block"] == 4
+    assert event["trough_transaction_index"] == 0
+    assert event["trough_log_index"] == 0
+    assert event["confirmation_block"] == 5
+    assert event["confirmation_transaction_index"] == 0
+    assert event["confirmation_log_index"] == 0

@@ -880,15 +880,29 @@ def materialize_phase2_dump_candidate_research(
                     continue
                 state["threshold"] = {
                     "block_number": event[0],
+                    "transaction_index": (
+                        None if event[1] == -1 else event[1]
+                    ),
+                    "log_index": event[2],
                 }
                 state["peak"] = {
                     "block_number": int(
                         row["trailing_peak_block"]
                     ),
+                    "transaction_index": row[
+                        "trailing_peak_transaction_index"
+                    ],
+                    "log_index": int(
+                        row["trailing_peak_log_index"]
+                    ),
                     "market_cap_proxy_usd": peak_value,
                 }
                 state["trough"] = {
                     "block_number": event[0],
+                    "transaction_index": (
+                        None if event[1] == -1 else event[1]
+                    ),
+                    "log_index": event[2],
                     "market_cap_proxy_usd": value,
                 }
                 continue
@@ -898,6 +912,10 @@ def materialize_phase2_dump_candidate_research(
             if value < trough_value:
                 state["trough"] = {
                     "block_number": event[0],
+                    "transaction_index": (
+                        None if event[1] == -1 else event[1]
+                    ),
+                    "log_index": event[2],
                     "market_cap_proxy_usd": value,
                 }
                 continue
@@ -908,6 +926,10 @@ def materialize_phase2_dump_candidate_research(
             if value >= confirmation_level:
                 state["confirmation"] = {
                     "block_number": event[0],
+                    "transaction_index": (
+                        None if event[1] == -1 else event[1]
+                    ),
+                    "log_index": event[2],
                     "market_cap_proxy_usd": value,
                 }
 
@@ -967,8 +989,20 @@ def materialize_phase2_dump_candidate_research(
                     "threshold_cross_block": int(
                         threshold["block_number"]
                     ),
+                    "threshold_cross_transaction_index": threshold[
+                        "transaction_index"
+                    ],
+                    "threshold_cross_log_index": int(
+                        threshold["log_index"]
+                    ),
                     "trough_block": int(
                         trough["block_number"]
+                    ),
+                    "trough_transaction_index": trough[
+                        "transaction_index"
+                    ],
+                    "trough_log_index": int(
+                        trough["log_index"]
                     ),
                     "point_in_time_confirmed": False,
                     "research_candidate_only": True,
@@ -996,20 +1030,42 @@ def materialize_phase2_dump_candidate_research(
                     "token": token,
                     "candidate_status": status,
                     "peak_block": int(peak["block_number"]),
+                    "peak_transaction_index": peak[
+                        "transaction_index"
+                    ],
+                    "peak_log_index": int(peak["log_index"]),
                     "peak_market_cap_proxy_usd": _decimal_text(
                         peak_value
                     ),
                     "threshold_cross_block": int(
                         threshold["block_number"]
                     ),
+                    "threshold_cross_transaction_index": threshold[
+                        "transaction_index"
+                    ],
+                    "threshold_cross_log_index": int(
+                        threshold["log_index"]
+                    ),
                     "trough_block": int(
                         trough["block_number"]
+                    ),
+                    "trough_transaction_index": trough[
+                        "transaction_index"
+                    ],
+                    "trough_log_index": int(
+                        trough["log_index"]
                     ),
                     "trough_market_cap_proxy_usd": _decimal_text(
                         trough_value
                     ),
                     "confirmation_block": int(
                         confirmation["block_number"]
+                    ),
+                    "confirmation_transaction_index": confirmation[
+                        "transaction_index"
+                    ],
+                    "confirmation_log_index": int(
+                        confirmation["log_index"]
                     ),
                     "confirmation_market_cap_proxy_usd": _decimal_text(
                         confirmation_value
@@ -1381,6 +1437,8 @@ def build_phase2_dump_candidate_diagnostics(
                 row["token"],
                 row["candidate_status"],
                 row.get("confirmation_block"),
+                row.get("confirmation_transaction_index"),
+                row.get("confirmation_log_index"),
             )
             for row in sorted(rows, key=lambda value: value["token"])
         )
