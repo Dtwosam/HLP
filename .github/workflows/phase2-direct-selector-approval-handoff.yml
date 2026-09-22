@@ -487,6 +487,9 @@ jobs:
 
           output = {
               **approval,
+              "approval_handoff_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
               "pre_selector_completion_run_id": completion_run_id,
               "pre_selector_completion_artifact_digest": (
                   actual_completion_digest

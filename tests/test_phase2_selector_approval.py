@@ -4,6 +4,7 @@ from hlp.data.market_quality import MARKET_SELECTION_CANDIDATE_VERSION
 from hlp.data.phase2_selector_approval import (
     PHASE2_SELECTOR_APPROVAL_HANDOFF_VERSION,
     build_phase2_selector_approval_handoff,
+    validate_phase2_selector_approval_handoff_receipt,
 )
 
 
@@ -137,3 +138,51 @@ def test_selector_approval_handoff_requires_explicit_freeze_step():
     row["remaining_steps"] = ["complete direct source historical coverage"]
     with pytest.raises(ValueError, match="explicit freeze review"):
         build(row=row)
+
+
+
+def approval_receipt():
+    row = build()
+    row.update({
+        "approval_handoff_control_run_id": 501,
+        "pre_selector_completion_run_id": 502,
+        "pre_selector_completion_artifact_digest": "sha256:" + "11" * 32,
+        "planner_run_id": 503,
+        "planner_artifact_digest": "sha256:" + "22" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "33" * 20,
+        "canonical_coverage_ledger_sha256": "44" * 32,
+    })
+    return row
+
+
+def test_selector_approval_handoff_receipt_binds_control_and_planner():
+    report = validate_phase2_selector_approval_handoff_receipt(
+        approval_receipt()
+    )
+
+    assert report["approval_handoff_control_run_id"] == 501
+    assert report["pre_selector_completion_run_id"] == 502
+    assert report["planner_run_id"] == 503
+    assert report["selector_freeze_approval_value_supplied"] is False
+    assert report["selector_workflow_dispatched"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("approval_handoff_control_run_id", 0, "control run ID"),
+        ("selector_freeze_approval_value_supplied", True, "already supplies"),
+        ("selector_workflow_dispatched", True, "read-only field"),
+        ("approval_required", False, "approval requirement"),
+    ],
+)
+def test_selector_approval_handoff_receipt_rejects_tampering(
+    field,
+    value,
+    match,
+):
+    row = approval_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_selector_approval_handoff_receipt(row)

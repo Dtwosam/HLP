@@ -62,3 +62,11 @@ def test_selector_approval_handoff_never_approves_or_dispatches():
     assert "selector_workflow_dispatched: false" in text
     assert "canonical_coverage_ledger_mutated: false" in text
     assert "/dispatches" not in text
+
+
+
+def test_selector_approval_handoff_artifact_binds_control_run_identity():
+    text = WORKFLOW.read_text()
+
+    assert '"approval_handoff_control_run_id": int(' in text
+    assert 'os.environ["GITHUB_RUN_ID"]' in text

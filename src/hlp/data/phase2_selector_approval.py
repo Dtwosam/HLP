@@ -257,3 +257,130 @@ def build_phase2_selector_approval_handoff(
         "canonical_coverage_ledger_mutated": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def _commit_sha(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if len(text) != 40:
+        raise ValueError(f"{label} must be a 40-char commit SHA")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def validate_phase2_selector_approval_handoff_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable read-only handoff before human approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != PHASE2_SELECTOR_APPROVAL_HANDOFF_VERSION:
+        raise ValueError("direct selector approval handoff version changed")
+
+    control_run_id = _positive_run_id(
+        row.get("approval_handoff_control_run_id"),
+        label="selector approval handoff control run ID",
+    )
+    pre_selector_run_id = _positive_run_id(
+        row.get("pre_selector_completion_run_id"),
+        label="pre-selector completion run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="selector approval planner run ID",
+    )
+    pre_selector_digest = _artifact_digest(
+        row.get("pre_selector_completion_artifact_digest"),
+        label="pre-selector completion artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="selector approval planner artifact digest",
+    )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("selector approval handoff execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="selector approval handoff execution head",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="selector approval handoff coverage ledger",
+    )
+
+    if str(row.get("selector_freeze_workflow") or "") != SELECTOR_FREEZE_WORKFLOW:
+        raise ValueError("selector approval handoff workflow identity drift")
+    evidence_run_id = _positive_run_id(
+        row.get("evidence_run_id"),
+        label="selector approval evidence run ID",
+    )
+    evidence_artifact_digest = _artifact_digest(
+        row.get("evidence_artifact_digest"),
+        label="selector approval evidence artifact digest",
+    )
+    evidence_handoff_sha = _sha256(
+        row.get("evidence_handoff_sha256"),
+        label="selector approval evidence handoff",
+    )
+
+    generated = row.get("selector_freeze_generated_inputs")
+    if not isinstance(generated, Mapping):
+        raise ValueError("selector approval generated input map is missing")
+    expected_generated = {
+        "evidence_run_id": str(evidence_run_id),
+        "expected_artifact_digest": evidence_artifact_digest,
+        "expected_handoff_sha256": evidence_handoff_sha,
+    }
+    if dict(generated) != expected_generated:
+        raise ValueError("selector approval generated input map drift")
+
+    if str(row.get("selector_freeze_approval_input") or "") != (
+        "freeze_active_quote_liquidity_causal_v1"
+    ):
+        raise ValueError("selector approval boolean input identity drift")
+    if row.get("selector_freeze_approval_value_supplied") is not False:
+        raise ValueError("selector approval handoff already supplies approval")
+    if row.get("approval_required") is not True:
+        raise ValueError("selector approval handoff lost approval requirement")
+    if row.get("selector_freeze_ready_from_evidence") is not False:
+        raise ValueError("selector approval handoff claims evidence-only readiness")
+
+    for field in (
+        "selector_approval_performed",
+        "selector_workflow_dispatched",
+        "coverage_promotion_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"selector approval handoff violates read-only field {field}"
+            )
+
+    return {
+        **row,
+        "approval_handoff_control_run_id": control_run_id,
+        "pre_selector_completion_run_id": pre_selector_run_id,
+        "pre_selector_completion_artifact_digest": pre_selector_digest,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "selector_freeze_workflow": SELECTOR_FREEZE_WORKFLOW,
+        "evidence_run_id": evidence_run_id,
+        "evidence_artifact_digest": evidence_artifact_digest,
+        "evidence_handoff_sha256": evidence_handoff_sha,
+        "selector_freeze_generated_inputs": expected_generated,
+        "selector_freeze_approval_value_supplied": False,
+        "approval_required": True,
+        "selector_approval_performed": False,
+        "selector_workflow_dispatched": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
