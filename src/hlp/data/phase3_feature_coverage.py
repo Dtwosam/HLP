@@ -20,6 +20,9 @@ from hlp.data.phase3_feature_registry import (
 from hlp.data.phase3_holder_features import (
     PHASE3_HOLDER_FEATURE_HANDOFF_VERSION,
 )
+from hlp.data.phase3_lifecycle_features import (
+    PHASE3_LIFECYCLE_FEATURE_HANDOFF_VERSION,
+)
 from hlp.data.phase3_price_features import (
     PHASE3_PRICE_FEATURE_HANDOFF_VERSION,
 )
@@ -54,6 +57,10 @@ FAMILY_HANDOFF_CONTRACTS = {
     "holder_state": (
         PHASE3_HOLDER_FEATURE_HANDOFF_VERSION,
         "phase3_holder_features_ready",
+    ),
+    "lifecycle_age": (
+        PHASE3_LIFECYCLE_FEATURE_HANDOFF_VERSION,
+        "phase3_lifecycle_features_ready",
     ),
     "participant_retention": (
         PHASE3_RETENTION_FEATURE_HANDOFF_VERSION,

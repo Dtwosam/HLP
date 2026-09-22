@@ -177,6 +177,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
     assert set(FAMILY_HANDOFF_CONTRACTS) == {
         "chain_regime",
         "holder_state",
+        "lifecycle_age",
         "participant_retention",
         "price_drawdown",
         "supply_redistribution",
@@ -229,4 +230,14 @@ def test_feature_coverage_contract_supports_trade_size_flow():
     assert FAMILY_HANDOFF_CONTRACTS["trade_size_flow"] == (
         "phase3-trade-size-flow-features-handoff-v1",
         "phase3_trade_size_flow_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_lifecycle_age():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["lifecycle_age"] == (
+        "phase3-lifecycle-age-features-handoff-v1",
+        "phase3_lifecycle_features_ready",
     )
