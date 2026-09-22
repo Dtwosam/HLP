@@ -634,7 +634,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   frozen-universe LBP source-coverage workflow is prepared and tested. This is
   adapter/readiness completion only; actual canonical trade coverage remains
   unclaimed until those workflows and the other source backfills are executed
-  successfully. Holder and supply-redistribution features
+  successfully. The canonical Phase-3 trade-tape workflow is now also prepared:
+  it accepts one SHA-bound JSON descriptor covering the exact 14-source
+  inventory, verifies every artifact digest, canonical-trade manifest and
+  source-coverage row, requires all 14 `trade_coverage_complete=true`, then
+  merges/deduplicates them into the immutable
+  `phase3-canonical-trade-tape` artifact and compact handoff consumed by
+  trade-flow, participant-retention and trade-size-flow features. No canonical
+  trade tape is claimed yet because those 14 source-coverage artifacts have not
+  all been executed and accepted. Holder and supply-redistribution features
   share a complete guarded transfer-acquisition architecture: every eligible
   token's first code block is binary-searched and boundary-verified against
   archive `eth_getCode`, transfer batches begin at or before the earliest
