@@ -45,7 +45,8 @@ def test_archive_fanout_completion_reuses_all_15_dispatcher_receipts():
     text = WORKFLOW.read_text()
 
     assert "validate_phase2_first_wave_launch_receipt" in text
-    assert "exactly 15 unique dispatcher control runs" in text
+    assert "fan-out completion requires exactly 15 unique" in text
+    assert "dispatcher control runs" in text
     assert "node_dispatch_run_ids_json" in text
     assert "validate_phase2_archive_fanout_completion" in text
     assert "phase2-archive-fanout-completion-receipt.json" in text

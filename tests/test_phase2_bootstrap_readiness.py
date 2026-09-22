@@ -63,6 +63,7 @@ def test_strip_automatic_triggers_preserves_manual_contract_and_jobs():
 
 def test_bootstrap_readiness_accepts_exact_surface_and_planner_variant():
     expected, bootstrap = surfaces()
+    assert "phase2-archive-fanout-completion.yml" in expected
     report = evaluate_phase2_bootstrap_readiness(
         expected,
         bootstrap,
