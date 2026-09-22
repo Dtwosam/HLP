@@ -538,7 +538,12 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `ready_to_dispatch` node through GitHub's workflow-dispatch API. It records
   the returned target run ID immediately and never authorizes selector/manual
   approval gates or canonical-ledger writes; those remain separate explicit
-  workflows.
+  workflows. Subsequent planner refreshes may consume the dispatcher workflow
+  run IDs directly through `node_dispatch_run_ids_json`: the planner downloads
+  each immutable dispatch receipt, reconstructs the node-to-target-run mapping,
+  and independently re-validates the target run and branch lineage. The exact
+  operator cycle and its two explicit approval stops are frozen in
+  `docs/phase2-execution-runbook.md`.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
