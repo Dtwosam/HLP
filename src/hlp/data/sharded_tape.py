@@ -107,6 +107,32 @@ def _field_value_matcher(
     return matches
 
 
+def iter_validated_jsonl(
+    path: Path,
+    manifest_path: Path,
+) -> Iterator[dict]:
+    """Stream every row while validating the complete canonical JSONL tape."""
+    manifest = json.loads(manifest_path.read_text())
+    records = 0
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if not raw.strip():
+                continue
+            records += 1
+            yield json.loads(raw)
+
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+
+
 def iter_validated_jsonl_matching_field_values(
     path: Path,
     manifest_path: Path,

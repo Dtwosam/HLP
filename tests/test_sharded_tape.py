@@ -268,3 +268,26 @@ def test_validate_shard_block_coverage_rejects_end_overshoot():
             start_block=10,
             end_block=30,
         )
+
+
+
+def test_iter_validated_jsonl_streams_all_rows_and_validates_sha(tmp_path):
+    from hlp.data.sharded_tape import iter_validated_jsonl
+    from hlp.data.snapshot import write_jsonl_snapshot
+
+    path = tmp_path / "all.jsonl"
+    write_jsonl_snapshot(
+        [{"a": 1}, {"a": 2}],
+        output=path,
+        provenance={"source": "unit"},
+    )
+    manifest = path.with_suffix(".jsonl.manifest.json")
+
+    assert list(iter_validated_jsonl(path, manifest)) == [
+        {"a": 1},
+        {"a": 2},
+    ]
+
+    path.write_text('{"a":1}\n{"a":3}\n')
+    with pytest.raises(ValueError, match="JSONL SHA changed"):
+        list(iter_validated_jsonl(path, manifest))
