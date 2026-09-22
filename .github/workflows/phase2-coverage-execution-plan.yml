@@ -8,31 +8,6 @@ on:
         required: false
         default: '{}'
         type: string
-  push:
-    branches:
-      - phase1/data-acquisition-spike
-    paths:
-      - '.github/phase2-source-coverage.json'
-      - '.github/workflows/phase2-coverage-execution-plan.yml'
-      - '.github/workflows/phase2-archive-rpc-preflight.yml'
-      - '.github/workflows/phase2-source-coverage-promotion.yml'
-      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
-      - 'src/hlp/data/phase2_coverage_execution.py'
-      - 'src/hlp/data/phase2_coverage.py'
-      - 'src/hlp/data/phase2_sources.py'
-      - 'tests/test_phase2_coverage_execution.py'
-  pull_request:
-    paths:
-      - '.github/phase2-source-coverage.json'
-      - '.github/workflows/phase2-coverage-execution-plan.yml'
-      - '.github/workflows/phase2-archive-rpc-preflight.yml'
-      - '.github/workflows/phase2-source-coverage-promotion.yml'
-      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
-      - 'src/hlp/data/phase2_coverage_execution.py'
-      - 'src/hlp/data/phase2_coverage.py'
-      - 'src/hlp/data/phase2_sources.py'
-      - 'tests/test_phase2_coverage_execution.py'
-
 permissions:
   actions: read
   contents: read
