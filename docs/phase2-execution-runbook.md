@@ -98,9 +98,22 @@ canonical coverage-ledger SHA, target workflow's default-branch
 `workflow_dispatch` interface and planner authorization before making one
 dispatch API call.
 
-Each successful dispatcher run emits
-`phase2-execution-node-dispatch.json` containing the returned target workflow
-run ID. The dispatcher does not wait for that target workflow to finish.
+Immediately after GitHub returns a target run ID, the dispatcher writes
+`phase2-execution-node-dispatch-attempt.json`. That attempt artifact is
+uploaded even when later target-run verification fails. A successful control
+run additionally emits `phase2-execution-node-dispatch.json`, whose SHA-bound
+final receipt links back to the attempt.
+
+Before creating a target run, the dispatcher scans prior same-HEAD dispatcher
+artifacts. Reusing the same planner run for the same node is rejected when a
+prior attempt or final receipt already proves that GitHub created a target run.
+This prevents accidental double launches of expensive historical jobs.
+
+A deliberate retry is still possible: generate a **fresh planner run** after
+the failed target/control state has been reviewed, then dispatch the node from
+that new planner identity.
+
+The dispatcher does not wait for the target workflow to finish.
 
 ## 3. Wait for target success, then refresh the planner
 

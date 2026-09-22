@@ -536,9 +536,14 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   canonical-ledger SHA to still match the execution branch, re-check the target
   workflow's default-branch manual interface, and dispatch exactly one
   `ready_to_dispatch` node through GitHub's workflow-dispatch API. It records
-  the returned target run ID immediately and never authorizes selector/manual
-  approval gates or canonical-ledger writes; those remain separate explicit
-  workflows. Subsequent planner refreshes may consume the dispatcher workflow
+  the returned target run ID immediately in an immutable dispatch-attempt
+  artifact before later target verification, then SHA-binds the successful
+  final receipt back to that attempt. Before dispatch it scans prior same-HEAD
+  dispatcher artifacts and refuses to launch the same planner/node twice; a
+  deliberate retry therefore requires a fresh planner identity. It never
+  authorizes selector/manual approval gates or canonical-ledger writes; those
+  remain separate explicit workflows. Subsequent planner refreshes may consume
+  the dispatcher workflow
   run IDs directly through `node_dispatch_run_ids_json`: the planner downloads
   each immutable dispatch receipt, reconstructs the node-to-target-run mapping,
   and independently re-validates the target run and branch lineage. The exact
