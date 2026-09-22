@@ -15,6 +15,8 @@ on:
       - '.github/phase2-source-coverage.json'
       - '.github/workflows/phase2-coverage-execution-plan.yml'
       - '.github/workflows/phase2-archive-rpc-preflight.yml'
+      - '.github/workflows/phase2-source-coverage-promotion.yml'
+      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
       - 'src/hlp/data/phase2_coverage_execution.py'
       - 'src/hlp/data/phase2_coverage.py'
       - 'src/hlp/data/phase2_sources.py'
@@ -24,6 +26,8 @@ on:
       - '.github/phase2-source-coverage.json'
       - '.github/workflows/phase2-coverage-execution-plan.yml'
       - '.github/workflows/phase2-archive-rpc-preflight.yml'
+      - '.github/workflows/phase2-source-coverage-promotion.yml'
+      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
       - 'src/hlp/data/phase2_coverage_execution.py'
       - 'src/hlp/data/phase2_coverage.py'
       - 'src/hlp/data/phase2_sources.py'
@@ -111,6 +115,9 @@ jobs:
               "awaiting_explicit_approval_node_ids"
           ]
           manual = plan["manual_ledger_commit_node_ids"]
+          ledger_approvals = plan[
+              "ledger_commit_approval_node_ids"
+          ]
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(
@@ -130,6 +137,9 @@ jobs:
                   f"approvals={len(approvals)}\n"
               )
               handle.write(f"manual={len(manual)}\n")
+              handle.write(
+                  f"ledger_approvals={len(ledger_approvals)}\n"
+              )
 
           print(json.dumps({
               "complete_sources": plan["complete_sources"],
@@ -139,8 +149,11 @@ jobs:
               "ready_without_archive_secret_node_ids": ready_public,
               "awaiting_explicit_approval_node_ids": approvals,
               "manual_ledger_commit_node_ids": manual,
+              "ledger_commit_approval_node_ids": ledger_approvals,
               "ledger_promotion_serialized": True,
               "canonical_ledger_mutation_automatic": False,
+              "canonical_ledger_commit_workflow_available": True,
+              "ledger_commit_requires_explicit_approval": True,
               "workflow_dispatch_performed": False,
           }, sort_keys=True))
 
@@ -179,12 +192,18 @@ jobs:
                       f"{len(manual)}\n"
                   )
                   handle.write(
+                      f"- approved ledger-commit gates ready: "
+                      f"{len(ledger_approvals)}\n"
+                  )
+                  handle.write(
                       "- coverage acquisition may run in parallel; "
                       "canonical ledger promotion is serialized\n"
                   )
                   handle.write(
                       "- this planner does not dispatch workflows or mutate "
-                      "the canonical ledger\n"
+                      "the canonical ledger; the separate ledger-commit "
+                      "workflow requires explicit approval and exact SHA "
+                      "lineage\n"
                   )
           PY
 
