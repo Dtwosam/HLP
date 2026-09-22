@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Iterable
@@ -10,6 +11,8 @@ from hlp.config import normalize_address
 from hlp.data.sharded_tape import (
     iter_sharded_jsonl_matching_field_values,
     iter_validated_jsonl_matching_field_values,
+    validate_shard_block_coverage,
+    write_virtual_jsonl_manifest,
 )
 from hlp.data.snapshot import iter_jsonl_snapshot
 
@@ -218,3 +221,187 @@ def materialize_sharded_jsonl_research_subset(
         "dump_threshold_frozen": False,
         "outcome_labels_computed": False,
     }
+
+
+
+def normalize_flat_sharded_research_manifest(
+    *,
+    component_id: str,
+    flat_manifest_path: Path,
+    output_manifest_path: Path,
+    path_name: str,
+    expected_logical_sha256: str,
+) -> dict:
+    """Convert a legacy flat shard manifest into the canonical virtual format."""
+
+    component_id = str(component_id)
+    expected_sha = _sha256(
+        expected_logical_sha256,
+        label=f"{component_id} flat logical input",
+    )
+    flat = json.loads(flat_manifest_path.read_text())
+    actual_sha = _sha256(
+        flat.get("sha256"),
+        label=f"{component_id} flat manifest",
+    )
+    if actual_sha != expected_sha:
+        raise ValueError(
+            f"{component_id} flat research logical tape SHA drift"
+        )
+    shards = [dict(row) for row in flat.get("shards") or []]
+    if not shards:
+        raise ValueError(
+            f"{component_id} flat research manifest has no shards"
+        )
+    start = min(int(row["from_block"]) for row in shards)
+    end = max(int(row["to_block"]) for row in shards)
+    ordered = validate_shard_block_coverage(
+        shards,
+        start_block=start,
+        end_block=end,
+    )
+    records = sum(int(row["records"]) for row in ordered)
+    if records != int(flat.get("records", -1)):
+        raise ValueError(
+            f"{component_id} flat research record count drift"
+        )
+    return write_virtual_jsonl_manifest(
+        manifest_path=output_manifest_path,
+        path_name=path_name,
+        records=records,
+        sha256=actual_sha,
+        provenance={
+            "storage_mode": "sharded_artifacts",
+            "source": "normalized_flat_research_manifest",
+            "component_id": component_id,
+            "from_block": start,
+            "to_block": end,
+            "shards": ordered,
+        },
+    )
+
+
+def rebuild_report_sharded_research_manifest(
+    *,
+    component_id: str,
+    root: Path,
+    point_pattern: str,
+    report_template: str,
+    report_records_field: str,
+    expected_logical_sha256: str,
+    output_manifest_path: Path,
+    path_name: str,
+) -> dict:
+    """Rebuild a virtual tape from exact point sidecars plus shard reports."""
+
+    component_id = str(component_id)
+    expected_sha = _sha256(
+        expected_logical_sha256,
+        label=f"{component_id} rebuilt logical input",
+    )
+    point_files = sorted(
+        path
+        for path in root.rglob(point_pattern)
+        if path.is_file()
+    )
+    if not point_files:
+        raise ValueError(
+            f"{component_id} research shard rebuild found no point files"
+        )
+
+    aggregate = hashlib.sha256()
+    shards = []
+    seen_names: set[str] = set()
+    for path in point_files:
+        if path.name in seen_names:
+            raise ValueError(
+                f"{component_id} research shard filename repeats: "
+                f"{path.name}"
+            )
+        seen_names.add(path.name)
+        suffix = path.stem.rsplit("-", 1)[-1]
+        report_path = path.parent / report_template.format(
+            suffix=suffix
+        )
+        sidecar_path = path.with_suffix(
+            path.suffix + ".manifest.json"
+        )
+        if not report_path.is_file() or not sidecar_path.is_file():
+            raise ValueError(
+                f"{component_id} research shard evidence is incomplete: "
+                f"{path.name}"
+            )
+        report = json.loads(report_path.read_text())
+        sidecar = json.loads(sidecar_path.read_text())
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != _sha256(
+            sidecar.get("sha256"),
+            label=f"{component_id} shard {path.name}",
+        ):
+            raise ValueError(
+                f"{component_id} research shard SHA drift: {path.name}"
+            )
+        if digest != _sha256(
+            report.get("points_sha256"),
+            label=f"{component_id} report {path.name}",
+        ):
+            raise ValueError(
+                f"{component_id} research report point SHA drift: "
+                f"{path.name}"
+            )
+        records = int(sidecar.get("records", -1))
+        if records < 0 or records != int(
+            report.get(report_records_field, -2)
+        ):
+            raise ValueError(
+                f"{component_id} research shard record count drift: "
+                f"{path.name}"
+            )
+        if int(report.get("priced_points", -1)) != records:
+            raise ValueError(
+                f"{component_id} research shard contains unpriced points: "
+                f"{path.name}"
+            )
+        lo = int(report.get("from_block", -1))
+        hi = int(report.get("to_block", -1))
+        if lo < 0 or hi < lo:
+            raise ValueError(
+                f"{component_id} research shard range is invalid: "
+                f"{path.name}"
+            )
+        aggregate.update(raw)
+        shards.append({
+            "file": path.name,
+            "records": records,
+            "sha256": digest,
+            "from_block": lo,
+            "to_block": hi,
+        })
+
+    start = min(int(row["from_block"]) for row in shards)
+    end = max(int(row["to_block"]) for row in shards)
+    ordered = validate_shard_block_coverage(
+        shards,
+        start_block=start,
+        end_block=end,
+    )
+    actual_sha = aggregate.hexdigest()
+    if actual_sha != expected_sha:
+        raise ValueError(
+            f"{component_id} rebuilt research logical tape SHA drift"
+        )
+    return write_virtual_jsonl_manifest(
+        manifest_path=output_manifest_path,
+        path_name=path_name,
+        records=sum(int(row["records"]) for row in ordered),
+        sha256=actual_sha,
+        provenance={
+            "storage_mode": "sharded_artifacts",
+            "source": "rebuilt_report_sharded_research_manifest",
+            "component_id": component_id,
+            "from_block": start,
+            "to_block": end,
+            "shards": ordered,
+        },
+    )

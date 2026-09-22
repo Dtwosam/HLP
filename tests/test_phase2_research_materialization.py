@@ -7,6 +7,8 @@ import pytest
 from hlp.data.phase2_research_materialization import (
     materialize_sharded_jsonl_research_subset,
     materialize_single_jsonl_research_subset,
+    normalize_flat_sharded_research_manifest,
+    rebuild_report_sharded_research_manifest,
 )
 from hlp.data.sharded_tape import write_virtual_jsonl_manifest
 from hlp.data.snapshot import write_jsonl_snapshot
@@ -203,3 +205,95 @@ def test_sharded_materialization_rejects_logical_manifest_substitution(
             output=tmp_path / "eligible.jsonl",
             source_binding_sha256=SHA,
         )
+
+
+
+def test_flat_shard_manifest_normalizes_to_standard_virtual_contract(
+    tmp_path: Path,
+):
+    flat_path = tmp_path / "flat.json"
+    flat = {
+        "records": 2,
+        "sha256": "ab" * 32,
+        "shards": [
+            {
+                "file": "points-000.jsonl",
+                "records": 1,
+                "sha256": "11" * 32,
+                "from_block": 1,
+                "to_block": 1,
+            },
+            {
+                "file": "points-001.jsonl",
+                "records": 1,
+                "sha256": "22" * 32,
+                "from_block": 2,
+                "to_block": 2,
+            },
+        ],
+    }
+    flat_path.write_text(json.dumps(flat))
+    output = tmp_path / "virtual.json"
+
+    manifest = normalize_flat_sharded_research_manifest(
+        component_id="flap-curve",
+        flat_manifest_path=flat_path,
+        output_manifest_path=output,
+        path_name="flap-curve-points.jsonl",
+        expected_logical_sha256=flat["sha256"],
+    )
+
+    assert manifest["sha256"] == flat["sha256"]
+    assert manifest["records"] == 2
+    assert manifest["provenance"]["storage_mode"] == "sharded_artifacts"
+    assert len(manifest["provenance"]["shards"]) == 2
+
+
+def test_report_shard_rebuild_requires_exact_aggregate_sha_and_reports(
+    tmp_path: Path,
+):
+    root = tmp_path / "downloaded"
+    root.mkdir()
+    chunks = []
+    for index, token in enumerate((TOKEN_A, TOKEN_B)):
+        point = root / f"flap-v3-points-{index:03d}.jsonl"
+        manifest = write_jsonl_snapshot(
+            [{
+                "token": token,
+                "block_number": index + 1,
+                "market_cap_proxy_usd": str(100000 + index),
+            }],
+            output=point,
+            provenance={
+                "from_block": index + 1,
+                "to_block": index + 1,
+            },
+        )
+        report = {
+            "from_block": index + 1,
+            "to_block": index + 1,
+            "points_sha256": manifest["sha256"],
+            "market_cap_points": 1,
+            "priced_points": 1,
+        }
+        (
+            root / f"flap-v3-report-{index:03d}.json"
+        ).write_text(json.dumps(report))
+        chunks.append(point.read_bytes())
+
+    aggregate_sha = hashlib.sha256(b"".join(chunks)).hexdigest()
+    output = tmp_path / "rebuilt.json"
+    manifest = rebuild_report_sharded_research_manifest(
+        component_id="flap-v3",
+        root=root,
+        point_pattern="flap-v3-points-*.jsonl",
+        report_template="flap-v3-report-{suffix}.json",
+        report_records_field="market_cap_points",
+        expected_logical_sha256=aggregate_sha,
+        output_manifest_path=output,
+        path_name="flap-v3-points.jsonl",
+    )
+
+    assert manifest["sha256"] == aggregate_sha
+    assert manifest["records"] == 2
+    assert len(manifest["provenance"]["shards"]) == 2
