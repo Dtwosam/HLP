@@ -1,0 +1,519 @@
+name: phase3-feature-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      coverage_run_id:
+        description: Exact phase3-feature-coverage run ID
+        required: true
+        type: string
+      expected_coverage_artifact_digest:
+        description: Exact phase3-feature-coverage artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_coverage_handoff_sha256:
+        description: Exact SHA-256 of phase3-feature-coverage-handoff.json
+        required: true
+        type: string
+      price_feature_run_id:
+        description: Exact phase3-price-features run ID
+        required: true
+        type: string
+      expected_price_feature_artifact_digest:
+        description: Exact phase3-price-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_price_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-price-features-handoff.json
+        required: true
+        type: string
+      trade_feature_run_id:
+        description: Exact phase3-trade-features run ID
+        required: true
+        type: string
+      expected_trade_feature_artifact_digest:
+        description: Exact phase3-trade-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_trade_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-trade-features-handoff.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-feature-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COVERAGE_RUN_ID: ${{ inputs.coverage_run_id }}
+  EXPECTED_COVERAGE_ARTIFACT_DIGEST: ${{ inputs.expected_coverage_artifact_digest }}
+  EXPECTED_COVERAGE_HANDOFF_SHA256: ${{ inputs.expected_coverage_handoff_sha256 }}
+  PRICE_FEATURE_RUN_ID: ${{ inputs.price_feature_run_id }}
+  EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_price_feature_artifact_digest }}
+  EXPECTED_PRICE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_price_feature_handoff_sha256 }}
+  TRADE_FEATURE_RUN_ID: ${{ inputs.trade_feature_run_id }}
+  EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_trade_feature_artifact_digest }}
+  EXPECTED_TRADE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_trade_feature_handoff_sha256 }}
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: staging
+        name: Build label-free Phase-3 feature staging bundle
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_feature_coverage import (
+              build_phase3_feature_coverage_handoff,
+          )
+          from hlp.data.phase3_feature_registry import (
+              build_phase3_feature_registry,
+              validate_phase3_feature_registry,
+          )
+          from hlp.data.phase3_feature_staging import (
+              build_phase3_feature_staging_handoff,
+              materialize_phase3_feature_staging,
+          )
+          from hlp.data.phase3_price_features import (
+              build_phase3_price_feature_handoff,
+          )
+          from hlp.data.phase3_trade_features import (
+              build_phase3_trade_feature_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          coverage_root = Path("inputs/coverage")
+          price_root = Path("inputs/price")
+          trade_root = Path("inputs/trade")
+          download_named(
+              int(os.environ["COVERAGE_RUN_ID"]),
+              "phase3-feature-coverage",
+              coverage_root,
+              "Phase-3 feature coverage",
+              os.environ["EXPECTED_COVERAGE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["PRICE_FEATURE_RUN_ID"]),
+              "phase3-price-features",
+              price_root,
+              "Phase-3 price features",
+              os.environ["EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["TRADE_FEATURE_RUN_ID"]),
+              "phase3-trade-features",
+              trade_root,
+              "Phase-3 trade features",
+              os.environ["EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST"],
+          )
+
+          coverage_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage.jsonl",
+          )
+          coverage_manifest_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage.jsonl.manifest.json",
+          )
+          coverage_manifest = json.loads(
+              coverage_manifest_path.read_text()
+          )
+          coverage_summary_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-summary.json",
+          )
+          coverage_summary = json.loads(
+              coverage_summary_path.read_text()
+          )
+          coverage_summary_sha = sha256_path(
+              coverage_summary_path
+          )
+          coverage_handoff_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-handoff.json",
+          )
+          coverage_handoff_sha = sha256_path(
+              coverage_handoff_path
+          )
+          if coverage_handoff_sha != os.environ[
+              "EXPECTED_COVERAGE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 feature-coverage handoff SHA drift")
+          coverage_handoff = json.loads(
+              coverage_handoff_path.read_text()
+          )
+          rebuilt_coverage = build_phase3_feature_coverage_handoff(
+              coverage_summary,
+              coverage_summary_sha256=coverage_summary_sha,
+              feature_entry_handoff_sha256=coverage_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt_coverage != coverage_handoff:
+              raise SystemExit(
+                  "Phase-3 feature-coverage handoff content drift"
+              )
+          if coverage_manifest.get("sha256") != coverage_handoff[
+              "coverage_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 feature-coverage manifest SHA drift"
+              )
+          if int(coverage_manifest.get("records", -1)) != int(
+              coverage_handoff["feature_subjects"]
+          ):
+              raise SystemExit(
+                  "Phase-3 feature-coverage subject count drift"
+              )
+
+          price_path = find_unique(
+              price_root,
+              "phase3-price-features.jsonl",
+          )
+          price_manifest_path = find_unique(
+              price_root,
+              "phase3-price-features.jsonl.manifest.json",
+          )
+          price_manifest = json.loads(
+              price_manifest_path.read_text()
+          )
+          price_summary_path = find_unique(
+              price_root,
+              "phase3-price-features-summary.json",
+          )
+          price_summary = json.loads(price_summary_path.read_text())
+          price_summary_sha = sha256_path(price_summary_path)
+          price_handoff_path = find_unique(
+              price_root,
+              "phase3-price-features-handoff.json",
+          )
+          price_handoff_sha = sha256_path(price_handoff_path)
+          if price_handoff_sha != os.environ[
+              "EXPECTED_PRICE_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 price-feature handoff SHA drift")
+          price_handoff = json.loads(price_handoff_path.read_text())
+          rebuilt_price = build_phase3_price_feature_handoff(
+              price_summary,
+              feature_summary_sha256=price_summary_sha,
+              feature_entry_handoff_sha256=price_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              price_path_handoff_sha256=price_summary[
+                  "price_path_handoff_sha256"
+              ],
+          )
+          if rebuilt_price != price_handoff:
+              raise SystemExit(
+                  "Phase-3 price-feature handoff content drift"
+              )
+          if price_manifest.get("sha256") != price_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 price-feature manifest SHA drift")
+
+          trade_path = find_unique(
+              trade_root,
+              "phase3-trade-features.jsonl",
+          )
+          trade_manifest_path = find_unique(
+              trade_root,
+              "phase3-trade-features.jsonl.manifest.json",
+          )
+          trade_manifest = json.loads(
+              trade_manifest_path.read_text()
+          )
+          trade_summary_path = find_unique(
+              trade_root,
+              "phase3-trade-features-summary.json",
+          )
+          trade_summary = json.loads(trade_summary_path.read_text())
+          trade_summary_sha = sha256_path(trade_summary_path)
+          trade_handoff_path = find_unique(
+              trade_root,
+              "phase3-trade-features-handoff.json",
+          )
+          trade_handoff_sha = sha256_path(trade_handoff_path)
+          if trade_handoff_sha != os.environ[
+              "EXPECTED_TRADE_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 trade-feature handoff SHA drift")
+          trade_handoff = json.loads(trade_handoff_path.read_text())
+          rebuilt_trade = build_phase3_trade_feature_handoff(
+              trade_summary,
+              feature_summary_sha256=trade_summary_sha,
+              feature_entry_handoff_sha256=trade_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_trade_handoff_sha256=trade_summary[
+                  "canonical_trade_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade != trade_handoff:
+              raise SystemExit(
+                  "Phase-3 trade-feature handoff content drift"
+              )
+          if trade_manifest.get("sha256") != trade_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 trade-feature manifest SHA drift")
+
+          registry = build_phase3_feature_registry()
+          registry_report = validate_phase3_feature_registry(registry)
+          registry_sha = registry_report["registry_sha256"]
+          if coverage_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 coverage registry SHA drift")
+          if price_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 price registry SHA drift")
+          if trade_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 trade registry SHA drift")
+
+          output = Path(
+              "artifacts/phase3-feature-staging.jsonl"
+          )
+          manifest, summary = materialize_phase3_feature_staging(
+              iter_validated_jsonl(
+                  coverage_path,
+                  coverage_manifest_path,
+              ),
+              {
+                  "price_drawdown": iter_validated_jsonl(
+                      price_path,
+                      price_manifest_path,
+                  ),
+                  "trade_flow": iter_validated_jsonl(
+                      trade_path,
+                      trade_manifest_path,
+                  ),
+              },
+              coverage_handoff=coverage_handoff,
+              feature_registry=registry,
+              output=output,
+          )
+          summary.update({
+              "coverage_run_id": int(
+                  os.environ["COVERAGE_RUN_ID"]
+              ),
+              "feature_coverage_handoff_sha256": (
+                  coverage_handoff_sha
+              ),
+              "price_feature_run_id": int(
+                  os.environ["PRICE_FEATURE_RUN_ID"]
+              ),
+              "price_feature_handoff_sha256": price_handoff_sha,
+              "trade_feature_run_id": int(
+                  os.environ["TRADE_FEATURE_RUN_ID"]
+              ),
+              "trade_feature_handoff_sha256": trade_handoff_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase3-feature-staging-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase3_feature_staging_handoff(
+              summary,
+              staging_summary_sha256=summary_sha,
+              feature_coverage_handoff_sha256=coverage_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-feature-staging-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"feature_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"feature_subjects={summary['feature_subjects']}\n"
+              )
+              handle.write(
+                  f"features_per_subject={summary['features_per_subject']}\n"
+              )
+          print(json.dumps({
+              "feature_rows_sha256": manifest["sha256"],
+              "staging_summary_sha256": summary_sha,
+              "staging_handoff_sha256": handoff_sha,
+              "feature_subjects": summary["feature_subjects"],
+              "features_per_subject": summary["features_per_subject"],
+              "outcome_rows_consumed": False,
+              "outcome_fields_exposed": False,
+              "future_state_allowed": False,
+              "staging_bundle_ready": True,
+              "final_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-3 feature staging bundle
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-feature-staging
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact feature-staging handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-feature-staging-handoff
+          path: |
+            artifacts/phase3-feature-staging.jsonl.manifest.json
+            artifacts/phase3-feature-staging-summary.json
+            artifacts/phase3-feature-staging-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish feature-staging identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          FEATURE_ROWS_SHA256: ${{ steps.staging.outputs.feature_rows_sha256 }}
+          SUMMARY_SHA256: ${{ steps.staging.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.staging.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.staging.outputs.feature_subjects }}
+          FEATURES: ${{ steps.staging.outputs.features_per_subject }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-3 feature staging bundle"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-feature-staging"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase3-feature-staging-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- feature_rows_sha256: ${FEATURE_ROWS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- feature_subjects: ${SUBJECTS}"
+            echo "- features_per_subject: ${FEATURES}"
+            echo "- included_families: price_drawdown,trade_flow"
+            echo "- outcome_rows_consumed: false"
+            echo "- outcome_fields_exposed: false"
+            echo "- future_state_allowed: false"
+            echo "- staging_bundle_ready: true"
+            echo "- final_checkpoint_name: hlp-v1-phase3-feature-store"
+            echo "- final_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
