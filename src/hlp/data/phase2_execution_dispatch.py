@@ -510,9 +510,16 @@ def validate_phase2_node_dispatch_receipt(
         row.get("target_head_sha"),
         label="Phase-2 node-dispatch target head",
     )
+    control_run_id = int(
+        row.get("node_dispatch_control_run_id") or 0
+    )
     planner_run_id = int(row.get("planner_run_id") or 0)
     dispatched_run_id = int(row.get("dispatched_run_id") or 0)
-    if planner_run_id <= 0 or dispatched_run_id <= 0:
+    if (
+        control_run_id <= 0
+        or planner_run_id <= 0
+        or dispatched_run_id <= 0
+    ):
         raise ValueError(
             "Phase-2 node-dispatch receipt run IDs must be positive"
         )
@@ -570,6 +577,7 @@ def validate_phase2_node_dispatch_receipt(
         "target_workflow": workflow,
         "target_ref": target_ref,
         "target_head_sha": target_head,
+        "node_dispatch_control_run_id": control_run_id,
         "planner_run_id": planner_run_id,
         "planner_artifact_digest": artifact_digest,
         "canonical_coverage_ledger_sha256": ledger_sha,
