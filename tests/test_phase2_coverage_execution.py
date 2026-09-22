@@ -145,7 +145,7 @@ def test_promotions_serialize_only_sources_with_finished_coverage():
         for row in initial["nodes"]
         if row["kind"] not in {
             "coverage_promotion",
-            "manual_ledger_commit",
+            "coverage_ledger_commit",
         }
     }
     report = build(base_nodes)
