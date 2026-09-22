@@ -299,3 +299,141 @@ def validate_phase2_archive_fanout_completion(
         "selector_approval_performed": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def validate_phase2_archive_fanout_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff into the post-fan-out DAG stage."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-archive-fanout-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("archive_fanout_completion_control_run_id") or 0
+    )
+    fanout_run_id = int(row.get("archive_fanout_launch_run_id") or 0)
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if control_run_id <= 0 or fanout_run_id <= 0 or planner_run_id <= 0:
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt run IDs "
+            "must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt branch is empty"
+        )
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 archive fan-out completion head",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 archive fan-out completion coverage ledger",
+    )
+    fanout_digest = _artifact_digest(
+        row.get("archive_fanout_artifact_digest"),
+        label="Phase-2 archive fan-out launch artifact",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 post-fan-out planner artifact",
+    )
+
+    targets = _run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 archive fan-out verified targets",
+        expected_nodes=PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS,
+    )
+    control_ids = row.get("node_dispatch_control_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 15
+        or len(set(int(value) for value in control_ids)) != 15
+    ):
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt requires exactly "
+            "15 dispatcher control runs"
+        )
+    normalized_controls = sorted(int(value) for value in control_ids)
+    if normalized_controls[0] <= 0:
+        raise ValueError(
+            "Phase-2 archive fan-out completion control run ID is invalid"
+        )
+
+    next_ready = row.get("next_ready_node_ids")
+    if not isinstance(next_ready, list) or not next_ready:
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt has no next-ready set"
+        )
+    normalized_ready = [str(value) for value in next_ready]
+    if len(normalized_ready) != len(set(normalized_ready)):
+        raise ValueError(
+            "Phase-2 archive fan-out completion receipt repeats next-ready "
+            "node"
+        )
+
+    contract = row.get("completion_contract")
+    if not isinstance(contract, Mapping):
+        raise ValueError(
+            "Phase-2 archive fan-out completion contract is missing"
+        )
+    if contract.get("archive_fanout_targets_credited") is not True:
+        raise ValueError(
+            "Phase-2 archive fan-out completion lacks target-credit proof"
+        )
+    if contract.get("canonical_coverage_sources_unchanged") is not True:
+        raise ValueError(
+            "Phase-2 archive fan-out completion changed canonical sources"
+        )
+
+    required_true = (
+        "archive_fanout_targets_completed_successfully",
+        "planner_refreshed",
+    )
+    for field in required_true:
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 archive fan-out completion receipt lacks {field}"
+            )
+    required_false = (
+        "coverage_promotion_performed",
+        "selector_approval_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    )
+    for field in required_false:
+        if row.get(field) is not False:
+            raise ValueError(
+                "Phase-2 archive fan-out completion receipt violates "
+                f"{field}"
+            )
+
+    return {
+        "version": "phase2-archive-fanout-completion-receipt-v1",
+        "archive_fanout_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "archive_fanout_launch_run_id": fanout_run_id,
+        "archive_fanout_artifact_digest": fanout_digest,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": normalized_controls,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "next_ready_node_ids": normalized_ready,
+        "archive_fanout_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }

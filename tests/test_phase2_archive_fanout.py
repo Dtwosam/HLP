@@ -4,6 +4,7 @@ from hlp.data.phase2_archive_fanout import (
     PHASE2_ARCHIVE_FANOUT_COMPLETION_VERSION,
     PHASE2_ARCHIVE_FANOUT_RECEIPT_VERSION,
     validate_phase2_archive_fanout_completion,
+    validate_phase2_archive_fanout_completion_receipt,
     validate_phase2_archive_fanout_launch_receipt,
 )
 from hlp.data.phase2_first_wave import (
@@ -149,3 +150,72 @@ def test_archive_fanout_completion_rejects_completed_node_still_ready():
     )
     with pytest.raises(ValueError, match="remain ready"):
         validate_phase2_archive_fanout_completion(execution, verified)
+
+
+
+def completion_receipt():
+    execution, verified = completion_plans()
+    contract = validate_phase2_archive_fanout_completion(
+        execution,
+        verified,
+    )
+    return {
+        "version": "phase2-archive-fanout-completion-receipt-v1",
+        "archive_fanout_completion_control_run_id": 5000,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "archive_fanout_launch_run_id": 5001,
+        "archive_fanout_artifact_digest": "sha256:" + "ef" * 32,
+        "verified_target_run_ids": launch_receipt()["target_run_ids"],
+        "node_dispatch_control_run_ids_consumed": list(range(5100, 5115)),
+        "planner_run_id": 5200,
+        "planner_artifact_digest": "sha256:" + "12" * 32,
+        "next_ready_node_ids": contract["next_ready_node_ids"],
+        "completion_contract": contract,
+        "archive_fanout_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_archive_fanout_completion_receipt_validates_next_stage_handoff():
+    row = validate_phase2_archive_fanout_completion_receipt(
+        completion_receipt()
+    )
+
+    assert row["archive_fanout_completion_control_run_id"] == 5000
+    assert row["planner_run_id"] == 5200
+    assert row["planner_refreshed"] is True
+    assert row["canonical_ledger_write_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("version", "other", "version changed"),
+        ("planner_refreshed", False, "planner_refreshed"),
+        (
+            "coverage_promotion_performed",
+            True,
+            "coverage_promotion_performed",
+        ),
+        (
+            "canonical_coverage_ledger_mutated",
+            True,
+            "canonical_coverage_ledger_mutated",
+        ),
+    ],
+)
+def test_archive_fanout_completion_receipt_rejects_tampering(
+    field,
+    value,
+    match,
+):
+    row = completion_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_archive_fanout_completion_receipt(row)
