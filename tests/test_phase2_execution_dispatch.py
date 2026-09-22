@@ -162,3 +162,77 @@ def test_verified_dependencies_fill_run_ids_for_ready_coverage():
     assert by_id["coverage:pools_fun"][
         "remaining_manual_inputs"
     ] == []
+
+
+
+def test_promotion_binding_uses_coverage_run_and_leaves_hashes_explicit():
+    completed = {
+        "preflight:archive_authenticated",
+        "shared:quote_registry",
+        "shared:v3_initialize",
+        "shared:v3_swap",
+        "registry:pools_fun",
+        "coverage:pools_fun",
+    }
+    plan = build_phase2_coverage_execution_plan(
+        ledger(),
+        build_phase2_source_inventory(),
+        completed_node_ids=completed,
+    )
+    dispatch = build_phase2_dispatch_input_plan(
+        plan,
+        receipts(completed),
+        workflow_text_by_name=workflow_texts(plan),
+    )
+    by_id = {row["node_id"]: row for row in dispatch["nodes"]}
+    promote = by_id["promote:pools_fun"]
+    run_by_node = {
+        row["node_id"]: str(row["run_id"])
+        for row in receipts(completed)["receipts"]
+    }
+
+    assert promote["run_id_inputs"] == {
+        "coverage_run_id": run_by_node["coverage:pools_fun"],
+    }
+    assert {
+        "coverage_artifact_name",
+        "expected_artifact_digest",
+        "coverage_report_path",
+        "expected_report_sha256",
+        "expected_source_id",
+    }.issubset(set(promote["remaining_manual_inputs"]))
+
+
+def test_ledger_commit_binding_uses_promotion_run():
+    completed = {
+        "preflight:archive_authenticated",
+        "shared:quote_registry",
+        "shared:v3_initialize",
+        "shared:v3_swap",
+        "registry:pools_fun",
+        "coverage:pools_fun",
+        "promote:pools_fun",
+    }
+    plan = build_phase2_coverage_execution_plan(
+        ledger(),
+        build_phase2_source_inventory(),
+        completed_node_ids=completed,
+    )
+    dispatch = build_phase2_dispatch_input_plan(
+        plan,
+        receipts(completed),
+        workflow_text_by_name=workflow_texts(plan),
+    )
+    by_id = {row["node_id"]: row for row in dispatch["nodes"]}
+    commit = by_id["ledger_commit:pools_fun"]
+    run_by_node = {
+        row["node_id"]: str(row["run_id"])
+        for row in receipts(completed)["receipts"]
+    }
+
+    assert commit["run_id_inputs"] == {
+        "promotion_run_id": run_by_node["promote:pools_fun"],
+    }
+    assert "apply_proposed_ledger" in commit[
+        "remaining_manual_inputs"
+    ]

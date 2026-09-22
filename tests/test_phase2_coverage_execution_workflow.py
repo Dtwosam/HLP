@@ -26,6 +26,8 @@ def test_phase2_execution_plan_uses_canonical_ledger_and_planner():
     assert "/actions/runs/{run_id}" in text
     assert "phase2-coverage-execution-plan.json" in text
     assert "phase2-execution-run-receipts.json" in text
+    assert "build_phase2_dispatch_input_plan" in text
+    assert "phase2-dispatch-input-plan.json" in text
     assert "ledger_promotion_serialized" in text
     assert "canonical_ledger_mutation_automatic" in text
     assert "workflow_dispatch_performed" in text
@@ -53,3 +55,12 @@ def test_phase2_execution_plan_never_trusts_bare_completed_node_names():
     assert "completed_node_runs_json:" in text
     assert "verified_completed_runs" in text
     assert "successful workflow_dispatch run IDs" in text
+
+
+
+def test_phase2_execution_plan_emits_real_workflow_dispatch_inputs():
+    text = WORKFLOW.read_text()
+
+    assert "workflow_text_by_name" in text
+    assert "dispatchable_input_plans" in text
+    assert "dispatch input plans emitted" in text
