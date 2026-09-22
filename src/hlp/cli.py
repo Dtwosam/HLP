@@ -194,6 +194,9 @@ from hlp.data.pons_transactions import (
     attach_pons_transaction_identities,
     fetch_transaction_identity_rows,
 )
+from hlp.data.transaction_identity import (
+    attach_transaction_identities,
+)
 from hlp.data.pons_time import (
     enrich_pons_episodes_with_time,
     enrich_pons_points_with_time,
@@ -8987,6 +8990,72 @@ def cmd_pons_trade_features(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rpc_transaction_identity_enrich(args: argparse.Namespace) -> int:
+    """Attach exact tx.from identities to an arbitrary event JSONL tape."""
+    events = _load_jsonl(args.events)
+    hashes = sorted({
+        str(row["transaction_hash"]).lower()
+        for row in events
+    })
+    if not hashes:
+        raise SystemExit("transaction identity input has no transaction hashes")
+
+    rpc = _archive_rpc(args)
+    rpc.assert_robinhood()
+    started = time.monotonic()
+    transaction_rows = fetch_transaction_identity_rows(
+        rpc,
+        hashes,
+        batch_size=args.batch_size,
+        min_batch_size=args.min_batch_size,
+    )
+    enriched = attach_transaction_identities(
+        events,
+        transaction_rows,
+        label=args.label,
+    )
+
+    transaction_manifest = write_jsonl_snapshot(
+        transaction_rows,
+        output=Path(args.transactions_out),
+        provenance={
+            "source": "eth_getTransactionByHash_batched",
+            "chain_id": 4663,
+            "events": Path(args.events).name,
+            "unique_transactions": len(hashes),
+            "requested_batch_size": args.batch_size,
+            "min_batch_size": args.min_batch_size,
+            "identity_semantics": "initiator is transaction.from",
+        },
+    )
+    enriched_manifest = write_jsonl_snapshot(
+        enriched,
+        output=Path(args.out),
+        provenance={
+            "source": "event_tape_plus_transaction_identity",
+            "chain_id": 4663,
+            "events": Path(args.events).name,
+            "transaction_map_sha256": transaction_manifest["sha256"],
+            "wallet_identity_kind": "transaction_from",
+        },
+    )
+
+    print(json.dumps({
+        "transactions": transaction_manifest,
+        "enriched_events": enriched_manifest,
+        "unique_transactions": len(transaction_rows),
+        "unique_initiators": len({
+            row["initiator"]
+            for row in transaction_rows
+        }),
+        "rpc_requests": rpc.requests_made,
+        "response_bytes_received": rpc.response_bytes_received,
+        "rpc_route": rpc.route_label,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_rpc_pons_transaction_enrich(args: argparse.Namespace) -> int:
     """Attach batched transaction initiator identities to Pons research points."""
     points = _load_jsonl(args.points)
@@ -10193,6 +10262,30 @@ def build_parser() -> argparse.ArgumentParser:
     pons_trade_features.add_argument("--trades", required=True)
     pons_trade_features.add_argument("--out", required=True)
     pons_trade_features.set_defaults(func=cmd_pons_trade_features)
+
+    transaction_identity = sub.add_parser(
+        "rpc-transaction-identity-enrich"
+    )
+    transaction_identity.add_argument("--events", required=True)
+    transaction_identity.add_argument("--transactions-out", required=True)
+    transaction_identity.add_argument("--out", required=True)
+    transaction_identity.add_argument(
+        "--label",
+        default="event",
+    )
+    transaction_identity.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+    )
+    transaction_identity.add_argument(
+        "--min-batch-size",
+        type=int,
+        default=1,
+    )
+    transaction_identity.set_defaults(
+        func=cmd_rpc_transaction_identity_enrich
+    )
 
     pons_transactions = sub.add_parser("rpc-pons-transaction-enrich")
     pons_transactions.add_argument("--points", required=True)
