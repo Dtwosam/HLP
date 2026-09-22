@@ -26,6 +26,9 @@ from hlp.data.phase3_price_features import (
 from hlp.data.phase3_trade_features import (
     PHASE3_TRADE_FEATURE_HANDOFF_VERSION,
 )
+from hlp.data.phase3_venue_features import (
+    PHASE3_VENUE_FEATURE_HANDOFF_VERSION,
+)
 from hlp.data.snapshot import write_jsonl_snapshot
 
 
@@ -50,6 +53,10 @@ FAMILY_HANDOFF_CONTRACTS = {
     "trade_flow": (
         PHASE3_TRADE_FEATURE_HANDOFF_VERSION,
         "phase3_trade_features_ready",
+    ),
+    "venue_mechanics": (
+        PHASE3_VENUE_FEATURE_HANDOFF_VERSION,
+        "phase3_venue_features_ready",
     ),
 }
 
