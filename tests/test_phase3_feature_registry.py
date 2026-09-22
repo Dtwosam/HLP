@@ -14,13 +14,14 @@ def test_phase3_feature_registry_is_versioned_causal_and_outcome_blind():
     report = validate_phase3_feature_registry(registry)
 
     assert report["version"] == PHASE3_FEATURE_REGISTRY_VERSION
-    assert report["features"] == 80
+    assert report["features"] == 87
     assert report["families"] == [
         "chain_regime",
         "early_recipient_activity",
         "holder_state",
         "lifecycle_age",
         "participant_retention",
+        "participant_type",
         "price_drawdown",
         "supply_redistribution",
         "trade_flow",

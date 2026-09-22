@@ -926,6 +926,118 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_transfer_tape",
             "missingness_policy": "error_if_missing",
         },
+        {
+            "feature_id": "participant_type.unique_code_accounts_so_far",
+            "family": "participant_type",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical trade initiators observed through cutoff "
+                "with contract code present at the start of the confirmation "
+                "block"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "participant_type.unique_no_code_accounts_so_far",
+            "family": "participant_type",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical trade initiators observed through cutoff "
+                "with no contract code at the start of the confirmation block"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": (
+                "participant_type.code_account_share_of_unique_traders"
+            ),
+            "family": "participant_type",
+            "dtype": "decimal_string",
+            "formula": (
+                "unique code-bearing initiators divided by all unique "
+                "canonical trade initiators observed through cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "participant_type.code_account_trade_share_so_far",
+            "family": "participant_type",
+            "dtype": "decimal_string",
+            "formula": (
+                "canonical trades through cutoff initiated by addresses with "
+                "code at the start of the confirmation block divided by all "
+                "canonical trades through cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": (
+                "participant_type.code_account_buy_trade_share_so_far"
+            ),
+            "family": "participant_type",
+            "dtype": "decimal_string",
+            "formula": (
+                "canonical buys through cutoff initiated by addresses with "
+                "code at the start of the confirmation block divided by all "
+                "canonical buys through cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": (
+                "participant_type.code_account_sell_trade_share_so_far"
+            ),
+            "family": "participant_type",
+            "dtype": "decimal_string",
+            "formula": (
+                "canonical sells through cutoff initiated by addresses with "
+                "code at the start of the confirmation block divided by all "
+                "canonical sells through cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": (
+                "participant_type."
+                "latest_initiator_has_code_before_cutoff_block"
+            ),
+            "family": "participant_type",
+            "dtype": "boolean",
+            "formula": (
+                "whether the latest canonical trade initiator at or before "
+                "cutoff has code in state from the block immediately before "
+                "the confirmation block"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+"
+                "archive_eth_getCode_start_of_cutoff_block"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
     ]
     return [
         {
