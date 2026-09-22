@@ -22,7 +22,7 @@ def handoff():
         "discovery_rows_sha256": SHA,
         "discovery_subjects": 3,
         "comeback_5x_tokens": 2,
-        "comeback_5x_base_rate": "0.66666666666666666666666666666666666666666666666666666666666666666666666666666667",
+        "comeback_5x_base_rate": "0.6666666666666666666666666667",
         "labels_joined_after_feature_freeze": True,
         "feature_values_mutated": False,
         "phase4_discovery_only": True,
