@@ -167,7 +167,19 @@ Implemented foundation:
   registries. Every row binds the frozen selector contract but remains
   `canonical_market_selected=false` and
   `source_coverage_complete=false`; the registries are inputs to historical
-  replay, not a shortcut around it;
+  replay, not a shortcut around it. A reusable dispatch-only direct-source
+  coverage workflow is now prepared for each of those three venues. It
+  validates the exact source-population artifact, complete shared Initialize,
+  Swap and mint/burn surfaces plus canonical quote registry, filters Initialize
+  and supply inputs once, then replays all **128** swap shards. Completion is
+  audited at market level rather than token level so multiple pools for one
+  token remain distinct: every registered pool/PoolId must emit exactly one
+  Initialize point, every market must have history, and every point must be
+  priced. The replay intentionally does not apply the selector or emit
+  threshold labels; the frozen selector identity is bound in provenance while
+  all competing market histories remain available. Only after those checks does
+  the workflow validate a proposed per-venue `complete` coverage row in memory
+  and publish exact promotion metadata, without mutating the ledger;
 - direct-market launch-origin attribution is now progressive and fail-closed.
   Exact address matches can immediately mark a market as originating from a
   known launch source, but unmatched markets remain `unattributed` until every
