@@ -15,7 +15,7 @@ from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
-from hlp.data.snapshot import iter_jsonl_snapshot
+from hlp.data.snapshot import iter_jsonl_snapshot, write_jsonl_snapshot
 
 
 PHASE2_DUMP_GEOMETRY_VERSION = "phase2-dump-geometry-v1"
@@ -23,6 +23,9 @@ PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION = (
     "phase2-dump-geometry-handoff-v1"
 )
 PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION = "phase2-dump-candidate-research-v1"
+PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION = (
+    "phase2-dump-candidate-handoff-v1"
+)
 PEAK_DRAWDOWN_REBOUND_FAMILY = "peak_drawdown_rebound"
 
 
@@ -734,6 +737,436 @@ def build_phase2_dump_geometry_handoff(
         "price_points": int(summary["price_points"]),
         "uses_price_path_only": True,
         "dump_geometry_ready": True,
+        "candidate_selected": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
+
+
+
+def materialize_phase2_dump_candidate_research(
+    geometry_rows: Iterable[Mapping[str, object]],
+    candidate_specs: Iterable[Mapping[str, object]],
+    *,
+    geometry_summary: Mapping[str, object],
+    output: Path,
+) -> tuple[dict, dict]:
+    """Evaluate explicit detector candidates in one causal streaming pass."""
+
+    summary = dict(geometry_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_GEOMETRY_VERSION
+    ):
+        raise ValueError(
+            "dump candidate research requires canonical geometry"
+        )
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError(
+            "dump candidate research geometry is not price-path only"
+        )
+    if summary.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError(
+            "dump candidate research received frozen detector state"
+        )
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError(
+            "dump candidate research cannot consume outcome labels"
+        )
+    specs = _normalize_candidate_specs(candidate_specs)
+    expected_tokens = {
+        str(token)
+        for token in (summary.get("token_price_points") or {})
+    }
+    if len(expected_tokens) != int(summary.get("tokens", -1)):
+        raise ValueError(
+            "dump candidate geometry token membership changed"
+        )
+    if not expected_tokens:
+        raise ValueError("dump candidate geometry has no tokens")
+
+    states = {
+        spec["candidate_id"]: {
+            token: {
+                "threshold": None,
+                "peak": None,
+                "trough": None,
+                "confirmation": None,
+            }
+            for token in expected_tokens
+        }
+        for spec in specs
+    }
+    seen_tokens: set[str] = set()
+    token_counts = {
+        token: 0 for token in expected_tokens
+    }
+    previous_global: tuple[int, int, int, str] | None = None
+    total_points = 0
+
+    for raw in geometry_rows:
+        row = dict(raw)
+        if (
+            str(row.get("version") or "")
+            != PHASE2_DUMP_GEOMETRY_VERSION
+        ):
+            raise ValueError(
+                "dump candidate geometry row version changed"
+            )
+        token = normalize_address(str(row.get("token") or ""))
+        if token not in expected_tokens:
+            raise ValueError(
+                "dump candidate geometry contains unexpected token: "
+                f"{token}"
+            )
+        row["token"] = token
+        event = _event_key(row)
+        global_key = (*event, token)
+        if (
+            previous_global is not None
+            and global_key < previous_global
+        ):
+            raise ValueError(
+                "dump candidate geometry is not globally chronological"
+            )
+        previous_global = global_key
+
+        value = _decimal(
+            row.get("market_cap_proxy_usd"),
+            label=f"{token} geometry market-cap proxy",
+            positive=True,
+        )
+        peak_value = _decimal(
+            row.get("trailing_peak_market_cap_proxy_usd"),
+            label=f"{token} geometry trailing peak",
+            positive=True,
+        )
+        drawdown = _decimal(
+            row.get("drawdown_fraction"),
+            label=f"{token} geometry drawdown",
+        )
+        if drawdown < 0 or drawdown >= 1:
+            raise ValueError(
+                f"{token} geometry drawdown is invalid"
+            )
+        if value > peak_value:
+            raise ValueError(
+                f"{token} geometry value exceeds trailing peak"
+            )
+
+        total_points += 1
+        token_counts[token] += 1
+        seen_tokens.add(token)
+
+        for spec in specs:
+            state = states[spec["candidate_id"]][token]
+            if state["confirmation"] is not None:
+                continue
+            if state["threshold"] is None:
+                if drawdown < spec["min_drawdown_fraction"]:
+                    continue
+                state["threshold"] = {
+                    "block_number": event[0],
+                }
+                state["peak"] = {
+                    "block_number": int(
+                        row["trailing_peak_block"]
+                    ),
+                    "market_cap_proxy_usd": peak_value,
+                }
+                state["trough"] = {
+                    "block_number": event[0],
+                    "market_cap_proxy_usd": value,
+                }
+                continue
+
+            trough = state["trough"]
+            trough_value = trough["market_cap_proxy_usd"]
+            if value < trough_value:
+                state["trough"] = {
+                    "block_number": event[0],
+                    "market_cap_proxy_usd": value,
+                }
+                continue
+            confirmation_level = trough_value * (
+                Decimal("1")
+                + spec["confirmation_rebound_fraction"]
+            )
+            if value >= confirmation_level:
+                state["confirmation"] = {
+                    "block_number": event[0],
+                    "market_cap_proxy_usd": value,
+                }
+
+    if total_points != int(summary.get("price_points", -1)):
+        raise ValueError(
+            "dump candidate geometry price-point count changed"
+        )
+    if seen_tokens != expected_tokens:
+        raise ValueError(
+            "dump candidate geometry token coverage changed"
+        )
+    expected_counts = {
+        str(token): int(count)
+        for token, count in (
+            summary.get("token_price_points") or {}
+        ).items()
+    }
+    if token_counts != expected_counts:
+        raise ValueError(
+            "dump candidate geometry per-token point counts changed"
+        )
+
+    results = []
+    counts: dict[str, Counter] = {
+        spec["candidate_id"]: Counter() for spec in specs
+    }
+    for spec in specs:
+        candidate_id = spec["candidate_id"]
+        for token in sorted(expected_tokens):
+            state = states[candidate_id][token]
+            threshold = state["threshold"]
+            trough = state["trough"]
+            confirmation = state["confirmation"]
+            if threshold is None:
+                status = "no_material_drawdown"
+                result = {
+                    "version": (
+                        PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+                    ),
+                    "candidate_id": candidate_id,
+                    "family": spec["family"],
+                    "token": token,
+                    "candidate_status": status,
+                    "point_in_time_confirmed": False,
+                    "research_candidate_only": True,
+                }
+            elif confirmation is None:
+                status = "drawdown_unconfirmed"
+                result = {
+                    "version": (
+                        PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+                    ),
+                    "candidate_id": candidate_id,
+                    "family": spec["family"],
+                    "token": token,
+                    "candidate_status": status,
+                    "threshold_cross_block": int(
+                        threshold["block_number"]
+                    ),
+                    "trough_block": int(
+                        trough["block_number"]
+                    ),
+                    "point_in_time_confirmed": False,
+                    "research_candidate_only": True,
+                }
+            else:
+                peak = state["peak"]
+                peak_value = peak["market_cap_proxy_usd"]
+                trough_value = trough["market_cap_proxy_usd"]
+                confirmation_value = confirmation[
+                    "market_cap_proxy_usd"
+                ]
+                observed_drawdown = (
+                    peak_value - trough_value
+                ) / peak_value
+                observed_rebound = (
+                    confirmation_value - trough_value
+                ) / trough_value
+                status = "confirmed"
+                result = {
+                    "version": (
+                        PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+                    ),
+                    "candidate_id": candidate_id,
+                    "family": spec["family"],
+                    "token": token,
+                    "candidate_status": status,
+                    "peak_block": int(peak["block_number"]),
+                    "peak_market_cap_proxy_usd": _decimal_text(
+                        peak_value
+                    ),
+                    "threshold_cross_block": int(
+                        threshold["block_number"]
+                    ),
+                    "trough_block": int(
+                        trough["block_number"]
+                    ),
+                    "trough_market_cap_proxy_usd": _decimal_text(
+                        trough_value
+                    ),
+                    "confirmation_block": int(
+                        confirmation["block_number"]
+                    ),
+                    "confirmation_market_cap_proxy_usd": _decimal_text(
+                        confirmation_value
+                    ),
+                    "observed_drawdown_fraction": _decimal_text(
+                        observed_drawdown
+                    ),
+                    "observed_confirmation_rebound_fraction": (
+                        _decimal_text(observed_rebound)
+                    ),
+                    "point_in_time_confirmed": True,
+                    "research_candidate_only": True,
+                }
+            counts[candidate_id][status] += 1
+            results.append(result)
+
+    normalized_specs = [
+        {
+            "candidate_id": spec["candidate_id"],
+            "family": spec["family"],
+            "min_drawdown_fraction": _decimal_text(
+                spec["min_drawdown_fraction"]
+            ),
+            "confirmation_rebound_fraction": _decimal_text(
+                spec["confirmation_rebound_fraction"]
+            ),
+        }
+        for spec in specs
+    ]
+    import hashlib
+    import json
+    specs_bytes = (
+        json.dumps(
+            normalized_specs,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+    specs_sha = hashlib.sha256(specs_bytes).hexdigest()
+
+    manifest = write_jsonl_snapshot(
+        results,
+        output=output,
+        provenance={
+            "version": PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
+            "geometry_sha256": _sha256(
+                summary.get("geometry_sha256"),
+                label="dump candidate geometry",
+            ),
+            "candidate_specs_sha256": specs_sha,
+            "uses_price_path_only": True,
+            "point_in_time_confirmation": True,
+            "candidate_selected": False,
+            "dump_threshold_frozen": False,
+            "phase2_dump_detector_frozen": False,
+            "outcome_labels_computed": False,
+        },
+    )
+    research_summary = {
+        "version": PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
+        "geometry_version": PHASE2_DUMP_GEOMETRY_VERSION,
+        "snapshot_head_block": int(
+            summary["snapshot_head_block"]
+        ),
+        "universe_sha256": str(summary["universe_sha256"]),
+        "price_path_provenance_sha256": str(
+            summary["price_path_provenance_sha256"]
+        ),
+        "normalized_price_path_sha256": str(
+            summary["normalized_price_path_sha256"]
+        ),
+        "geometry_sha256": str(summary["geometry_sha256"]),
+        "candidate_specs": normalized_specs,
+        "candidate_specs_sha256": specs_sha,
+        "tokens": len(expected_tokens),
+        "candidate_rows": int(manifest["records"]),
+        "candidate_rows_sha256": manifest["sha256"],
+        "candidate_status_counts": {
+            candidate_id: dict(sorted(counter.items()))
+            for candidate_id, counter in sorted(counts.items())
+        },
+        "uses_price_path_only": True,
+        "point_in_time_confirmation": True,
+        "streaming_evaluation": True,
+        "candidate_selected": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
+    return manifest, research_summary
+
+
+def build_phase2_dump_candidate_handoff(
+    research_summary: Mapping[str, object],
+    *,
+    research_summary_sha256: str,
+    geometry_handoff_sha256: str,
+) -> dict:
+    """Bind candidate-comparison evidence without selecting a detector."""
+
+    summary = dict(research_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+    ):
+        raise ValueError("dump candidate handoff version changed")
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError(
+            "dump candidate handoff is not price-path only"
+        )
+    if summary.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump candidate handoff lacks point-in-time confirmation"
+        )
+    if summary.get("candidate_selected") is not False:
+        raise ValueError(
+            "dump candidate handoff cannot select a detector"
+        )
+    if summary.get("dump_threshold_frozen") is not False:
+        raise ValueError(
+            "dump candidate handoff cannot freeze a threshold"
+        )
+    if summary.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError(
+            "dump candidate handoff cannot freeze a detector"
+        )
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError(
+            "dump candidate handoff cannot contain outcome labels"
+        )
+
+    return {
+        "version": PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION,
+        "snapshot_head_block": int(
+            summary["snapshot_head_block"]
+        ),
+        "universe_sha256": _sha256(
+            summary.get("universe_sha256"),
+            label="dump candidate universe",
+        ),
+        "normalized_price_path_sha256": _sha256(
+            summary.get("normalized_price_path_sha256"),
+            label="dump candidate price path",
+        ),
+        "geometry_sha256": _sha256(
+            summary.get("geometry_sha256"),
+            label="dump candidate geometry",
+        ),
+        "geometry_handoff_sha256": _sha256(
+            geometry_handoff_sha256,
+            label="dump candidate geometry handoff",
+        ),
+        "candidate_specs_sha256": _sha256(
+            summary.get("candidate_specs_sha256"),
+            label="dump candidate specs",
+        ),
+        "candidate_rows_sha256": _sha256(
+            summary.get("candidate_rows_sha256"),
+            label="dump candidate rows",
+        ),
+        "research_summary_sha256": _sha256(
+            research_summary_sha256,
+            label="dump candidate summary",
+        ),
+        "tokens": int(summary["tokens"]),
+        "candidate_rows": int(summary["candidate_rows"]),
+        "uses_price_path_only": True,
+        "candidate_research_ready": True,
         "candidate_selected": False,
         "dump_threshold_frozen": False,
         "phase2_dump_detector_frozen": False,

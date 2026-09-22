@@ -4,11 +4,14 @@ import pytest
 
 from hlp.data.phase2_dump_research import (
     PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
+    PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION,
     PHASE2_DUMP_GEOMETRY_VERSION,
     PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
     build_phase2_dump_geometry,
     build_phase2_dump_geometry_handoff,
     materialize_phase2_dump_geometry,
+    materialize_phase2_dump_candidate_research,
+    build_phase2_dump_candidate_handoff,
     research_phase2_dump_candidates,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
@@ -303,3 +306,72 @@ def test_streaming_dump_geometry_cleans_partial_output_on_missing_token(
 
     assert not output.exists()
     assert not output.with_suffix(".jsonl.tmp").exists()
+
+
+
+def test_streaming_candidate_research_matches_existing_candidate_semantics(
+    tmp_path,
+):
+    rows, summary = geometry()
+    specs = [
+        candidate("confirmed", "0.4", "0.25"),
+        candidate("too-deep", "0.6", "0.25"),
+    ]
+    expected, expected_summary = research_phase2_dump_candidates(
+        rows,
+        specs,
+        geometry_summary=summary,
+    )
+    summary = {
+        **summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    output = tmp_path / "candidates.jsonl"
+    manifest, streamed = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        specs,
+        geometry_summary=summary,
+        output=output,
+    )
+
+    import json
+    actual = [
+        json.loads(line)
+        for line in output.read_text().splitlines()
+        if line.strip()
+    ]
+    assert actual == expected
+    assert streamed["candidate_status_counts"] == expected_summary[
+        "candidate_status_counts"
+    ]
+    assert streamed["candidate_rows"] == len(expected)
+    assert streamed["candidate_rows_sha256"] == manifest["sha256"]
+    assert streamed["streaming_evaluation"] is True
+    assert streamed["candidate_selected"] is False
+    assert streamed["outcome_labels_computed"] is False
+
+
+def test_candidate_handoff_cannot_select_or_freeze_detector(tmp_path):
+    rows, summary = geometry()
+    summary = {
+        **summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [candidate()],
+        geometry_summary=summary,
+        output=tmp_path / "candidate.jsonl",
+    )
+    handoff = build_phase2_dump_candidate_handoff(
+        research,
+        research_summary_sha256=SHA,
+        geometry_handoff_sha256=SHA,
+    )
+    assert handoff["version"] == PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION
+    assert handoff["candidate_research_ready"] is True
+    assert handoff["candidate_selected"] is False
+    assert handoff["phase2_dump_detector_frozen"] is False
+    assert handoff["outcome_labels_computed"] is False
