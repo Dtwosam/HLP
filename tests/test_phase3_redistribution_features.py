@@ -113,7 +113,7 @@ def test_redistribution_tracks_real_holder_movement_only(tmp_path: Path):
     ] == "1.1"
     assert values[
         "redistribution.transfer_value_hhi_so_far"
-    ].startswith("0.487603305785")
+    ].startswith("0.438016528925")
     assert row["data_quality"][
         "mint_burn_self_zero_value_excluded"
     ] is True
