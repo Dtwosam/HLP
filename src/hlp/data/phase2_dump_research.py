@@ -410,7 +410,17 @@ def research_phase2_dump_candidates(
                     "threshold_cross_block": int(
                         threshold_row["block_number"]
                     ),
+                    "threshold_cross_transaction_index": (
+                        threshold_row.get("transaction_index")
+                    ),
+                    "threshold_cross_log_index": int(
+                        threshold_row["log_index"]
+                    ),
                     "trough_block": int(trough_row["block_number"]),
+                    "trough_transaction_index": (
+                        trough_row.get("transaction_index")
+                    ),
+                    "trough_log_index": int(trough_row["log_index"]),
                     "point_in_time_confirmed": False,
                     "research_candidate_only": True,
                 }
@@ -438,16 +448,36 @@ def research_phase2_dump_candidates(
                     "token": token,
                     "candidate_status": status,
                     "peak_block": int(peak_row["block_number"]),
+                    "peak_transaction_index": peak_row.get(
+                        "transaction_index"
+                    ),
+                    "peak_log_index": int(peak_row["log_index"]),
                     "peak_market_cap_proxy_usd": _decimal_text(peak_value),
                     "threshold_cross_block": int(
                         threshold_row["block_number"]
                     ),
+                    "threshold_cross_transaction_index": (
+                        threshold_row.get("transaction_index")
+                    ),
+                    "threshold_cross_log_index": int(
+                        threshold_row["log_index"]
+                    ),
                     "trough_block": int(trough_row["block_number"]),
+                    "trough_transaction_index": trough_row.get(
+                        "transaction_index"
+                    ),
+                    "trough_log_index": int(trough_row["log_index"]),
                     "trough_market_cap_proxy_usd": _decimal_text(
                         trough_value
                     ),
                     "confirmation_block": int(
                         confirmation_row["block_number"]
+                    ),
+                    "confirmation_transaction_index": confirmation_row.get(
+                        "transaction_index"
+                    ),
+                    "confirmation_log_index": int(
+                        confirmation_row["log_index"]
                     ),
                     "confirmation_market_cap_proxy_usd": _decimal_text(
                         confirmation_value

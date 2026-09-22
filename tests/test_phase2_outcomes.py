@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from pathlib import Path
 
 from hlp.data.phase2_outcomes import (
@@ -136,12 +137,11 @@ def test_outcomes_preserve_continuous_multiple_and_5x_minimum(tmp_path: Path):
     assert winner["reached_10x"] is True
     assert winner["time_to_5x_from_trough_blocks"] == 4
     assert winner["time_to_5x_from_confirmation_blocks"] == 3
-    assert (
+    assert Decimal(
         winner[
             "maximum_adverse_excursion_from_confirmation_fraction"
         ]
-        == "0.3846153846153846153846153846"
-    )
+    ) == (Decimal("130") - Decimal("80")) / Decimal("130")
     assert winner["right_censored_at_snapshot"] is True
 
     no_dump = rows[TOKEN_B]
