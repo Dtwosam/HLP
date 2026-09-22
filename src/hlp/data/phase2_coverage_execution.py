@@ -54,6 +54,17 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
 
     rows = [
         _node(
+            "preflight:archive_authenticated",
+            "phase2-archive-rpc-preflight.yml",
+            kind="execution_preflight",
+            requires_archive_secret=True,
+            notes=(
+                "Fail fast unless the authenticated archive route can read "
+                "historical state and a filtered-log window wider than the "
+                "200-block public cap."
+            ),
+        ),
+        _node(
             "shared:quote_registry",
             "phase2-direct-quote-registry.yml",
             kind="shared_acquisition",
@@ -63,6 +74,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:v3_pool_created",
             "phase2-direct-v3-pool-created-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire full-history Uniswap V3 and Sushi V3 PoolCreated "
@@ -73,6 +85,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:v3_initialize",
             "phase2-direct-v3-initialize-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire the shared V3 Initialize tape from block 8,930 "
@@ -83,6 +96,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:v4_initialize",
             "phase2-direct-uniswap-v4-initialize-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire the shared V4 Initialize tape from block 9,070 "
@@ -93,6 +107,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:v3_swap",
             "phase2-direct-v3-swap-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire the shared V3 Swap tape once for launchpad and "
@@ -103,6 +118,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:v4_swap",
             "phase2-direct-v4-swap-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire the shared V4 Swap tape once for launchpad and "
@@ -113,6 +129,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "shared:supply_delta",
             "phase2-direct-supply-delta-backfill.yml",
             kind="shared_acquisition",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Acquire the shared ERC-20 mint/burn supply-delta tape "
@@ -212,6 +229,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "registry:pools_fun",
             "phase2-pools-fun-registry-backfill.yml",
             kind="source_registry",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes="Backfill the complete pools.fun launch registry.",
         ),
@@ -231,6 +249,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "registry:pools_trade_launcher",
             "phase2-pools-trade-launcher-backfill.yml",
             kind="source_registry",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Backfill the shared pools.trade launcher surface used by "
@@ -325,6 +344,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "registry:flap",
             "phase2-flap-registry-backfill.yml",
             kind="source_registry",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes="Backfill the complete Flap lifecycle registry.",
         ),
@@ -358,6 +378,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "registry:trench",
             "phase2-trench-registry-backfill.yml",
             kind="source_registry",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Backfill trench.today lifecycle events and exact launch "
@@ -423,6 +444,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "coverage:hood_fun_current",
             "phase2-hoodfun-current-coverage.yml",
             kind="source_coverage",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Backfill and validate complete current-generation hood.fun "
@@ -433,6 +455,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "derive:hood_fun_previous_semantics",
             "phase2-hoodfun-legacy-curve-semantics.yml",
             kind="source_derivation",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes=(
                 "Prove previous-generation supply and virtual-reserve curve "
@@ -454,6 +477,7 @@ def build_phase2_coverage_execution_nodes() -> list[dict]:
             "registry:noxa",
             "phase2-noxa-registry-backfill.yml",
             kind="source_registry",
+            depends_on=("preflight:archive_authenticated",),
             requires_archive_secret=True,
             notes="Backfill the complete NOXA launch registry.",
         ),
