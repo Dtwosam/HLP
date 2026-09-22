@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Any
+from typing import Iterable, Iterator, Any
 
 
 def _jsonable(row: Any) -> dict:
@@ -56,3 +56,62 @@ def write_jsonl_snapshot(
     )
     manifest_temp.replace(manifest_path)
     return manifest
+
+
+def iter_jsonl_snapshot(
+    rows: Iterable[Any],
+    *,
+    output: Path,
+    provenance: dict[str, Any],
+) -> Iterator[dict]:
+    """Yield rows while atomically materializing the same canonical JSONL tape.
+
+    The final file and sidecar manifest are published only after the consumer
+    exhausts the iterator. If downstream processing fails or stops early, the
+    temporary tape is removed and no apparently complete snapshot is exposed.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp = output.with_suffix(output.suffix + ".tmp")
+    manifest_path = output.with_suffix(output.suffix + ".manifest.json")
+    count = 0
+    digest = hashlib.sha256()
+    completed = False
+
+    try:
+        with temp.open("wb") as handle:
+            for raw in rows:
+                row = _jsonable(raw)
+                line = (
+                    json.dumps(
+                        row,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode()
+                handle.write(line)
+                digest.update(line)
+                count += 1
+                yield row
+        completed = True
+    finally:
+        if not completed:
+            temp.unlink(missing_ok=True)
+
+    temp.replace(output)
+    manifest = {
+        "schema_version": 1,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "path": output.name,
+        "records": count,
+        "sha256": digest.hexdigest(),
+        "provenance": provenance,
+    }
+    manifest_temp = manifest_path.with_suffix(
+        manifest_path.suffix + ".tmp"
+    )
+    manifest_temp.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest_temp.replace(manifest_path)
