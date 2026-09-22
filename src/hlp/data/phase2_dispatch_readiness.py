@@ -19,6 +19,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-source-coverage-ledger-commit.yml",
     "phase2-execution-node-dispatch.yml",
     "phase2-first-wave-launch.yml",
+    "phase2-after-post-fanout-wave-launch.yml",
+    "phase2-after-post-fanout-wave-completion.yml",
     "phase2-archive-fanout-launch.yml",
     "phase2-archive-fanout-completion.yml",
     "phase2-post-fanout-wave-launch.yml",

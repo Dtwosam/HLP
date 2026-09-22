@@ -43,6 +43,8 @@ def test_required_workflows_cover_planner_and_dynamic_gates():
     assert "phase2-direct-source-coverage.yml" in required
     assert "phase2-execution-node-dispatch.yml" in required
     assert "phase2-first-wave-launch.yml" in required
+    assert "phase2-after-post-fanout-wave-launch.yml" in required
+    assert "phase2-after-post-fanout-wave-completion.yml" in required
     assert "phase2-archive-fanout-launch.yml" in required
     assert "phase2-archive-fanout-completion.yml" in required
     assert "phase2-post-fanout-wave-launch.yml" in required
