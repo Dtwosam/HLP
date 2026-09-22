@@ -178,8 +178,27 @@ evidence and records the 13 actual target workflow run IDs in
 
 It deliberately does **not** wait for the long-running historical target runs.
 It also does not promote coverage, approve the direct-market selector or write
-the canonical ledger. Review the recorded target runs and wait for them to
-finish before crediting them in a later planner refresh.
+the canonical ledger.
+
+After all 13 recorded target workflows have finished successfully, the
+preferred completion path is one manual run of
+`phase2-archive-fanout-completion`.
+
+Supply:
+
+- `archive_fanout_launch_run_id`: the exact successful fan-out launcher run;
+- `expected_archive_fanout_artifact_digest`: the exact fan-out artifact digest
+  printed by that launcher;
+- `confirm_completion_refresh=true`.
+
+The collector fails closed unless all 13 target runs are successful at the
+same execution branch/HEAD. It reloads and validates the original first-wave
+receipt, combines the two first-wave dispatcher control runs with the 13
+fan-out dispatcher control runs, and launches one fresh planner with exactly
+those **15** immutable receipt identities. The resulting planner must credit
+all 15 execution nodes while the canonical source-coverage ledger remains
+2/14. The collector publishes that planner run/digest and its new
+`next_ready_node_ids`, then stops.
 
 The individual planner-run/digest → node-dispatch method remains the fallback
 for debugging or selective execution. Nodes with generated dependency run-ID

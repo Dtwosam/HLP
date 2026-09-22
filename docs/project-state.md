@@ -572,6 +572,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   runs, reconciles each attempt/final receipt pair, records the real target run
   IDs, and then stops; it does **not** wait for the long-running historical
   jobs, promote coverage, approve the selector or mutate the canonical ledger.
+  A matching `phase2-archive-fanout-completion` collector is prepared for the
+  other side of that boundary. It accepts only the immutable fan-out launch
+  run/artifact identity, requires every one of the 13 real target workflows to
+  have completed successfully at the same execution HEAD, reloads the original
+  first-wave receipt, and supplies all **15** dispatcher control-run receipts to
+  one fresh planner. That planner must credit exactly the two first-wave nodes
+  plus the 13 archive-fan-out nodes while the canonical source ledger remains
+  2/14. The collector then exposes the next ready-node set and stops without
+  promoting coverage, approving the selector or writing the canonical ledger.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
