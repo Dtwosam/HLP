@@ -44,17 +44,24 @@ def registry():
 def handoffs():
     report = validate_phase3_feature_registry(registry())
     registry_sha = report["registry_sha256"]
-    discovery = {
-        "version": "phase4-discovery-entry-handoff-v1",
+    split = {
+        "version": "phase4-chronological-split-handoff-v1",
         "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
         "feature_registry_sha256": registry_sha,
         "discovery_rows_sha256": SHA,
-        "discovery_subjects": 4,
-        "comeback_5x_tokens": 2,
-        "comeback_5x_base_rate": "0.5",
-        "labels_joined_after_feature_freeze": True,
+        "discovery_subjects": 6,
+        "discovery_split_rows_sha256": SHA,
+        "discovery_split_rows": 4,
+        "validation_split_rows": 1,
+        "final_test_split_rows": 1,
+        "split_assignment_uses_feature_values": False,
+        "split_assignment_uses_outcome_values": False,
+        "random_shuffle_used": False,
+        "chronological_order_enforced": True,
         "feature_values_mutated": False,
-        "phase4_discovery_entry_ready": True,
+        "final_test_separated": True,
+        "phase4_chronological_split_ready": True,
+        "phase4_split_frozen": True,
         "phase4_discovery_checkpoint_claimed": False,
     }
     base = {
@@ -62,15 +69,15 @@ def handoffs():
         "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
         "feature_registry_sha256": registry_sha,
         "discovery_rows_sha256": SHA,
-        "discovery_subjects": 4,
-        "comeback_5x_tokens": 2,
+        "discovery_subjects": 6,
+        "comeback_5x_tokens": 3,
         "comeback_5x_base_rate": "0.5",
         "feature_relationships_tested": False,
         "signal_promoted": False,
         "phase4_discovery_checkpoint_claimed": False,
         "phase4_base_rate_report_ready": True,
     }
-    return discovery, base
+    return split, base
 
 
 def row(suffix, winner, numeric, count, flag, category):
@@ -97,7 +104,7 @@ def row(suffix, winner, numeric, count, flag, category):
 
 
 def test_univariate_reports_winner_and_failure_distributions():
-    discovery, base = handoffs()
+    split, base = handoffs()
     report = build_phase4_univariate_report(
         [
             row("11", True, "8", 1, True, "a"),
@@ -106,11 +113,13 @@ def test_univariate_reports_winner_and_failure_distributions():
             row("44", False, "4", 0, True, "a"),
         ],
         registry(),
-        discovery_entry_handoff=discovery,
+        chronological_split_handoff=split,
         base_rate_handoff=base,
     )
 
     assert report["version"] == PHASE4_UNIVARIATE_REPORT_VERSION
+    assert report["source_discovery_subjects"] == 6
+    assert report["analysis_subjects"] == 4
     assert report["winner_tokens"] == 2
     assert report["failure_tokens"] == 2
     assert report["features_tested"] == 4
@@ -153,7 +162,7 @@ def test_univariate_reports_winner_and_failure_distributions():
 
 
 def test_univariate_rejects_base_rate_population_drift():
-    discovery, base = handoffs()
+    split, base = handoffs()
     base["discovery_subjects"] = 5
 
     with pytest.raises(ValueError, match="discovery_subjects drift"):
@@ -165,19 +174,21 @@ def test_univariate_rejects_base_rate_population_drift():
                 row("44", False, "4", 0, True, "a"),
             ],
             registry(),
-            discovery_entry_handoff=discovery,
+            chronological_split_handoff=split,
             base_rate_handoff=base,
         )
 
 
 def test_univariate_handoff_never_ranks_or_promotes():
-    discovery, _ = handoffs()
+    split, _ = handoffs()
     report = {
         "version": PHASE4_UNIVARIATE_REPORT_VERSION,
         "phase4_checkpoint_name": "hlp-v1-phase4-discovery",
-        "feature_registry_sha256": discovery["feature_registry_sha256"],
-        "discovery_rows_sha256": SHA,
-        "discovery_subjects": 4,
+        "feature_registry_sha256": split["feature_registry_sha256"],
+        "source_discovery_rows_sha256": SHA,
+        "discovery_split_rows_sha256": SHA,
+        "source_discovery_subjects": 6,
+        "analysis_subjects": 4,
         "winner_tokens": 2,
         "failure_tokens": 2,
         "features_tested": 4,
@@ -195,7 +206,7 @@ def test_univariate_handoff_never_ranks_or_promotes():
     handoff = build_phase4_univariate_handoff(
         report,
         report_sha256=SHA,
-        discovery_entry_handoff_sha256=SHA,
+        chronological_split_handoff_sha256=SHA,
         base_rate_handoff_sha256=SHA,
         feature_registry_file_sha256=SHA,
     )
