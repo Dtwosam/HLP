@@ -14,8 +14,8 @@ def test_phase3_feature_registry_is_versioned_causal_and_outcome_blind():
     report = validate_phase3_feature_registry(registry)
 
     assert report["version"] == PHASE3_FEATURE_REGISTRY_VERSION
-    assert report["features"] == 11
-    assert report["families"] == ["price_drawdown"]
+    assert report["features"] == 22
+    assert report["families"] == ["price_drawdown", "trade_flow"]
     assert report["future_state_allowed"] is False
     assert report["outcome_dependency_allowed"] is False
     assert len(report["registry_sha256"]) == 64
@@ -26,7 +26,11 @@ def test_phase3_feature_registry_is_versioned_causal_and_outcome_blind():
         assert row["cutoff_inclusive"] is True
         assert row["future_state_allowed"] is False
         assert row["outcome_dependency_allowed"] is False
-        assert row["missingness_policy"] == "error_if_missing"
+        assert row["missingness_policy"] in {
+            "error_if_missing",
+            "null_with_flag",
+            "zero_if_no_observations",
+        }
 
 
 def test_phase3_feature_registry_sha_changes_when_formula_changes():

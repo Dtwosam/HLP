@@ -20,6 +20,7 @@ FEATURE_DTYPES = frozenset({
 MISSINGNESS_POLICIES = frozenset({
     "error_if_missing",
     "null_with_flag",
+    "zero_if_no_observations",
 })
 
 
@@ -148,6 +149,126 @@ def build_phase3_feature_registry() -> list[dict]:
             ),
             "data_dependency": "phase2_research_price_path",
             "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "trade.total_trades_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical user trade rows for the token at or "
+                "before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.buy_trades_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical buy rows for the token at or before "
+                "the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.sell_trades_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical sell rows for the token at or before "
+                "the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.buy_trade_share_so_far",
+            "family": "trade_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "buy_trades_so_far / total_trades_so_far"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "trade.unique_traders_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical trade initiators observed for the token "
+                "at or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.unique_buyers_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical buy initiators observed for the token "
+                "at or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.unique_sellers_so_far",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "distinct canonical sell initiators observed for the token "
+                "at or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "trade.repeat_buyer_trade_share_so_far",
+            "family": "trade_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "buy trades after each buyer's first buy divided by total "
+                "buy trades through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "trade.repeat_seller_trade_share_so_far",
+            "family": "trade_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "sell trades after each seller's first sell divided by "
+                "total sell trades through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "trade.current_side_is_buy",
+            "family": "trade_flow",
+            "dtype": "boolean",
+            "formula": (
+                "true when the latest canonical user trade at or before "
+                "the confirmation cutoff is a buy"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "trade.current_side_streak_trades",
+            "family": "trade_flow",
+            "dtype": "integer",
+            "formula": (
+                "consecutive canonical trades on the latest side ending "
+                "at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
         },
     ]
     return [
