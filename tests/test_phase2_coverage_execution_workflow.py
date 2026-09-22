@@ -115,7 +115,8 @@ def test_phase2_execution_plan_resolves_node_dispatch_receipts():
     assert "node_dispatch_run_ids_json:" in text
     assert "NODE_DISPATCH_RUN_IDS_JSON" in text
     assert "phase2-execution-node-dispatch.yml" in text
-    assert "validate_phase2_node_dispatch_receipt" in text
+    assert "validate_phase2_node_dispatch_evidence" in text
+    assert "phase2-execution-node-dispatch-attempt.json" in text
     assert "phase2-execution-node-dispatch.json" in text
     assert "conflicting target run IDs" in text
     assert "node_dispatch_receipts_consumed" in text
@@ -126,4 +127,14 @@ def test_phase2_execution_plan_binds_dispatch_receipt_to_control_run():
     text = WORKFLOW.read_text()
 
     assert '"node_dispatch_control_run_id"' in text
-    assert "node-dispatch receipt/control run identity drift" in text
+    assert "node-dispatch evidence/control run identity drift" in text
+
+
+
+def test_phase2_execution_plan_reconciles_attempt_and_final_dispatch_evidence():
+    text = WORKFLOW.read_text()
+
+    assert "attempt_bytes = attempt_path.read_bytes()" in text
+    assert "attempt_file_sha256=hashlib.sha256(" in text
+    assert "validate_phase2_node_dispatch_evidence" in text
+    assert "node-dispatch artifact lacks attempt/final evidence" in text

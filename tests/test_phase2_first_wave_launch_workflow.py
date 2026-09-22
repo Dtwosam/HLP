@@ -62,3 +62,13 @@ def test_first_wave_launcher_stops_before_archive_fanout():
     assert "selector_approval_performed" in text
     assert "review the refreshed planner before launching archive fan-out" in text
     assert "phase2-direct-v3-initialize-backfill.yml" not in text
+
+
+
+def test_first_wave_launcher_reconciles_dispatch_attempt_and_final_receipt():
+    text = WORKFLOW.read_text()
+
+    assert "phase2-execution-node-dispatch-attempt.json" in text
+    assert "validate_phase2_node_dispatch_evidence" in text
+    assert "attempt_file_sha256=hashlib.sha256(" in text
+    assert "lacks attempt/final evidence" in text
