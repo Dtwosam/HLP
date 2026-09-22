@@ -1,0 +1,195 @@
+name: phase2-coverage-execution-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      completed_node_ids_json:
+        description: JSON array of planner node IDs backed by successful runs
+        required: false
+        default: '[]'
+        type: string
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+      - 'tests/test_phase2_coverage_execution.py'
+  pull_request:
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+      - 'tests/test_phase2_coverage_execution.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-coverage-execution-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPLETED_NODE_IDS_JSON: ${{ inputs.completed_node_ids_json }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: plan
+        name: Build deterministic Phase-2 coverage execution plan
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_execution import (
+              build_phase2_coverage_execution_plan,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          raw = os.environ.get("COMPLETED_NODE_IDS_JSON", "").strip()
+          if not raw:
+              raw = "[]"
+          try:
+              completed = json.loads(raw)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "completed_node_ids_json must be valid JSON"
+              ) from exc
+          if not isinstance(completed, list) or any(
+              not isinstance(value, str)
+              for value in completed
+          ):
+              raise SystemExit(
+                  "completed_node_ids_json must be a JSON string array"
+              )
+
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          plan = build_phase2_coverage_execution_plan(
+              ledger,
+              build_phase2_source_inventory(),
+              completed_node_ids=completed,
+          )
+          output = Path(
+              "artifacts/phase2-coverage-execution-plan.json"
+          )
+          output.write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+
+          ready = plan["ready_to_dispatch_node_ids"]
+          ready_secret = plan[
+              "ready_requiring_archive_secret_node_ids"
+          ]
+          ready_public = plan[
+              "ready_without_archive_secret_node_ids"
+          ]
+          approvals = plan[
+              "awaiting_explicit_approval_node_ids"
+          ]
+          manual = plan["manual_ledger_commit_node_ids"]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"complete={plan['complete_sources']}\n"
+              )
+              handle.write(
+                  f"incomplete={plan['incomplete_sources']}\n"
+              )
+              handle.write(f"ready={len(ready)}\n")
+              handle.write(
+                  f"ready_secret={len(ready_secret)}\n"
+              )
+              handle.write(
+                  f"ready_public={len(ready_public)}\n"
+              )
+              handle.write(
+                  f"approvals={len(approvals)}\n"
+              )
+              handle.write(f"manual={len(manual)}\n")
+
+          print(json.dumps({
+              "complete_sources": plan["complete_sources"],
+              "incomplete_sources": plan["incomplete_sources"],
+              "ready_to_dispatch_node_ids": ready,
+              "ready_requiring_archive_secret_node_ids": ready_secret,
+              "ready_without_archive_secret_node_ids": ready_public,
+              "awaiting_explicit_approval_node_ids": approvals,
+              "manual_ledger_commit_node_ids": manual,
+              "ledger_promotion_serialized": True,
+              "canonical_ledger_mutation_automatic": False,
+              "workflow_dispatch_performed": False,
+          }, sort_keys=True))
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## Phase-2 coverage execution plan\n\n"
+                  )
+                  handle.write(
+                      f"- canonical complete: "
+                      f"{plan['complete_sources']}/"
+                      f"{plan['inventory_sources']}\n"
+                  )
+                  handle.write(
+                      f"- incomplete targets: "
+                      f"{plan['incomplete_sources']}\n"
+                  )
+                  handle.write(
+                      f"- ready workflow nodes: {len(ready)}\n"
+                  )
+                  handle.write(
+                      f"- ready without archive secret: "
+                      f"{len(ready_public)}\n"
+                  )
+                  handle.write(
+                      f"- ready requiring archive secret: "
+                      f"{len(ready_secret)}\n"
+                  )
+                  handle.write(
+                      f"- explicit approvals ready: "
+                      f"{len(approvals)}\n"
+                  )
+                  handle.write(
+                      f"- manual ledger commits ready: "
+                      f"{len(manual)}\n"
+                  )
+                  handle.write(
+                      "- coverage acquisition may run in parallel; "
+                      "canonical ledger promotion is serialized\n"
+                  )
+                  handle.write(
+                      "- this planner does not dispatch workflows or mutate "
+                      "the canonical ledger\n"
+                  )
+          PY
+
+      - name: Upload Phase-2 execution plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-coverage-execution-plan
+          path: artifacts/phase2-coverage-execution-plan.json
+          if-no-files-found: error
+          retention-days: 30
