@@ -517,6 +517,9 @@ jobs:
 
           receipt = {
               "version": "phase2-first-wave-launch-receipt-v1",
+              "first_wave_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
               "execution_branch": branch,
               "execution_head_sha": current_head,
               "canonical_coverage_ledger_sha256": ledger_sha,
@@ -576,6 +579,7 @@ jobs:
           PY
 
       - name: Upload first-wave launch receipt
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: phase2-first-wave-launch
@@ -585,6 +589,7 @@ jobs:
 
       - name: Publish first-wave completion summary
         env:
+          FIRST_WAVE_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           INITIAL_PLANNER_RUN_ID: ${{ steps.launch.outputs.planner_run_id }}
           ARCHIVE_PREFLIGHT_RUN_ID: ${{ steps.launch.outputs.archive_preflight_run_id }}
           QUOTE_REGISTRY_RUN_ID: ${{ steps.launch.outputs.quote_registry_run_id }}
@@ -596,6 +601,8 @@ jobs:
             echo "## Phase-2 first wave"
             echo
             echo "- first_wave_completed: true"
+            echo "- first_wave_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- first_wave_artifact_digest: ${FIRST_WAVE_ARTIFACT_DIGEST}"
             echo "- initial_planner_run_id: ${INITIAL_PLANNER_RUN_ID}"
             echo "- archive_preflight_run_id: ${ARCHIVE_PREFLIGHT_RUN_ID}"
             echo "- quote_registry_run_id: ${QUOTE_REGISTRY_RUN_ID}"

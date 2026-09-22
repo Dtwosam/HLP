@@ -5,16 +5,16 @@ workflow surface on the repository default-branch lineage, which GitHub
 requires before `workflow_dispatch` can be used.
 
 Compatibility target:
-`phase1/data-acquisition-spike@8e4703aabf8dcbb0d6bee085136437748e1b6f00`
+`phase1/data-acquisition-spike@97db1b0420de574cd33290cc4e3ca291131c7888`
 
-The bootstrap currently contains 44 Phase 2 workflow files:
+The bootstrap currently contains 45 Phase 2 workflow files:
 
-- 43 are byte-for-byte identical to the compatibility target;
+- 44 are byte-for-byte identical to the compatibility target;
 - `phase2-coverage-execution-plan.yml` keeps the exact same
   `workflow_dispatch` interface but intentionally removes its feature-branch
   `push` and `pull_request` triggers in this default-branch bootstrap copy.
 
-All 44 workflow files are manual-only on this branch: `workflow_dispatch`
+All 45 workflow files are manual-only on this branch: `workflow_dispatch`
 is present and no `push` or `pull_request` trigger is enabled.
 
 After this bootstrap is merged, dispatch Phase 2 workflows against
