@@ -205,3 +205,102 @@ def build_direct_selector_freeze(
         "selector_freeze_ready": True,
         "source_coverage_complete": False,
     }
+
+
+
+def validate_direct_selector_freeze(
+    descriptor: Mapping[str, object],
+    *,
+    expected_evidence_run_id: int,
+    expected_evidence_artifact_digest: str,
+    expected_evidence_handoff_sha256: str,
+) -> dict:
+    """Validate an immutable selector-freeze descriptor after workflow success."""
+
+    row = dict(descriptor)
+    if str(row.get("version") or "") != DIRECT_SELECTOR_FREEZE_VERSION:
+        raise ValueError("direct selector freeze version changed")
+    if int(row.get("chain_id", 0)) != 4663:
+        raise ValueError("direct selector freeze chain ID changed")
+    if int(row.get("snapshot_head_block", -1)) <= 0:
+        raise ValueError("direct selector freeze snapshot is invalid")
+    if str(row.get("selector_version") or "") != DIRECT_SELECTOR_VERSION:
+        raise ValueError("direct selector frozen selector version changed")
+    if str(row.get("selection_policy_candidate_version") or "") != (
+        MARKET_SELECTION_CANDIDATE_VERSION
+    ):
+        raise ValueError("direct selector frozen candidate policy changed")
+
+    if str(row.get("selection_metric") or "") != "active_quote_liquidity_usd":
+        raise ValueError("direct selector frozen metric changed")
+    if str(row.get("tie_break_rule") or "") != "stable market_id ascending":
+        raise ValueError("direct selector frozen tie-break rule changed")
+    if row.get("cross_pool_volume_double_counting_allowed") is not False:
+        raise ValueError("direct selector freeze permits cross-pool double counting")
+    if row.get("selection_rule_frozen") is not True:
+        raise ValueError("direct selector descriptor is not frozen")
+    if row.get("selector_freeze_ready") is not True:
+        raise ValueError("direct selector descriptor is not freeze-ready")
+    if row.get("source_coverage_complete") is not False:
+        raise ValueError("direct selector freeze cannot close source coverage")
+
+    run_id = int(row.get("evidence_run_id") or 0)
+    if run_id != int(expected_evidence_run_id) or run_id <= 0:
+        raise ValueError("direct selector frozen evidence run identity drift")
+    artifact_digest = str(row.get("evidence_artifact_digest") or "").lower()
+    expected_artifact = str(expected_evidence_artifact_digest or "").lower()
+    if artifact_digest != expected_artifact:
+        raise ValueError("direct selector frozen evidence artifact drift")
+    _sha256(artifact_digest, label="direct selector frozen evidence artifact")
+
+    handoff_sha = _sha256(
+        row.get("evidence_handoff_sha256"),
+        label="direct selector frozen evidence handoff",
+    )
+    expected_handoff = _sha256(
+        expected_evidence_handoff_sha256,
+        label="expected direct selector evidence handoff",
+    )
+    if handoff_sha != expected_handoff:
+        raise ValueError("direct selector frozen evidence handoff drift")
+
+    if int(row.get("sample_tokens", 0)) <= 0:
+        raise ValueError("direct selector freeze has no sample tokens")
+    if int(row.get("sample_markets", 0)) <= int(row.get("sample_tokens", 0)):
+        raise ValueError("direct selector freeze lacks competing markets")
+    if int(row.get("multi_market_snapshots", 0)) <= 0:
+        raise ValueError("direct selector freeze has no multi-market snapshots")
+    if int(row.get("candidate_points", 0)) <= 0:
+        raise ValueError("direct selector freeze has no candidate points")
+
+    point_sha = row.get("point_sha256")
+    if not isinstance(point_sha, Mapping):
+        raise ValueError("direct selector frozen point SHA map is missing")
+    if set(map(str, point_sha)) != DIRECT_SOURCE_IDS:
+        raise ValueError("direct selector frozen point SHA source set changed")
+    normalized_points = {
+        str(source_id): _sha256(
+            digest,
+            label=f"direct selector frozen point {source_id}",
+        )
+        for source_id, digest in point_sha.items()
+    }
+
+    for field in (
+        "plan_sha256",
+        "trace_sha256",
+        "candidate_series_sha256",
+        "market_quality_report_sha256",
+    ):
+        _sha256(row.get(field), label=f"direct selector frozen {field}")
+
+    return {
+        **row,
+        "evidence_run_id": run_id,
+        "evidence_artifact_digest": artifact_digest,
+        "evidence_handoff_sha256": handoff_sha,
+        "point_sha256": dict(sorted(normalized_points.items())),
+        "selection_rule_frozen": True,
+        "selector_freeze_ready": True,
+        "source_coverage_complete": False,
+    }

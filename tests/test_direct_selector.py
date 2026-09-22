@@ -4,6 +4,7 @@ from hlp.data.direct_selector import (
     DIRECT_SELECTOR_FREEZE_VERSION,
     DIRECT_SELECTOR_VERSION,
     build_direct_selector_freeze,
+    validate_direct_selector_freeze,
 )
 from hlp.data.market_quality import MARKET_SELECTION_CANDIDATE_VERSION
 
@@ -106,4 +107,47 @@ def test_direct_selector_freeze_rejects_bad_handoff_sha():
             evidence_run_id=123,
             evidence_artifact_digest="sha256:" + SHA,
             evidence_handoff_sha256="bad",
+        )
+
+
+
+def test_direct_selector_freeze_descriptor_validates_exact_evidence():
+    row = validate_direct_selector_freeze(
+        freeze(),
+        expected_evidence_run_id=123,
+        expected_evidence_artifact_digest="sha256:" + SHA,
+        expected_evidence_handoff_sha256=SHA,
+    )
+
+    assert row["selection_rule_frozen"] is True
+    assert row["selector_freeze_ready"] is True
+    assert row["source_coverage_complete"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("selection_rule_frozen", False, "not frozen"),
+        ("source_coverage_complete", True, "cannot close"),
+        (
+            "cross_pool_volume_double_counting_allowed",
+            True,
+            "double counting",
+        ),
+        ("multi_market_snapshots", 0, "multi-market"),
+    ],
+)
+def test_direct_selector_freeze_descriptor_rejects_tampering(
+    field,
+    value,
+    match,
+):
+    row = freeze()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_direct_selector_freeze(
+            row,
+            expected_evidence_run_id=123,
+            expected_evidence_artifact_digest="sha256:" + SHA,
+            expected_evidence_handoff_sha256=SHA,
         )
