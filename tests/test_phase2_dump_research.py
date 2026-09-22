@@ -5,6 +5,7 @@ import pytest
 from hlp.data.phase2_dump_research import (
     PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
     PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION,
+    PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION,
     PHASE2_DUMP_GEOMETRY_VERSION,
     PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
     build_phase2_dump_geometry,
@@ -12,6 +13,7 @@ from hlp.data.phase2_dump_research import (
     materialize_phase2_dump_geometry,
     materialize_phase2_dump_candidate_research,
     build_phase2_dump_candidate_handoff,
+    build_phase2_dump_candidate_diagnostics,
     research_phase2_dump_candidates,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
@@ -375,3 +377,49 @@ def test_candidate_handoff_cannot_select_or_freeze_detector(tmp_path):
     assert handoff["candidate_selected"] is False
     assert handoff["phase2_dump_detector_frozen"] is False
     assert handoff["outcome_labels_computed"] is False
+
+
+
+def test_candidate_diagnostics_report_live_structure_without_outcomes(tmp_path):
+    rows, geometry_summary = geometry()
+    geometry_summary = {
+        **geometry_summary,
+        "normalized_price_path_sha256": SHA,
+        "geometry_sha256": SHA,
+    }
+    output = tmp_path / "candidate.jsonl"
+    _, research = materialize_phase2_dump_candidate_research(
+        iter(rows),
+        [
+            candidate("candidate-a", "0.4", "0.25"),
+            candidate("candidate-b", "0.4", "0.25"),
+        ],
+        geometry_summary=geometry_summary,
+        output=output,
+    )
+    import json
+    candidate_rows = [
+        json.loads(line)
+        for line in output.read_text().splitlines()
+        if line.strip()
+    ]
+    diagnostics, summary = build_phase2_dump_candidate_diagnostics(
+        candidate_rows,
+        research_summary=research,
+    )
+
+    assert len(diagnostics) == 2
+    first = diagnostics[0]
+    assert first["status_counts"] == {"confirmed": 1}
+    assert first["confirmed_fraction"] == "1"
+    assert first["threshold_to_trough_blocks"]["median"] == "1"
+    assert first["trough_to_confirmation_blocks"]["median"] == "1"
+    assert first["observed_drawdown_fraction"]["median"] == "0.5"
+    assert first["uses_outcome_labels"] is False
+    assert first["detector_freeze_ready"] is False
+    assert summary["version"] == PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION
+    assert summary["equivalent_candidate_pairs"] == [
+        ["candidate-a", "candidate-b"]
+    ]
+    assert summary["candidate_selected"] is False
+    assert summary["outcome_labels_computed"] is False

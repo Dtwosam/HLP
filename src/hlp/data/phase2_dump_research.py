@@ -26,6 +26,9 @@ PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION = "phase2-dump-candidate-research-v1"
 PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION = (
     "phase2-dump-candidate-handoff-v1"
 )
+PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION = (
+    "phase2-dump-candidate-diagnostics-v1"
+)
 PEAK_DRAWDOWN_REBOUND_FAMILY = "peak_drawdown_rebound"
 
 
@@ -1172,3 +1175,301 @@ def build_phase2_dump_candidate_handoff(
         "phase2_dump_detector_frozen": False,
         "outcome_labels_computed": False,
     }
+
+
+
+def _median_decimal(values: list[Decimal]) -> str | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return _decimal_text(ordered[middle])
+    return _decimal_text(
+        (ordered[middle - 1] + ordered[middle]) / Decimal("2")
+    )
+
+
+def _median_int(values: list[int]) -> str | None:
+    return _median_decimal([Decimal(value) for value in values])
+
+
+def build_phase2_dump_candidate_diagnostics(
+    candidate_rows: Iterable[Mapping[str, object]],
+    *,
+    research_summary: Mapping[str, object],
+) -> tuple[list[dict], dict]:
+    """Describe detector behavior without outcome labels or candidate selection."""
+
+    summary = dict(research_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+    ):
+        raise ValueError(
+            "dump candidate diagnostics require canonical candidate research"
+        )
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError(
+            "dump candidate diagnostics are not price-path only"
+        )
+    if summary.get("point_in_time_confirmation") is not True:
+        raise ValueError(
+            "dump candidate diagnostics require point-in-time confirmation"
+        )
+    if summary.get("candidate_selected") is not False:
+        raise ValueError(
+            "dump candidate diagnostics cannot consume selected detector"
+        )
+    if summary.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError(
+            "dump candidate diagnostics cannot consume frozen detector"
+        )
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError(
+            "dump candidate diagnostics cannot consume outcome labels"
+        )
+
+    specs = {
+        str(row["candidate_id"]): dict(row)
+        for row in summary.get("candidate_specs") or []
+    }
+    if not specs:
+        raise ValueError(
+            "dump candidate diagnostics have no candidate specs"
+        )
+    tokens = int(summary.get("tokens", -1))
+    if tokens <= 0:
+        raise ValueError(
+            "dump candidate diagnostics token count is invalid"
+        )
+
+    grouped = {
+        candidate_id: []
+        for candidate_id in specs
+    }
+    seen: set[tuple[str, str]] = set()
+    for raw in candidate_rows:
+        row = dict(raw)
+        if (
+            str(row.get("version") or "")
+            != PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+        ):
+            raise ValueError(
+                "dump candidate diagnostics row version changed"
+            )
+        candidate_id = str(row.get("candidate_id") or "")
+        token = normalize_address(str(row.get("token") or ""))
+        if candidate_id not in specs:
+            raise ValueError(
+                "dump candidate diagnostics contain unknown candidate: "
+                f"{candidate_id}"
+            )
+        identity = (candidate_id, token)
+        if identity in seen:
+            raise ValueError(
+                "dump candidate diagnostics repeat candidate/token: "
+                f"{identity}"
+            )
+        seen.add(identity)
+        status = str(row.get("candidate_status") or "")
+        if status not in {
+            "confirmed",
+            "drawdown_unconfirmed",
+            "no_material_drawdown",
+        }:
+            raise ValueError(
+                f"dump candidate diagnostics status is invalid: {status}"
+            )
+        confirmed = status == "confirmed"
+        if bool(row.get("point_in_time_confirmed")) != confirmed:
+            raise ValueError(
+                "dump candidate point-in-time confirmation flag drift"
+            )
+        if row.get("research_candidate_only") is not True:
+            raise ValueError(
+                "dump candidate row is not research-only"
+            )
+        row["token"] = token
+        grouped[candidate_id].append(row)
+
+    expected_rows = tokens * len(specs)
+    if len(seen) != expected_rows:
+        raise ValueError(
+            "dump candidate diagnostics candidate/token coverage changed"
+        )
+    if int(summary.get("candidate_rows", -1)) != expected_rows:
+        raise ValueError(
+            "dump candidate diagnostics summary row count changed"
+        )
+
+    status_signatures = {}
+    diagnostics = []
+    for candidate_id in sorted(specs):
+        rows = grouped[candidate_id]
+        if len(rows) != tokens:
+            raise ValueError(
+                f"{candidate_id} candidate token coverage changed"
+            )
+        statuses = Counter(
+            str(row["candidate_status"]) for row in rows
+        )
+        confirmed = [
+            row
+            for row in rows
+            if row["candidate_status"] == "confirmed"
+        ]
+        threshold_to_trough = [
+            int(row["trough_block"])
+            - int(row["threshold_cross_block"])
+            for row in confirmed
+        ]
+        trough_to_confirmation = [
+            int(row["confirmation_block"])
+            - int(row["trough_block"])
+            for row in confirmed
+        ]
+        threshold_to_confirmation = [
+            int(row["confirmation_block"])
+            - int(row["threshold_cross_block"])
+            for row in confirmed
+        ]
+        peak_to_confirmation = [
+            int(row["confirmation_block"])
+            - int(row["peak_block"])
+            for row in confirmed
+        ]
+        for values, label in (
+            (threshold_to_trough, "threshold-to-trough"),
+            (trough_to_confirmation, "trough-to-confirmation"),
+            (
+                threshold_to_confirmation,
+                "threshold-to-confirmation",
+            ),
+            (peak_to_confirmation, "peak-to-confirmation"),
+        ):
+            if any(value < 0 for value in values):
+                raise ValueError(
+                    f"{candidate_id} {label} block ordering is invalid"
+                )
+
+        drawdowns = [
+            _decimal(
+                row["observed_drawdown_fraction"],
+                label=f"{candidate_id} observed drawdown",
+            )
+            for row in confirmed
+        ]
+        rebounds = [
+            _decimal(
+                row["observed_confirmation_rebound_fraction"],
+                label=f"{candidate_id} observed rebound",
+            )
+            for row in confirmed
+        ]
+        signature = tuple(
+            (
+                row["token"],
+                row["candidate_status"],
+                row.get("confirmation_block"),
+            )
+            for row in sorted(rows, key=lambda value: value["token"])
+        )
+        status_signatures[candidate_id] = signature
+
+        def bounds(values: list[Decimal]):
+            if not values:
+                return {
+                    "min": None,
+                    "median": None,
+                    "max": None,
+                }
+            return {
+                "min": _decimal_text(min(values)),
+                "median": _median_decimal(values),
+                "max": _decimal_text(max(values)),
+            }
+
+        def int_bounds(values: list[int]):
+            if not values:
+                return {
+                    "min": None,
+                    "median": None,
+                    "max": None,
+                }
+            return {
+                "min": min(values),
+                "median": _median_int(values),
+                "max": max(values),
+            }
+
+        diagnostics.append({
+            "version": PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION,
+            "candidate_id": candidate_id,
+            "family": specs[candidate_id]["family"],
+            "min_drawdown_fraction": specs[candidate_id][
+                "min_drawdown_fraction"
+            ],
+            "confirmation_rebound_fraction": specs[candidate_id][
+                "confirmation_rebound_fraction"
+            ],
+            "tokens": tokens,
+            "status_counts": dict(sorted(statuses.items())),
+            "confirmed_fraction": _decimal_text(
+                Decimal(len(confirmed)) / Decimal(tokens)
+            ),
+            "threshold_to_trough_blocks": int_bounds(
+                threshold_to_trough
+            ),
+            "trough_to_confirmation_blocks": int_bounds(
+                trough_to_confirmation
+            ),
+            "threshold_to_confirmation_blocks": int_bounds(
+                threshold_to_confirmation
+            ),
+            "peak_to_confirmation_blocks": int_bounds(
+                peak_to_confirmation
+            ),
+            "observed_drawdown_fraction": bounds(drawdowns),
+            "observed_confirmation_rebound_fraction": bounds(rebounds),
+            "uses_outcome_labels": False,
+            "candidate_selected": False,
+            "detector_freeze_ready": False,
+        })
+
+    equivalent = []
+    candidate_ids = sorted(status_signatures)
+    for index, left in enumerate(candidate_ids):
+        for right in candidate_ids[index + 1:]:
+            if status_signatures[left] == status_signatures[right]:
+                equivalent.append([left, right])
+
+    diagnostic_summary = {
+        "version": PHASE2_DUMP_CANDIDATE_DIAGNOSTICS_VERSION,
+        "candidate_research_version": (
+            PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION
+        ),
+        "snapshot_head_block": int(
+            summary["snapshot_head_block"]
+        ),
+        "universe_sha256": str(summary["universe_sha256"]),
+        "geometry_sha256": str(summary["geometry_sha256"]),
+        "candidate_specs_sha256": str(
+            summary["candidate_specs_sha256"]
+        ),
+        "candidate_rows_sha256": str(
+            summary["candidate_rows_sha256"]
+        ),
+        "tokens": tokens,
+        "candidates": len(specs),
+        "equivalent_candidate_pairs": equivalent,
+        "uses_price_path_only": True,
+        "uses_outcome_labels": False,
+        "point_in_time_confirmation": True,
+        "candidate_selected": False,
+        "detector_freeze_ready": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
+    return diagnostics, diagnostic_summary
