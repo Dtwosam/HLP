@@ -7,11 +7,13 @@ from hlp.data.phase2_coverage_execution import (
 )
 from hlp.data.phase2_execution_dispatch import (
     PHASE2_DISPATCH_INPUT_PLAN_VERSION,
+    PHASE2_NODE_DISPATCH_ATTEMPT_VERSION,
     PHASE2_NODE_DISPATCH_RECEIPT_VERSION,
     PHASE2_NODE_DISPATCH_REQUEST_VERSION,
     RUN_ID_INPUT_BINDINGS,
     build_phase2_dispatch_input_plan,
     build_phase2_node_dispatch_request,
+    validate_phase2_node_dispatch_attempt,
     validate_phase2_node_dispatch_receipt,
     extract_workflow_dispatch_inputs,
 )
@@ -405,3 +407,64 @@ def test_node_dispatch_receipt_rejects_tampering(field, value, match):
     row[field] = value
     with pytest.raises(ValueError, match=match):
         validate_phase2_node_dispatch_receipt(row)
+
+
+
+def dispatch_attempt():
+    return {
+        "version": PHASE2_NODE_DISPATCH_ATTEMPT_VERSION,
+        "node_id": "shared:quote_registry",
+        "target_workflow": "phase2-direct-quote-registry.yml",
+        "target_ref": "phase1/data-acquisition-spike",
+        "target_head_sha": "ab" * 20,
+        "node_dispatch_control_run_id": 98,
+        "planner_run_id": 101,
+        "planner_artifact_digest": "sha256:" + "cd" * 32,
+        "canonical_coverage_ledger_sha256": "ef" * 32,
+        "dispatch_input_names": [],
+        "dispatch_inputs_sha256": "12" * 32,
+        "dispatched_run_id": 202,
+        "requires_explicit_approval": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+        "target_run_identity_verified": False,
+    }
+
+
+def test_node_dispatch_attempt_proves_target_creation_before_verification():
+    row = validate_phase2_node_dispatch_attempt(dispatch_attempt())
+
+    assert row["node_id"] == "shared:quote_registry"
+    assert row["node_dispatch_control_run_id"] == 98
+    assert row["dispatched_run_id"] == 202
+    assert row["workflow_dispatch_performed"] is True
+    assert row["target_run_identity_verified"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("version", "other", "version changed"),
+        ("dispatched_run_id", 0, "run IDs must be positive"),
+        (
+            "canonical_ledger_write_authorized",
+            True,
+            "authorizes ledger write",
+        ),
+        (
+            "workflow_dispatch_performed",
+            False,
+            "does not prove dispatch",
+        ),
+        (
+            "target_run_identity_verified",
+            True,
+            "must precede target verification",
+        ),
+    ],
+)
+def test_node_dispatch_attempt_rejects_tampering(field, value, match):
+    row = dispatch_attempt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_node_dispatch_attempt(row)
