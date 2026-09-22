@@ -1,355 +1,339 @@
-"""Source-agnostic Phase-2 universe assembly.
-
-Venue-specific adapters own price/supply reconstruction. This module normalizes
-their per-token threshold summaries, merges the same token across sources, and
-applies deterministic address exclusions without erasing threshold evidence.
-"""
+"""Fail-closed Phase-2 eligible-universe assembly."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Iterable, Mapping
 
-from hlp.config import normalize_address
-from hlp.data.exclusions import exclusion_map
-from hlp.data.phase2_sources import build_phase2_source_inventory
+from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH, normalize_address
+from hlp.data.phase2_coverage import validate_phase2_coverage_ledger
 
 
-THRESHOLD_STATUSES = frozenset({"eligible", "unknown", "ineligible"})
-PHASE2_UNIVERSE_STATUSES = frozenset(
-    {"eligible", "unknown", "ineligible", "excluded"}
-)
-MARKET_CAP_THRESHOLD_USD = Decimal("100000")
+PHASE2_UNIVERSE_VERSION = "phase2-universe-v1"
+PHASE2_ELIGIBILITY_THRESHOLD_USD = Decimal("100000")
 
 
-def _source_specs(
-    source_inventory: Iterable[Mapping[str, object]] | None,
-) -> dict[str, dict]:
-    rows = (
-        build_phase2_source_inventory()
-        if source_inventory is None
-        else [dict(row) for row in source_inventory]
-    )
-    specs: dict[str, dict] = {}
-    for raw in rows:
-        source_id = str(raw.get("source_id") or "")
-        if not source_id:
-            raise ValueError("Phase-2 source inventory has an empty source id")
-        if source_id in specs:
-            raise ValueError(
-                f"Phase-2 source inventory repeats source id: {source_id}"
-            )
-        specs[source_id] = dict(raw)
-    return specs
-
-
-def _count(raw: Mapping[str, object], field: str) -> int:
+def _sha256(value: object, *, label: str) -> str:
+    text = str(value or "").lower().removeprefix("sha256:")
+    if len(text) != 64:
+        raise ValueError(f"{label} SHA-256 is invalid")
     try:
-        value = int(raw.get(field, 0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field} must be an integer") from exc
-    if value < 0:
-        raise ValueError(f"{field} cannot be negative")
-    return value
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} SHA-256 is invalid") from exc
+    return text
 
 
-def normalize_phase2_source_summary(
+def normalize_phase2_source_eligibility_rows(
     source_id: str,
     rows: Iterable[Mapping[str, object]],
     *,
-    source_inventory: Iterable[Mapping[str, object]] | None = None,
+    provenance_sha256: str,
+    canonical_price_series: bool,
 ) -> list[dict]:
-    """Normalize one venue/source summary into a common threshold contract.
-
-    Existing Phase-1 summaries may already carry eligibility_status. Generic
-    venue summaries expose crossed_100k plus priced/total point counts. Both
-    shapes are reduced to the same fail-closed semantics:
-
-    - any observed >=$100k point proves eligible;
-    - no crossing plus any unpriced point remains unknown;
-    - only complete priced non-crossing history is ineligible.
-    """
-    specs = _source_specs(source_inventory)
+    """Normalize one complete source's token summaries for universe assembly."""
     source_id = str(source_id)
-    spec = specs.get(source_id)
-    if spec is None:
-        raise ValueError(f"unknown Phase-2 source id: {source_id}")
+    if not source_id:
+        raise ValueError("Phase-2 eligibility source id is empty")
+    provenance = _sha256(
+        provenance_sha256,
+        label=f"{source_id} eligibility provenance",
+    )
+    if canonical_price_series is not True:
+        raise ValueError(
+            f"{source_id} eligibility is not a canonical price series"
+        )
 
-    output: list[dict] = []
-    seen_tokens: set[str] = set()
+    output = []
+    seen: set[str] = set()
     for raw in rows:
-        if "token" not in raw:
-            raise ValueError(f"{source_id} summary row has no token")
-        token = normalize_address(str(raw["token"]))
-        if token in seen_tokens:
+        row = dict(raw)
+        token = normalize_address(str(row.get("token") or ""))
+        if token in seen:
             raise ValueError(
-                f"duplicate Phase-2 source/token summary: {source_id} {token}"
+                f"{source_id} eligibility repeats token: {token}"
             )
-        seen_tokens.add(token)
+        seen.add(token)
 
-        observed_venue = raw.get("venue")
-        expected_venue = str(spec.get("venue") or "")
-        if observed_venue is not None and str(observed_venue) != expected_venue:
+        points = int(row.get("price_points", -1))
+        priced = int(row.get("priced_points", -1))
+        if points <= 0 or priced != points:
             raise ValueError(
-                f"{source_id} venue mismatch: "
-                f"{observed_venue!r} != {expected_venue!r}"
+                f"{source_id} eligibility has incomplete pricing: {token}"
             )
-
-        price_points = _count(raw, "price_points")
-        priced_points = _count(raw, "priced_points")
-        if priced_points > price_points:
+        if "unpriced_points" in row and int(
+            row.get("unpriced_points", -1)
+        ) != 0:
             raise ValueError(
-                f"{source_id} priced_points exceed price_points for {token}"
+                f"{source_id} eligibility has unpriced points: {token}"
             )
-        unpriced_points = price_points - priced_points
-        if "unpriced_points" in raw:
-            explicit_unpriced = _count(raw, "unpriced_points")
-            if explicit_unpriced != unpriced_points:
-                raise ValueError(
-                    f"{source_id} unpriced point count mismatch for {token}"
-                )
-
-        crossed_raw = raw.get("crossed_100k", False)
-        if not isinstance(crossed_raw, bool):
+        if "pricing_complete" in row and row.get(
+            "pricing_complete"
+        ) is not True:
             raise ValueError(
-                f"{source_id} crossed_100k must be boolean for {token}"
-            )
-        crossed = crossed_raw
-
-        max_value = raw.get("max_market_cap_proxy_usd")
-        if max_value is None:
-            maximum = None
-        else:
-            try:
-                maximum = Decimal(str(max_value))
-            except Exception as exc:
-                raise ValueError(
-                    f"{source_id} invalid max market cap for {token}"
-                ) from exc
-            if maximum < 0:
-                raise ValueError(
-                    f"{source_id} negative max market cap for {token}"
-                )
-        max_block = raw.get("max_market_cap_block")
-        if maximum is not None:
-            if max_block is None:
-                raise ValueError(
-                    f"{source_id} max market cap has no block for {token}"
-                )
-            max_block = int(max_block)
-            if max_block < 0:
-                raise ValueError(
-                    f"{source_id} max market-cap block is negative for {token}"
-                )
-        elif priced_points > 0:
-            raise ValueError(
-                f"{source_id} priced history has no max market cap for {token}"
+                f"{source_id} eligibility pricing_complete changed: {token}"
             )
 
-        if crossed and (
-            maximum is None or maximum < MARKET_CAP_THRESHOLD_USD
-        ):
+        raw_max = row.get("max_market_cap_proxy_usd")
+        if raw_max is None:
             raise ValueError(
-                f"{source_id} crossed_100k contradicts max market cap for {token}"
+                f"{source_id} eligibility has no maximum market cap: {token}"
             )
-        if (
-            not crossed
-            and maximum is not None
-            and maximum >= MARKET_CAP_THRESHOLD_USD
-        ):
+        maximum = Decimal(str(raw_max))
+        if maximum < 0:
             raise ValueError(
-                f"{source_id} max market cap contradicts crossed_100k for {token}"
+                f"{source_id} eligibility has negative maximum: {token}"
+            )
+        crossed = row.get("crossed_100k")
+        if crossed not in {True, False}:
+            raise ValueError(
+                f"{source_id} eligibility crossed_100k is invalid: {token}"
+            )
+        expected_crossed = maximum >= PHASE2_ELIGIBILITY_THRESHOLD_USD
+        if bool(crossed) != expected_crossed:
+            raise ValueError(
+                f"{source_id} eligibility threshold evidence disagrees: "
+                f"{token}"
             )
 
-        derived_status = (
-            "eligible"
-            if crossed
-            else "unknown"
-            if unpriced_points > 0
-            else "ineligible"
+        max_block_raw = row.get("max_market_cap_block")
+        max_block = (
+            None if max_block_raw is None else int(max_block_raw)
         )
-        explicit_status = raw.get("eligibility_status")
-        if explicit_status is not None:
-            explicit_status = str(explicit_status)
-            if explicit_status not in THRESHOLD_STATUSES:
-                raise ValueError(
-                    f"{source_id} invalid eligibility_status for {token}: "
-                    f"{explicit_status!r}"
-                )
-            if explicit_status != derived_status:
-                raise ValueError(
-                    f"{source_id} eligibility_status contradicts price evidence "
-                    f"for {token}: {explicit_status} != {derived_status}"
-                )
+        if max_block is None or max_block < 0:
+            raise ValueError(
+                f"{source_id} eligibility max block is invalid: {token}"
+            )
 
-        output.append(
-            {
-                "source_id": source_id,
-                "venue": expected_venue,
-                "source_kind": spec.get("source_kind"),
-                "source_readiness": spec.get("readiness"),
-                "token": token,
-                "eligibility_status": derived_status,
-                "crossed_100k": crossed,
-                "price_points": price_points,
-                "priced_points": priced_points,
-                "unpriced_points": unpriced_points,
-                "pricing_complete": unpriced_points == 0,
-                "max_market_cap_proxy_usd": (
-                    None if maximum is None else str(maximum)
-                ),
-                "max_market_cap_block": max_block,
-            }
-        )
+        output.append({
+            "source_id": source_id,
+            "token": token,
+            "price_points": points,
+            "priced_points": priced,
+            "max_market_cap_proxy_usd": str(maximum),
+            "max_market_cap_block": max_block,
+            "crossed_100k": bool(crossed),
+            "canonical_price_series": True,
+            "eligibility_provenance_sha256": provenance,
+        })
 
     output.sort(key=lambda row: row["token"])
     return output
 
 
-def merge_phase2_universe(
-    source_summaries: Mapping[str, Iterable[Mapping[str, object]]],
-    exclusion_registry_rows: Iterable[Mapping[str, object]],
+def build_phase2_universe(
+    source_rows: Mapping[str, Iterable[Mapping[str, object]]],
     *,
-    source_inventory: Iterable[Mapping[str, object]] | None = None,
-) -> list[dict]:
-    """Merge per-source threshold evidence into one deterministic population."""
-    inventory_rows = (
-        build_phase2_source_inventory()
-        if source_inventory is None
-        else [dict(row) for row in source_inventory]
+    source_inventory: Iterable[Mapping[str, object]],
+    coverage_ledger: Mapping[str, object],
+    exclusion_rows: Iterable[Mapping[str, object]],
+) -> tuple[list[dict], list[dict], dict]:
+    """Assemble the address-deduplicated >=$100k universe after full coverage."""
+    inventory = [dict(row) for row in source_inventory]
+    coverage = validate_phase2_coverage_ledger(
+        coverage_ledger,
+        inventory,
     )
-    specs = _source_specs(inventory_rows)
-    exclusions = exclusion_map(exclusion_registry_rows)
-
-    grouped: dict[str, list[dict]] = {}
-    for source_id in source_summaries:
-        if source_id not in specs:
-            raise ValueError(f"unknown Phase-2 source id: {source_id}")
-        normalized = normalize_phase2_source_summary(
-            source_id,
-            source_summaries[source_id],
-            source_inventory=inventory_rows,
+    if coverage["phase2_universe_coverage_complete"] is not True:
+        raise ValueError(
+            "Phase-2 universe requires complete coverage for every source"
         )
-        for row in normalized:
-            grouped.setdefault(row["token"], []).append(row)
 
-    output: list[dict] = []
-    for token in sorted(grouped):
-        evidence = sorted(
-            grouped[token],
-            key=lambda row: row["source_id"],
+    inventory_ids = {
+        str(row["source_id"])
+        for row in inventory
+    }
+    supplied_ids = {str(source_id) for source_id in source_rows}
+    if supplied_ids != inventory_ids:
+        raise ValueError(
+            "Phase-2 universe source-summary contract mismatch: "
+            f"missing={sorted(inventory_ids - supplied_ids)} "
+            f"extra={sorted(supplied_ids - inventory_ids)}"
         )
-        source_ids = [row["source_id"] for row in evidence]
-        if len(source_ids) != len(set(source_ids)):
+
+    exclusions: dict[str, dict] = {}
+    for raw in exclusion_rows:
+        row = dict(raw)
+        address = normalize_address(str(row.get("address") or ""))
+        if address in exclusions:
             raise ValueError(
-                f"Phase-2 token repeats source evidence: {token}"
+                f"Phase-2 universe exclusion repeats address: {address}"
+            )
+        exclusion_class = str(row.get("exclusion_class") or "")
+        identity_source = str(row.get("identity_source") or "")
+        if not exclusion_class or not identity_source:
+            raise ValueError(
+                f"Phase-2 universe exclusion is incomplete: {address}"
+            )
+        exclusions[address] = {
+            "exclusion_class": exclusion_class,
+            "identity_source": identity_source,
+        }
+
+    for required in (ROBINHOOD_WETH, ROBINHOOD_USDG):
+        address = normalize_address(required)
+        if address not in exclusions:
+            raise ValueError(
+                f"Phase-2 universe exclusion registry lacks {address}"
             )
 
-        statuses = {row["eligibility_status"] for row in evidence}
-        threshold_status = (
-            "eligible"
-            if "eligible" in statuses
-            else "unknown"
-            if "unknown" in statuses
-            else "ineligible"
-        )
-
-        maxima = [
-            (
-                Decimal(row["max_market_cap_proxy_usd"]),
-                row["source_id"],
-                row["max_market_cap_block"],
+    by_token: dict[str, dict] = {}
+    source_token_counts: dict[str, int] = {}
+    for source_id in sorted(inventory_ids):
+        rows = [dict(row) for row in source_rows[source_id]]
+        source_token_counts[source_id] = len(rows)
+        seen_source_tokens: set[str] = set()
+        for row in rows:
+            if str(row.get("source_id") or "") != source_id:
+                raise ValueError(
+                    f"Phase-2 universe source identity drift: {source_id}"
+                )
+            token = normalize_address(str(row.get("token") or ""))
+            if token in seen_source_tokens:
+                raise ValueError(
+                    f"Phase-2 universe repeats {source_id} token: {token}"
+                )
+            seen_source_tokens.add(token)
+            if row.get("canonical_price_series") is not True:
+                raise ValueError(
+                    f"Phase-2 universe row is not canonical: {token}"
+                )
+            points = int(row.get("price_points", -1))
+            priced = int(row.get("priced_points", -1))
+            if points <= 0 or priced != points:
+                raise ValueError(
+                    f"Phase-2 universe row has incomplete pricing: {token}"
+                )
+            provenance = _sha256(
+                row.get("eligibility_provenance_sha256"),
+                label=f"{source_id} eligibility row",
             )
-            for row in evidence
-            if row["max_market_cap_proxy_usd"] is not None
-        ]
-        if maxima:
-            maximum, maximum_source, maximum_block = max(
-                maxima,
-                key=lambda item: (item[0], item[1], item[2]),
+            maximum = Decimal(
+                str(row.get("max_market_cap_proxy_usd"))
             )
-        else:
-            maximum = None
-            maximum_source = None
-            maximum_block = None
+            if maximum < 0:
+                raise ValueError(
+                    f"Phase-2 universe row has negative maximum: {token}"
+                )
+            crossed = row.get("crossed_100k")
+            if crossed not in {True, False}:
+                raise ValueError(
+                    f"Phase-2 universe threshold flag is invalid: {token}"
+                )
+            if bool(crossed) != (
+                maximum >= PHASE2_ELIGIBILITY_THRESHOLD_USD
+            ):
+                raise ValueError(
+                    f"Phase-2 universe threshold evidence disagrees: {token}"
+                )
+            max_block = int(row.get("max_market_cap_block", -1))
+            if max_block < 0:
+                raise ValueError(
+                    f"Phase-2 universe max block is invalid: {token}"
+                )
 
-        exclusion = exclusions.get(token)
-        universe_status = (
-            "excluded" if exclusion is not None else threshold_status
-        )
-        row = {
+            current = by_token.get(token)
+            if current is None:
+                current = {
+                    "token": token,
+                    "source_ids": [],
+                    "source_provenance_sha256": {},
+                    "source_price_points": {},
+                    "max_market_cap_proxy_usd": maximum,
+                    "max_market_cap_block": max_block,
+                    "crossed_100k": bool(crossed),
+                }
+                by_token[token] = current
+            current["source_ids"].append(source_id)
+            current["source_provenance_sha256"][source_id] = provenance
+            current["source_price_points"][source_id] = points
+            prior = Decimal(
+                str(current["max_market_cap_proxy_usd"])
+            )
+            prior_block = int(current["max_market_cap_block"])
+            if maximum > prior or (
+                maximum == prior and max_block < prior_block
+            ):
+                current["max_market_cap_proxy_usd"] = maximum
+                current["max_market_cap_block"] = max_block
+            current["crossed_100k"] = (
+                bool(current["crossed_100k"])
+                or bool(crossed)
+            )
+
+    universe: list[dict] = []
+    rejected: list[dict] = []
+    overlap_tokens = 0
+    excluded_eligible = 0
+    below_threshold = 0
+    for token, raw in by_token.items():
+        source_ids = sorted(set(raw["source_ids"]))
+        if len(source_ids) > 1:
+            overlap_tokens += 1
+        maximum = Decimal(str(raw["max_market_cap_proxy_usd"]))
+        base = {
             "token": token,
             "source_ids": source_ids,
-            "source_count": len(source_ids),
-            "source_evidence": evidence,
-            "threshold_eligibility_status": threshold_status,
-            "eligibility_status": threshold_status,
-            "crossed_100k": threshold_status == "eligible",
-            "max_market_cap_proxy_usd": (
-                None if maximum is None else str(maximum)
+            "source_provenance_sha256": dict(sorted(
+                raw["source_provenance_sha256"].items()
+            )),
+            "source_price_points": dict(sorted(
+                raw["source_price_points"].items()
+            )),
+            "max_market_cap_proxy_usd": str(maximum),
+            "max_market_cap_block": int(
+                raw["max_market_cap_block"]
             ),
-            "max_market_cap_source_id": maximum_source,
-            "max_market_cap_block": maximum_block,
-            "excluded": exclusion is not None,
-            "phase2_universe_status": universe_status,
-            "included": universe_status == "eligible",
-            "exclusion_category": (
-                None if exclusion is None else exclusion["category"]
-            ),
-            "exclusion_source": (
-                None if exclusion is None else exclusion["source"]
-            ),
-            "exclusion_reason": (
-                None if exclusion is None else exclusion["reason"]
-            ),
+            "crossed_100k": bool(raw["crossed_100k"]),
+            "eligibility_threshold_usd": "100000",
         }
-        output.append(row)
+        exclusion = exclusions.get(token)
+        if exclusion is not None:
+            if base["crossed_100k"]:
+                excluded_eligible += 1
+            rejected.append({
+                **base,
+                "universe_status": "excluded",
+                **exclusion,
+            })
+            continue
+        if not base["crossed_100k"]:
+            below_threshold += 1
+            rejected.append({
+                **base,
+                "universe_status": "below_threshold",
+                "exclusion_class": None,
+                "identity_source": None,
+            })
+            continue
+        universe.append({
+            **base,
+            "universe_status": "eligible",
+        })
 
-    return output
-
-
-def summarize_phase2_universe(rows: Iterable[Mapping[str, object]]) -> dict:
-    """Return compact population counts without changing membership."""
-    counts = {status: 0 for status in sorted(PHASE2_UNIVERSE_STATUSES)}
-    threshold_counts = {status: 0 for status in sorted(THRESHOLD_STATUSES)}
-    source_ids: set[str] = set()
-    tokens = 0
-
-    for raw in rows:
-        tokens += 1
-        status = str(raw.get("phase2_universe_status") or "")
-        if status not in counts:
-            raise ValueError(f"invalid Phase-2 universe status: {status!r}")
-        counts[status] += 1
-
-        threshold_status = str(
-            raw.get("threshold_eligibility_status") or ""
-        )
-        if threshold_status not in threshold_counts:
-            raise ValueError(
-                f"invalid threshold eligibility status: {threshold_status!r}"
-            )
-        threshold_counts[threshold_status] += 1
-
-        evidence = raw.get("source_evidence")
-        if not isinstance(evidence, list) or not evidence:
-            raise ValueError(
-                f"Phase-2 universe row has no source evidence: {raw.get('token')}"
-            )
-        source_ids.update(
-            str(item["source_id"])
-            for item in evidence
-            if isinstance(item, Mapping) and item.get("source_id")
-        )
-
-    return {
-        "tokens": tokens,
-        "included_tokens": counts["eligible"],
-        "excluded_tokens": counts["excluded"],
-        "unknown_tokens": counts["unknown"],
-        "ineligible_tokens": counts["ineligible"],
-        "threshold_status_counts": threshold_counts,
-        "phase2_status_counts": counts,
-        "covered_source_ids": sorted(source_ids),
-        "covered_sources": len(source_ids),
+    universe.sort(key=lambda row: row["token"])
+    rejected.sort(key=lambda row: row["token"])
+    summary = {
+        "version": PHASE2_UNIVERSE_VERSION,
+        "snapshot_head_block": int(
+            coverage["snapshot_head_block"]
+        ),
+        "eligibility_threshold_usd": "100000",
+        "inventory_sources": len(inventory_ids),
+        "complete_source_ids": list(
+            coverage["complete_source_ids"]
+        ),
+        "source_token_counts": dict(sorted(source_token_counts.items())),
+        "observed_unique_tokens": len(by_token),
+        "source_overlap_tokens": overlap_tokens,
+        "eligible_tokens": len(universe),
+        "rejected_tokens": len(rejected),
+        "excluded_eligible_tokens": excluded_eligible,
+        "below_threshold_tokens": below_threshold,
+        "exclusion_addresses": len(exclusions),
+        "coverage_complete": True,
+        "exclusions_address_based": True,
+        "canonical_price_series_required": True,
+        "phase2_universe_frozen": True,
     }
+    return universe, rejected, summary

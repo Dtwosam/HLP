@@ -420,6 +420,19 @@ Implemented foundation:
   prepared execution logic; NOXA remains incomplete until the backfills run
   and the resulting evidence is accepted.
 
+- the final Phase-2 universe assembly contract is now implemented but remains
+  intentionally unusable against the current incomplete ledger. It requires
+  `phase2_universe_coverage_complete=true` across **all 14 sources**, an exact
+  source-summary entry for every inventory source (including explicitly empty
+  populations), fully priced canonical per-token series, and valid SHA-256
+  provenance. It de-duplicates tokens by normalized address across source
+  overlaps, applies only the deterministic address exclusion registry, and
+  admits a token only when its verified maximum market-cap proxy is at least
+  **$100,000**. Threshold flags are cross-checked against the numeric maximum;
+  WETH/USDG must be present in the exclusion set. This contract is ready for
+  the later source-eligibility bundle but cannot freeze today's universe while
+  the ledger remains 2/14 complete;
+
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
 - the keyless SolidRPC filtered log cap is now **200 blocks** (observed
