@@ -70,7 +70,8 @@ def test_node_dispatch_workflow_blocks_same_planner_node_duplicates():
     assert "validate_phase2_node_dispatch_receipt" in text
     assert "actions/artifacts?" in text
     assert "name=phase2-execution-node-dispatch" in text
-    assert "prior same-planner/node dispatch identity drift" in text
+    assert "prior same-planner/node dispatch identity" in text
+    assert "drift:" in text
     assert "Phase-2 node was already dispatched from this planner" in text
     assert "refresh the planner before retrying" in text
 
