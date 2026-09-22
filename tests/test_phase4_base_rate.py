@@ -1,3 +1,5 @@
+from decimal import getcontext
+
 import pytest
 
 from hlp.data.phase4_base_rate import (
@@ -22,7 +24,7 @@ def handoff():
         "discovery_rows_sha256": SHA,
         "discovery_subjects": 3,
         "comeback_5x_tokens": 2,
-        "comeback_5x_base_rate": "0.6666666666666666666666666667",
+        "comeback_5x_base_rate": "0.66666666666666666666666666666666666666666666666666666666666666666666666666666667",
         "labels_joined_after_feature_freeze": True,
         "feature_values_mutated": False,
         "phase4_discovery_only": True,
@@ -74,7 +76,10 @@ def test_base_rate_reports_population_before_feature_tests():
     distribution = report["max_post_dump_multiple_distribution"]
     assert distribution["minimum"] == "2"
     assert distribution["median"] == "6"
-    assert distribution["mean"] == "10.66666666666666666666666667"
+    assert distribution["mean"] == (
+        "10.666666666666666666666666666666666666666666666666666666666666"
+        "666666666666666667"
+    )
     assert distribution["maximum"] == "24"
     assert distribution["ge_20x_tokens"] == 1
     assert report["feature_relationships_tested"] is False
@@ -122,3 +127,29 @@ def test_base_rate_handoff_never_promotes_signal():
     assert result["feature_relationships_tested"] is False
     assert result["signal_promoted"] is False
     assert result["phase4_discovery_checkpoint_claimed"] is False
+
+
+
+def test_base_rate_is_independent_of_ambient_decimal_context():
+    original_precision = getcontext().prec
+    try:
+        getcontext().prec = 6
+        report = build_phase4_base_rate_report(
+            [
+                row(TOKEN_A, "2"),
+                row(TOKEN_B, "6"),
+                row(TOKEN_C, "24"),
+            ],
+            discovery_entry_handoff=handoff(),
+        )
+    finally:
+        getcontext().prec = original_precision
+
+    assert report["comeback_5x_base_rate"] == (
+        "0.666666666666666666666666666666666666666666666666666666666666"
+        "66666666666666666667"
+    )
+    assert report["max_post_dump_multiple_distribution"]["mean"] == (
+        "10.666666666666666666666666666666666666666666666666666666666666"
+        "666666666666666667"
+    )
