@@ -600,23 +600,29 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3_feature_registry.py` now gives every implemented feature a versioned
   formula, snapshot semantics, data dependency, dtype and missingness policy;
   registry definitions are SHA-bound and explicitly forbid future state or
-  outcome dependence. The registry now contains **80 causal features across
-  ten families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  outcome dependence. The registry now contains **87 causal features across
+  eleven families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
   9 `trade_size_flow`, 8 `holder_state` / concentration, 8
-  `participant_retention`, 8 `supply_redistribution`, 6
-  `early_recipient_activity`, 5 `chain_regime`, 4 `lifecycle_age`, and
-  10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
+  `participant_retention`, 7 `participant_type`, 8
+  `supply_redistribution`, 6 `early_recipient_activity`, 5
+  `chain_regime`, 4 `lifecycle_age`, and 10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
   and `venue_mechanics` all
   use the canonical research price path and enforce the exact confirmation
   event as an inclusive cutoff. Chain regime replays the full cross-sectional
   price tape for contemporaneous market-cap and 1000-block activity state;
   venue mechanics uses only per-event canonical `source_ids` /
   `component_ids` to measure observed venue identity, overlap and causal
-  identity-set switches through the cutoff. Trade flow and participant
-  retention both remain behind the same fail-closed canonical wallet-trade
-  tape. Retention measures repeat participation, two-sided wallets and whether
-  the latest participant is returning without consuming trades after the
-  cutoff. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and trench.today all
+  identity-set switches through the cutoff. Trade flow, participant retention and participant type all remain behind the
+  same fail-closed canonical wallet-trade tape. Retention measures repeat
+  participation, two-sided wallets and whether the latest participant is
+  returning without consuming trades after the cutoff. Participant type adds
+  historical contract-code participation without creating a permanent
+  contract/EOA label: each distinct canonical initiator is checked with archive
+  `eth_getCode` against state at the **start of the confirmation block**
+  (block `cutoff - 1`), so a deployment later in the same block cannot leak
+  through the exact confirmation event. The seven features measure unique
+  code/no-code accounts, their trade/buy/sell shares and whether the latest
+  initiator had code at that causal boundary. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and trench.today all
   have source-specific adapters that use transaction initiator identity rather
   than router/protocol sender identity. `trade_size_flow` uses the canonical
   per-trade token amount but never compares raw quote amounts across assets;
@@ -641,7 +647,8 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   source-coverage row, requires all 14 `trade_coverage_complete=true`, then
   merges/deduplicates them into the immutable
   `phase3-canonical-trade-tape` artifact and compact handoff consumed by
-  trade-flow, participant-retention and trade-size-flow features. No canonical
+  trade-flow, participant-retention, participant-type and trade-size-flow
+  features. No canonical
   trade tape is claimed yet because those 14 source-coverage artifacts have not
   all been executed and accepted. Holder, supply-redistribution,
   early-recipient and lifecycle-age features share a complete guarded
@@ -664,9 +671,10 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   lifecycle and early-recipient contracts/workflows are tested. Full-universe transfer
   execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
   verified 200-block keyless filtered-log route is rejected for this job rather
-  than launching an impractical millions-request backfill. The
-  equal-family-coverage and feature-staging workflows now require all ten
-  implemented families, giving a prepared **80-feature** label-free bundle at
+  than launching an impractical millions-request backfill. The participant-type workflow likewise requires authenticated archive state
+  for its historical `eth_getCode` evidence. The equal-family-coverage and
+  feature-staging workflows now require all eleven implemented families,
+  giving a prepared **87-feature** label-free bundle at
   exactly matched subject cutoffs. The staging bundle validates every value
   against registry dtype and missingness policy, preserves per-family
   data-quality flags, consumes no outcome rows, and explicitly publishes
