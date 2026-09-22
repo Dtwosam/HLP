@@ -86,3 +86,12 @@ def test_phase2_execution_plan_binds_exact_canonical_ledger():
     assert "canonical_coverage_ledger_sha256" in text
     assert "ledger_sha256 = hashlib.sha256" in text
     assert 'plan["planner_head_sha"] = current_head' in text
+
+
+
+def test_phase2_execution_plan_fails_closed_on_compare_file_cap():
+    text = WORKFLOW.read_text()
+
+    assert "len(comparison_files) >= 300" in text
+    assert "compare file list reached API cap" in text
+    assert "rerun the dependency" in text
