@@ -360,11 +360,9 @@ jobs:
               coverage_manifest = json.loads(
                   coverage_manifest_path.read_text()
               )
-              rows = list(
-                  iter_validated_jsonl(
-                      canonical_path,
-                      canonical_manifest_path,
-                  )
+              rows = iter_validated_jsonl(
+                  canonical_path,
+                  canonical_manifest_path,
               )
               cover = list(
                   iter_validated_jsonl(

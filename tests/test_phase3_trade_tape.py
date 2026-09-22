@@ -239,3 +239,56 @@ def test_source_coverage_rejects_wrong_identity_kind():
             wallet_identity_complete=True,
             canonical_trade_adapter_complete=True,
         )
+
+
+
+def test_canonical_trade_tape_consumes_source_iterators_once(tmp_path):
+    universe, source_rows, coverage = complete_inputs(overlap=True)
+
+    class OneShot:
+        def __init__(self, rows):
+            self.rows = list(rows)
+            self.used = False
+
+        def __iter__(self):
+            if self.used:
+                raise AssertionError("source iterator was consumed twice")
+            self.used = True
+            return iter(self.rows)
+
+    streamed = {
+        source_id: OneShot(rows)
+        for source_id, rows in source_rows.items()
+    }
+    output = tmp_path / "streamed.jsonl"
+    manifest, summary = materialize_phase3_canonical_trade_tape(
+        universe,
+        streamed,
+        coverage,
+        feature_entry_handoff=entry(),
+        output=output,
+    )
+
+    assert manifest["records"] == 1
+    assert summary["cross_source_duplicates_collapsed"] == 1
+    assert all(value.used for value in streamed.values())
+
+
+def test_source_coverage_accepts_one_shot_trade_iterator():
+    rows = OneShotRows = iter([trade("direct_uniswap_v3")])
+    coverage = build_phase3_trade_source_coverage(
+        "direct_uniswap_v3",
+        rows,
+        eligible_tokens=[TOKEN],
+        snapshot_head_block=100,
+        market_registry_sha256=SHA,
+        raw_trade_tape_sha256=SHA,
+        raw_trade_rows=1,
+        wallet_identity_sha256=SHA,
+        wallet_identity_kind="transaction_from",
+        historical_event_scan_complete=True,
+        wallet_identity_complete=True,
+        canonical_trade_adapter_complete=True,
+    )
+    assert coverage["canonical_trade_rows"] == 1
+    assert coverage["trade_coverage_complete"] is True

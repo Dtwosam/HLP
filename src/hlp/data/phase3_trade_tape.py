@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -137,7 +138,8 @@ def build_phase3_trade_source_coverage(
         for token in eligible_tokens
     })
     eligible_set = set(eligible)
-    rows = []
+    canonical_rows = 0
+    canonical_digest = hashlib.sha256()
     previous = None
     for raw in canonical_trade_rows:
         row = validate_phase3_canonical_trade_row(raw)
@@ -162,9 +164,18 @@ def build_phase3_trade_source_coverage(
                 f"{source_id} canonical trades are not strictly ordered"
             )
         previous = key
-        rows.append(row)
+        line = (
+            json.dumps(
+                row,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+        canonical_digest.update(line)
+        canonical_rows += 1
 
-    canonical_rows, canonical_sha = _jsonl_sha(rows)
+    canonical_sha = canonical_digest.hexdigest()
     complete = (
         historical_event_scan_complete is True
         and wallet_identity_complete is True
@@ -373,31 +384,22 @@ def materialize_phase3_canonical_trade_tape(
             f"extra={sorted(set(coverage) - inventory_ids)}"
         )
 
-    by_event = {}
     source_row_counts = {}
-    collapsed_duplicates = 0
-    for source_id in sorted(inventory_ids):
-        rows = [
-            validate_phase3_canonical_trade_row(raw)
-            for raw in source_trade_rows[source_id]
-        ]
-        source_row_counts[source_id] = len(rows)
-        count, digest = _jsonl_sha(rows)
+
+    def validated_source_rows(source_id: str):
         evidence = coverage[source_id]
-        if count != int(evidence.get("canonical_trade_rows", -1)):
-            raise ValueError(
-                f"{source_id} Phase-3 canonical trade count drift"
-            )
-        if digest != _sha256(
+        expected_count = int(
+            evidence.get("canonical_trade_rows", -1)
+        )
+        expected_sha = _sha256(
             evidence.get("canonical_trade_rows_sha256"),
             label=f"{source_id} canonical trade rows",
-        ):
-            raise ValueError(
-                f"{source_id} Phase-3 canonical trade SHA drift"
-            )
-
+        )
+        digest = hashlib.sha256()
+        count = 0
         previous = None
-        for row in rows:
+        for raw in source_trade_rows[source_id]:
+            row = validate_phase3_canonical_trade_row(raw)
             if str(row["source_id"]) != source_id:
                 raise ValueError(
                     f"{source_id} Phase-3 canonical trade source drift"
@@ -423,54 +425,136 @@ def materialize_phase3_canonical_trade_tape(
                     f"{source_id} Phase-3 canonical trades are not ordered"
                 )
             previous = source_key
+            line = (
+                json.dumps(
+                    row,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode()
+            digest.update(line)
+            count += 1
+            yield row
+
+        if count != expected_count:
+            raise ValueError(
+                f"{source_id} Phase-3 canonical trade count drift"
+            )
+        if digest.hexdigest() != expected_sha:
+            raise ValueError(
+                f"{source_id} Phase-3 canonical trade SHA drift"
+            )
+        source_row_counts[source_id] = count
+
+    provenance = {
+        "version": PHASE3_CANONICAL_TRADE_TAPE_VERSION,
+        "snapshot_head_block": snapshot,
+        "eligible_universe_sha256": entry[
+            "eligible_universe_sha256"
+        ],
+        "inventory_sources": len(inventory_ids),
+        "complete_trade_sources": len(coverage),
+        "cross_source_duplicates_collapsed": 0,
+        "trade_coverage_complete": True,
+        "outcome_rows_consumed": False,
+        "future_state_allowed": False,
+    }
+
+    def merge_sorted_sources():
+        heap = []
+        iterators = {}
+        for source_id in sorted(inventory_ids):
+            iterator = iter(validated_source_rows(source_id))
+            iterators[source_id] = iterator
+            try:
+                row = next(iterator)
+            except StopIteration:
+                continue
+            heapq.heappush(
+                heap,
+                (
+                    (
+                        *_event_key(row),
+                        row["token"],
+                        source_id,
+                        str(
+                            row.get("transaction_hash") or ""
+                        ).lower(),
+                    ),
+                    source_id,
+                    row,
+                ),
+            )
+
+        pending = None
+        pending_identity = None
+        while heap:
+            _, source_id, row = heapq.heappop(heap)
+            iterator = iterators[source_id]
+            try:
+                following = next(iterator)
+            except StopIteration:
+                following = None
+            if following is not None:
+                heapq.heappush(
+                    heap,
+                    (
+                        (
+                            *_event_key(following),
+                            following["token"],
+                            source_id,
+                            str(
+                                following.get("transaction_hash") or ""
+                            ).lower(),
+                        ),
+                        source_id,
+                        following,
+                    ),
+                )
 
             identity = (
-                token,
-                *event,
+                row["token"],
+                *_event_key(row),
                 str(row.get("transaction_hash") or "").lower(),
             )
-            prior = by_event.get(identity)
-            if prior is None:
-                merged = dict(row)
-                merged["source_ids"] = [source_id]
-                by_event[identity] = merged
+            if pending is None:
+                pending = dict(row)
+                pending["source_ids"] = [source_id]
+                pending_identity = identity
                 continue
-            if _duplicate_economics(prior) != _duplicate_economics(row):
-                raise ValueError(
-                    "Phase-3 cross-source duplicate trade disagrees: "
-                    f"{identity}"
-                )
-            prior_sources = set(prior.get("source_ids") or [])
-            prior_sources.add(source_id)
-            prior["source_ids"] = sorted(prior_sources)
-            prior["source_id"] = min(prior["source_ids"])
-            collapsed_duplicates += 1
+            if identity == pending_identity:
+                if _duplicate_economics(pending) != (
+                    _duplicate_economics(row)
+                ):
+                    raise ValueError(
+                        "Phase-3 cross-source duplicate trade disagrees: "
+                        f"{identity}"
+                    )
+                sources = set(pending.get("source_ids") or [])
+                sources.add(source_id)
+                pending["source_ids"] = sorted(sources)
+                pending["source_id"] = min(pending["source_ids"])
+                provenance[
+                    "cross_source_duplicates_collapsed"
+                ] += 1
+                continue
 
-    merged_rows = list(by_event.values())
-    merged_rows.sort(
-        key=lambda row: (
-            *_event_key(row),
-            row["token"],
-            row["source_id"],
-            str(row.get("transaction_hash") or ""),
-        )
-    )
+            yield pending
+            pending = dict(row)
+            pending["source_ids"] = [source_id]
+            pending_identity = identity
+
+        if pending is not None:
+            yield pending
+
     manifest = write_jsonl_snapshot(
-        merged_rows,
+        merge_sorted_sources(),
         output=output,
-        provenance={
-            "version": PHASE3_CANONICAL_TRADE_TAPE_VERSION,
-            "snapshot_head_block": snapshot,
-            "eligible_universe_sha256": entry[
-                "eligible_universe_sha256"
-            ],
-            "inventory_sources": len(inventory_ids),
-            "complete_trade_sources": len(coverage),
-            "cross_source_duplicates_collapsed": collapsed_duplicates,
-            "trade_coverage_complete": True,
-            "outcome_rows_consumed": False,
-            "future_state_allowed": False,
-        },
+        provenance=provenance,
+    )
+    collapsed_duplicates = int(
+        provenance["cross_source_duplicates_collapsed"]
     )
 
     coverage_rows_sorted = [
