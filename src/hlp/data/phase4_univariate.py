@@ -11,9 +11,11 @@ from hlp.data.phase3_feature_registry import (
     validate_phase3_feature_registry,
 )
 from hlp.data.phase4_base_rate import PHASE4_BASE_RATE_HANDOFF_VERSION
+from hlp.data.phase4_chronological_split import (
+    PHASE4_CHRONOLOGICAL_SPLIT_HANDOFF_VERSION,
+)
 from hlp.data.phase4_discovery_entry import (
     PHASE4_DISCOVERY_CHECKPOINT_NAME,
-    PHASE4_DISCOVERY_ENTRY_HANDOFF_VERSION,
     PHASE4_DISCOVERY_ENTRY_VERSION,
 )
 
@@ -116,35 +118,51 @@ def _difference(
 
 
 def _validate_parent_handoffs(
-    discovery_entry_handoff: Mapping[str, object],
+    chronological_split_handoff: Mapping[str, object],
     base_rate_handoff: Mapping[str, object],
     *,
     registry_sha256: str,
 ) -> tuple[dict, dict]:
-    discovery = dict(discovery_entry_handoff)
+    split = dict(chronological_split_handoff)
     base = dict(base_rate_handoff)
+
     if (
-        str(discovery.get("version") or "")
-        != PHASE4_DISCOVERY_ENTRY_HANDOFF_VERSION
+        str(split.get("version") or "")
+        != PHASE4_CHRONOLOGICAL_SPLIT_HANDOFF_VERSION
     ):
-        raise ValueError("Phase-4 univariate discovery-entry version changed")
-    if discovery.get("phase4_checkpoint_name") != (
+        raise ValueError("Phase-4 univariate split version changed")
+    if split.get("phase4_checkpoint_name") != (
         PHASE4_DISCOVERY_CHECKPOINT_NAME
     ):
         raise ValueError("Phase-4 univariate checkpoint name changed")
-    if discovery.get("phase4_discovery_entry_ready") is not True:
-        raise ValueError("Phase-4 univariate discovery entry is not ready")
-    if discovery.get("labels_joined_after_feature_freeze") is not True:
-        raise ValueError("Phase-4 univariate labels predate feature freeze")
-    if discovery.get("feature_values_mutated") is not False:
-        raise ValueError("Phase-4 univariate frozen features were mutated")
-    if discovery.get("phase4_discovery_checkpoint_claimed") is not False:
-        raise ValueError("Phase-4 univariate input already claimed discovery")
+    for flag in (
+        "chronological_order_enforced",
+        "final_test_separated",
+        "phase4_chronological_split_ready",
+        "phase4_split_frozen",
+    ):
+        if split.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 univariate split lacks {flag}"
+            )
+    for flag in (
+        "split_assignment_uses_feature_values",
+        "split_assignment_uses_outcome_values",
+        "random_shuffle_used",
+        "feature_values_mutated",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if split.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 univariate split violates {flag}"
+            )
     if _sha256(
-        discovery.get("feature_registry_sha256"),
-        label="Phase-4 univariate discovery registry",
+        split.get("feature_registry_sha256"),
+        label="Phase-4 univariate split registry",
     ) != registry_sha256:
-        raise ValueError("Phase-4 univariate registry SHA drift")
+        raise ValueError("Phase-4 univariate split registry drift")
+    if int(split.get("discovery_split_rows", -1)) <= 0:
+        raise ValueError("Phase-4 univariate discovery slice is empty")
 
     if str(base.get("version") or "") != PHASE4_BASE_RATE_HANDOFF_VERSION:
         raise ValueError("Phase-4 univariate base-rate version changed")
@@ -165,27 +183,24 @@ def _validate_parent_handoffs(
         base.get("discovery_rows_sha256"),
         label="Phase-4 univariate base-rate rows",
     ) != _sha256(
-        discovery.get("discovery_rows_sha256"),
-        label="Phase-4 univariate discovery rows",
+        split.get("discovery_rows_sha256"),
+        label="Phase-4 univariate split source rows",
     ):
         raise ValueError("Phase-4 univariate base-rate population drift")
-    for key in (
-        "discovery_subjects",
-        "comeback_5x_tokens",
-        "comeback_5x_base_rate",
+    if int(base.get("discovery_subjects", -1)) != int(
+        split.get("discovery_subjects", -2)
     ):
-        if str(base.get(key)) != str(discovery.get(key)):
-            raise ValueError(
-                f"Phase-4 univariate base-rate {key} drift"
-            )
-    return discovery, base
+        raise ValueError(
+            "Phase-4 univariate base-rate discovery_subjects drift"
+        )
+    return split, base
 
 
 def build_phase4_univariate_report(
     discovery_rows: Iterable[Mapping[str, object]],
     feature_registry: Iterable[Mapping[str, object]],
     *,
-    discovery_entry_handoff: Mapping[str, object],
+    chronological_split_handoff: Mapping[str, object],
     base_rate_handoff: Mapping[str, object],
 ) -> dict:
     """Compare every frozen feature across comeback and failure cohorts."""
@@ -193,8 +208,8 @@ def build_phase4_univariate_report(
     registry_rows = [dict(row) for row in feature_registry]
     registry = validate_phase3_feature_registry(registry_rows)
     registry_sha = registry["registry_sha256"]
-    discovery, _ = _validate_parent_handoffs(
-        discovery_entry_handoff,
+    split, _ = _validate_parent_handoffs(
+        chronological_split_handoff,
         base_rate_handoff,
         registry_sha256=registry_sha,
     )
@@ -312,10 +327,8 @@ def build_phase4_univariate_report(
             state[f"{cohort}_values"].append(normalized)
 
     subjects = len(seen)
-    if subjects != int(discovery.get("discovery_subjects", -1)):
-        raise ValueError("Phase-4 univariate subject count drift")
-    if winner_tokens != int(discovery.get("comeback_5x_tokens", -1)):
-        raise ValueError("Phase-4 univariate winner count drift")
+    if subjects != int(split.get("discovery_split_rows", -1)):
+        raise ValueError("Phase-4 univariate discovery-slice count drift")
     if failure_tokens != subjects - winner_tokens:
         raise ValueError("Phase-4 univariate failure count drift")
     if winner_tokens <= 0 or failure_tokens <= 0:
@@ -457,11 +470,18 @@ def build_phase4_univariate_report(
         "version": PHASE4_UNIVARIATE_REPORT_VERSION,
         "phase4_checkpoint_name": PHASE4_DISCOVERY_CHECKPOINT_NAME,
         "feature_registry_sha256": registry_sha,
-        "discovery_rows_sha256": _sha256(
-            discovery.get("discovery_rows_sha256"),
-            label="Phase-4 univariate discovery rows",
+        "source_discovery_rows_sha256": _sha256(
+            split.get("discovery_rows_sha256"),
+            label="Phase-4 univariate source discovery rows",
         ),
-        "discovery_subjects": subjects,
+        "discovery_split_rows_sha256": _sha256(
+            split.get("discovery_split_rows_sha256"),
+            label="Phase-4 univariate discovery split rows",
+        ),
+        "source_discovery_subjects": int(
+            split["discovery_subjects"]
+        ),
+        "analysis_subjects": subjects,
         "winner_tokens": winner_tokens,
         "failure_tokens": failure_tokens,
         "features_tested": len(reports),
@@ -483,7 +503,7 @@ def build_phase4_univariate_handoff(
     report: Mapping[str, object],
     *,
     report_sha256: str,
-    discovery_entry_handoff_sha256: str,
+    chronological_split_handoff_sha256: str,
     base_rate_handoff_sha256: str,
     feature_registry_file_sha256: str,
 ) -> dict:
@@ -526,23 +546,30 @@ def build_phase4_univariate_handoff(
             feature_registry_file_sha256,
             label="Phase-4 univariate registry file",
         ),
-        "discovery_rows_sha256": _sha256(
-            row.get("discovery_rows_sha256"),
-            label="Phase-4 univariate discovery rows",
+        "source_discovery_rows_sha256": _sha256(
+            row.get("source_discovery_rows_sha256"),
+            label="Phase-4 univariate source discovery rows",
+        ),
+        "discovery_split_rows_sha256": _sha256(
+            row.get("discovery_split_rows_sha256"),
+            label="Phase-4 univariate discovery split rows",
         ),
         "univariate_report_sha256": _sha256(
             report_sha256,
             label="Phase-4 univariate report",
         ),
-        "discovery_entry_handoff_sha256": _sha256(
-            discovery_entry_handoff_sha256,
-            label="Phase-4 univariate discovery-entry handoff",
+        "chronological_split_handoff_sha256": _sha256(
+            chronological_split_handoff_sha256,
+            label="Phase-4 univariate chronological split handoff",
         ),
         "base_rate_handoff_sha256": _sha256(
             base_rate_handoff_sha256,
             label="Phase-4 univariate base-rate handoff",
         ),
-        "discovery_subjects": int(row["discovery_subjects"]),
+        "source_discovery_subjects": int(
+            row["source_discovery_subjects"]
+        ),
+        "analysis_subjects": int(row["analysis_subjects"]),
         "winner_tokens": int(row["winner_tokens"]),
         "failure_tokens": int(row["failure_tokens"]),
         "features_tested": int(row["features_tested"]),
