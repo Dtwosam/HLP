@@ -1,0 +1,589 @@
+name: phase2-research-materialize-component
+
+on:
+  workflow_dispatch:
+    inputs:
+      rehydration_plan_run_id:
+        description: Exact phase2-research-rehydration-plan run ID
+        required: true
+        type: string
+      expected_plan_artifact_digest:
+        description: Exact rehydration-plan artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_plan_sha256:
+        description: Exact SHA-256 of phase2-research-rehydration-plan.json
+        required: true
+        type: string
+      universe_run_id:
+        description: Exact phase2-universe-freeze run ID
+        required: true
+        type: string
+      expected_universe_artifact_digest:
+        description: Exact frozen-universe artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_universe_handoff_sha256:
+        description: Exact SHA-256 of phase2-universe-freeze-handoff.json
+        required: true
+        type: string
+      component_id:
+        description: One simple research component to materialize
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-materialize-${{ inputs.component_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLAN_RUN_ID: ${{ inputs.rehydration_plan_run_id }}
+  EXPECTED_PLAN_ARTIFACT_DIGEST: ${{ inputs.expected_plan_artifact_digest }}
+  EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+  UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
+  EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
+  EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
+  COMPONENT_ID: ${{ inputs.component_id }}
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify and download plan plus frozen universe
+        run: |
+          mkdir -p inputs/plan inputs/universe
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          specs = [
+              (
+                  "plan",
+                  int(os.environ["PLAN_RUN_ID"]),
+                  "phase2-research-rehydration-plan",
+                  os.environ["EXPECTED_PLAN_ARTIFACT_DIGEST"].lower(),
+                  Path("inputs/plan"),
+              ),
+              (
+                  "universe",
+                  int(os.environ["UNIVERSE_RUN_ID"]),
+                  "phase2-universe-freeze",
+                  os.environ["EXPECTED_UNIVERSE_ARTIFACT_DIGEST"].lower(),
+                  Path("inputs/universe"),
+              ),
+          ]
+
+          def artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                          f"actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+
+          for label, run_id, name, expected, destination in specs:
+              if run_id <= 0:
+                  raise SystemExit(f"{label} run id is invalid")
+              if not expected.startswith("sha256:") or len(expected) != 71:
+                  raise SystemExit(f"{label} artifact digest is invalid")
+              matches = [
+                  row
+                  for row in artifacts(run_id)
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{label}: expected one artifact; "
+                      f"found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(f"{label} artifact is expired")
+              actual = str(artifact.get("digest") or "").lower()
+              if actual != expected:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected}"
+                  )
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  os.environ["GITHUB_REPOSITORY"],
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+          PY
+
+      - id: materialize
+        name: Materialize exact eligible-token research tape
+        run: |
+          mkdir -p artifacts inputs/source inputs/shards
+          python - <<'PY'
+          import fnmatch
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from hlp.config import normalize_address
+          from hlp.data.phase2_research_materialization import (
+              materialize_sharded_jsonl_research_subset,
+              materialize_single_jsonl_research_subset,
+          )
+          from hlp.data.phase2_research_paths import (
+              DIRECT_RESEARCH_COMPONENT_ID,
+          )
+          from hlp.data.phase2_research_rehydration import (
+              build_phase2_research_rehydration_plan,
+              build_phase2_research_rehydration_seed,
+          )
+          from hlp.data.phase2_research_source_layouts import (
+              build_phase2_research_source_layouts,
+              validate_phase2_research_source_layouts,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          component_id = os.environ["COMPONENT_ID"]
+          plan_root = Path("inputs/plan")
+          universe_root = Path("inputs/universe")
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def canonical_sha(payload):
+              raw = (
+                  json.dumps(
+                      payload,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              ).encode()
+              return hashlib.sha256(raw).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                          f"actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+
+          def verify_named_artifact(run_id, name, expected_digest):
+              expected = str(expected_digest).lower()
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{component_id}: expected one {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(
+                      f"{component_id}: {name} artifact is expired"
+                  )
+              actual = str(artifact.get("digest") or "").lower()
+              if actual != expected:
+                  raise SystemExit(
+                      f"{component_id}: {name} artifact digest drift"
+                  )
+              return artifact
+
+          def download_named(run_id, name, destination):
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  os.environ["GITHUB_REPOSITORY"],
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          plan_path = (
+              plan_root / "phase2-research-rehydration-plan.json"
+          )
+          actual_plan_sha = sha256_path(plan_path)
+          expected_plan_sha = os.environ[
+              "EXPECTED_PLAN_SHA256"
+          ].lower().removeprefix("sha256:")
+          if actual_plan_sha != expected_plan_sha:
+              raise SystemExit("rehydration plan SHA drift")
+          plan = json.loads(plan_path.read_text())
+          seed = json.loads(
+              (
+                  plan_root
+                  / "phase2-research-rehydration-seed.json"
+              ).read_text()
+          )
+          rebuilt_plan = build_phase2_research_rehydration_plan(
+              seed,
+              plan["launchpad_bindings"],
+              plan["direct_binding"],
+          )
+          if rebuilt_plan != plan:
+              raise SystemExit("rehydration plan content drift")
+
+          handoff_path = (
+              universe_root / "phase2-universe-freeze-handoff.json"
+          )
+          expected_handoff_sha = os.environ[
+              "EXPECTED_UNIVERSE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if sha256_path(handoff_path) != expected_handoff_sha:
+              raise SystemExit("frozen-universe handoff SHA drift")
+          handoff = json.loads(handoff_path.read_text())
+          summary = json.loads(
+              (
+                  universe_root / "phase2-universe-summary.json"
+              ).read_text()
+          )
+          provenance = json.loads(
+              (
+                  universe_root / "phase2-universe-provenance.json"
+              ).read_text()
+          )
+          universe_path = (
+              universe_root / "phase2-eligible-universe.jsonl"
+          )
+          universe_sha = sha256_path(universe_path)
+          if universe_sha != plan["eligible_universe_sha256"]:
+              raise SystemExit("materializer universe SHA disagrees with plan")
+          rebuilt_seed = build_phase2_research_rehydration_seed(
+              summary,
+              provenance,
+              handoff,
+              source_inventory=build_phase2_source_inventory(),
+              universe_sha256=universe_sha,
+          )
+          if rebuilt_seed != seed:
+              raise SystemExit(
+                  "materializer frozen-universe seed disagrees with plan"
+              )
+
+          layouts = build_phase2_research_source_layouts()
+          validate_phase2_research_source_layouts(
+              layouts,
+              build_phase2_source_inventory(),
+          )
+          if component_id not in layouts:
+              raise SystemExit(
+                  f"unknown research component: {component_id}"
+              )
+          layout = layouts[component_id]
+          strategy = layout["strategy"]
+          if strategy not in {
+              "coverage_single",
+              "coverage_sharded",
+              "handoff_single",
+          }:
+              raise SystemExit(
+                  f"{component_id}: strategy {strategy} requires a "
+                  "specialized replay/composite materializer"
+              )
+          segments = list(layout["segments"])
+          if len(segments) != 1:
+              raise SystemExit(
+                  f"{component_id}: simple materializer requires one segment"
+              )
+          segment = segments[0]
+
+          if component_id == DIRECT_RESEARCH_COMPONENT_ID:
+              binding = dict(plan["direct_binding"])
+          else:
+              binding = dict(
+                  plan["launchpad_bindings"].get(component_id) or {}
+              )
+          if not binding:
+              raise SystemExit(
+                  f"{component_id}: source binding is absent from plan"
+              )
+          binding_sha = canonical_sha(binding)
+
+          expected_source_ids = set(binding["source_ids"])
+          eligible_tokens = set()
+          with universe_path.open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  source_ids = {
+                      str(value)
+                      for value in row.get("source_ids", [])
+                  }
+                  if source_ids & expected_source_ids:
+                      eligible_tokens.add(
+                          normalize_address(str(row["token"]))
+                      )
+
+          source_root = Path("inputs/source")
+          shards_root = Path("inputs/shards")
+          if strategy == "handoff_single":
+              run_id = int(binding["handoff_run_id"])
+              name = str(binding["handoff_artifact_name"])
+              verify_named_artifact(
+                  run_id,
+                  name,
+                  binding["handoff_artifact_digest"],
+              )
+              download_named(run_id, name, source_root)
+              handoff_file = source_root / "direct-eligibility-handoff.json"
+              expected_handoff_file_sha = seed["components"][
+                  component_id
+              ]["handoff_sha256"]
+              if sha256_path(handoff_file) != expected_handoff_file_sha:
+                  raise SystemExit("direct handoff file SHA drift")
+              direct_handoff = json.loads(handoff_file.read_text())
+              logical_sha = direct_handoff[
+                  segment["logical_sha_field"]
+              ]
+              report = materialize_single_jsonl_research_subset(
+                  component_id=component_id,
+                  data_path=source_root / segment["data_path"],
+                  manifest_path=source_root / segment["manifest_path"],
+                  eligible_tokens=eligible_tokens,
+                  expected_logical_sha256=logical_sha,
+                  output=Path(
+                      f"artifacts/phase2-research-{component_id}.jsonl"
+                  ),
+                  source_binding_sha256=binding_sha,
+              )
+          else:
+              run_id = int(binding["coverage_run_id"])
+              name = str(binding["coverage_artifact_name"])
+              verify_named_artifact(
+                  run_id,
+                  name,
+                  binding["coverage_artifact_digest"],
+              )
+              download_named(run_id, name, source_root)
+              coverage_report_path = (
+                  source_root / binding["coverage_report_path"]
+              )
+              if sha256_path(coverage_report_path) != binding[
+                  "coverage_report_sha256"
+              ]:
+                  raise SystemExit(
+                      f"{component_id}: coverage report SHA drift"
+                  )
+              coverage = json.loads(
+                  coverage_report_path.read_text()
+              )
+              if str(coverage.get("source_id") or "") != component_id:
+                  raise SystemExit(
+                      f"{component_id}: coverage report source drift"
+                  )
+              if str(coverage.get("provenance_sha256") or "").lower() != (
+                  str(binding["coverage_provenance_sha256"]).lower()
+              ):
+                  raise SystemExit(
+                      f"{component_id}: coverage provenance drift"
+                  )
+              logical_sha = coverage[segment["logical_sha_field"]]
+
+              if strategy == "coverage_single":
+                  report = materialize_single_jsonl_research_subset(
+                      component_id=component_id,
+                      data_path=source_root / segment["data_path"],
+                      manifest_path=source_root / segment["manifest_path"],
+                      eligible_tokens=eligible_tokens,
+                      expected_logical_sha256=logical_sha,
+                      output=Path(
+                          f"artifacts/phase2-research-{component_id}.jsonl"
+                      ),
+                      source_binding_sha256=binding_sha,
+                  )
+              else:
+                  all_artifacts = list_artifacts(run_id)
+                  patterns = list(
+                      segment["shard_artifact_patterns"]
+                  )
+                  selected = {}
+                  for artifact in all_artifacts:
+                      artifact_name = str(artifact.get("name") or "")
+                      if any(
+                          fnmatch.fnmatch(artifact_name, pattern)
+                          for pattern in patterns
+                      ):
+                          if artifact.get("expired"):
+                              raise SystemExit(
+                                  f"{component_id}: shard artifact expired: "
+                                  f"{artifact_name}"
+                              )
+                          selected[artifact_name] = artifact
+                  if not selected:
+                      raise SystemExit(
+                          f"{component_id}: no shard artifacts matched layout"
+                      )
+                  for artifact_name in sorted(selected):
+                      download_named(
+                          run_id,
+                          artifact_name,
+                          shards_root / artifact_name,
+                      )
+                  report = materialize_sharded_jsonl_research_subset(
+                      component_id=component_id,
+                      root=shards_root,
+                      aggregate_manifest_path=(
+                          source_root
+                          / segment["aggregate_manifest_path"]
+                      ),
+                      eligible_tokens=eligible_tokens,
+                      expected_logical_sha256=logical_sha,
+                      output=Path(
+                          f"artifacts/phase2-research-{component_id}.jsonl"
+                      ),
+                      source_binding_sha256=binding_sha,
+                  )
+
+          output_path = Path(
+              f"artifacts/phase2-research-{component_id}.jsonl"
+          )
+          observed_tokens = set()
+          with output_path.open() as handle:
+              for line in handle:
+                  if line.strip():
+                      observed_tokens.add(
+                          normalize_address(
+                              str(json.loads(line)["token"])
+                          )
+                      )
+          if observed_tokens != eligible_tokens:
+              missing = sorted(eligible_tokens - observed_tokens)
+              extra = sorted(observed_tokens - eligible_tokens)
+              raise SystemExit(
+                  f"{component_id}: materialized token coverage mismatch: "
+                  f"missing={missing[:20]} extra={extra[:20]}"
+              )
+
+          final_report = {
+              **report,
+              "strategy": strategy,
+              "source_ids": sorted(expected_source_ids),
+              "expected_eligible_tokens": len(eligible_tokens),
+              "observed_eligible_tokens": len(observed_tokens),
+              "eligible_token_coverage_complete": True,
+              "rehydration_plan_sha256": actual_plan_sha,
+              "eligible_universe_sha256": universe_sha,
+              "research_component_ready": True,
+              "dump_threshold_frozen": False,
+              "outcome_labels_computed": False,
+          }
+          report_path = Path(
+              "artifacts/phase2-research-component-report.json"
+          )
+          report_text = (
+              json.dumps(final_report, indent=2, sort_keys=True)
+              + "\n"
+          )
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(
+              report_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+              handle.write(
+                  "materialized_sha256="
+                  f"{report['materialized_sha256']}\n"
+              )
+              handle.write(
+                  f"materialized_records={report['materialized_records']}\n"
+              )
+
+          print(json.dumps(final_report, sort_keys=True))
+          PY
+
+      - name: Upload materialized research component
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialized-${{ inputs.component_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish component identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.materialize.outputs.report_sha256 }}
+          MATERIALIZED_SHA256: ${{ steps.materialize.outputs.materialized_sha256 }}
+          MATERIALIZED_RECORDS: ${{ steps.materialize.outputs.materialized_records }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          test -n "${MATERIALIZED_SHA256}"
+          {
+            echo "## Phase-2 research component"
+            echo
+            echo "- component_id: ${COMPONENT_ID}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-research-materialized-${COMPONENT_ID}"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- report_sha256: ${REPORT_SHA256}"
+            echo "- materialized_sha256: ${MATERIALIZED_SHA256}"
+            echo "- materialized_records: ${MATERIALIZED_RECORDS}"
+            echo "- research_component_ready: true"
+            echo "- dump_threshold_frozen: false"
+            echo "- outcome_labels_computed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
