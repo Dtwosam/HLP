@@ -568,8 +568,16 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   peak/drawdown/rebound candidate specs. It deliberately emits
   `candidate_selected=false`, `dump_threshold_frozen=false`, and
   `outcome_labels_computed=false`; a later rally cannot rewrite an already
-  confirmed candidate event. This is plumbing for the post-14/14 study, not a
-  shortcut around the coverage gate or an empirically frozen dump rule.
+  confirmed candidate event. The frozen-universe research path is now bound
+  separately in `phase2_research_paths.py`: all launchpad lifecycles remain
+  distinct, the three direct DEX populations collapse exactly once into the
+  selector-frozen canonical tape, eligible-token source membership must match
+  the frozen universe, exact duplicate events must agree on market cap, and the
+  normalized path is SHA-bound before dump geometry is computed. Missing
+  transaction indexes remain valid and sort before known same-block indexes,
+  matching existing canonical adapter semantics. This is plumbing for the
+  post-14/14 study, not a shortcut around the coverage gate or an empirically
+  frozen dump rule.
 
 
 ### Live/current chain access
