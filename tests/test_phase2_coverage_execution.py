@@ -214,3 +214,25 @@ def test_authenticated_preflight_unlocks_archive_batch():
     assert "coverage:hood_fun_current" in ready
     assert "derive:hood_fun_previous_semantics" in ready
     assert "registry:noxa" in ready
+
+
+
+def test_archive_secret_nodes_fail_closed_without_public_chunk_fallback():
+    root = Path(".github/workflows")
+    for row in build_phase2_coverage_execution_nodes():
+        if not row["requires_archive_secret"]:
+            continue
+        text = (root / row["workflow"]).read_text()
+        assert "ROBINHOOD_ARCHIVE_RPC_API_KEY" in text, row["node_id"]
+        if row["node_id"] == "preflight:archive_authenticated":
+            assert (
+                "ROBINHOOD_ARCHIVE_RPC_API_KEY is not configured"
+                in text
+            )
+        else:
+            assert (
+                "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for "
+                "Phase-2 full-history execution"
+                in text
+            ), row["node_id"]
+        assert "CHUNK=200" not in text, row["node_id"]
