@@ -51,6 +51,18 @@ on:
         description: Exact SHA-256 of phase3-holder-features-handoff.json
         required: true
         type: string
+      redistribution_feature_run_id:
+        description: Exact phase3-redistribution-features run ID
+        required: true
+        type: string
+      expected_redistribution_feature_artifact_digest:
+        description: Exact phase3-redistribution-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_redistribution_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-redistribution-features-handoff.json
+        required: true
+        type: string
       retention_feature_run_id:
         description: Exact phase3-retention-features run ID
         required: true
@@ -109,6 +121,9 @@ env:
   HOLDER_FEATURE_RUN_ID: ${{ inputs.holder_feature_run_id }}
   EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_holder_feature_artifact_digest }}
   EXPECTED_HOLDER_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_holder_feature_handoff_sha256 }}
+  REDISTRIBUTION_FEATURE_RUN_ID: ${{ inputs.redistribution_feature_run_id }}
+  EXPECTED_REDISTRIBUTION_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_redistribution_feature_artifact_digest }}
+  EXPECTED_REDISTRIBUTION_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_redistribution_feature_handoff_sha256 }}
   RETENTION_FEATURE_RUN_ID: ${{ inputs.retention_feature_run_id }}
   EXPECTED_RETENTION_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_retention_feature_artifact_digest }}
   EXPECTED_RETENTION_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_retention_feature_handoff_sha256 }}
@@ -168,6 +183,9 @@ jobs:
           )
           from hlp.data.phase3_price_features import (
               build_phase3_price_feature_handoff,
+          )
+          from hlp.data.phase3_redistribution_features import (
+              build_phase3_redistribution_feature_handoff,
           )
           from hlp.data.phase3_retention_features import (
               build_phase3_retention_feature_handoff,
@@ -261,6 +279,7 @@ jobs:
           chain_root = Path("inputs/chain-regime")
           venue_root = Path("inputs/venue")
           holder_root = Path("inputs/holder")
+          redistribution_root = Path("inputs/redistribution")
           retention_root = Path("inputs/retention")
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
@@ -292,6 +311,13 @@ jobs:
               holder_root,
               "Phase-3 holder features",
               os.environ["EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]),
+              "phase3-redistribution-features",
+              redistribution_root,
+              "Phase-3 redistribution features",
+              os.environ["EXPECTED_REDISTRIBUTION_FEATURE_ARTIFACT_DIGEST"],
           )
           download_named(
               int(os.environ["RETENTION_FEATURE_RUN_ID"]),
@@ -521,6 +547,72 @@ jobs:
                   "Phase-3 holder-feature/entry linkage drift"
               )
 
+          redistribution_rows_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features.jsonl",
+          )
+          redistribution_manifest_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features.jsonl.manifest.json",
+          )
+          redistribution_manifest = json.loads(
+              redistribution_manifest_path.read_text()
+          )
+          redistribution_summary_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features-summary.json",
+          )
+          redistribution_summary = json.loads(
+              redistribution_summary_path.read_text()
+          )
+          redistribution_summary_sha = sha256_path(
+              redistribution_summary_path
+          )
+          redistribution_handoff_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features-handoff.json",
+          )
+          redistribution_handoff_sha = sha256_path(
+              redistribution_handoff_path
+          )
+          if redistribution_handoff_sha != os.environ[
+              "EXPECTED_REDISTRIBUTION_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "Phase-3 redistribution-feature handoff SHA drift"
+              )
+          redistribution_handoff = json.loads(
+              redistribution_handoff_path.read_text()
+          )
+          rebuilt_redistribution = (
+              build_phase3_redistribution_feature_handoff(
+                  redistribution_summary,
+                  feature_summary_sha256=redistribution_summary_sha,
+                  feature_entry_handoff_sha256=redistribution_summary[
+                      "feature_entry_handoff_sha256"
+                  ],
+                  canonical_transfer_handoff_sha256=redistribution_summary[
+                      "canonical_transfer_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_redistribution != redistribution_handoff:
+              raise SystemExit(
+                  "Phase-3 redistribution-feature handoff content drift"
+              )
+          if redistribution_manifest.get("sha256") != (
+              redistribution_handoff["feature_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 redistribution-feature manifest SHA drift"
+              )
+          if redistribution_handoff[
+              "feature_entry_handoff_sha256"
+          ] != entry_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 redistribution-feature/entry linkage drift"
+              )
+
           retention_rows_path = find_unique(
               retention_root,
               "phase3-retention-features.jsonl",
@@ -694,6 +786,8 @@ jobs:
               raise SystemExit("Phase-3 venue registry SHA drift")
           if holder_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 holder registry SHA drift")
+          if redistribution_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 redistribution registry SHA drift")
           if retention_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 retention registry SHA drift")
           if price_handoff["feature_registry_sha256"] != registry_sha:
@@ -722,6 +816,10 @@ jobs:
                       holder_rows_path,
                       holder_manifest_path,
                   ),
+                  "supply_redistribution": iter_validated_jsonl(
+                      redistribution_rows_path,
+                      redistribution_manifest_path,
+                  ),
                   "participant_retention": iter_validated_jsonl(
                       retention_rows_path,
                       retention_manifest_path,
@@ -739,6 +837,7 @@ jobs:
                   "chain_regime": chain_handoff,
                   "venue_mechanics": venue_handoff,
                   "holder_state": holder_handoff,
+                  "supply_redistribution": redistribution_handoff,
                   "participant_retention": retention_handoff,
                   "price_drawdown": price_handoff,
                   "trade_flow": trade_handoff,
@@ -749,6 +848,7 @@ jobs:
                   "holder_state",
                   "participant_retention",
                   "price_drawdown",
+                  "supply_redistribution",
                   "trade_flow",
                   "venue_mechanics",
               ],
@@ -771,6 +871,12 @@ jobs:
                   os.environ["HOLDER_FEATURE_RUN_ID"]
               ),
               "holder_feature_handoff_sha256": holder_handoff_sha,
+              "redistribution_feature_run_id": int(
+                  os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]
+              ),
+              "redistribution_feature_handoff_sha256": (
+                  redistribution_handoff_sha
+              ),
               "retention_feature_run_id": int(
                   os.environ["RETENTION_FEATURE_RUN_ID"]
               ),
@@ -878,7 +984,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: chain_regime,holder_state,participant_retention,price_drawdown,trade_flow,venue_mechanics"
+            echo "- required_families: chain_regime,holder_state,participant_retention,price_drawdown,supply_redistribution,trade_flow,venue_mechanics"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
