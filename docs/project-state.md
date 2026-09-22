@@ -486,21 +486,21 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   reports first-wave and full-DAG dispatch readiness. It now hashes each
   required workflow's complete `workflow_dispatch` block, so a stale or
   incompatible default-branch interface cannot pass on filename alone. Its live
-  result against the current default branch is **0/44 required workflows
+  result against the current default branch is **0/47 required workflows
   present**, **0 incompatible present interfaces**,
   `phase2_first_wave_dispatch_ready=false`, and
   `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
   **#25** provides the non-invasive bootstrap option: it is based directly on
-  `main`, contains exactly **44 manual Phase-2 workflow files plus one safety
-  note**, and carries no source code or coverage-ledger mutation. **43/44**
+  `main`, contains exactly **47 manual Phase-2 workflow files plus one safety
+  note**, and carries no source code or coverage-ledger mutation. **46/47**
   bootstrap workflows are byte-for-byte identical to the current compatibility
   target; the planner copy differs only by removing its automatic branch/PR
-  triggers while preserving the exact manual-dispatch interface. All 44
+  triggers while preserving the exact manual-dispatch interface. All 47
   bootstrap workflows are manual-only on that branch
   (`workflow_dispatch` present; no `push`/`pull_request` triggers). The
-  machine compatibility gate has now passed on the full **45/45** surface with
-  bootstrap HEAD `014deb9b` and workflow-surface SHA-256
-  `2bab629b1832dbbf5ebcccbc9924f525382587412c4105d1441c02a64a5f029b`;
+  machine compatibility gate has now passed on the full **47/47** surface with
+  bootstrap HEAD `347e7011` and workflow-surface SHA-256
+  `0aa8e4f6d590f5fe5ed0642e8c8aa1bcaced7063a9c3130d32b04ebe812a70df`;
   there were zero content or manual-interface mismatches.
   After that workflow surface is merged, execution can target
   `phase1/data-acquisition-spike` without merging the full 764-file project
@@ -581,6 +581,19 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   plus the 13 archive-fan-out nodes while the canonical source ledger remains
   2/14. The collector then exposes the next ready-node set and stops without
   promoting coverage, approving the selector or writing the canonical ledger.
+  That post-fan-out planner boundary is now frozen explicitly: exactly **nine**
+  nodes are eligible for generated-input batch dispatch
+  (`shared:direct_market_registry`, pools.fun coverage, pools.trade Instant
+  registry, pools.trade LBP registry, Doppler registry, Flap curve, trench
+  curve, previous hood.fun coverage and NOXA coverage), while
+  `promote:hood_fun_current` is present but held out because it requires exact
+  coverage artifact/report identities from an operator. A
+  `phase2-post-fanout-wave-launch` workflow consumes only the immutable
+  fan-out-completion run/artifact plus its planner, dispatches those nine nodes
+  through the duplicate-safe dispatcher using planner-generated dependency run
+  IDs, reconciles every attempt/final receipt pair and records the nine target
+  run IDs. It does not launch the hood.fun promotion, wait for target
+  completion, approve the selector or mutate the canonical ledger.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now

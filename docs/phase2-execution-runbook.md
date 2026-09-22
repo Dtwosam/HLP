@@ -209,7 +209,54 @@ artifact fills them from verified receipts. When a node has
 
 Do not dispatch a node that is absent from the planner artifact.
 
-## 5. Coverage proposal and promotion
+## 5. Launch the post-fan-out generated-input wave
+
+After `phase2-archive-fanout-completion` succeeds, its planner exposes exactly
+nine nodes whose full workflow inputs can be generated from already verified
+dependency runs. It also exposes `promote:hood_fun_current`, but that promotion
+is deliberately held for a separate operator review because it requires exact
+coverage artifact/report identities.
+
+The preferred automatic batch is one manual run of
+`phase2-post-fanout-wave-launch`.
+
+Supply:
+
+- `archive_fanout_completion_run_id`: the exact successful completion
+  collector run;
+- `expected_completion_artifact_digest`: the exact completion artifact digest
+  printed by that run;
+- `confirm_post_fanout_wave=true`.
+
+The launcher requires the exact post-fan-out planner state: the two first-wave
+nodes plus all 13 archive-fan-out nodes credited, with exactly these nine
+auto-dispatchable next nodes:
+
+- direct-market registry;
+- pools.fun source coverage;
+- pools.trade Instant registry;
+- pools.trade LBP registry;
+- Doppler registry;
+- Flap curve reconstruction;
+- trench.today curve reconstruction;
+- previous-generation hood.fun coverage;
+- NOXA source coverage.
+
+For all nine, the planner must provide the complete dependency run-ID input set
+and zero remaining manual inputs. Each is dispatched only through
+`phase2-execution-node-dispatch`, with paired attempt/final evidence
+reconciled before the launcher records the real target run ID.
+
+The launcher explicitly refuses to dispatch `promote:hood_fun_current`.
+That proposal remains visible in the same planner with its generated
+`coverage_run_id`, but the operator still has to provide the coverage artifact
+name/digest, report path/SHA and source ID separately.
+
+The launcher stops immediately after the nine targets are created. It does not
+wait for them, promote coverage, approve the direct-market selector or write
+the canonical ledger.
+
+## 6. Coverage proposal and promotion
 
 When a source-coverage node succeeds, refresh the planner with its dispatcher
 receipt. The corresponding `promote:<source_id>` node becomes ready.
@@ -221,7 +268,7 @@ promotion because it does not mutate the canonical ledger.
 A successful promotion emits a SHA-bound proposed replacement ledger; it does
 not update `.github/phase2-source-coverage.json`.
 
-## 6. Canonical ledger commit — explicit stop
+## 7. Canonical ledger commit — explicit stop
 
 `ledger_commit:<source_id>` is deliberately **not** dispatchable through
 `phase2-execution-node-dispatch`.
@@ -246,7 +293,7 @@ After a successful canonical ledger commit, **rerun the planner**. Never reuse
 a pre-commit planner artifact. Earlier dependency target runs can remain valid
 because the planner explicitly permits canonical-ledger-only branch drift.
 
-## 7. Direct-market selector — explicit stop
+## 8. Direct-market selector — explicit stop
 
 `shared:direct_selector_freeze` is also excluded from the generic node
 dispatcher because it requires explicit research approval.
@@ -257,7 +304,7 @@ selector. Do not infer approval from a successful evidence workflow.
 After the approved selector-freeze run succeeds, feed its run identity back
 through the normal planner receipt path.
 
-## 8. Repeat until 14/14
+## 9. Repeat until 14/14
 
 Continue the cycle:
 
