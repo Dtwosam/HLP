@@ -11,7 +11,10 @@ from hlp.data.phase2_coverage_execution import (
 
 
 PHASE2_EXECUTION_RUN_RECEIPTS_VERSION = (
-    "phase2-execution-run-receipts-v1"
+    "phase2-execution-run-receipts-v2"
+)
+PHASE2_ALLOWED_POST_RUN_DRIFT_PATHS = (
+    ".github/phase2-source-coverage.json",
 )
 
 
@@ -46,23 +49,29 @@ def validate_phase2_execution_run_receipts(
     *,
     repository_full_name: str,
     branch: str,
+    current_head_sha: str,
 ) -> dict:
-    """Validate successful workflow runs before planner completion credit.
+    """Validate successful, lineage-safe runs before planner completion credit.
 
-    GitHub API lookup happens outside this pure function. Each receipt must
-    contain the exact run facts returned by the API. Successful ledger-commit
-    runs are intentionally not accepted here: after one succeeds, the planner
-    must be regenerated from the newly canonical coverage ledger.
+    GitHub API lookup and commit comparison happen outside this pure function.
+    A historical run remains valid only while the current branch is identical
+    to or ahead of that run and every intervening changed path is an explicitly
+    allowed canonical-ledger mutation.
     """
 
     repo = str(repository_full_name or "").strip()
     expected_branch = str(branch or "").strip()
+    current_sha = _sha(
+        current_head_sha,
+        label="Phase-2 execution current_head_sha",
+    )
     if not repo or "/" not in repo:
         raise ValueError("Phase-2 execution receipt repository is invalid")
     if not expected_branch:
         raise ValueError("Phase-2 execution receipt branch is empty")
 
     workflows = _known_workflows()
+    allowed_drift = set(PHASE2_ALLOWED_POST_RUN_DRIFT_PATHS)
     seen_nodes: set[str] = set()
     seen_runs: set[int] = set()
     normalized = []
@@ -135,6 +144,46 @@ def validate_phase2_execution_run_receipts(
             row.get("head_sha"),
             label=f"{node_id} head_sha",
         )
+        lineage_status = str(row.get("lineage_status") or "")
+        if lineage_status not in {"identical", "ahead"}:
+            raise ValueError(
+                f"{node_id} run head is not an ancestor of current HEAD"
+            )
+
+        raw_paths = row.get("changed_paths_since_run")
+        if not isinstance(raw_paths, list):
+            raise ValueError(
+                f"{node_id} changed_paths_since_run must be a list"
+            )
+        changed_paths = [str(value) for value in raw_paths]
+        if len(changed_paths) != len(set(changed_paths)):
+            raise ValueError(
+                f"{node_id} changed_paths_since_run repeats a path"
+            )
+        changed_paths = sorted(changed_paths)
+
+        if lineage_status == "identical":
+            if head_sha != current_sha:
+                raise ValueError(
+                    f"{node_id} identical lineage has head SHA drift"
+                )
+            if changed_paths:
+                raise ValueError(
+                    f"{node_id} identical lineage unexpectedly changed paths"
+                )
+        else:
+            if head_sha == current_sha:
+                raise ValueError(
+                    f"{node_id} ahead lineage unexpectedly has identical SHA"
+                )
+
+        disallowed = sorted(set(changed_paths) - allowed_drift)
+        if disallowed:
+            raise ValueError(
+                f"{node_id} run is stale; branch changed outside the "
+                f"canonical coverage ledger: {disallowed}"
+            )
+
         normalized.append({
             "node_id": node_id,
             "run_id": run_id,
@@ -144,6 +193,9 @@ def validate_phase2_execution_run_receipts(
             "conclusion": "success",
             "head_branch": expected_branch,
             "head_sha": head_sha,
+            "current_head_sha": current_sha,
+            "lineage_status": lineage_status,
+            "changed_paths_since_run": changed_paths,
             "run_attempt": run_attempt,
             "repository_full_name": repo,
             "head_repository_full_name": repo,
@@ -154,12 +206,15 @@ def validate_phase2_execution_run_receipts(
         "version": PHASE2_EXECUTION_RUN_RECEIPTS_VERSION,
         "repository_full_name": repo,
         "branch": expected_branch,
+        "current_head_sha": current_sha,
         "verified_runs": len(normalized),
         "completed_node_ids": [
             row["node_id"] for row in normalized
         ],
         "receipts": normalized,
+        "allowed_post_run_drift_paths": sorted(allowed_drift),
         "all_runs_workflow_dispatch": True,
         "all_runs_completed_successfully": True,
+        "all_runs_current_or_ledger_only_ancestors": True,
         "ledger_commit_runs_accepted": False,
     }

@@ -1,8 +1,7 @@
-import copy
-
 import pytest
 
 from hlp.data.phase2_execution_runs import (
+    PHASE2_ALLOWED_POST_RUN_DRIFT_PATHS,
     PHASE2_EXECUTION_RUN_RECEIPTS_VERSION,
     validate_phase2_execution_run_receipts,
 )
@@ -10,13 +9,18 @@ from hlp.data.phase2_execution_runs import (
 
 REPO = "Dtwosam/HLP"
 BRANCH = "phase1/data-acquisition-spike"
-SHA = "ab" * 20
+RUN_SHA = "ab" * 20
+CURRENT_SHA = "cd" * 20
 
 
 def receipt(
     node_id="shared:quote_registry",
     workflow="phase2-direct-quote-registry.yml",
     run_id=123,
+    *,
+    head_sha=RUN_SHA,
+    lineage_status="ahead",
+    changed_paths=None,
 ):
     return {
         "node_id": node_id,
@@ -26,22 +30,29 @@ def receipt(
         "status": "completed",
         "conclusion": "success",
         "head_branch": BRANCH,
-        "head_sha": SHA,
+        "head_sha": head_sha,
+        "lineage_status": lineage_status,
+        "changed_paths_since_run": (
+            list(PHASE2_ALLOWED_POST_RUN_DRIFT_PATHS)
+            if changed_paths is None
+            else changed_paths
+        ),
         "run_attempt": 1,
         "repository_full_name": REPO,
         "head_repository_full_name": REPO,
     }
 
 
-def validate(rows):
+def validate(rows, *, current_head_sha=CURRENT_SHA):
     return validate_phase2_execution_run_receipts(
         rows,
         repository_full_name=REPO,
         branch=BRANCH,
+        current_head_sha=current_head_sha,
     )
 
 
-def test_execution_run_receipts_accept_exact_successful_runs():
+def test_execution_run_receipts_accept_ledger_only_ancestor_runs():
     report = validate([
         receipt(),
         receipt(
@@ -59,7 +70,20 @@ def test_execution_run_receipts_accept_exact_successful_runs():
     ]
     assert report["all_runs_workflow_dispatch"] is True
     assert report["all_runs_completed_successfully"] is True
+    assert report["all_runs_current_or_ledger_only_ancestors"] is True
     assert report["ledger_commit_runs_accepted"] is False
+
+
+def test_execution_run_receipts_accept_current_head_runs():
+    row = receipt(
+        head_sha=CURRENT_SHA,
+        lineage_status="identical",
+        changed_paths=[],
+    )
+    report = validate([row])
+
+    assert report["receipts"][0]["lineage_status"] == "identical"
+    assert report["receipts"][0]["changed_paths_since_run"] == []
 
 
 @pytest.mark.parametrize(
@@ -122,4 +146,39 @@ def test_execution_run_receipts_never_credit_ledger_commit_run():
 def test_execution_run_receipts_reject_unknown_node():
     row = receipt(node_id="unknown:node")
     with pytest.raises(ValueError, match="unknown Phase-2"):
+        validate([row])
+
+
+def test_execution_run_receipts_reject_diverged_or_behind_run():
+    row = receipt()
+    row["lineage_status"] = "diverged"
+    with pytest.raises(ValueError, match="not an ancestor"):
+        validate([row])
+
+
+def test_execution_run_receipts_reject_non_ledger_branch_drift():
+    row = receipt(
+        changed_paths=[
+            ".github/phase2-source-coverage.json",
+            "src/hlp/data/phase2_coverage.py",
+        ]
+    )
+    with pytest.raises(ValueError, match="run is stale"):
+        validate([row])
+
+
+def test_execution_run_receipts_reject_invalid_identical_lineage():
+    row = receipt(
+        lineage_status="identical",
+        changed_paths=[],
+    )
+    with pytest.raises(ValueError, match="head SHA drift"):
+        validate([row])
+
+    row = receipt(
+        head_sha=CURRENT_SHA,
+        lineage_status="identical",
+        changed_paths=[".github/phase2-source-coverage.json"],
+    )
+    with pytest.raises(ValueError, match="unexpectedly changed paths"):
         validate([row])
