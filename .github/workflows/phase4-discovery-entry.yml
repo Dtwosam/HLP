@@ -1,0 +1,537 @@
+name: phase4-discovery-entry
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase2_dataset_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase2-universe-outcome-dataset
+        required: true
+        type: string
+      feature_entry_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-feature-entry
+        required: true
+        type: string
+      feature_coverage_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-feature-coverage
+        required: true
+        type: string
+      feature_store_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-feature-store
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-discovery-entry-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PHASE2_DATASET_HANDOFF_JSON: ${{ inputs.phase2_dataset_handoff_json }}
+  FEATURE_ENTRY_HANDOFF_JSON: ${{ inputs.feature_entry_handoff_json }}
+  FEATURE_COVERAGE_HANDOFF_JSON: ${{ inputs.feature_coverage_handoff_json }}
+  FEATURE_STORE_HANDOFF_JSON: ${{ inputs.feature_store_handoff_json }}
+
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: discovery
+        name: Join frozen outcomes to frozen features
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_dataset import (
+              build_phase2_dataset_handoff,
+          )
+          from hlp.data.phase3_feature_coverage import (
+              build_phase3_feature_coverage_handoff,
+          )
+          from hlp.data.phase3_feature_entry import (
+              build_phase3_feature_entry_handoff,
+          )
+          from hlp.data.phase3_feature_store import (
+              build_phase3_feature_store_handoff,
+          )
+          from hlp.data.phase4_discovery_entry import (
+              build_phase4_discovery_entry_handoff,
+              materialize_phase4_discovery_entry,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor(env_name, label):
+              try:
+                  value = json.loads(os.environ[env_name])
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(f"{label} descriptor is invalid JSON") from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{label} descriptor must be an object")
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(f"{label} run_id is invalid") from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(f"{label} artifact_digest is invalid")
+              if len(handoff_sha) != 64:
+                  raise SystemExit(f"{label} handoff_sha256 is invalid")
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(f"{label} digest/SHA is not hexadecimal") from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          p2_run, p2_digest, p2_expected_sha = descriptor(
+              "PHASE2_DATASET_HANDOFF_JSON",
+              "Phase-2 dataset",
+          )
+          entry_run, entry_digest, entry_expected_sha = descriptor(
+              "FEATURE_ENTRY_HANDOFF_JSON",
+              "Phase-3 feature entry",
+          )
+          coverage_run, coverage_digest, coverage_expected_sha = descriptor(
+              "FEATURE_COVERAGE_HANDOFF_JSON",
+              "Phase-3 feature coverage",
+          )
+          store_run, store_digest, store_expected_sha = descriptor(
+              "FEATURE_STORE_HANDOFF_JSON",
+              "Phase-3 feature store",
+          )
+
+          p2_root = Path("inputs/phase2")
+          entry_root = Path("inputs/entry")
+          coverage_root = Path("inputs/coverage")
+          store_root = Path("inputs/store")
+          download_named(
+              p2_run,
+              "phase2-universe-outcome-dataset",
+              p2_root,
+              "Phase-2 dataset",
+              p2_digest,
+          )
+          download_named(
+              entry_run,
+              "phase3-feature-entry",
+              entry_root,
+              "Phase-3 feature entry",
+              entry_digest,
+          )
+          download_named(
+              coverage_run,
+              "phase3-feature-coverage",
+              coverage_root,
+              "Phase-3 feature coverage",
+              coverage_digest,
+          )
+          download_named(
+              store_run,
+              "phase3-feature-store",
+              store_root,
+              "Phase-3 feature store",
+              store_digest,
+          )
+
+          p2_rows_path = find_unique(
+              p2_root,
+              "phase2-universe-outcome-dataset.jsonl",
+          )
+          p2_manifest_path = find_unique(
+              p2_root,
+              "phase2-universe-outcome-dataset.jsonl.manifest.json",
+          )
+          p2_manifest = json.loads(p2_manifest_path.read_text())
+          p2_summary_path = find_unique(
+              p2_root,
+              "phase2-universe-outcome-dataset-summary.json",
+          )
+          p2_summary = json.loads(p2_summary_path.read_text())
+          p2_summary_sha = sha256_path(p2_summary_path)
+          p2_handoff_path = find_unique(
+              p2_root,
+              "phase2-universe-outcome-dataset-handoff.json",
+          )
+          p2_handoff_sha = sha256_path(p2_handoff_path)
+          if p2_handoff_sha != p2_expected_sha:
+              raise SystemExit("Phase-2 dataset handoff SHA drift")
+          p2_handoff = json.loads(p2_handoff_path.read_text())
+          rebuilt_p2 = build_phase2_dataset_handoff(
+              p2_summary,
+              dataset_summary_sha256=p2_summary_sha,
+              universe_handoff_sha256=p2_summary[
+                  "universe_handoff_sha256"
+              ],
+              outcome_handoff_sha256=p2_summary[
+                  "outcome_handoff_sha256"
+              ],
+          )
+          if rebuilt_p2 != p2_handoff:
+              raise SystemExit("Phase-2 dataset handoff content drift")
+          if p2_manifest.get("sha256") != p2_handoff["dataset_rows_sha256"]:
+              raise SystemExit("Phase-2 dataset manifest SHA drift")
+          if int(p2_manifest.get("records", -1)) != int(p2_handoff["tokens"]):
+              raise SystemExit("Phase-2 dataset row count drift")
+
+          entry_manifest_path = find_unique(
+              entry_root,
+              "phase3-feature-subjects.jsonl.manifest.json",
+          )
+          entry_manifest = json.loads(entry_manifest_path.read_text())
+          entry_summary_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-summary.json",
+          )
+          entry_summary = json.loads(entry_summary_path.read_text())
+          entry_summary_sha = sha256_path(entry_summary_path)
+          entry_handoff_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-handoff.json",
+          )
+          entry_handoff_sha = sha256_path(entry_handoff_path)
+          if entry_handoff_sha != entry_expected_sha:
+              raise SystemExit("Phase-3 feature-entry handoff SHA drift")
+          entry_handoff = json.loads(entry_handoff_path.read_text())
+          rebuilt_entry = build_phase3_feature_entry_handoff(
+              entry_summary,
+              entry_summary_sha256=entry_summary_sha,
+              phase2_dataset_handoff_sha256=entry_summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              detector_freeze_handoff_sha256=entry_summary[
+                  "detector_freeze_handoff_sha256"
+              ],
+          )
+          if rebuilt_entry != entry_handoff:
+              raise SystemExit("Phase-3 feature-entry handoff content drift")
+          if entry_manifest.get("sha256") != entry_handoff[
+              "feature_subjects_sha256"
+          ]:
+              raise SystemExit("Phase-3 feature-entry manifest SHA drift")
+          if int(entry_manifest.get("records", -1)) != int(
+              entry_handoff["feature_subjects"]
+          ):
+              raise SystemExit("Phase-3 feature-entry subject count drift")
+
+          coverage_manifest_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage.jsonl.manifest.json",
+          )
+          coverage_manifest = json.loads(coverage_manifest_path.read_text())
+          coverage_summary_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-summary.json",
+          )
+          coverage_summary = json.loads(coverage_summary_path.read_text())
+          coverage_summary_sha = sha256_path(coverage_summary_path)
+          coverage_handoff_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-handoff.json",
+          )
+          coverage_handoff_sha = sha256_path(coverage_handoff_path)
+          if coverage_handoff_sha != coverage_expected_sha:
+              raise SystemExit("Phase-3 coverage handoff SHA drift")
+          coverage_handoff = json.loads(coverage_handoff_path.read_text())
+          rebuilt_coverage = build_phase3_feature_coverage_handoff(
+              coverage_summary,
+              coverage_summary_sha256=coverage_summary_sha,
+              feature_entry_handoff_sha256=coverage_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt_coverage != coverage_handoff:
+              raise SystemExit("Phase-3 coverage handoff content drift")
+          if coverage_manifest.get("sha256") != coverage_handoff[
+              "coverage_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 coverage manifest SHA drift")
+          if int(coverage_manifest.get("records", -1)) != int(
+              coverage_handoff["feature_subjects"]
+          ):
+              raise SystemExit("Phase-3 coverage subject count drift")
+
+          store_rows_path = find_unique(
+              store_root,
+              "phase3-feature-store.jsonl",
+          )
+          store_manifest_path = find_unique(
+              store_root,
+              "phase3-feature-store.jsonl.manifest.json",
+          )
+          store_manifest = json.loads(store_manifest_path.read_text())
+          store_summary_path = find_unique(
+              store_root,
+              "phase3-feature-store-summary.json",
+          )
+          store_summary = json.loads(store_summary_path.read_text())
+          store_summary_sha = sha256_path(store_summary_path)
+          store_handoff_path = find_unique(
+              store_root,
+              "phase3-feature-store-handoff.json",
+          )
+          store_handoff_sha = sha256_path(store_handoff_path)
+          if store_handoff_sha != store_expected_sha:
+              raise SystemExit("Phase-3 feature-store handoff SHA drift")
+          store_handoff = json.loads(store_handoff_path.read_text())
+          rebuilt_store = build_phase3_feature_store_handoff(
+              store_summary,
+              feature_store_summary_sha256=store_summary_sha,
+              staging_handoff_sha256=store_summary[
+                  "staging_handoff_sha256"
+              ],
+              feature_coverage_handoff_sha256=store_summary[
+                  "feature_coverage_handoff_sha256"
+              ],
+          )
+          if rebuilt_store != store_handoff:
+              raise SystemExit("Phase-3 feature-store handoff content drift")
+          if store_manifest.get("sha256") != store_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 feature-store manifest SHA drift")
+          if int(store_manifest.get("records", -1)) != int(
+              store_handoff["feature_subjects"]
+          ):
+              raise SystemExit("Phase-3 feature-store subject count drift")
+
+          output = Path("artifacts/phase4-discovery-entry.jsonl")
+          manifest, summary = materialize_phase4_discovery_entry(
+              iter_validated_jsonl(
+                  p2_rows_path,
+                  p2_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  store_rows_path,
+                  store_manifest_path,
+              ),
+              phase2_dataset_handoff=p2_handoff,
+              feature_store_handoff=store_handoff,
+              coverage_handoff=coverage_handoff,
+              feature_entry_handoff=entry_handoff,
+              phase2_dataset_handoff_sha256=p2_handoff_sha,
+              feature_store_handoff_sha256=store_handoff_sha,
+              feature_coverage_handoff_sha256=coverage_handoff_sha,
+              feature_entry_handoff_sha256=entry_handoff_sha,
+              output=output,
+          )
+          summary.update({
+              "phase2_dataset_run_id": p2_run,
+              "feature_entry_run_id": entry_run,
+              "feature_coverage_run_id": coverage_run,
+              "feature_store_run_id": store_run,
+              "phase2_dataset_handoff_sha256": p2_handoff_sha,
+              "feature_entry_handoff_sha256": entry_handoff_sha,
+              "feature_coverage_handoff_sha256": coverage_handoff_sha,
+              "feature_store_handoff_sha256": store_handoff_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase4-discovery-entry-summary.json"
+          )
+          summary_text = json.dumps(
+              summary,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(summary_text.encode()).hexdigest()
+
+          handoff = build_phase4_discovery_entry_handoff(
+              summary,
+              discovery_summary_sha256=summary_sha,
+              phase2_dataset_handoff_sha256=p2_handoff_sha,
+              feature_store_handoff_sha256=store_handoff_sha,
+              feature_coverage_handoff_sha256=coverage_handoff_sha,
+              feature_entry_handoff_sha256=entry_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase4-discovery-entry-handoff.json"
+          )
+          handoff_text = json.dumps(
+              handoff,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(handoff_text.encode()).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"rows_sha256={manifest['sha256']}\n")
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"subjects={summary['discovery_subjects']}\n"
+              )
+              handle.write(
+                  f"positives={summary['comeback_5x_tokens']}\n"
+              )
+              handle.write(
+                  f"base_rate={summary['comeback_5x_base_rate']}\n"
+              )
+          print(json.dumps({
+              "discovery_rows_sha256": manifest["sha256"],
+              "discovery_subjects": summary["discovery_subjects"],
+              "comeback_5x_tokens": summary["comeback_5x_tokens"],
+              "comeback_5x_base_rate": summary["comeback_5x_base_rate"],
+              "labels_joined_after_feature_freeze": True,
+              "feature_values_mutated": False,
+              "phase4_discovery_entry_ready": True,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-4 discovery entry
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-discovery-entry
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact Phase-4 discovery-entry handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-discovery-entry-handoff
+          path: |
+            artifacts/phase4-discovery-entry.jsonl.manifest.json
+            artifacts/phase4-discovery-entry-summary.json
+            artifacts/phase4-discovery-entry-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 discovery-entry identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          ROWS_SHA256: ${{ steps.discovery.outputs.rows_sha256 }}
+          SUMMARY_SHA256: ${{ steps.discovery.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.discovery.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.discovery.outputs.subjects }}
+          POSITIVES: ${{ steps.discovery.outputs.positives }}
+          BASE_RATE: ${{ steps.discovery.outputs.base_rate }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 discovery entry"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-discovery-entry"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase4-discovery-entry-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- discovery_rows_sha256: ${ROWS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- discovery_subjects: ${SUBJECTS}"
+            echo "- comeback_5x_tokens: ${POSITIVES}"
+            echo "- comeback_5x_base_rate: ${BASE_RATE}"
+            echo "- labels_joined_after_feature_freeze: true"
+            echo "- feature_values_mutated: false"
+            echo "- phase4_discovery_entry_ready: true"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
