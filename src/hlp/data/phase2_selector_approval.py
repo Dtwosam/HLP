@@ -384,3 +384,157 @@ def validate_phase2_selector_approval_handoff_receipt(
         "canonical_coverage_ledger_mutated": False,
         "canonical_ledger_write_authorized": False,
     }
+
+
+
+def validate_phase2_selector_approved_freeze_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff after explicit selector approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-direct-selector-approved-freeze-receipt-v1"
+    ):
+        raise ValueError("approved selector freeze receipt version changed")
+
+    control_run_id = _positive_run_id(
+        row.get("approved_freeze_control_run_id"),
+        label="approved selector freeze control run ID",
+    )
+    handoff_run_id = _positive_run_id(
+        row.get("approval_handoff_run_id"),
+        label="selector approval handoff run ID",
+    )
+    pre_selector_run_id = _positive_run_id(
+        row.get("pre_selector_completion_run_id"),
+        label="pre-selector completion run ID",
+    )
+    selector_run_id = _positive_run_id(
+        row.get("selector_run_id"),
+        label="selector freeze run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="post-selector planner run ID",
+    )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("approved selector freeze execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="approved selector freeze execution head",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="approved selector freeze coverage ledger",
+    )
+    handoff_digest = _artifact_digest(
+        row.get("approval_handoff_artifact_digest"),
+        label="selector approval handoff artifact digest",
+    )
+    pre_selector_digest = _artifact_digest(
+        row.get("pre_selector_completion_artifact_digest"),
+        label="pre-selector completion artifact digest",
+    )
+    selector_digest = _artifact_digest(
+        row.get("selector_artifact_digest"),
+        label="selector freeze artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="post-selector planner artifact digest",
+    )
+    descriptor_sha = _sha256(
+        row.get("selector_descriptor_sha256"),
+        label="selector freeze descriptor",
+    )
+    evidence_run_id = _positive_run_id(
+        row.get("evidence_run_id"),
+        label="approved selector evidence run ID",
+    )
+    evidence_digest = _artifact_digest(
+        row.get("evidence_artifact_digest"),
+        label="approved selector evidence artifact digest",
+    )
+    evidence_handoff_sha = _sha256(
+        row.get("evidence_handoff_sha256"),
+        label="approved selector evidence handoff",
+    )
+
+    if str(row.get("selector_version") or "") != "active-quote-liquidity-causal-v1":
+        raise ValueError("approved selector frozen version drift")
+    if str(row.get("human_approval_input") or "") != "approve_freeze":
+        raise ValueError("approved selector human-approval input drift")
+    if row.get("human_approval_value") is not True:
+        raise ValueError("approved selector receipt lacks affirmative approval")
+    if row.get("selector_approval_performed") is not True:
+        raise ValueError("approved selector receipt lacks approval proof")
+    if row.get("selector_freeze_completed") is not True:
+        raise ValueError("approved selector receipt lacks freeze completion")
+
+    controls = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls, list):
+        raise ValueError("approved selector prior control-run list is missing")
+    normalized_controls = [int(value) for value in controls]
+    if (
+        len(normalized_controls) != 35
+        or len(set(normalized_controls)) != 35
+        or min(normalized_controls) <= 0
+    ):
+        raise ValueError(
+            "approved selector receipt requires exactly 35 prior control runs"
+        )
+
+    auto_nodes = row.get("auto_node_ids")
+    expected_auto = [
+        "shared:direct_source_population",
+        "coverage:trench_today",
+    ]
+    if auto_nodes != expected_auto:
+        raise ValueError("approved selector post-freeze auto-node drift")
+    manual_nodes = row.get("manual_promotion_node_ids")
+    if manual_nodes != ["promote:pools_fun"]:
+        raise ValueError("approved selector promotion-hold drift")
+
+    for field in (
+        "coverage_promotion_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"approved selector receipt violates {field}"
+            )
+
+    return {
+        **row,
+        "approved_freeze_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "approval_handoff_run_id": handoff_run_id,
+        "approval_handoff_artifact_digest": handoff_digest,
+        "pre_selector_completion_run_id": pre_selector_run_id,
+        "pre_selector_completion_artifact_digest": pre_selector_digest,
+        "selector_run_id": selector_run_id,
+        "selector_artifact_digest": selector_digest,
+        "selector_descriptor_sha256": descriptor_sha,
+        "evidence_run_id": evidence_run_id,
+        "evidence_artifact_digest": evidence_digest,
+        "evidence_handoff_sha256": evidence_handoff_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "node_dispatch_control_run_ids_consumed": sorted(
+            normalized_controls
+        ),
+        "auto_node_ids": expected_auto,
+        "manual_promotion_node_ids": ["promote:pools_fun"],
+        "human_approval_value": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }

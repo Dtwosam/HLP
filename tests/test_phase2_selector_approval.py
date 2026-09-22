@@ -5,6 +5,7 @@ from hlp.data.phase2_selector_approval import (
     PHASE2_SELECTOR_APPROVAL_HANDOFF_VERSION,
     build_phase2_selector_approval_handoff,
     validate_phase2_selector_approval_handoff_receipt,
+    validate_phase2_selector_approved_freeze_receipt,
 )
 
 
@@ -186,3 +187,77 @@ def test_selector_approval_handoff_receipt_rejects_tampering(
     row[field] = value
     with pytest.raises(ValueError, match=match):
         validate_phase2_selector_approval_handoff_receipt(row)
+
+
+
+def approved_freeze_receipt():
+    return {
+        "version": "phase2-direct-selector-approved-freeze-receipt-v1",
+        "approved_freeze_control_run_id": 601,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "11" * 20,
+        "canonical_coverage_ledger_sha256": "22" * 32,
+        "approval_handoff_run_id": 602,
+        "approval_handoff_artifact_digest": "sha256:" + "33" * 32,
+        "pre_selector_completion_run_id": 603,
+        "pre_selector_completion_artifact_digest": "sha256:" + "44" * 32,
+        "selector_run_id": 604,
+        "selector_artifact_digest": "sha256:" + "55" * 32,
+        "selector_descriptor_sha256": "66" * 32,
+        "selector_version": "active-quote-liquidity-causal-v1",
+        "evidence_run_id": 605,
+        "evidence_artifact_digest": "sha256:" + "77" * 32,
+        "evidence_handoff_sha256": "88" * 32,
+        "planner_run_id": 606,
+        "planner_artifact_digest": "sha256:" + "99" * 32,
+        "node_dispatch_control_run_ids_consumed": list(range(700, 735)),
+        "auto_node_ids": [
+            "shared:direct_source_population",
+            "coverage:trench_today",
+        ],
+        "manual_promotion_node_ids": ["promote:pools_fun"],
+        "human_approval_input": "approve_freeze",
+        "human_approval_value": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_approved_selector_freeze_receipt_validates_handoff():
+    report = validate_phase2_selector_approved_freeze_receipt(
+        approved_freeze_receipt()
+    )
+
+    assert report["approved_freeze_control_run_id"] == 601
+    assert report["selector_run_id"] == 604
+    assert report["human_approval_value"] is True
+    assert report["auto_node_ids"] == [
+        "shared:direct_source_population",
+        "coverage:trench_today",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("human_approval_value", False, "affirmative approval"),
+        ("selector_freeze_completed", False, "freeze completion"),
+        (
+            "canonical_coverage_ledger_mutated",
+            True,
+            "canonical_coverage_ledger_mutated",
+        ),
+    ],
+)
+def test_approved_selector_freeze_receipt_rejects_tampering(
+    field,
+    value,
+    match,
+):
+    row = approved_freeze_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_selector_approved_freeze_receipt(row)
