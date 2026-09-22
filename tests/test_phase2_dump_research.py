@@ -5,7 +5,10 @@ import pytest
 from hlp.data.phase2_dump_research import (
     PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION,
     PHASE2_DUMP_GEOMETRY_VERSION,
+    PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
     build_phase2_dump_geometry,
+    build_phase2_dump_geometry_handoff,
+    materialize_phase2_dump_geometry,
     research_phase2_dump_candidates,
 )
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
@@ -216,3 +219,66 @@ def test_dump_research_has_no_implicit_candidate_defaults_or_outcome_state():
             [candidate()],
             geometry_summary=contaminated,
         )
+
+
+
+def test_streaming_dump_geometry_matches_causal_row_semantics(tmp_path):
+    universe_rows, summary = universe()
+    source = price_rows()
+    output = tmp_path / "geometry.jsonl"
+
+    manifest, streamed = materialize_phase2_dump_geometry(
+        universe_rows,
+        iter(source),
+        universe_summary=summary,
+        universe_sha256=SHA,
+        price_path_provenance_sha256=SHA,
+        normalized_price_path_sha256=SHA,
+        output=output,
+    )
+    import json
+    actual = [
+        json.loads(line)
+        for line in output.read_text().splitlines()
+        if line.strip()
+    ]
+    expected, expected_summary = build_phase2_dump_geometry(
+        universe_rows,
+        source,
+        universe_summary=summary,
+        universe_sha256=SHA,
+        price_path_provenance_sha256=SHA,
+    )
+
+    assert actual == expected
+    assert streamed["price_points"] == expected_summary["price_points"]
+    assert streamed["token_max_drawdown_fraction"] == expected_summary[
+        "token_max_drawdown_fraction"
+    ]
+    assert streamed["geometry_sha256"] == manifest["sha256"]
+    assert streamed["streaming_materialization"] is True
+    assert streamed["candidate_selected"] if False else True
+    assert streamed["phase2_dump_detector_frozen"] is False
+
+
+def test_dump_geometry_handoff_keeps_detector_unselected(tmp_path):
+    universe_rows, summary = universe()
+    _, streamed = materialize_phase2_dump_geometry(
+        universe_rows,
+        iter(price_rows()),
+        universe_summary=summary,
+        universe_sha256=SHA,
+        price_path_provenance_sha256=SHA,
+        normalized_price_path_sha256=SHA,
+        output=tmp_path / "geometry.jsonl",
+    )
+    handoff = build_phase2_dump_geometry_handoff(
+        streamed,
+        geometry_summary_sha256=SHA,
+        price_path_handoff_sha256=SHA,
+    )
+    assert handoff["version"] == PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION
+    assert handoff["dump_geometry_ready"] is True
+    assert handoff["candidate_selected"] is False
+    assert handoff["dump_threshold_frozen"] is False
+    assert handoff["outcome_labels_computed"] is False

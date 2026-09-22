@@ -10,13 +10,18 @@ from __future__ import annotations
 
 from collections import Counter
 from decimal import Decimal
+from pathlib import Path
 from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
 from hlp.data.phase2_universe import PHASE2_UNIVERSE_VERSION
+from hlp.data.snapshot import write_jsonl_snapshot
 
 
 PHASE2_DUMP_GEOMETRY_VERSION = "phase2-dump-geometry-v1"
+PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION = (
+    "phase2-dump-geometry-handoff-v1"
+)
 PHASE2_DUMP_CANDIDATE_RESEARCH_VERSION = "phase2-dump-candidate-research-v1"
 PEAK_DRAWDOWN_REBOUND_FAMILY = "peak_drawdown_rebound"
 
@@ -480,3 +485,246 @@ def research_phase2_dump_candidates(
         "outcome_labels_computed": False,
     }
     return results, research_summary
+
+
+
+def materialize_phase2_dump_geometry(
+    universe_rows: Iterable[Mapping[str, object]],
+    price_rows: Iterable[Mapping[str, object]],
+    *,
+    universe_summary: Mapping[str, object],
+    universe_sha256: str,
+    price_path_provenance_sha256: str,
+    normalized_price_path_sha256: str,
+    output: Path,
+) -> tuple[dict, dict]:
+    """Stream causal trailing-peak geometry in global price-event order."""
+
+    universe, snapshot = _validate_frozen_universe(
+        universe_rows,
+        universe_summary,
+    )
+    universe_sha = _sha256(
+        universe_sha256,
+        label="Phase-2 universe",
+    )
+    price_provenance_sha = _sha256(
+        price_path_provenance_sha256,
+        label="Phase-2 price-path provenance",
+    )
+    price_path_sha = _sha256(
+        normalized_price_path_sha256,
+        label="Phase-2 normalized price path",
+    )
+    expected = {row["token"] for row in universe}
+
+    states: dict[str, dict] = {}
+    token_point_counts = {
+        token: 0 for token in expected
+    }
+    token_max_drawdown = {
+        token: Decimal("0") for token in expected
+    }
+    previous_global: tuple[int, int, int, str] | None = None
+    previous_by_token: dict[str, tuple[int, int, int]] = {}
+
+    def geometry_rows():
+        nonlocal previous_global
+        for raw in price_rows:
+            row = dict(raw)
+            token = normalize_address(str(row.get("token") or ""))
+            if token not in expected:
+                raise ValueError(
+                    "dump research price path contains token outside frozen "
+                    f"universe: {token}"
+                )
+            event = _event_key(row)
+            if event[0] > snapshot:
+                raise ValueError(
+                    "dump research price row is after universe snapshot: "
+                    f"{token}"
+                )
+            global_key = (*event, token)
+            if (
+                previous_global is not None
+                and global_key < previous_global
+            ):
+                raise ValueError(
+                    "dump research price path is not globally chronological"
+                )
+            previous_global = global_key
+
+            previous = previous_by_token.get(token)
+            if previous is not None and event <= previous:
+                raise ValueError(
+                    "dump research price path repeats or reverses token event "
+                    f"position: {(token, *event)}"
+                )
+            previous_by_token[token] = event
+
+            value = _decimal(
+                row.get("market_cap_proxy_usd"),
+                label=f"{token} market-cap proxy",
+                positive=True,
+            )
+            state = states.get(token)
+            is_peak = (
+                state is None
+                or value > state["peak_value"]
+            )
+            if is_peak:
+                state = {
+                    "peak_value": value,
+                    "peak_block": event[0],
+                    "peak_transaction_index": (
+                        None if event[1] == -1 else event[1]
+                    ),
+                    "peak_log_index": event[2],
+                }
+                states[token] = state
+
+            peak_value = state["peak_value"]
+            drawdown = (peak_value - value) / peak_value
+            if drawdown > token_max_drawdown[token]:
+                token_max_drawdown[token] = drawdown
+            token_point_counts[token] += 1
+
+            yield {
+                "version": PHASE2_DUMP_GEOMETRY_VERSION,
+                "token": token,
+                "block_number": event[0],
+                "transaction_index": (
+                    None if event[1] == -1 else event[1]
+                ),
+                "log_index": event[2],
+                "market_cap_proxy_usd": _decimal_text(value),
+                "trailing_peak_market_cap_proxy_usd": _decimal_text(
+                    peak_value
+                ),
+                "trailing_peak_block": int(
+                    state["peak_block"]
+                ),
+                "trailing_peak_transaction_index": state[
+                    "peak_transaction_index"
+                ],
+                "trailing_peak_log_index": int(
+                    state["peak_log_index"]
+                ),
+                "drawdown_fraction": _decimal_text(drawdown),
+                "is_new_trailing_peak": is_peak,
+            }
+
+        missing = sorted(
+            token
+            for token, count in token_point_counts.items()
+            if count <= 0
+        )
+        if missing:
+            raise ValueError(
+                "dump research price-path coverage missing frozen tokens: "
+                f"{missing[:20]}"
+            )
+
+    manifest = write_jsonl_snapshot(
+        geometry_rows(),
+        output=output,
+        provenance={
+            "version": PHASE2_DUMP_GEOMETRY_VERSION,
+            "snapshot_head_block": snapshot,
+            "universe_sha256": universe_sha,
+            "price_path_provenance_sha256": price_provenance_sha,
+            "normalized_price_path_sha256": price_path_sha,
+            "uses_price_path_only": True,
+            "streaming_order": "global_event_order",
+            "dump_threshold_frozen": False,
+            "phase2_dump_detector_frozen": False,
+            "outcome_labels_computed": False,
+        },
+    )
+    summary = {
+        "version": PHASE2_DUMP_GEOMETRY_VERSION,
+        "snapshot_head_block": snapshot,
+        "universe_sha256": universe_sha,
+        "price_path_provenance_sha256": price_provenance_sha,
+        "normalized_price_path_sha256": price_path_sha,
+        "geometry_sha256": manifest["sha256"],
+        "tokens": len(expected),
+        "price_points": int(manifest["records"]),
+        "token_price_points": dict(
+            sorted(token_point_counts.items())
+        ),
+        "token_max_drawdown_fraction": {
+            token: _decimal_text(value)
+            for token, value in sorted(
+                token_max_drawdown.items()
+            )
+        },
+        "uses_price_path_only": True,
+        "streaming_materialization": True,
+        "streaming_order": "global_event_order",
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
+    return manifest, summary
+
+
+def build_phase2_dump_geometry_handoff(
+    geometry_summary: Mapping[str, object],
+    *,
+    geometry_summary_sha256: str,
+    price_path_handoff_sha256: str,
+) -> dict:
+    """Bind geometry research to the exact normalized price-path handoff."""
+
+    summary = dict(geometry_summary)
+    if (
+        str(summary.get("version") or "")
+        != PHASE2_DUMP_GEOMETRY_VERSION
+    ):
+        raise ValueError("dump geometry handoff version changed")
+    if summary.get("uses_price_path_only") is not True:
+        raise ValueError("dump geometry handoff is not price-path only")
+    if summary.get("streaming_materialization") is not True:
+        raise ValueError("dump geometry is not streaming-materialized")
+    if summary.get("dump_threshold_frozen") is not False:
+        raise ValueError("dump geometry cannot freeze a threshold")
+    if summary.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError("dump geometry cannot freeze a detector")
+    if summary.get("outcome_labels_computed") is not False:
+        raise ValueError("dump geometry cannot contain outcome labels")
+
+    return {
+        "version": PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION,
+        "snapshot_head_block": int(
+            summary["snapshot_head_block"]
+        ),
+        "universe_sha256": _sha256(
+            summary.get("universe_sha256"),
+            label="dump geometry universe",
+        ),
+        "normalized_price_path_sha256": _sha256(
+            summary.get("normalized_price_path_sha256"),
+            label="dump geometry normalized price path",
+        ),
+        "price_path_handoff_sha256": _sha256(
+            price_path_handoff_sha256,
+            label="dump geometry price-path handoff",
+        ),
+        "geometry_sha256": _sha256(
+            summary.get("geometry_sha256"),
+            label="dump geometry tape",
+        ),
+        "geometry_summary_sha256": _sha256(
+            geometry_summary_sha256,
+            label="dump geometry summary",
+        ),
+        "tokens": int(summary["tokens"]),
+        "price_points": int(summary["price_points"]),
+        "uses_price_path_only": True,
+        "dump_geometry_ready": True,
+        "candidate_selected": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+    }
