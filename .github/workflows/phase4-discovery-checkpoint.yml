@@ -530,6 +530,211 @@ jobs:
                   "Phase-4 validation handoff content drift"
               )
 
+          magnitude_report_path = find_unique(
+              roots["magnitude"],
+              "phase4-magnitude-strata-report.json",
+          )
+          magnitude_report = json.loads(
+              magnitude_report_path.read_text()
+          )
+          magnitude_report_sha = sha256_path(
+              magnitude_report_path
+          )
+          magnitude_handoff_path = find_unique(
+              roots["magnitude"],
+              "phase4-magnitude-strata-handoff.json",
+          )
+          magnitude_handoff_sha = sha256_path(
+              magnitude_handoff_path
+          )
+          if magnitude_handoff_sha != descriptors[
+              "magnitude"
+          ]["handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-4 magnitude-strata handoff SHA drift"
+              )
+          magnitude_handoff = json.loads(
+              magnitude_handoff_path.read_text()
+          )
+          rebuilt_magnitude = build_phase4_magnitude_strata_handoff(
+              magnitude_report,
+              report_sha256=magnitude_report_sha,
+              chronological_split_handoff_sha256=magnitude_report[
+                  "chronological_split_handoff_sha256"
+              ],
+              feature_registry_file_sha256=magnitude_report[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_magnitude != magnitude_handoff:
+              raise SystemExit(
+                  "Phase-4 magnitude-strata handoff content drift"
+              )
+
+          nonlinear_report_path = find_unique(
+              roots["nonlinear"],
+              "phase4-nonlinear-report.json",
+          )
+          nonlinear_report = json.loads(
+              nonlinear_report_path.read_text()
+          )
+          nonlinear_report_sha = sha256_path(
+              nonlinear_report_path
+          )
+          nonlinear_handoff_path = find_unique(
+              roots["nonlinear"],
+              "phase4-nonlinear-handoff.json",
+          )
+          nonlinear_handoff_sha = sha256_path(
+              nonlinear_handoff_path
+          )
+          if nonlinear_handoff_sha != descriptors[
+              "nonlinear"
+          ]["handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-4 nonlinear handoff SHA drift"
+              )
+          nonlinear_handoff = json.loads(
+              nonlinear_handoff_path.read_text()
+          )
+          rebuilt_nonlinear = build_phase4_nonlinear_handoff(
+              nonlinear_report,
+              report_sha256=nonlinear_report_sha,
+              chronological_split_handoff_sha256=nonlinear_report[
+                  "chronological_split_handoff_sha256"
+              ],
+              feature_registry_file_sha256=nonlinear_report[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_nonlinear != nonlinear_handoff:
+              raise SystemExit(
+                  "Phase-4 nonlinear handoff content drift"
+              )
+
+          interaction_report_path = find_unique(
+              roots["interaction"],
+              "phase4-interaction-report.json",
+          )
+          interaction_report = json.loads(
+              interaction_report_path.read_text()
+          )
+          interaction_report_sha = sha256_path(
+              interaction_report_path
+          )
+          interaction_handoff_path = find_unique(
+              roots["interaction"],
+              "phase4-interaction-handoff.json",
+          )
+          interaction_handoff_sha = sha256_path(
+              interaction_handoff_path
+          )
+          if interaction_handoff_sha != descriptors[
+              "interaction"
+          ]["handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-4 interaction handoff SHA drift"
+              )
+          interaction_handoff = json.loads(
+              interaction_handoff_path.read_text()
+          )
+          rebuilt_interaction = build_phase4_interaction_handoff(
+              interaction_report,
+              report_sha256=interaction_report_sha,
+              chronological_split_handoff_sha256=interaction_report[
+                  "chronological_split_handoff_sha256"
+              ],
+              feature_registry_file_sha256=interaction_report[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_interaction != interaction_handoff:
+              raise SystemExit(
+                  "Phase-4 interaction handoff content drift"
+              )
+
+          simple_model_report_path = find_unique(
+              roots["simple_model"],
+              "phase4-simple-model-report.json",
+          )
+          simple_model_report = json.loads(
+              simple_model_report_path.read_text()
+          )
+          simple_model_report_sha = sha256_path(
+              simple_model_report_path
+          )
+          simple_model_handoff_path = find_unique(
+              roots["simple_model"],
+              "phase4-simple-model-handoff.json",
+          )
+          simple_model_handoff_sha = sha256_path(
+              simple_model_handoff_path
+          )
+          if simple_model_handoff_sha != descriptors[
+              "simple_model"
+          ]["handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-4 simple-model handoff SHA drift"
+              )
+          simple_model_handoff = json.loads(
+              simple_model_handoff_path.read_text()
+          )
+          rebuilt_simple_model = build_phase4_simple_model_handoff(
+              simple_model_report,
+              report_sha256=simple_model_report_sha,
+              chronological_split_handoff_sha256=simple_model_report[
+                  "chronological_split_handoff_sha256"
+              ],
+              feature_registry_file_sha256=simple_model_report[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_simple_model != simple_model_handoff:
+              raise SystemExit(
+                  "Phase-4 simple-model handoff content drift"
+              )
+
+          stability_report_path = find_unique(
+              roots["stability"],
+              "phase4-stability-report.json",
+          )
+          stability_report = json.loads(
+              stability_report_path.read_text()
+          )
+          stability_report_sha = sha256_path(
+              stability_report_path
+          )
+          stability_handoff_path = find_unique(
+              roots["stability"],
+              "phase4-stability-handoff.json",
+          )
+          stability_handoff_sha = sha256_path(
+              stability_handoff_path
+          )
+          if stability_handoff_sha != descriptors[
+              "stability"
+          ]["handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-4 stability handoff SHA drift"
+              )
+          stability_handoff = json.loads(
+              stability_handoff_path.read_text()
+          )
+          rebuilt_stability = build_phase4_stability_handoff(
+              stability_report,
+              report_sha256=stability_report_sha,
+              hypothesis_freeze_handoff_sha256=stability_report[
+                  "hypothesis_freeze_handoff_sha256"
+              ],
+              chronological_split_handoff_sha256=stability_report[
+                  "chronological_split_handoff_sha256"
+              ],
+          )
+          if rebuilt_stability != stability_handoff:
+              raise SystemExit(
+                  "Phase-4 stability handoff content drift"
+              )
+
           ledger = build_phase4_discovery_ledger(
               freeze_report,
               validation_report,
