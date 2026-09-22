@@ -184,12 +184,21 @@ jobs:
                   "canonical coverage ledger changed during proposal build"
               )
 
+          base_ledger_sha = hashlib.sha256(
+              canonical_bytes
+          ).hexdigest()
+          proposed_text = json.dumps(proposed, indent=2) + "\n"
+          proposed_ledger_sha = hashlib.sha256(
+              proposed_text.encode()
+          ).hexdigest()
           Path("phase2-source-coverage.proposed.json").write_text(
-              json.dumps(proposed, indent=2) + "\n"
+              proposed_text
           )
           handoff = {
               "version": "phase2-source-coverage-promotion-v1",
               "base_commit": os.environ["GITHUB_SHA"],
+              "base_ledger_sha256": base_ledger_sha,
+              "proposed_ledger_sha256": proposed_ledger_sha,
               "coverage_run_id": int(os.environ["COVERAGE_RUN_ID"]),
               "coverage_artifact_name": os.environ[
                   "COVERAGE_ARTIFACT_NAME"
@@ -209,6 +218,8 @@ jobs:
               "phase2_universe_coverage_complete": validation[
                   "phase2_universe_coverage_complete"
               ],
+              "proposal_only": True,
+              "canonical_ledger_mutated": False,
           }
           Path("phase2-source-coverage-promotion.json").write_text(
               json.dumps(handoff, indent=2, sort_keys=True) + "\n"
