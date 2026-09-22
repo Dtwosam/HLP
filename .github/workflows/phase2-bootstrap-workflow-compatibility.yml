@@ -65,6 +65,22 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           bootstrap_branch = os.environ["BOOTSTRAP_BRANCH"]
           required = required_phase2_manual_workflows()
+          bootstrap_meta = json.loads(
+              subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  f"/repos/{repo}/commits/{bootstrap_branch}",
+              ])
+          )
+          bootstrap_head_sha = str(
+              bootstrap_meta.get("sha") or ""
+          ).lower()
+          if len(bootstrap_head_sha) != 40:
+              raise SystemExit(
+                  "bootstrap branch HEAD SHA is unavailable"
+              )
 
           expected = {}
           for name in required:
@@ -125,6 +141,7 @@ jobs:
               expected,
               bootstrap,
           )
+          report["bootstrap_head_sha"] = bootstrap_head_sha
           report["working_branch"] = os.environ["GITHUB_REF_NAME"]
           report["working_head_sha"] = subprocess.check_output(
               ["git", "rev-parse", "HEAD"],
@@ -150,6 +167,13 @@ jobs:
               )
               handle.write(
                   f"present={report['present_required_workflows']}\n"
+              )
+              handle.write(
+                  "allowed_variants="
+                  f"{report['exact_or_allowed_variant_workflows']}\n"
+              )
+              handle.write(
+                  f"bootstrap_head={bootstrap_head_sha}\n"
               )
               handle.write(
                   "mismatches="
@@ -181,14 +205,18 @@ jobs:
           READY: ${{ steps.compatibility.outputs.ready }}
           REQUIRED: ${{ steps.compatibility.outputs.required }}
           PRESENT: ${{ steps.compatibility.outputs.present }}
+          ALLOWED_VARIANTS: ${{ steps.compatibility.outputs.allowed_variants }}
+          BOOTSTRAP_HEAD: ${{ steps.compatibility.outputs.bootstrap_head }}
           MISMATCHES: ${{ steps.compatibility.outputs.mismatches }}
         run: |
           {
             echo "## Phase-2 bootstrap workflow compatibility"
             echo
             echo "- bootstrap_branch: ${BOOTSTRAP_BRANCH}"
+            echo "- bootstrap_head_sha: ${BOOTSTRAP_HEAD}"
             echo "- required_workflows: ${REQUIRED}"
             echo "- present_required_workflows: ${PRESENT}"
+            echo "- exact_or_allowed_variant_workflows: ${ALLOWED_VARIANTS}"
             echo "- content_or_interface_mismatches: ${MISMATCHES}"
             echo "- bootstrap_dispatch_surface_ready: ${READY}"
           } >> "${GITHUB_STEP_SUMMARY}"
