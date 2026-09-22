@@ -600,46 +600,53 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3_feature_registry.py` now gives every implemented feature a versioned
   formula, snapshot semantics, data dependency, dtype and missingness policy;
   registry definitions are SHA-bound and explicitly forbid future state or
-  outcome dependence. The registry now contains **45 causal features across
-  five families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
-  8 `holder_state` / concentration, 5 `chain_regime`, and 10
-  `venue_mechanics` features. `price_drawdown`, `chain_regime`, and
-  `venue_mechanics` all use the canonical research price path and enforce the
-  exact confirmation event as an inclusive cutoff. Chain regime replays the
-  full cross-sectional price tape for contemporaneous market-cap and
-  1000-block activity state; venue mechanics uses only per-event canonical
-  `source_ids` / `component_ids` to measure observed venue identity,
-  overlap and causal identity-set switches through the cutoff. The trade
-  family remains behind a fail-closed canonical wallet-trade tape. Pons V1/V2,
-  V3/Sushi V3, V4, Flap, hood.fun and trench.today all have source-specific
-  adapters that use transaction initiator identity rather than router/protocol
-  sender identity. The canonical trade-tape assembler binds exact frozen
-  source membership, requires complete historical event scan + transaction
-  identity + adapter evidence for all 14 sources, and collapses only
-  economically identical cross-source duplicate swaps. The current
+  outcome dependence. The registry now contains **61 causal features across
+  seven families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  8 `holder_state` / concentration, 8 `participant_retention`, 8
+  `supply_redistribution`, 5 `chain_regime`, and 10 `venue_mechanics`
+  features. `price_drawdown`, `chain_regime`, and `venue_mechanics` all
+  use the canonical research price path and enforce the exact confirmation
+  event as an inclusive cutoff. Chain regime replays the full cross-sectional
+  price tape for contemporaneous market-cap and 1000-block activity state;
+  venue mechanics uses only per-event canonical `source_ids` /
+  `component_ids` to measure observed venue identity, overlap and causal
+  identity-set switches through the cutoff. Trade flow and participant
+  retention both remain behind the same fail-closed canonical wallet-trade
+  tape. Retention measures repeat participation, two-sided wallets and whether
+  the latest participant is returning without consuming trades after the
+  cutoff. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and trench.today all
+  have source-specific adapters that use transaction initiator identity rather
+  than router/protocol sender identity. The canonical trade-tape assembler
+  binds exact frozen source membership, requires complete historical event scan
+  + transaction identity + adapter evidence for all 14 sources, and collapses
+  only economically identical cross-source duplicate swaps. The current
   trade-source readiness plan is **13/14 adapter-ready**;
   `pools_trade_lbp` remains explicitly blocked because the frozen CCA/LBP
   surface contains aggregate clearing/checkpoint state rather than verified
-  wallet-level fill attribution. Holder features now have a complete guarded
-  acquisition architecture as well: every eligible token's first code block
-  is binary-searched and boundary-verified against archive `eth_getCode`,
-  transfer batches begin at or before the earliest verified deployment in the
-  batch, every token must retain continuous scan evidence through the frozen
-  snapshot and positive initial-mint evidence, and replayed balances must
-  reconcile to accounted supply before holder features can run. The
-  deployment/transfer/holder contracts and workflows are tested. Full-universe
-  transfer execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`;
-  the verified 200-block keyless filtered-log route is rejected for this job
-  rather than launching an impractical millions-request backfill. The
-  equal-family-coverage and feature-staging workflows now require all five
-  implemented families, giving a prepared **45-feature** label-free bundle at
+  wallet-level fill attribution. Holder and supply-redistribution features
+  share a complete guarded transfer-acquisition architecture: every eligible
+  token's first code block is binary-searched and boundary-verified against
+  archive `eth_getCode`, transfer batches begin at or before the earliest
+  verified deployment in the batch, every token must retain continuous scan
+  evidence through the frozen snapshot and positive initial-mint evidence, and
+  replayed balances must reconcile to accounted supply. Redistribution excludes
+  mints, burns, self-transfers and zero-value transfers from movement metrics
+  and measures recipient activations, sender exits, distinct senders/receivers,
+  gross transfer turnover relative to supply and transfer-value concentration
+  only through the exact feature cutoff. The deployment/transfer/holder and
+  redistribution contracts/workflows are tested. Full-universe transfer
+  execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
+  verified 200-block keyless filtered-log route is rejected for this job rather
+  than launching an impractical millions-request backfill. The
+  equal-family-coverage and feature-staging workflows now require all seven
+  implemented families, giving a prepared **61-feature** label-free bundle at
   exactly matched subject cutoffs. The staging bundle validates every value
   against registry dtype and missingness policy, preserves per-family
   data-quality flags, consumes no outcome rows, and explicitly publishes
   `final_checkpoint_claimed=false`. No
   `hlp-v1-phase3-feature-store` checkpoint is claimed yet; creator/early
-  wallet, relationship, liquidity, absorption and retention families still
-  remain to be implemented and coverage-tested.
+  wallet, relationship, liquidity and absorption families still remain to be
+  implemented and coverage-tested.
 
 
 ### Live/current chain access
