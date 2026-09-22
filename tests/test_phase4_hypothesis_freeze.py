@@ -100,6 +100,7 @@ def plan():
         "version": "phase4-hypothesis-plan-v1",
         "multiple_testing_method": "benjamini_hochberg",
         "false_discovery_rate_alpha": "0.05",
+        "permutation_trials": 2000,
         "hypotheses": [
             {
                 "hypothesis_id": "H-001",
@@ -141,6 +142,8 @@ def test_hypothesis_freeze_is_manual_and_logs_unselected_features():
     assert report["automatic_feature_ranking_used"] is False
     assert report["validation_rows_consumed"] is False
     assert report["final_test_rows_consumed"] is False
+    assert report["permutation_trials"] == 2000
+    assert report["permutation_test_two_sided"] is True
     assert report["multiple_testing_plan_frozen"] is True
     assert report["multiple_testing_control_applied"] is False
 
@@ -226,7 +229,24 @@ def test_hypothesis_freeze_handoff_never_claims_discovery():
     assert handoff["automatic_feature_ranking_used"] is False
     assert handoff["validation_rows_consumed"] is False
     assert handoff["final_test_rows_consumed"] is False
+    assert handoff["permutation_trials"] == 2000
+    assert handoff["permutation_test_two_sided"] is True
     assert handoff["multiple_testing_plan_frozen"] is True
     assert handoff["multiple_testing_control_applied"] is False
     assert handoff["signal_promoted"] is False
     assert handoff["phase4_discovery_checkpoint_claimed"] is False
+
+
+
+def test_hypothesis_freeze_rejects_unfrozen_permutation_budget():
+    bad = plan()
+    bad["permutation_trials"] = 99
+
+    with pytest.raises(ValueError, match="permutation trials"):
+        build_phase4_hypothesis_freeze(
+            univariate_report(),
+            univariate_handoff=univariate_handoff(),
+            chronological_split_handoff=split_handoff(),
+            chronological_split_handoff_sha256=SPLIT_SHA,
+            hypothesis_plan=bad,
+        )
