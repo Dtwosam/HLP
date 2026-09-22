@@ -472,10 +472,30 @@ Implemented foundation:
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
+- the canonical coverage ledger remains **2/14 complete**. A deterministic
+  execution DAG is now prepared in `phase2_coverage_execution.py` plus the
+  read-only `phase2-coverage-execution-plan` workflow. It expands only the
+  currently incomplete sources, reuses one shared V3/V4 Initialize/Swap,
+  PoolCreated, supply-delta and quote spine across all dependent launchpads and
+  the three direct DEX sources, and identifies exactly which workflow nodes are
+  ready, blocked, archive-secret dependent, awaiting explicit selector
+  approval, or waiting for a manual canonical-ledger commit. Coverage
+  acquisition/derivation can run in parallel; canonical source promotion is
+  deliberately serialized only among coverage reports that are actually ready,
+  because `phase2-source-coverage-promotion` emits a proposed ledger artifact
+  but never mutates `.github/phase2-source-coverage.json`. After each accepted
+  proposal, the canonical ledger must be reviewed/committed and the plan
+  regenerated before the next serialized promotion;
 - the keyless SolidRPC filtered log cap is now **200 blocks** (observed
-  2026-09-21), so Phase-2 backfills must use more aggressive source sharing,
-  sparse quote-price sampling, or the free authenticated route rather than the
-  older 2,000-block assumption;
+  2026-09-21). Chain-wide source execution now fails closed on missing
+  `ROBINHOOD_ARCHIVE_RPC_API_KEY` rather than quietly falling back to
+  `CHUNK=200`. A dedicated `phase2-archive-rpc-preflight` workflow verifies
+  the authenticated SolidRPC route, historical Pons bytecode, frozen-snapshot
+  reachability and a **1,000-block** historical filtered-log request that
+  exceeds the public cap without exposing the key. The execution DAG gates all
+  secret-backed work behind that preflight; with today's 2/14 ledger the first
+  safe wave is therefore the archive preflight plus the canonical direct-quote
+  registry, after which the large shared/source archive batch can fan out;
 - complete pools.trade LBP historical CCA and migrated-V4 backfill;
 - complete historical backfills for both hood.fun generations. The current
   generation now has a dispatch-only, fail-closed coverage proposal path with
