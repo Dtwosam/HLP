@@ -385,7 +385,6 @@ jobs:
               "feature_handoff_sha256": handoff_sha,
               "feature_subjects": summary["feature_subjects"],
               "features_per_subject": summary["features_per_subject"],
-              "features_per_subject": summary["features_per_subject"],
               "future_price_rows_used": False,
               "outcome_rows_consumed": False,
               "phase3_venue_features_ready": True,
@@ -440,7 +439,6 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- features_per_subject: 10"
             echo "- features_per_subject: 10"
             echo "- future_price_rows_used: false"
             echo "- outcome_rows_consumed: false"
