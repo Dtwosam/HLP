@@ -45,7 +45,8 @@ def test_first_wave_launcher_checks_default_branch_interfaces():
 def test_first_wave_launcher_uses_returned_run_ids_and_waits_for_targets():
     text = WORKFLOW.read_text()
 
-    assert "X-GitHub-Api-Version: 2026-03-10" in text
+    assert 'API_VERSION = "2026-03-10"' in text
+    assert "X-GitHub-Api-Version:" in text
     assert 'response["workflow_run_id"]' in text
     assert "wait_run(" in text
     assert "node_dispatch_control_run_ids" in text
