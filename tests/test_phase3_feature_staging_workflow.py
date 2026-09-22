@@ -14,6 +14,7 @@ def test_phase3_staging_requires_coverage_price_and_trade_artifacts():
     assert "phase3-chain-regime-features" in text
     assert "phase3-venue-mechanics-features" in text
     assert "phase3-holder-features" in text
+    assert "phase3-redistribution-features" in text
     assert "phase3-retention-features" in text
     assert "phase3-price-features" in text
     assert "phase3-trade-features" in text
@@ -30,7 +31,7 @@ def test_phase3_staging_never_claims_final_feature_store():
     assert (
         "included_families: "
         "chain_regime,holder_state,participant_retention,"
-        "price_drawdown,trade_flow,venue_mechanics"
+        "price_drawdown,supply_redistribution,trade_flow,venue_mechanics"
     ) in text
     assert "staging_bundle_ready: true" in text
     assert "final_checkpoint_name: hlp-v1-phase3-feature-store" in text
