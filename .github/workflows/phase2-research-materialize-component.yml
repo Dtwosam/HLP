@@ -562,9 +562,21 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Upload research component handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-handoff-${{ inputs.component_id }}
+          path: |
+            artifacts/phase2-research-component-report.json
+            artifacts/*.manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Publish component identity
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
           REPORT_SHA256: ${{ steps.materialize.outputs.report_sha256 }}
           MATERIALIZED_SHA256: ${{ steps.materialize.outputs.materialized_sha256 }}
           MATERIALIZED_RECORDS: ${{ steps.materialize.outputs.materialized_records }}
@@ -579,6 +591,8 @@ jobs:
             echo "- component_id: ${COMPONENT_ID}"
             echo "- run_id: ${GITHUB_RUN_ID}"
             echo "- artifact_name: phase2-research-materialized-${COMPONENT_ID}"
+            echo "- handoff_artifact_name: phase2-research-handoff-${COMPONENT_ID}"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
             echo "- artifact_digest: ${ARTIFACT_DIGEST}"
             echo "- report_sha256: ${REPORT_SHA256}"
             echo "- materialized_sha256: ${MATERIALIZED_SHA256}"
