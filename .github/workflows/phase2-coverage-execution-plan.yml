@@ -72,6 +72,9 @@ jobs:
           from hlp.data.phase2_coverage_execution import (
               build_phase2_coverage_execution_plan,
           )
+          from hlp.data.phase2_execution_dispatch import (
+              build_phase2_dispatch_input_plan,
+          )
           from hlp.data.phase2_execution_runs import (
               validate_phase2_execution_run_receipts,
           )
@@ -171,6 +174,34 @@ jobs:
               json.dumps(plan, indent=2, sort_keys=True) + "\n"
           )
 
+          workflow_names = {
+              str(row["workflow"])
+              for row in plan["nodes"]
+              if row.get("workflow")
+          }
+          workflow_text_by_name = {
+              name: Path(
+                  ".github/workflows",
+                  name,
+              ).read_text()
+              for name in workflow_names
+          }
+          dispatch_plan = build_phase2_dispatch_input_plan(
+              plan,
+              verified,
+              workflow_text_by_name=workflow_text_by_name,
+          )
+          dispatch_path = Path(
+              "artifacts/phase2-dispatch-input-plan.json"
+          )
+          dispatch_path.write_text(
+              json.dumps(
+                  dispatch_plan,
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+
           ready = plan["ready_to_dispatch_node_ids"]
           ready_secret = plan[
               "ready_requiring_archive_secret_node_ids"
@@ -222,6 +253,9 @@ jobs:
               "canonical_ledger_commit_workflow_available": True,
               "ledger_commit_requires_explicit_approval": True,
               "verified_completed_runs": verified["verified_runs"],
+              "dispatchable_input_plans": dispatch_plan[
+                  "dispatchable_nodes"
+              ],
               "workflow_dispatch_performed": False,
           }, sort_keys=True))
 
@@ -272,6 +306,10 @@ jobs:
                       f"{verified['verified_runs']}\n"
                   )
                   handle.write(
+                      f"- dispatch input plans emitted: "
+                      f"{dispatch_plan['dispatchable_nodes']}\n"
+                  )
+                  handle.write(
                       "- planner completion credit is accepted only from "
                       "successful workflow_dispatch run IDs whose workflow, "
                       "repo and branch identities match the DAG\n"
@@ -291,5 +329,6 @@ jobs:
           path: |
             artifacts/phase2-coverage-execution-plan.json
             artifacts/phase2-execution-run-receipts.json
+            artifacts/phase2-dispatch-input-plan.json
           if-no-files-found: error
           retention-days: 30
