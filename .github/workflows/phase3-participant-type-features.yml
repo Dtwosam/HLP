@@ -1,0 +1,553 @@
+name: phase3-participant-type-features
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature_entry_run_id:
+        description: Exact phase3-feature-entry run ID
+        required: true
+        type: string
+      expected_feature_entry_artifact_digest:
+        description: Exact phase3-feature-entry artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_feature_entry_handoff_sha256:
+        description: Exact SHA-256 of phase3-feature-entry-handoff.json
+        required: true
+        type: string
+      canonical_trade_run_id:
+        description: Exact phase3-canonical-trade-tape run ID
+        required: true
+        type: string
+      expected_canonical_trade_artifact_digest:
+        description: Exact canonical trade-tape artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_canonical_trade_handoff_sha256:
+        description: Exact SHA-256 of phase3-canonical-trade-handoff.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-participant-type-features-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FEATURE_ENTRY_RUN_ID: ${{ inputs.feature_entry_run_id }}
+  EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
+  EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
+  CANONICAL_TRADE_RUN_ID: ${{ inputs.canonical_trade_run_id }}
+  EXPECTED_CANONICAL_TRADE_ARTIFACT_DIGEST: ${{ inputs.expected_canonical_trade_artifact_digest }}
+  EXPECTED_CANONICAL_TRADE_HANDOFF_SHA256: ${{ inputs.expected_canonical_trade_handoff_sha256 }}
+
+jobs:
+  features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: features
+        name: Materialize causal participant-type features
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_feature_entry import (
+              build_phase3_feature_entry_handoff,
+          )
+          from hlp.data.phase3_feature_registry import (
+              build_phase3_feature_registry,
+              validate_phase3_feature_registry,
+          )
+          from hlp.config import SOLIDRPC_AUTH_RPC_URL
+          from hlp.data.phase3_participant_type_features import (
+              PHASE3_PARTICIPANT_CODE_STATE_VERSION,
+              build_phase3_participant_code_query_plan,
+              build_phase3_participant_type_feature_handoff,
+              materialize_phase3_participant_type_features,
+          )
+          from hlp.data.rpc import RpcClient, RpcError
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.phase3_trade_tape import (
+              build_phase3_canonical_trade_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          entry_root = Path("inputs/entry")
+          trade_root = Path("inputs/trades")
+          download_named(
+              int(os.environ["FEATURE_ENTRY_RUN_ID"]),
+              "phase3-feature-entry",
+              entry_root,
+              "Phase-3 feature entry",
+              os.environ["EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["CANONICAL_TRADE_RUN_ID"]),
+              "phase3-canonical-trade-tape",
+              trade_root,
+              "Phase-3 canonical trade tape",
+              os.environ["EXPECTED_CANONICAL_TRADE_ARTIFACT_DIGEST"],
+          )
+
+          subjects_path = find_unique(
+              entry_root,
+              "phase3-feature-subjects.jsonl",
+          )
+          subjects_manifest_path = find_unique(
+              entry_root,
+              "phase3-feature-subjects.jsonl.manifest.json",
+          )
+          subjects_manifest = json.loads(
+              subjects_manifest_path.read_text()
+          )
+          entry_summary_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-summary.json",
+          )
+          entry_summary = json.loads(entry_summary_path.read_text())
+          entry_summary_sha = sha256_path(entry_summary_path)
+          entry_handoff_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-handoff.json",
+          )
+          entry_handoff_sha = sha256_path(entry_handoff_path)
+          if entry_handoff_sha != os.environ[
+              "EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 feature-entry handoff SHA drift")
+          entry_handoff = json.loads(entry_handoff_path.read_text())
+          rebuilt_entry = build_phase3_feature_entry_handoff(
+              entry_summary,
+              entry_summary_sha256=entry_summary_sha,
+              phase2_dataset_handoff_sha256=entry_summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              detector_freeze_handoff_sha256=entry_summary[
+                  "detector_freeze_handoff_sha256"
+              ],
+          )
+          if rebuilt_entry != entry_handoff:
+              raise SystemExit(
+                  "Phase-3 feature-entry handoff content drift"
+              )
+          if subjects_manifest.get("sha256") != entry_handoff[
+              "feature_subjects_sha256"
+          ]:
+              raise SystemExit("Phase-3 feature-subject manifest SHA drift")
+
+          trade_path = find_unique(
+              trade_root,
+              "phase3-canonical-trades.jsonl",
+          )
+          trade_manifest_path = find_unique(
+              trade_root,
+              "phase3-canonical-trades.jsonl.manifest.json",
+          )
+          trade_manifest = json.loads(trade_manifest_path.read_text())
+          trade_summary_path = find_unique(
+              trade_root,
+              "phase3-canonical-trade-summary.json",
+          )
+          trade_summary = json.loads(trade_summary_path.read_text())
+          trade_summary_sha = sha256_path(trade_summary_path)
+          trade_handoff_path = find_unique(
+              trade_root,
+              "phase3-canonical-trade-handoff.json",
+          )
+          trade_handoff_sha = sha256_path(trade_handoff_path)
+          if trade_handoff_sha != os.environ[
+              "EXPECTED_CANONICAL_TRADE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 canonical-trade handoff SHA drift")
+          trade_handoff = json.loads(trade_handoff_path.read_text())
+          rebuilt_trade = build_phase3_canonical_trade_handoff(
+              trade_summary,
+              tape_summary_sha256=trade_summary_sha,
+              feature_entry_handoff_sha256=trade_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade != trade_handoff:
+              raise SystemExit(
+                  "Phase-3 canonical-trade handoff content drift"
+              )
+          if trade_manifest.get("sha256") != trade_handoff[
+              "canonical_trade_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 canonical-trade manifest SHA drift")
+          if int(trade_manifest.get("records", -1)) != int(
+              trade_handoff["trade_rows"]
+          ):
+              raise SystemExit("Phase-3 canonical-trade row count drift")
+          if trade_handoff.get("trade_coverage_complete") is not True:
+              raise SystemExit("Phase-3 canonical trade coverage incomplete")
+          if trade_handoff.get("outcome_rows_consumed") is not False:
+              raise SystemExit("Phase-3 canonical trades consumed outcomes")
+          if trade_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 canonical trades/entry linkage drift"
+              )
+
+          registry = build_phase3_feature_registry()
+          registry_report = validate_phase3_feature_registry(registry)
+          Path("artifacts/phase3-feature-registry.json").write_text(
+              json.dumps(registry, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/phase3-feature-registry-report.json"
+          ).write_text(
+              json.dumps(
+                  registry_report,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+
+          query_rows, query_summary = (
+              build_phase3_participant_code_query_plan(
+                  iter_validated_jsonl(
+                      subjects_path,
+                      subjects_manifest_path,
+                  ),
+                  iter_validated_jsonl(
+                      trade_path,
+                      trade_manifest_path,
+                  ),
+                  entry_handoff=entry_handoff,
+                  trade_tape_handoff=trade_handoff,
+              )
+          )
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          if not key:
+              raise SystemExit(
+                  "Phase-3 participant-type features require "
+                  "ROBINHOOD_ARCHIVE_RPC_API_KEY for historical eth_getCode"
+              )
+          rpc = RpcClient(
+              SOLIDRPC_AUTH_RPC_URL,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.05,
+              extra_headers={"X-API-Key": key},
+              route_label="solidrpc_authenticated_free",
+          )
+          rpc.assert_robinhood()
+
+          code_rows = []
+          batch_size = 50
+          for cursor in range(0, len(query_rows), batch_size):
+              batch = query_rows[cursor : cursor + batch_size]
+              calls = [
+                  (
+                      "eth_getCode",
+                      [row["address"], hex(int(row["block_number"]))],
+                  )
+                  for row in batch
+              ]
+              try:
+                  results = rpc.batch_call(calls)
+              except RpcError:
+                  results = [
+                      rpc.get_code(
+                          row["address"],
+                          int(row["block_number"]),
+                      )
+                      for row in batch
+                  ]
+              for query, code in zip(batch, results):
+                  if not isinstance(code, str) or not code.startswith("0x"):
+                      raise SystemExit(
+                          "historical eth_getCode returned invalid payload"
+                      )
+                  payload = code[2:]
+                  if len(payload) % 2:
+                      raise SystemExit(
+                          "historical eth_getCode returned odd-length hex"
+                      )
+                  raw_code = bytes.fromhex(payload)
+                  code_rows.append({
+                      "version": PHASE3_PARTICIPANT_CODE_STATE_VERSION,
+                      "address": query["address"],
+                      "block_number": int(query["block_number"]),
+                      "code_present": bool(raw_code),
+                      "code_size_bytes": len(raw_code),
+                      "code_sha256": hashlib.sha256(raw_code).hexdigest(),
+                      "archive_state_read": True,
+                      "future_state_allowed": False,
+                  })
+
+          code_output = Path(
+              "artifacts/phase3-participant-code-state.jsonl"
+          )
+          code_manifest = write_jsonl_snapshot(
+              code_rows,
+              output=code_output,
+              provenance={
+                  **query_summary,
+                  "rpc_route": rpc.route_label,
+                  "archive_state_read": True,
+                  "same_block_future_state_allowed": False,
+                  "outcome_rows_consumed": False,
+                  "future_state_allowed": False,
+              },
+          )
+
+          output = Path(
+              "artifacts/phase3-participant-type-features.jsonl"
+          )
+          manifest, summary = materialize_phase3_participant_type_features(
+              iter_validated_jsonl(
+                  subjects_path,
+                  subjects_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  trade_path,
+                  trade_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  code_output,
+                  Path(str(code_output) + ".manifest.json"),
+              ),
+              entry_handoff=entry_handoff,
+              trade_tape_handoff=trade_handoff,
+              feature_registry=registry,
+              output=output,
+          )
+          if summary["participant_code_rows_sha256"] != (
+              code_manifest["sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 participant code-state manifest SHA drift"
+              )
+          summary.update({
+              "feature_entry_run_id": int(
+                  os.environ["FEATURE_ENTRY_RUN_ID"]
+              ),
+              "feature_entry_handoff_sha256": entry_handoff_sha,
+              "canonical_trade_run_id": int(
+                  os.environ["CANONICAL_TRADE_RUN_ID"]
+              ),
+              "canonical_trade_handoff_sha256": trade_handoff_sha,
+              "participant_code_query_plan": query_summary,
+              "rpc_route": rpc.route_label,
+              "rpc_requests": rpc.requests_made,
+              "response_bytes_received": rpc.response_bytes_received,
+          })
+          summary_path = Path(
+              "artifacts/phase3-participant-type-features-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase3_participant_type_feature_handoff(
+              summary,
+              feature_summary_sha256=summary_sha,
+              feature_entry_handoff_sha256=entry_handoff_sha,
+              canonical_trade_handoff_sha256=trade_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-participant-type-features-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"feature_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(
+                  f"registry_sha256={registry_report['registry_sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"feature_subjects={summary['feature_subjects']}\n"
+              )
+          print(json.dumps({
+              "feature_rows_sha256": manifest["sha256"],
+              "feature_registry_sha256": registry_report[
+                  "registry_sha256"
+              ],
+              "feature_summary_sha256": summary_sha,
+              "feature_handoff_sha256": handoff_sha,
+              "feature_subjects": summary["feature_subjects"],
+              "features_per_subject": summary["features_per_subject"],
+              "participant_code_rows": summary["participant_code_rows"],
+              "historical_code_state_complete": True,
+              "same_block_future_state_used": False,
+              "future_trade_rows_used": False,
+              "outcome_rows_consumed": False,
+              "phase3_participant_type_features_ready": True,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-3 trade features
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-participant-type-features
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact participant-type-feature handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-participant-type-features-handoff
+          path: |
+            artifacts/phase3-participant-type-features.jsonl.manifest.json
+            artifacts/phase3-participant-code-state.jsonl.manifest.json
+            artifacts/phase3-participant-type-features-summary.json
+            artifacts/phase3-participant-type-features-handoff.json
+            artifacts/phase3-feature-registry-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish participant-type-feature identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          FEATURE_ROWS_SHA256: ${{ steps.features.outputs.feature_rows_sha256 }}
+          REGISTRY_SHA256: ${{ steps.features.outputs.registry_sha256 }}
+          SUMMARY_SHA256: ${{ steps.features.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.features.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.features.outputs.feature_subjects }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-3 participant-type features"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-participant-type-features"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase3-participant-type-features-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- feature_rows_sha256: ${FEATURE_ROWS_SHA256}"
+            echo "- feature_registry_sha256: ${REGISTRY_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- feature_subjects: ${SUBJECTS}"
+            echo "- historical_code_state_complete: true"
+            echo "- query_block_semantics: start_of_confirmation_block"
+            echo "- same_block_future_state_used: false"
+            echo "- future_trade_rows_used: false"
+            echo "- outcome_rows_consumed: false"
+            echo "- phase3_participant_type_features_ready: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
