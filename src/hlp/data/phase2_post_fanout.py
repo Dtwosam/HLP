@@ -2426,6 +2426,7 @@ def validate_phase2_direct_coverage_completion(
         "manual_promotion_node_ids": list(
             PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS
         ),
+        "promotion_run_inputs": dict(promotion["run_id_inputs"]),
         "manual_promotion_inputs": actual_manual,
         "pools_fun_promotion_ready": True,
         "automatic_acquisition_complete": True,
@@ -2562,4 +2563,143 @@ def validate_phase2_direct_coverage_wave_launch_receipt(
         "canonical_coverage_ledger_mutated": False,
         "canonical_ledger_write_authorized": False,
         "workflow_dispatch_performed": True,
+    }
+
+
+
+def validate_phase2_direct_coverage_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable automatic-acquisition completion handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-direct-coverage-wave-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("direct_coverage_completion_control_run_id") or 0
+    )
+    launch_run_id = int(
+        row.get("direct_coverage_wave_launch_run_id") or 0
+    )
+    selector_run_id = int(row.get("selector_run_id") or 0)
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(
+        control_run_id,
+        launch_run_id,
+        selector_run_id,
+        planner_run_id,
+    ) <= 0:
+        raise ValueError(
+            "Phase-2 direct coverage completion receipt run IDs "
+            "must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 direct coverage completion receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 direct coverage completion head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 direct coverage completion coverage ledger",
+    )
+    launch_digest = _post_fanout_artifact_digest(
+        row.get("direct_coverage_wave_artifact_digest"),
+        label="Phase-2 direct coverage launch artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 promotion-frontier planner artifact",
+    )
+
+    targets = _post_fanout_run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 direct coverage verified target runs",
+        expected_nodes=PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS,
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "Phase-2 direct coverage completion control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 40
+        or len(set(controls)) != 40
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion requires exactly 40 unique "
+            "positive dispatcher control runs"
+        )
+
+    if row.get("auto_node_ids") != []:
+        raise ValueError(
+            "Phase-2 direct coverage completion unexpectedly has auto nodes"
+        )
+    if row.get("manual_promotion_node_ids") != list(
+        PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 direct coverage completion promotion frontier drift"
+        )
+    if row.get("pools_fun_promotion_ready") is not True:
+        raise ValueError(
+            "Phase-2 direct coverage completion lost pools.fun promotion"
+        )
+    if row.get("automatic_acquisition_complete") is not True:
+        raise ValueError(
+            "Phase-2 direct coverage completion lacks acquisition proof"
+        )
+    for field in (
+        "selector_approval_performed",
+        "selector_freeze_completed",
+    ):
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 direct coverage completion receipt violates {field}"
+            )
+    for field in (
+        "coverage_promotion_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 direct coverage completion receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-direct-coverage-wave-completion-receipt-v1",
+        "direct_coverage_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "direct_coverage_wave_launch_run_id": launch_run_id,
+        "direct_coverage_wave_artifact_digest": launch_digest,
+        "selector_run_id": selector_run_id,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "auto_node_ids": [],
+        "manual_promotion_node_ids": list(
+            PHASE2_PROMOTION_FRONTIER_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_ready": True,
+        "automatic_acquisition_complete": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
     }

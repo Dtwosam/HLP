@@ -6,7 +6,9 @@ from hlp.data.phase2_coverage import (
     validate_phase2_coverage_ledger,
 )
 from hlp.data.phase2_coverage_promotion import (
+    build_phase2_pools_fun_promotion_review_handoff,
     validate_phase2_coverage_ledger_commit,
+    validate_phase2_pools_fun_promotion_review_receipt,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
 
@@ -201,3 +203,92 @@ def test_ledger_commit_rejects_complete_source_regression():
             current_ledger_sha256=SHA,
             proposed_ledger_sha256=PROPOSED_SHA,
         )
+
+
+
+def pools_fun_report():
+    return {
+        "source_id": "pools_fun",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "complete",
+        "required_start_block": 0,
+        "first_block": 0,
+        "last_block": SNAPSHOT,
+        "continuous": True,
+        "missing_ranges": [],
+        "tokens_discovered": 2,
+        "price_points": 3,
+        "priced_points": 3,
+        "observed_volume_usd": None,
+        "provenance_sha256": "ef" * 32,
+        "blocking_reason": None,
+        "snapshot_head_block": SNAPSHOT,
+    }
+
+
+def test_pools_fun_promotion_review_is_read_only_and_exact():
+    report = build_phase2_pools_fun_promotion_review_handoff(
+        ledger({"pons_v1", "pons_v2"}),
+        pools_fun_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=301,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=302,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+
+    assert report["complete_source_ids_before"] == ["pons_v1", "pons_v2"]
+    assert report["complete_source_ids_after_if_promoted"] == [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+    ]
+    assert report["promotion_generated_inputs"]["coverage_run_id"] == "301"
+    assert report["promotion_review_required"] is True
+    assert report["promotion_dispatched"] is False
+    assert report["proposal_created"] is False
+    assert report["canonical_coverage_ledger_mutated"] is False
+
+
+def promotion_review_receipt():
+    row = build_phase2_pools_fun_promotion_review_handoff(
+        ledger({"pons_v1", "pons_v2"}),
+        pools_fun_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=301,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=302,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+    row.update({
+        "promotion_review_control_run_id": 303,
+        "promotion_frontier_run_id": 304,
+        "promotion_frontier_artifact_digest": "sha256:" + "55" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "66" * 20,
+    })
+    return row
+
+
+def test_pools_fun_promotion_review_receipt_rejects_dispatch_claim():
+    row = promotion_review_receipt()
+    row["promotion_dispatched"] = True
+    with pytest.raises(ValueError, match="read-only field"):
+        validate_phase2_pools_fun_promotion_review_receipt(row)
+
+
+def test_pools_fun_promotion_review_receipt_validates_generated_inputs():
+    report = validate_phase2_pools_fun_promotion_review_receipt(
+        promotion_review_receipt()
+    )
+
+    assert report["promotion_review_control_run_id"] == 303
+    assert report["coverage_run_id"] == 301
+    assert report["promotion_generated_inputs"]["expected_source_id"] == (
+        "pools_fun"
+    )
+    assert report["promotion_dispatched"] is False

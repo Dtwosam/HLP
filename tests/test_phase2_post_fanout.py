@@ -31,6 +31,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_post_selector_wave_completion_receipt,
     validate_phase2_direct_coverage_completion,
     validate_phase2_direct_coverage_wave_launch_receipt,
+    validate_phase2_direct_coverage_wave_completion_receipt,
     validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
@@ -1158,3 +1159,59 @@ def test_direct_coverage_launch_receipt_validates_three_source_handoff():
     assert report["direct_coverage_control_run_id"] == 22001
     assert report["target_runs_created"] == 3
     assert report["pools_fun_promotion_held_for_operator"] is True
+
+
+
+def direct_coverage_completion_receipt():
+    return {
+        "version": "phase2-direct-coverage-wave-completion-receipt-v1",
+        "direct_coverage_completion_control_run_id": 23001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "aa" * 20,
+        "canonical_coverage_ledger_sha256": "bb" * 32,
+        "direct_coverage_wave_launch_run_id": 23002,
+        "direct_coverage_wave_artifact_digest": "sha256:" + "cc" * 32,
+        "selector_run_id": 23003,
+        "verified_target_run_ids": {
+            node_id: 23100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "node_dispatch_control_run_ids_consumed": list(range(23200, 23240)),
+        "planner_run_id": 23004,
+        "planner_artifact_digest": "sha256:" + "dd" * 32,
+        "auto_node_ids": [],
+        "manual_promotion_node_ids": ["promote:pools_fun"],
+        "pools_fun_promotion_ready": True,
+        "automatic_acquisition_complete": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_direct_coverage_completion_receipt_validates_frontier_handoff():
+    report = validate_phase2_direct_coverage_wave_completion_receipt(
+        direct_coverage_completion_receipt()
+    )
+
+    assert report["direct_coverage_completion_control_run_id"] == 23001
+    assert report["automatic_acquisition_complete"] is True
+    assert report["auto_node_ids"] == []
+    assert report["manual_promotion_node_ids"] == ["promote:pools_fun"]
+
+
+def test_direct_coverage_frontier_exposes_exact_promotion_run_input():
+    execution, verified, dispatch = direct_coverage_completed_plans()
+    report = validate_phase2_direct_coverage_completion(
+        execution,
+        verified,
+        dispatch,
+    )
+
+    assert report["promotion_run_inputs"] == {
+        "coverage_run_id": "21999"
+    }
