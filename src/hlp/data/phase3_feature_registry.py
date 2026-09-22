@@ -613,6 +613,94 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_trade_tape",
             "missingness_policy": "null_with_flag",
         },
+        {
+            "feature_id": "redistribution.transfer_events_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "count of positive non-mint/non-burn non-self ERC-20 "
+                "transfers through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.unique_senders_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "distinct nonzero senders in positive redistribution "
+                "transfers through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.unique_receivers_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "distinct nonzero receivers in positive redistribution "
+                "transfers through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.recipient_activation_events_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "redistribution transfers where the receiver balance was "
+                "zero immediately before the transfer"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.sender_exit_events_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "redistribution transfers where the sender balance became "
+                "zero immediately after the transfer"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.net_holder_creation_events_so_far",
+            "family": "supply_redistribution",
+            "dtype": "integer",
+            "formula": (
+                "recipient_activation_events_so_far minus "
+                "sender_exit_events_so_far"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "zero_if_no_observations",
+        },
+        {
+            "feature_id": "redistribution.gross_transfer_supply_multiple_so_far",
+            "family": "supply_redistribution",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of positive redistribution transfer value_raw divided "
+                "by accounted token supply at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "redistribution.transfer_value_hhi_so_far",
+            "family": "supply_redistribution",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of squared shares of positive redistribution transfer "
+                "value_raw through the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "null_with_flag",
+        },
     ]
     return [
         {
