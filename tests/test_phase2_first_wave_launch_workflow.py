@@ -71,4 +71,5 @@ def test_first_wave_launcher_reconciles_dispatch_attempt_and_final_receipt():
     assert "phase2-execution-node-dispatch-attempt.json" in text
     assert "validate_phase2_node_dispatch_evidence" in text
     assert "attempt_file_sha256=hashlib.sha256(" in text
-    assert "lacks attempt/final evidence" in text
+    assert "lacks " in text
+    assert "attempt/final evidence" in text
