@@ -99,16 +99,8 @@ on:
         description: Exact SHA-256 of phase3-trade-features-handoff.json
         required: true
         type: string
-      trade_size_flow_run_id:
-        description: Exact phase3-trade-size-flow-features run ID
-        required: true
-        type: string
-      expected_trade_size_flow_artifact_digest:
-        description: Exact phase3-trade-size-flow-features artifact digest (sha256:...)
-        required: true
-        type: string
-      expected_trade_size_flow_handoff_sha256:
-        description: Exact SHA-256 of phase3-trade-size-flow-features-handoff.json
+      trade_size_flow_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-trade-size-flow-features
         required: true
         type: string
 
@@ -145,9 +137,7 @@ env:
   TRADE_FEATURE_RUN_ID: ${{ inputs.trade_feature_run_id }}
   EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_trade_feature_artifact_digest }}
   EXPECTED_TRADE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_trade_feature_handoff_sha256 }}
-  TRADE_SIZE_FLOW_RUN_ID: ${{ inputs.trade_size_flow_run_id }}
-  EXPECTED_TRADE_SIZE_FLOW_ARTIFACT_DIGEST: ${{ inputs.expected_trade_size_flow_artifact_digest }}
-  EXPECTED_TRADE_SIZE_FLOW_HANDOFF_SHA256: ${{ inputs.expected_trade_size_flow_handoff_sha256 }}
+  TRADE_SIZE_FLOW_HANDOFF_JSON: ${{ inputs.trade_size_flow_handoff_json }}
 
 jobs:
   coverage:
@@ -302,6 +292,50 @@ jobs:
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
           trade_size_root = Path("inputs/trade-size-flow")
+          try:
+              trade_size_descriptor = json.loads(
+                  os.environ["TRADE_SIZE_FLOW_HANDOFF_JSON"]
+              )
+          except (json.JSONDecodeError, KeyError) as exc:
+              raise SystemExit(
+                  "trade_size_flow_handoff_json is invalid JSON"
+              ) from exc
+          if not isinstance(trade_size_descriptor, dict):
+              raise SystemExit(
+                  "trade_size_flow_handoff_json must be an object"
+              )
+          try:
+              trade_size_run_id = int(
+                  trade_size_descriptor["run_id"]
+              )
+          except (KeyError, TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "trade-size-flow run_id is invalid"
+              ) from exc
+          trade_size_artifact_digest = str(
+              trade_size_descriptor.get("artifact_digest") or ""
+          ).lower()
+          trade_size_expected_handoff_sha = str(
+              trade_size_descriptor.get("handoff_sha256") or ""
+          ).lower().removeprefix("sha256:")
+          if (
+              not trade_size_artifact_digest.startswith("sha256:")
+              or len(trade_size_artifact_digest) != 71
+          ):
+              raise SystemExit(
+                  "trade-size-flow artifact_digest is invalid"
+              )
+          if len(trade_size_expected_handoff_sha) != 64:
+              raise SystemExit(
+                  "trade-size-flow handoff_sha256 is invalid"
+              )
+          try:
+              int(trade_size_artifact_digest.split(":", 1)[1], 16)
+              int(trade_size_expected_handoff_sha, 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "trade-size-flow SHA/digest is not hexadecimal"
+              ) from exc
 
           download_named(
               int(os.environ["FEATURE_ENTRY_RUN_ID"]),
@@ -362,13 +396,11 @@ jobs:
               os.environ["EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST"],
           )
           download_named(
-              int(os.environ["TRADE_SIZE_FLOW_RUN_ID"]),
+              trade_size_run_id,
               "phase3-trade-size-flow-features",
               trade_size_root,
               "Phase-3 trade-size-flow features",
-              os.environ[
-                  "EXPECTED_TRADE_SIZE_FLOW_ARTIFACT_DIGEST"
-              ],
+              trade_size_artifact_digest,
           )
 
           subjects_path = find_unique(
@@ -833,9 +865,7 @@ jobs:
           trade_size_handoff_sha = sha256_path(
               trade_size_handoff_path
           )
-          if trade_size_handoff_sha != os.environ[
-              "EXPECTED_TRADE_SIZE_FLOW_HANDOFF_SHA256"
-          ].lower().removeprefix("sha256:"):
+          if trade_size_handoff_sha != trade_size_expected_handoff_sha:
               raise SystemExit(
                   "Phase-3 trade-size-flow handoff SHA drift"
               )
@@ -992,9 +1022,7 @@ jobs:
                   os.environ["TRADE_FEATURE_RUN_ID"]
               ),
               "trade_feature_handoff_sha256": trade_handoff_sha,
-              "trade_size_flow_run_id": int(
-                  os.environ["TRADE_SIZE_FLOW_RUN_ID"]
-              ),
+              "trade_size_flow_run_id": trade_size_run_id,
               "trade_size_flow_handoff_sha256": (
                   trade_size_handoff_sha
               ),

@@ -40,3 +40,13 @@ def test_phase3_staging_never_claims_final_feature_store():
     assert "final_checkpoint_claimed: false" in text
     assert "git push" not in text
     assert "contents: write" not in text
+
+
+
+def test_phase3_staging_stays_within_dispatch_input_limit():
+    text = WORKFLOW.read_text()
+
+    assert "trade_size_flow_handoff_json:" in text
+    assert "trade_size_flow_run_id:" not in text
+    assert "expected_trade_size_flow_artifact_digest:" not in text
+    assert "expected_trade_size_flow_handoff_sha256:" not in text

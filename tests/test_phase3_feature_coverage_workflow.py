@@ -38,3 +38,13 @@ def test_phase3_feature_coverage_stays_outcome_blind():
     assert "feature_coverage_complete: true" in text
     assert "git push" not in text
     assert "contents: write" not in text
+
+
+
+def test_phase3_feature_coverage_stays_within_dispatch_input_limit():
+    text = WORKFLOW.read_text()
+
+    assert "trade_size_flow_handoff_json:" in text
+    assert "trade_size_flow_run_id:" not in text
+    assert "expected_trade_size_flow_artifact_digest:" not in text
+    assert "expected_trade_size_flow_handoff_sha256:" not in text
