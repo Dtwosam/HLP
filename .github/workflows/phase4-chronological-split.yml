@@ -397,18 +397,47 @@ jobs:
           }, sort_keys=True))
           PY
 
-      - name: Upload Phase-4 chronological split
+      - name: Upload discovery-safe Phase-4 split bundle
         id: upload
         uses: actions/upload-artifact@v4
         with:
           name: phase4-chronological-split
-          path: artifacts/
+          path: |
+            artifacts/phase4-discovery-train.jsonl
+            artifacts/phase4-discovery-train.jsonl.manifest.json
+            artifacts/phase4-chronological-split-summary.json
+            artifacts/phase4-chronological-split-handoff.json
+            artifacts/phase4-feature-registry.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload Phase-4 validation slice
+        id: validation_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-validation-slice
+          path: |
+            artifacts/phase4-validation.jsonl
+            artifacts/phase4-validation.jsonl.manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload untouched Phase-4 final-test slice
+        id: final_test_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-final-test-slice
+          path: |
+            artifacts/phase4-final-test.jsonl
+            artifacts/phase4-final-test.jsonl.manifest.json
           if-no-files-found: error
           retention-days: 90
 
       - name: Publish Phase-4 split identity
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          VALIDATION_ARTIFACT_DIGEST: ${{ steps.validation_upload.outputs.artifact-digest }}
+          FINAL_TEST_ARTIFACT_DIGEST: ${{ steps.final_test_upload.outputs.artifact-digest }}
           HANDOFF_SHA256: ${{ steps.split.outputs.handoff_sha256 }}
           DISCOVERY_ROWS: ${{ steps.split.outputs.discovery_rows }}
           VALIDATION_ROWS: ${{ steps.split.outputs.validation_rows }}
@@ -416,12 +445,18 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${ARTIFACT_DIGEST}"
+          test -n "${VALIDATION_ARTIFACT_DIGEST}"
+          test -n "${FINAL_TEST_ARTIFACT_DIGEST}"
           {
             echo "## Phase-4 chronological split"
             echo
             echo "- run_id: ${GITHUB_RUN_ID}"
             echo "- artifact_name: phase4-chronological-split"
             echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- validation_artifact_name: phase4-validation-slice"
+            echo "- validation_artifact_digest: ${VALIDATION_ARTIFACT_DIGEST}"
+            echo "- final_test_artifact_name: phase4-final-test-slice"
+            echo "- final_test_artifact_digest: ${FINAL_TEST_ARTIFACT_DIGEST}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- discovery_end_block: ${DISCOVERY_END_BLOCK}"
             echo "- validation_end_block: ${VALIDATION_END_BLOCK}"
