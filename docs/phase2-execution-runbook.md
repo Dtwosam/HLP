@@ -18,6 +18,45 @@ the source-of-truth contracts in `docs/project-state.md` or
 4. Full-history jobs must never be run without the authenticated archive
    preflight.
 
+## Preferred first-wave path
+
+After PR #25 is merged, the preferred initial execution is one explicit manual
+run of `phase2-first-wave-launch` against the execution branch with
+`confirm_first_wave=true`.
+
+That launcher is deliberately limited to the exact initial **2/14 Pons-only**
+state. Before dispatching anything it requires:
+
+- `ROBINHOOD_ARCHIVE_RPC_API_KEY` to be configured;
+- zero already-credited execution nodes;
+- exactly `preflight:archive_authenticated` and
+  `shared:quote_registry` in the initial dispatch plan;
+- zero manual inputs or approval gates on either node;
+- compatible default-branch `workflow_dispatch` interfaces for the planner,
+  node dispatcher, archive preflight and quote registry;
+- an unchanged canonical Phase-2 coverage ledger.
+
+The launcher then:
+
+1. dispatches and waits for a fresh empty-input execution planner;
+2. validates the exact first-wave planner artifact;
+3. dispatches both first-wave nodes through
+   `phase2-execution-node-dispatch`;
+4. waits for both dispatcher control runs;
+5. validates their immutable receipts and returned target run IDs;
+6. waits for the actual archive-preflight and quote-registry targets to finish
+   successfully;
+7. dispatches a refreshed planner using the two dispatcher receipt run IDs;
+8. proves both targets were credited and the expected archive fan-out became
+   ready while the canonical coverage ledger stayed unchanged.
+
+Its final artifact is `phase2-first-wave-launch-receipt.json`. The launcher
+**stops there**: it does not launch the expensive archive fan-out, approve the
+direct-market selector, promote coverage or mutate the canonical ledger.
+
+The manual steps below remain the fallback/debug path and describe the same
+contracts individually.
+
 ## 1. Build the first planner artifact
 
 Manually run `phase2-coverage-execution-plan` against the execution branch

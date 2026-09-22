@@ -486,16 +486,16 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   reports first-wave and full-DAG dispatch readiness. It now hashes each
   required workflow's complete `workflow_dispatch` block, so a stale or
   incompatible default-branch interface cannot pass on filename alone. Its live
-  result against the current default branch is **0/43 required workflows
+  result against the current default branch is **0/44 required workflows
   present**, **0 incompatible present interfaces**,
   `phase2_first_wave_dispatch_ready=false`, and
   `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
   **#25** provides the non-invasive bootstrap option: it is based directly on
-  `main`, contains exactly **43 manual Phase-2 workflow files plus one safety
-  note**, and carries no source code or coverage-ledger mutation. **42/43**
+  `main`, contains exactly **44 manual Phase-2 workflow files plus one safety
+  note**, and carries no source code or coverage-ledger mutation. **43/44**
   bootstrap workflows are byte-for-byte identical to the current compatibility
   target; the planner copy differs only by removing its automatic branch/PR
-  triggers while preserving the exact manual-dispatch interface. All 43
+  triggers while preserving the exact manual-dispatch interface. All 44
   bootstrap workflows are manual-only on that branch
   (`workflow_dispatch` present; no `push`/`pull_request` triggers).
   After that workflow surface is merged, execution can target
@@ -543,7 +543,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   each immutable dispatch receipt, reconstructs the node-to-target-run mapping,
   and independently re-validates the target run and branch lineage. The exact
   operator cycle and its two explicit approval stops are frozen in
-  `docs/phase2-execution-runbook.md`.
+  `docs/phase2-execution-runbook.md`. A fail-closed
+  `phase2-first-wave-launch` workflow is also prepared for the exact initial
+  2/14 state. With one explicit approval it runs a fresh planner, launches the
+  archive preflight and quote registry only through the planner-authorized node
+  dispatcher, waits for both real target runs, and produces a refreshed planner
+  that must credit both receipts and unlock the expected archive fan-out.
+  It requires the archive secret and compatible default-branch interfaces, and
+  stops before any expensive fan-out, selector approval, coverage promotion or
+  canonical-ledger mutation.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
