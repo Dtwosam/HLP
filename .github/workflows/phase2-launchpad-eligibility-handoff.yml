@@ -179,7 +179,13 @@ jobs:
           )
           from hlp.data.snapshot import write_jsonl_snapshot
 
-          def exact_path(root_name, env_name, sha_env, label):
+          def exact_path(
+              root_name,
+              env_name,
+              sha_env,
+              label,
+              drift_message,
+          ):
               root = Path(root_name).resolve()
               relative = Path(os.environ[env_name])
               if relative.is_absolute():
@@ -197,7 +203,7 @@ jobs:
               )
               if actual != expected:
                   raise SystemExit(
-                      f"{label} SHA drift: {actual} != {expected}"
+                      f"{drift_message}: {actual} != {expected}"
                   )
               return path, actual
 
@@ -206,12 +212,14 @@ jobs:
               "COVERAGE_REPORT_PATH",
               "EXPECTED_COVERAGE_REPORT_SHA256",
               "coverage report",
+              "coverage report SHA drift",
           )
           eligibility_path, eligibility_sha = exact_path(
               "inputs/eligibility",
               "ELIGIBILITY_SUMMARY_PATH",
               "EXPECTED_ELIGIBILITY_SUMMARY_SHA256",
               "eligibility summary",
+              "eligibility summary SHA drift",
           )
           coverage = json.loads(coverage_path.read_text())
           raw_rows = [
