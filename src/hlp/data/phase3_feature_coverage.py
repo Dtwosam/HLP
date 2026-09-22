@@ -9,6 +9,9 @@ from hlp.config import normalize_address
 from hlp.data.phase3_chain_regime import (
     PHASE3_CHAIN_REGIME_HANDOFF_VERSION,
 )
+from hlp.data.phase3_early_recipient_features import (
+    PHASE3_EARLY_RECIPIENT_FEATURE_HANDOFF_VERSION,
+)
 from hlp.data.phase3_feature_entry import (
     PHASE3_FEATURE_SNAPSHOT_KIND,
     PHASE3_FEATURE_SUBJECT_FIELDS,
@@ -53,6 +56,10 @@ FAMILY_HANDOFF_CONTRACTS = {
     "chain_regime": (
         PHASE3_CHAIN_REGIME_HANDOFF_VERSION,
         "phase3_chain_regime_features_ready",
+    ),
+    "early_recipient_activity": (
+        PHASE3_EARLY_RECIPIENT_FEATURE_HANDOFF_VERSION,
+        "phase3_early_recipient_features_ready",
     ),
     "holder_state": (
         PHASE3_HOLDER_FEATURE_HANDOFF_VERSION,

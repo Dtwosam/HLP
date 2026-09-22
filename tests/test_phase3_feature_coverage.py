@@ -176,6 +176,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
 
     assert set(FAMILY_HANDOFF_CONTRACTS) == {
         "chain_regime",
+        "early_recipient_activity",
         "holder_state",
         "lifecycle_age",
         "participant_retention",
@@ -240,4 +241,14 @@ def test_feature_coverage_contract_supports_lifecycle_age():
     assert FAMILY_HANDOFF_CONTRACTS["lifecycle_age"] == (
         "phase3-lifecycle-age-features-handoff-v1",
         "phase3_lifecycle_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_early_recipient_activity():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["early_recipient_activity"] == (
+        "phase3-early-recipient-features-handoff-v1",
+        "phase3_early_recipient_features_ready",
     )
