@@ -497,7 +497,11 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   target; the planner copy differs only by removing its automatic branch/PR
   triggers while preserving the exact manual-dispatch interface. All 44
   bootstrap workflows are manual-only on that branch
-  (`workflow_dispatch` present; no `push`/`pull_request` triggers).
+  (`workflow_dispatch` present; no `push`/`pull_request` triggers). The
+  machine compatibility gate has now passed on the full **45/45** surface with
+  bootstrap HEAD `014deb9b` and workflow-surface SHA-256
+  `2bab629b1832dbbf5ebcccbc9924f525382587412c4105d1441c02a64a5f029b`;
+  there were zero content or manual-interface mismatches.
   After that workflow surface is merged, execution can target
   `phase1/data-acquisition-spike` without merging the full 764-file project
   PR first. Promoting workflow files to `main` enables execution; it does
@@ -559,7 +563,15 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   that must credit both receipts and unlock the expected archive fan-out.
   It requires the archive secret and compatible default-branch interfaces, and
   stops before any expensive fan-out, selector approval, coverage promotion or
-  canonical-ledger mutation.
+  canonical-ledger mutation. A second explicit
+  `phase2-archive-fanout-launch` gate is now prepared for that next step. It
+  accepts only the immutable first-wave run/artifact identity, re-validates the
+  first-wave handoff plus refreshed planner, requires the exact **13-node**
+  zero-input archive fan-out and launches every target only through the
+  duplicate-safe node dispatcher. It waits only for the 13 dispatcher control
+  runs, reconciles each attempt/final receipt pair, records the real target run
+  IDs, and then stops; it does **not** wait for the long-running historical
+  jobs, promote coverage, approve the selector or mutate the canonical ledger.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now

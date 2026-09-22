@@ -145,15 +145,47 @@ dependency to be rerun.
 
 ## 4. Fan out the archive batch
 
-After both first-wave target runs are credited, the refreshed planner exposes
-the next safe parallel batch.
+The preferred second-stage path is one explicit manual run of
+`phase2-archive-fanout-launch` after the one-shot first wave has completed.
 
-Use the exact same planner-run/digest → node-dispatch pattern for each desired
-`ready_to_dispatch` node. Nodes with generated dependency run-ID inputs need
-no hand-copying of those run IDs; the planner's dispatch-input artifact fills
-them from verified receipts.
+Supply:
 
-When a node has `remaining_manual_inputs`, supply **exactly** those fields in
+- `first_wave_launch_run_id`: the exact successful first-wave launcher run;
+- `expected_first_wave_artifact_digest`: the exact
+  `phase2-first-wave-launch` artifact digest printed by that run;
+- `confirm_archive_fanout=true`.
+
+The fan-out launcher fails closed unless the first-wave receipt, refreshed
+planner HEAD, canonical coverage-ledger SHA and default-branch dispatcher
+interface still match the execution branch. It then requires the planner to
+contain **exactly these 13 zero-input ready nodes**:
+
+- shared V3 PoolCreated, V3 Initialize, V4 Initialize, V3 Swap, V4 Swap and
+  supply-delta acquisition;
+- pools.fun registry;
+- pools.trade launcher registry;
+- Flap registry;
+- trench.today registry;
+- current hood.fun coverage;
+- previous hood.fun curve-semantics proof;
+- NOXA registry.
+
+Each target is launched only through `phase2-execution-node-dispatch`, so the
+same duplicate-prevention and paired attempt/final-receipt rules apply. The
+fan-out launcher waits for all 13 dispatcher **control** runs, reconciles their
+evidence and records the 13 actual target workflow run IDs in
+`phase2-archive-fanout-launch-receipt.json`.
+
+It deliberately does **not** wait for the long-running historical target runs.
+It also does not promote coverage, approve the direct-market selector or write
+the canonical ledger. Review the recorded target runs and wait for them to
+finish before crediting them in a later planner refresh.
+
+The individual planner-run/digest → node-dispatch method remains the fallback
+for debugging or selective execution. Nodes with generated dependency run-ID
+inputs need no hand-copying of those run IDs; the planner's dispatch-input
+artifact fills them from verified receipts. When a node has
+`remaining_manual_inputs`, supply **exactly** those fields in
 `manual_inputs_json`. Missing or extra fields are rejected.
 
 Do not dispatch a node that is absent from the planner artifact.
