@@ -177,6 +177,7 @@ def test_feature_coverage_contract_supports_regime_and_holder_families():
     assert set(FAMILY_HANDOFF_CONTRACTS) == {
         "chain_regime",
         "holder_state",
+        "participant_retention",
         "price_drawdown",
         "trade_flow",
         "venue_mechanics",
@@ -196,4 +197,14 @@ def test_feature_coverage_contract_supports_venue_mechanics():
     assert FAMILY_HANDOFF_CONTRACTS["venue_mechanics"] == (
         "phase3-venue-mechanics-features-handoff-v1",
         "phase3_venue_features_ready",
+    )
+
+
+
+def test_feature_coverage_contract_supports_participant_retention():
+    from hlp.data.phase3_feature_coverage import FAMILY_HANDOFF_CONTRACTS
+
+    assert FAMILY_HANDOFF_CONTRACTS["participant_retention"] == (
+        "phase3-retention-features-handoff-v1",
+        "phase3_retention_features_ready",
     )
