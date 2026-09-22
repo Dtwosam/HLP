@@ -44,6 +44,7 @@ def test_required_workflows_cover_planner_and_dynamic_gates():
     assert "phase2-execution-node-dispatch.yml" in required
     assert "phase2-first-wave-launch.yml" in required
     assert "phase2-archive-fanout-launch.yml" in required
+    assert "phase2-archive-fanout-completion.yml" in required
 
 
 def test_dispatch_interface_digest_ignores_unrelated_trigger_changes():
