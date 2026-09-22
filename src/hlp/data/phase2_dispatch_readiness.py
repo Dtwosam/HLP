@@ -17,6 +17,7 @@ PHASE2_PLANNER_WORKFLOW = "phase2-coverage-execution-plan.yml"
 PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-source-coverage-promotion.yml",
     "phase2-source-coverage-ledger-commit.yml",
+    "phase2-execution-node-dispatch.yml",
 )
 PHASE2_FIRST_WAVE_NODE_IDS = (
     "preflight:archive_authenticated",
