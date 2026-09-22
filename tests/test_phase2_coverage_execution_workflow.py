@@ -8,7 +8,8 @@ def test_phase2_execution_plan_workflow_is_read_only():
     text = WORKFLOW.read_text()
 
     assert "workflow_dispatch:" in text
-    assert "completed_node_ids_json:" in text
+    assert "completed_node_runs_json:" in text
+    assert "actions: read" in text
     assert "contents: read" in text
     assert "contents: write" not in text
     assert "git push" not in text
@@ -21,7 +22,10 @@ def test_phase2_execution_plan_uses_canonical_ledger_and_planner():
     assert ".github/phase2-source-coverage.json" in text
     assert "build_phase2_coverage_execution_plan" in text
     assert "build_phase2_source_inventory" in text
+    assert "validate_phase2_execution_run_receipts" in text
+    assert "/actions/runs/{run_id}" in text
     assert "phase2-coverage-execution-plan.json" in text
+    assert "phase2-execution-run-receipts.json" in text
     assert "ledger_promotion_serialized" in text
     assert "canonical_ledger_mutation_automatic" in text
     assert "workflow_dispatch_performed" in text
@@ -38,3 +42,14 @@ def test_phase2_execution_plan_reports_secret_and_manual_gates():
     assert "canonical_ledger_commit_workflow_available" in text
     assert "ledger_commit_requires_explicit_approval" in text
     assert "phase2-source-coverage-ledger-commit.yml" in text
+
+
+
+def test_phase2_execution_plan_never_trusts_bare_completed_node_names():
+    text = WORKFLOW.read_text()
+
+    assert "completed_node_ids_json:" not in text
+    assert "COMPLETED_NODE_IDS_JSON" not in text
+    assert "completed_node_runs_json:" in text
+    assert "verified_completed_runs" in text
+    assert "successful workflow_dispatch run IDs" in text
