@@ -701,6 +701,121 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_transfer_tape",
             "missingness_policy": "null_with_flag",
         },
+        {
+            "feature_id": "flow.buy_token_supply_multiple_so_far",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of canonical buy token_amount_raw through cutoff divided "
+                "by accounted ERC-20 supply at the confirmation cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "flow.sell_token_supply_multiple_so_far",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of canonical sell token_amount_raw through cutoff divided "
+                "by accounted ERC-20 supply at the confirmation cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "flow.net_token_supply_multiple_so_far",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "(buy token_amount_raw minus sell token_amount_raw) through "
+                "cutoff divided by accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "flow.gross_token_supply_multiple_so_far",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "(buy plus sell token_amount_raw) through cutoff divided by "
+                "accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "flow.mean_buy_size_supply_fraction",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "mean canonical buy token_amount_raw through cutoff divided "
+                "by accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "flow.mean_sell_size_supply_fraction",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "mean canonical sell token_amount_raw through cutoff divided "
+                "by accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "flow.max_buy_size_supply_fraction",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "largest canonical buy token_amount_raw through cutoff divided "
+                "by accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "flow.max_sell_size_supply_fraction",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "largest canonical sell token_amount_raw through cutoff "
+                "divided by accounted ERC-20 supply at cutoff"
+            ),
+            "data_dependency": (
+                "phase3_canonical_trade_tape+phase3_canonical_transfer_tape"
+            ),
+            "missingness_policy": "null_with_flag",
+        },
+        {
+            "feature_id": "flow.sell_to_buy_token_amount_ratio",
+            "family": "trade_size_flow",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of canonical sell token_amount_raw divided by sum of "
+                "canonical buy token_amount_raw through cutoff"
+            ),
+            "data_dependency": "phase3_canonical_trade_tape",
+            "missingness_policy": "null_with_flag",
+        },
     ]
     return [
         {
