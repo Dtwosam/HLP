@@ -1,0 +1,296 @@
+name: phase2-direct-origin-pons-attribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-direct-market-registry-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-direct-origin-pons-attribution-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  attribute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v3-market-registry
+          path: inputs/uniswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_sushiswap_v3-market-registry
+          path: inputs/sushiswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-registry
+          path: inputs/uniswap-v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - name: Download exact accepted Pons lifecycle populations
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+          )
+
+          descriptor_path = Path(
+              ".github/phase2-pons-source-coverage.json"
+          )
+          descriptor = json.loads(descriptor_path.read_text())
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          evidence = {}
+          for source in descriptor["sources"]:
+              source_id = source["source_id"]
+              artifact_id = int(source["artifact_id"])
+              metadata_url = (
+                  f"{api}/repos/{repo}/actions/artifacts/{artifact_id}"
+              )
+              metadata = fetch_github_actions_json(
+                  metadata_url,
+                  token,
+                  timeout=60,
+              )
+              if metadata.get("expired"):
+                  raise SystemExit(
+                      f"{source_id}: accepted Pons artifact expired"
+                  )
+              if metadata.get("name") != source["artifact_name"]:
+                  raise SystemExit(
+                      f"{source_id}: accepted artifact name drift"
+                  )
+              if str(metadata.get("digest") or "").lower() != str(
+                  source["artifact_digest"]
+              ).lower():
+                  raise SystemExit(
+                      f"{source_id}: accepted artifact digest drift"
+                  )
+              workflow_run = metadata.get("workflow_run") or {}
+              if int(workflow_run.get("id", 0)) != int(
+                  source["artifact_run_id"]
+              ):
+                  raise SystemExit(
+                      f"{source_id}: accepted artifact run drift"
+                  )
+
+              archive = fetch_github_actions_artifact_zip(
+                  f"{metadata_url}/zip",
+                  token,
+                  timeout=120,
+                  attempts=4,
+              )
+              destination = Path("inputs/pons") / source_id
+              destination.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+                  zf.extractall(destination)
+
+              lifecycle = destination / source["lifecycle_filename"]
+              if not lifecycle.exists():
+                  raise SystemExit(
+                      f"{source_id}: lifecycle file missing"
+                  )
+              digest = hashlib.sha256(lifecycle.read_bytes()).hexdigest()
+              if digest != source["lifecycle_sha256"]:
+                  raise SystemExit(
+                      f"{source_id}: lifecycle SHA drift"
+                  )
+              records = sum(
+                  1
+                  for line in lifecycle.open(encoding="utf-8")
+                  if line.strip()
+              )
+              if records != int(source["records"]):
+                  raise SystemExit(
+                      f"{source_id}: lifecycle record count drift"
+                  )
+              evidence[source_id] = {
+                  "artifact_id": artifact_id,
+                  "artifact_run_id": int(source["artifact_run_id"]),
+                  "artifact_digest": source["artifact_digest"],
+                  "lifecycle_sha256": digest,
+                  "records": records,
+              }
+
+          Path("inputs/pons-evidence.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - name: Validate direct registry handoffs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          roots = {
+              "direct_uniswap_v3": Path("inputs/uniswap-v3"),
+              "direct_sushiswap_v3": Path("inputs/sushiswap-v3"),
+              "direct_uniswap_v4": Path("inputs/uniswap-v4"),
+          }
+          for source, root in roots.items():
+              handoff = json.loads(
+                  (root / f"{source}-registry-handoff.json").read_text()
+              )
+              if handoff["source_id"] != source:
+                  raise SystemExit(f"{source}: registry identity drift")
+              registry = root / f"{source}-registry.jsonl"
+              digest = hashlib.sha256(registry.read_bytes()).hexdigest()
+              if digest != handoff["registry_sha256"]:
+                  raise SystemExit(f"{source}: registry SHA drift")
+              if handoff["source_coverage_complete"] is not False:
+                  raise SystemExit(
+                      f"{source}: registry unexpectedly closes coverage"
+                  )
+          PY
+      - name: Attribute exact Pons origins
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-origin-attribution \
+            --market-registry inputs/uniswap-v3/direct_uniswap_v3-registry.jsonl \
+            --market-registry inputs/sushiswap-v3/direct_sushiswap_v3-registry.jsonl \
+            --market-registry inputs/uniswap-v4/direct_uniswap_v4-registry.jsonl \
+            --launch-registry pons_v1=inputs/pons/pons_v1/pons-v1-lifecycle-eligibility.jsonl \
+            --launch-registry pons_v2=inputs/pons/pons_v2/pons-v2-lifecycle-eligibility.jsonl \
+            --coverage-ledger .github/phase2-source-coverage.json \
+            --out artifacts/direct-market-pons-attributed.jsonl \
+            --summary-out artifacts/direct-market-pons-attribution-summary.json
+      - name: Split attributed direct registries and bind provenance
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          summary_path = Path(
+              "artifacts/direct-market-pons-attribution-summary.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          if summary["launch_source_coverage_complete"] is not False:
+              raise SystemExit(
+                  "Pons-only attribution cannot close all launch-source coverage"
+              )
+          if summary[
+              "absence_from_launch_registries_is_conclusive"
+          ] is not False:
+              raise SystemExit(
+                  "Pons-only attribution cannot make unmatched origin conclusive"
+              )
+          if not {"pons_v1", "pons_v2"}.issubset(
+              set(summary["complete_launch_source_ids"])
+          ):
+              raise SystemExit("canonical Pons source coverage is no longer complete")
+
+          rows = [
+              json.loads(line)
+              for line in Path(
+                  "artifacts/direct-market-pons-attributed.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          parent_sha = summary["attributed_registry_sha256"]
+          source_manifests = {}
+          for source in (
+              "direct_uniswap_v3",
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+          ):
+              source_rows = [
+                  row for row in rows
+                  if row["source_id"] == source
+              ]
+              manifest = write_jsonl_snapshot(
+                  source_rows,
+                  output=Path(f"artifacts/{source}-attributed.jsonl"),
+                  provenance={
+                      "source": "phase2_direct_pons_origin_attribution",
+                      "chain_id": 4663,
+                      "source_id": source,
+                      "parent_attributed_sha256": parent_sha,
+                      "registry_run_id": int(
+                          os.environ["REGISTRY_RUN_ID"]
+                      ),
+                      "launch_source_coverage_complete": False,
+                  },
+              )
+              source_manifests[source] = {
+                  "records": manifest["records"],
+                  "sha256": manifest["sha256"],
+              }
+
+          pons_evidence = json.loads(
+              Path("inputs/pons-evidence.json").read_text()
+          )
+          descriptor_sha = hashlib.sha256(
+              Path(
+                  ".github/phase2-pons-source-coverage.json"
+              ).read_bytes()
+          ).hexdigest()
+          handoff = {
+              "version": "phase2-direct-origin-pons-attribution-v1",
+              "chain_id": 4663,
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "pons_source_descriptor_sha256": descriptor_sha,
+              "pons_evidence": pons_evidence,
+              "combined_attributed_sha256": parent_sha,
+              "source_manifests": source_manifests,
+              "known_launch_source_markets": summary[
+                  "known_launch_source_markets"
+              ],
+              "unattributed_markets": summary["unattributed_markets"],
+              "launch_source_coverage_complete": False,
+              "absence_from_launch_registries_is_conclusive": False,
+              "source_coverage_complete": False,
+              "remaining_launch_sources": summary[
+                  "missing_launch_registry_source_ids"
+              ],
+          }
+          Path(
+              "artifacts/direct-market-pons-attribution-handoff.json"
+          ).write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-origin-pons-attribution
+          path: artifacts/
+          if-no-files-found: error
