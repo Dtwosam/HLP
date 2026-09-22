@@ -3,6 +3,7 @@ import pytest
 from hlp.data.direct_canonical import (
     DIRECT_CANONICAL_SERIES_VERSION,
     build_frozen_direct_canonical_series,
+    iter_frozen_direct_canonical_series,
     summarize_frozen_direct_canonical_series,
 )
 from hlp.data.direct_selector import (
@@ -177,3 +178,23 @@ def test_direct_canonical_requires_exact_expected_token_population():
             selector(),
             expected_tokens=[TOKEN],
         )
+
+
+def test_direct_canonical_stream_requires_chronological_input():
+    rows = [
+        point(POOL_A, 2, mcap=110000, depth=100),
+        point(
+            POOL_A,
+            1,
+            mcap=90000,
+            depth=None,
+            event_type="v3_initialize",
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="not chronological"):
+        list(iter_frozen_direct_canonical_series(
+            rows,
+            selector(),
+        ))
+

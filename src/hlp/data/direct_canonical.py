@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Iterable, Mapping
+from typing import Iterable, Iterator, Mapping
 
 from hlp.config import normalize_address
 from hlp.data.direct_selector import (
@@ -81,12 +81,12 @@ def _validate_selector(selector: Mapping[str, object]) -> None:
         )
 
 
-def build_frozen_direct_canonical_series(
+def iter_frozen_direct_canonical_series(
     rows: Iterable[Mapping[str, object]],
     selector_freeze: Mapping[str, object],
     *,
     expected_tokens: Iterable[str] | None = None,
-) -> list[dict]:
+) -> Iterator[dict]:
     """Apply the frozen selector causally across all direct DEX venues.
 
     Before competition is observed, a token's sole market is trivially
@@ -101,17 +101,15 @@ def build_frozen_direct_canonical_series(
     """
     _validate_selector(selector_freeze)
 
-    data = [dict(row) for row in rows]
-    data.sort(key=_order)
-
     observed: dict[str, set[str]] = {}
-    latest_priced: dict[str, dict[str, dict]] = {}
     latest_quality: dict[str, dict[str, dict]] = {}
     selected: dict[str, str] = {}
     seen_events: set[tuple[str, tuple[int, int, int, str]]] = set()
-    output: list[dict] = []
+    emitted_tokens: set[str] = set()
+    previous_order: tuple[int, int, int, str] | None = None
 
-    for row in data:
+    for raw in rows:
+        row = dict(raw)
         source_id = str(row.get("source_id") or "")
         if source_id not in DIRECT_SOURCE_IDS:
             raise ValueError(
@@ -120,6 +118,11 @@ def build_frozen_direct_canonical_series(
         token = normalize_address(str(row.get("token") or ""))
         market = _market_id(row)
         order = _order(row)
+        if previous_order is not None and order < previous_order:
+            raise ValueError(
+                "direct canonical input is not chronological"
+            )
+        previous_order = order
         event_key = (token, order)
         if event_key in seen_events:
             raise ValueError(
@@ -145,7 +148,6 @@ def build_frozen_direct_canonical_series(
         state["market_cap_proxy_usd"] = str(mcap)
 
         observed.setdefault(token, set()).add(market)
-        latest_priced.setdefault(token, {})[market] = state
 
         raw_depth = row.get("active_quote_liquidity_usd")
         if raw_depth is not None:
@@ -232,14 +234,15 @@ def build_frozen_direct_canonical_series(
             item["transaction_index"] = row.get("transaction_index")
             item["log_index"] = order[2]
             item["event_type"] = "selector_switch"
-        output.append(item)
+        emitted_tokens.add(token)
+        yield item
 
     if expected_tokens is not None:
         expected = {
             normalize_address(str(token))
             for token in expected_tokens
         }
-        actual = {row["token"] for row in output}
+        actual = emitted_tokens
         if actual != expected:
             raise ValueError(
                 "direct canonical token population mismatch: "
@@ -247,21 +250,36 @@ def build_frozen_direct_canonical_series(
                 f"extra={sorted(actual - expected)}"
             )
 
-    return output
+def build_frozen_direct_canonical_series(
+    rows: Iterable[Mapping[str, object]],
+    selector_freeze: Mapping[str, object],
+    *,
+    expected_tokens: Iterable[str] | None = None,
+) -> list[dict]:
+    """Convenience wrapper that sorts bounded inputs before selection."""
+    data = [dict(row) for row in rows]
+    data.sort(key=_order)
+    return list(iter_frozen_direct_canonical_series(
+        data,
+        selector_freeze,
+        expected_tokens=expected_tokens,
+    ))
 
 
 def summarize_frozen_direct_canonical_series(
     rows: Iterable[Mapping[str, object]],
 ) -> tuple[list[dict], dict]:
     """Return universe-ready token summaries from the frozen direct series."""
-    data = [dict(row) for row in rows]
     summary: dict[str, dict] = {}
     selected_markets: set[str] = set()
     switches = 0
     synthetic_switches = 0
     volume_points = 0
+    points = 0
 
-    for row in data:
+    for raw in rows:
+        row = dict(raw)
+        points += 1
         if row.get("selection_rule_frozen") is not True:
             raise ValueError("direct canonical row is not selector-frozen")
         if row.get("canonical_price_series") is not True:
@@ -337,7 +355,7 @@ def summarize_frozen_direct_canonical_series(
 
     report = {
         "version": DIRECT_CANONICAL_SERIES_VERSION,
-        "points": len(data),
+        "points": points,
         "tokens": len(output),
         "selected_markets": len(selected_markets),
         "leadership_switches": switches,
