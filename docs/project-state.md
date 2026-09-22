@@ -431,7 +431,17 @@ Implemented foundation:
   **$100,000**. Threshold flags are cross-checked against the numeric maximum;
   WETH/USDG must be present in the exclusion set. This contract is ready for
   the later source-eligibility bundle but cannot freeze today's universe while
-  the ledger remains 2/14 complete;
+  the ledger remains 2/14 complete. A generic dispatch-only launchpad
+  eligibility handoff is now prepared for all **11 launchpad sources**. It
+  accepts exact coverage and full-token-summary artifacts independently,
+  verifies both artifact digests and file SHAs, requires the coverage report to
+  be complete/continuous through the snapshot, normalizes every token to the
+  universe schema, and reconciles token count plus aggregate price/priced-point
+  counts exactly against the coverage report. The output is SHA-bound and
+  `canonical_price_series=true`, but remains
+  `phase2_universe_frozen=false`. Direct DEX sources are deliberately rejected
+  by this handoff because their three venue histories still require the frozen
+  cross-venue selector before becoming canonical;
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
