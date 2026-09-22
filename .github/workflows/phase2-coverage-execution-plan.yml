@@ -114,6 +114,10 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
           branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
           receipts = []
           for node_id, run_id in sorted(completed_runs.items()):
               payload = json.loads(
@@ -125,6 +129,33 @@ jobs:
                       f"/repos/{repo}/actions/runs/{run_id}",
                   ])
               )
+              run_head = str(payload.get("head_sha") or "").lower()
+              if run_head == current_head:
+                  lineage_status = "identical"
+                  changed_paths = []
+              else:
+                  comparison = json.loads(
+                      subprocess.check_output([
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          (
+                              f"/repos/{repo}/compare/"
+                              f"{run_head}...{current_head}"
+                          ),
+                      ])
+                  )
+                  lineage_status = str(
+                      comparison.get("status") or ""
+                  )
+                  changed_paths = sorted(
+                      str(row.get("filename") or "")
+                      for row in comparison.get("files", [])
+                      if isinstance(row, dict)
+                      and str(row.get("filename") or "")
+                  )
+
               receipts.append({
                   "node_id": node_id,
                   "run_id": int(payload["id"]),
@@ -133,7 +164,9 @@ jobs:
                   "status": str(payload.get("status") or ""),
                   "conclusion": str(payload.get("conclusion") or ""),
                   "head_branch": str(payload.get("head_branch") or ""),
-                  "head_sha": str(payload.get("head_sha") or ""),
+                  "head_sha": run_head,
+                  "lineage_status": lineage_status,
+                  "changed_paths_since_run": changed_paths,
                   "run_attempt": int(payload.get("run_attempt") or 0),
                   "repository_full_name": str(
                       (payload.get("repository") or {}).get(
@@ -151,6 +184,7 @@ jobs:
               receipts,
               repository_full_name=repo,
               branch=branch,
+              current_head_sha=current_head,
           )
           verified_path = Path(
               "artifacts/phase2-execution-run-receipts.json"
@@ -253,6 +287,9 @@ jobs:
               "canonical_ledger_commit_workflow_available": True,
               "ledger_commit_requires_explicit_approval": True,
               "verified_completed_runs": verified["verified_runs"],
+              "all_runs_current_or_ledger_only_ancestors": verified[
+                  "all_runs_current_or_ledger_only_ancestors"
+              ],
               "dispatchable_input_plans": dispatch_plan[
                   "dispatchable_nodes"
               ],
@@ -304,6 +341,10 @@ jobs:
                   handle.write(
                       f"- verified successful workflow runs: "
                       f"{verified['verified_runs']}\n"
+                  )
+                  handle.write(
+                      "- verified run lineage: current HEAD or "
+                      "canonical-ledger-only ancestor\n"
                   )
                   handle.write(
                       f"- dispatch input plans emitted: "
