@@ -359,6 +359,7 @@ def dispatch_receipt():
         "target_workflow": "phase2-direct-quote-registry.yml",
         "target_ref": "phase1/data-acquisition-spike",
         "target_head_sha": "ab" * 20,
+        "node_dispatch_control_run_id": 99,
         "planner_run_id": 101,
         "planner_artifact_digest": "sha256:" + "cd" * 32,
         "canonical_coverage_ledger_sha256": "ef" * 32,
@@ -375,6 +376,7 @@ def test_node_dispatch_receipt_validates_immutable_mapping():
     row = validate_phase2_node_dispatch_receipt(dispatch_receipt())
 
     assert row["node_id"] == "shared:quote_registry"
+    assert row["node_dispatch_control_run_id"] == 99
     assert row["dispatched_run_id"] == 202
     assert row["target_workflow"] == "phase2-direct-quote-registry.yml"
     assert row["canonical_ledger_write_authorized"] is False

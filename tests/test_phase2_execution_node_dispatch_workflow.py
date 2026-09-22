@@ -51,3 +51,12 @@ def test_node_dispatch_workflow_captures_returned_run_id():
     assert "dispatched_run_id" in text
     assert "phase2-execution-node-dispatch.json" in text
     assert "workflow_dispatch_performed" in text
+
+
+
+def test_node_dispatch_receipt_records_control_run_identity():
+    text = WORKFLOW.read_text()
+
+    assert '"node_dispatch_control_run_id": int(' in text
+    assert 'os.environ["GITHUB_RUN_ID"]' in text
+    assert "node_dispatch_control_run_id: ${GITHUB_RUN_ID}" in text

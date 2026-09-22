@@ -119,3 +119,11 @@ def test_phase2_execution_plan_resolves_node_dispatch_receipts():
     assert "phase2-execution-node-dispatch.json" in text
     assert "conflicting target run IDs" in text
     assert "node_dispatch_receipts_consumed" in text
+
+
+
+def test_phase2_execution_plan_binds_dispatch_receipt_to_control_run():
+    text = WORKFLOW.read_text()
+
+    assert '"node_dispatch_control_run_id"' in text
+    assert "node-dispatch receipt/control run identity drift" in text
