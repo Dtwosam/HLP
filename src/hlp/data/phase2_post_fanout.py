@@ -2130,3 +2130,145 @@ def validate_phase2_post_selector_wave_launch_receipt(
         "canonical_ledger_write_authorized": False,
         "workflow_dispatch_performed": True,
     }
+
+
+
+def validate_phase2_post_selector_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff before the direct coverage wave."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-post-selector-wave-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("post_selector_completion_control_run_id") or 0
+    )
+    launch_run_id = int(row.get("post_selector_wave_launch_run_id") or 0)
+    freeze_run_id = int(row.get("approved_freeze_run_id") or 0)
+    selector_run_id = int(row.get("selector_run_id") or 0)
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(
+        control_run_id,
+        launch_run_id,
+        freeze_run_id,
+        selector_run_id,
+        planner_run_id,
+    ) <= 0:
+        raise ValueError(
+            "Phase-2 post-selector completion receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 post-selector completion receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 post-selector completion head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 post-selector completion coverage ledger",
+    )
+    launch_digest = _post_fanout_artifact_digest(
+        row.get("post_selector_wave_artifact_digest"),
+        label="Phase-2 post-selector launch artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 direct-coverage planner artifact",
+    )
+
+    targets = _post_fanout_run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 post-selector verified target runs",
+        expected_nodes=PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS,
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "Phase-2 post-selector completion control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 37
+        or len(set(controls)) != 37
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion requires exactly 37 unique "
+            "positive dispatcher control runs"
+        )
+
+    if row.get("auto_node_ids") != list(
+        PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion auto-node drift"
+        )
+    if row.get("manual_promotion_node_ids") != list(
+        PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion promotion-hold drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 post-selector completion did not hold pools.fun promotion"
+        )
+    for field in (
+        "post_selector_targets_completed_successfully",
+        "planner_refreshed",
+        "selector_approval_performed",
+        "selector_freeze_completed",
+    ):
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 post-selector completion receipt violates {field}"
+            )
+    for field in (
+        "coverage_promotion_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 post-selector completion receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-post-selector-wave-completion-receipt-v1",
+        "post_selector_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "post_selector_wave_launch_run_id": launch_run_id,
+        "post_selector_wave_artifact_digest": launch_digest,
+        "approved_freeze_run_id": freeze_run_id,
+        "selector_run_id": selector_run_id,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "auto_node_ids": list(
+            PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS
+        ),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "post_selector_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }

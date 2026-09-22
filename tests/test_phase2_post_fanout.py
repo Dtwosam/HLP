@@ -27,6 +27,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_selector_freeze_completion,
     validate_phase2_post_selector_wave_completion,
     validate_phase2_post_selector_wave_launch_receipt,
+    validate_phase2_post_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
@@ -970,4 +971,51 @@ def test_post_selector_launch_receipt_validates_two_node_handoff():
     assert report["post_selector_control_run_id"] == 19001
     assert report["target_runs_created"] == 2
     assert report["selector_approval_performed"] is True
+    assert report["pools_fun_promotion_held_for_operator"] is True
+
+
+
+def post_selector_completion_receipt():
+    return {
+        "version": "phase2-post-selector-wave-completion-receipt-v1",
+        "post_selector_completion_control_run_id": 20001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "aa" * 20,
+        "canonical_coverage_ledger_sha256": "bb" * 32,
+        "post_selector_wave_launch_run_id": 20002,
+        "post_selector_wave_artifact_digest": "sha256:" + "cc" * 32,
+        "approved_freeze_run_id": 20003,
+        "selector_run_id": 20004,
+        "verified_target_run_ids": {
+            node_id: 20100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS
+            )
+        },
+        "node_dispatch_control_run_ids_consumed": list(range(20200, 20237)),
+        "planner_run_id": 20005,
+        "planner_artifact_digest": "sha256:" + "dd" * 32,
+        "auto_node_ids": list(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "post_selector_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "coverage_promotion_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_post_selector_completion_receipt_validates_direct_boundary():
+    report = validate_phase2_post_selector_wave_completion_receipt(
+        post_selector_completion_receipt()
+    )
+
+    assert report["post_selector_completion_control_run_id"] == 20001
+    assert len(report["auto_node_ids"]) == 3
+    assert report["selector_freeze_completed"] is True
     assert report["pools_fun_promotion_held_for_operator"] is True
