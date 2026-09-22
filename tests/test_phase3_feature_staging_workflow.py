@@ -50,12 +50,16 @@ def test_phase3_staging_stays_within_dispatch_input_limit():
     text = WORKFLOW.read_text()
 
     assert "early_recipient_feature_handoff_json:" in text
+    assert "chain_regime_handoff_json:" in text
     assert "holder_feature_handoff_json:" in text
     assert "lifecycle_feature_handoff_json:" in text
     assert "trade_size_flow_handoff_json:" in text
     assert "trade_size_flow_run_id:" not in text
     assert "expected_trade_size_flow_artifact_digest:" not in text
     assert "expected_trade_size_flow_handoff_sha256:" not in text
+    assert "chain_regime_run_id:" not in text
+    assert "expected_chain_regime_artifact_digest:" not in text
+    assert "expected_chain_regime_handoff_sha256:" not in text
 
 
 
@@ -68,7 +72,7 @@ def test_phase3_staging_compacts_holder_identity():
 
 
 
-def test_phase3_staging_uses_final_dispatch_slot():
+def test_phase3_staging_leaves_dispatch_headroom():
     text = WORKFLOW.read_text()
 
     input_lines = [
@@ -77,4 +81,5 @@ def test_phase3_staging_uses_final_dispatch_slot():
         and not line.startswith("        ")
         and line.endswith(":")
     ]
-    assert len(input_lines) == 25
+    assert len(input_lines) == 23
+    assert len(input_lines) < 25

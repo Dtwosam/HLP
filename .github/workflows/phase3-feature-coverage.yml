@@ -19,16 +19,8 @@ on:
         description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-early-recipient-features
         required: true
         type: string
-      chain_regime_run_id:
-        description: Exact phase3-chain-regime-features run ID
-        required: true
-        type: string
-      expected_chain_regime_artifact_digest:
-        description: Exact phase3-chain-regime-features artifact digest (sha256:...)
-        required: true
-        type: string
-      expected_chain_regime_handoff_sha256:
-        description: Exact SHA-256 of phase3-chain-regime-features-handoff.json
+      chain_regime_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-chain-regime-features
         required: true
         type: string
       venue_feature_run_id:
@@ -117,9 +109,7 @@ env:
   EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
   EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
   EARLY_RECIPIENT_FEATURE_HANDOFF_JSON: ${{ inputs.early_recipient_feature_handoff_json }}
-  CHAIN_REGIME_RUN_ID: ${{ inputs.chain_regime_run_id }}
-  EXPECTED_CHAIN_REGIME_ARTIFACT_DIGEST: ${{ inputs.expected_chain_regime_artifact_digest }}
-  EXPECTED_CHAIN_REGIME_HANDOFF_SHA256: ${{ inputs.expected_chain_regime_handoff_sha256 }}
+  CHAIN_REGIME_HANDOFF_JSON: ${{ inputs.chain_regime_handoff_json }}
   VENUE_FEATURE_RUN_ID: ${{ inputs.venue_feature_run_id }}
   EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_venue_feature_artifact_digest }}
   EXPECTED_VENUE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_venue_feature_handoff_sha256 }}
@@ -352,6 +342,14 @@ jobs:
               "early-recipient-feature",
           )
           (
+              chain_run_id,
+              chain_artifact_digest,
+              chain_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "CHAIN_REGIME_HANDOFF_JSON",
+              "chain-regime-feature",
+          )
+          (
               holder_run_id,
               holder_artifact_digest,
               holder_expected_handoff_sha,
@@ -427,11 +425,11 @@ jobs:
               early_artifact_digest,
           )
           download_named(
-              int(os.environ["CHAIN_REGIME_RUN_ID"]),
+              chain_run_id,
               "phase3-chain-regime-features",
               chain_root,
               "Phase-3 chain-regime features",
-              os.environ["EXPECTED_CHAIN_REGIME_ARTIFACT_DIGEST"],
+              chain_artifact_digest,
           )
           download_named(
               int(os.environ["VENUE_FEATURE_RUN_ID"]),
@@ -614,9 +612,7 @@ jobs:
               "phase3-chain-regime-features-handoff.json",
           )
           chain_handoff_sha = sha256_path(chain_handoff_path)
-          if chain_handoff_sha != os.environ[
-              "EXPECTED_CHAIN_REGIME_HANDOFF_SHA256"
-          ].lower().removeprefix("sha256:"):
+          if chain_handoff_sha != chain_expected_handoff_sha:
               raise SystemExit("Phase-3 chain-regime handoff SHA drift")
           chain_handoff = json.loads(chain_handoff_path.read_text())
           rebuilt_chain = build_phase3_chain_regime_handoff(
@@ -1215,9 +1211,7 @@ jobs:
               "feature_entry_handoff_sha256": entry_handoff_sha,
               "early_recipient_feature_run_id": early_run_id,
               "early_recipient_feature_handoff_sha256": early_handoff_sha,
-              "chain_regime_run_id": int(
-                  os.environ["CHAIN_REGIME_RUN_ID"]
-              ),
+              "chain_regime_run_id": chain_run_id,
               "chain_regime_handoff_sha256": chain_handoff_sha,
               "venue_feature_run_id": int(
                   os.environ["VENUE_FEATURE_RUN_ID"]
