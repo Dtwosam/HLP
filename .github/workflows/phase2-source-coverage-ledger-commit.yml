@@ -82,8 +82,8 @@ jobs:
           import subprocess
           from pathlib import Path
 
-          from hlp.data.phase2_coverage import (
-              validate_phase2_coverage_ledger,
+          from hlp.data.phase2_coverage_promotion import (
+              validate_phase2_coverage_ledger_commit,
           )
           from hlp.data.phase2_sources import (
               build_phase2_source_inventory,
@@ -254,64 +254,29 @@ jobs:
               str(metadata["content"]).replace("\n", "")
           )
           current_sha = hashlib.sha256(current_bytes).hexdigest()
-          base_ledger_sha = sha(
-              handoff.get("base_ledger_sha256"),
-              "promotion base_ledger_sha256",
-          )
-          if current_sha != base_ledger_sha:
-              raise SystemExit(
-                  "current canonical ledger SHA drift; promotion is stale: "
-                  f"{current_sha} != {base_ledger_sha}"
-              )
-
-          inventory = build_phase2_source_inventory()
-          before = validate_phase2_coverage_ledger(
-              json.loads(current_bytes),
-              inventory,
-          )
           proposed = json.loads(proposed_bytes)
-          after = validate_phase2_coverage_ledger(
-              proposed,
-              inventory,
-          )
-          before_ids = set(before["complete_source_ids"])
-          after_ids = set(after["complete_source_ids"])
-          if not before_ids.issubset(after_ids):
-              raise SystemExit(
-                  "proposed ledger regresses complete sources"
-              )
-          newly_complete = sorted(after_ids - before_ids)
-          if newly_complete != [source]:
-              raise SystemExit(
-                  "proposed ledger must complete exactly the expected "
-                  f"source; got {newly_complete}"
-              )
-          if handoff.get("complete_source_ids_before") != sorted(
-              before_ids
-          ):
-              raise SystemExit(
-                  "promotion handoff before-set drift"
-              )
-          if handoff.get("complete_source_ids_after") != sorted(
-              after_ids
-          ):
-              raise SystemExit(
-                  "promotion handoff after-set drift"
-              )
-
           validation = json.loads(validation_path.read_text())
-          if sorted(validation.get("complete_source_ids") or []) != (
-              sorted(after_ids)
-          ):
-              raise SystemExit(
-                  "promotion validation/ledger complete-set drift"
+          try:
+              policy = validate_phase2_coverage_ledger_commit(
+                  json.loads(current_bytes),
+                  proposed,
+                  handoff,
+                  validation,
+                  build_phase2_source_inventory(),
+                  expected_source_id=source,
+                  current_ledger_sha256=current_sha,
+                  proposed_ledger_sha256=proposed_sha,
               )
-          if validation.get(
-              "phase2_universe_coverage_complete"
-          ) != after["phase2_universe_coverage_complete"]:
-              raise SystemExit(
-                  "promotion validation completeness drift"
-              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          base_ledger_sha = policy["base_ledger_sha256"]
+          before_ids = set(
+              policy["complete_source_ids_before"]
+          )
+          after_ids = set(
+              policy["complete_source_ids_after"]
+          )
 
           payload = {
               "message": f"promote Phase 2 coverage: {source}",
@@ -358,7 +323,7 @@ jobs:
               "proposed_ledger_sha256": proposed_sha,
               "complete_source_ids_before": sorted(before_ids),
               "complete_source_ids_after": sorted(after_ids),
-              "phase2_universe_coverage_complete": after[
+              "phase2_universe_coverage_complete": policy[
                   "phase2_universe_coverage_complete"
               ],
               "canonical_ledger_commit_sha": commit_sha,
