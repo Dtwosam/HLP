@@ -165,7 +165,10 @@ def test_promotions_serialize_only_sources_with_finished_coverage():
         for row in after_promotion["nodes"]
     }
     assert by_id["ledger_commit:pools_fun"]["status"] == (
-        "manual_ledger_commit_required"
+        "awaiting_explicit_approval"
+    )
+    assert "ledger_commit:pools_fun" in (
+        after_promotion["ledger_commit_approval_node_ids"]
     )
     assert by_id["promote:pools_trade_instant"]["status"] == (
         "blocked_by_dependencies"
@@ -190,7 +193,7 @@ def test_completed_nodes_must_include_dependency_closure():
         build({"coverage:pools_fun"})
 
 
-def test_manual_ledger_commit_cannot_be_declared_complete():
+def test_ledger_commit_cannot_be_declared_complete_before_ledger_changes():
     with pytest.raises(ValueError, match="canonical ledger"):
         build({"ledger_commit:pools_fun"})
 
@@ -236,3 +239,20 @@ def test_archive_secret_nodes_fail_closed_without_public_chunk_fallback():
                 in text
             ), row["node_id"]
         assert "CHUNK=200" not in text, row["node_id"]
+
+
+
+def test_ledger_commit_nodes_use_explicit_approval_workflow():
+    report = build()
+    by_id = {row["node_id"]: row for row in report["nodes"]}
+    commit = by_id["ledger_commit:pools_fun"]
+
+    assert commit["workflow"] == (
+        "phase2-source-coverage-ledger-commit.yml"
+    )
+    assert commit["kind"] == "coverage_ledger_commit"
+    assert commit["requires_explicit_approval"] is True
+    assert commit["manual_action"] is False
+    assert report["canonical_ledger_commit_workflow_available"] is True
+    assert report["ledger_commit_requires_explicit_approval"] is True
+    assert report["manual_ledger_commit_node_ids"] == []
