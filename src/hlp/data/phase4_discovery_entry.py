@@ -399,6 +399,7 @@ def materialize_phase4_discovery_entry(
             "data_quality_by_family": dict(
                 feature["data_quality_by_family"]
             ),
+            "universe": dict(dataset[token]["universe"]),
             "outcome": dict(outcome),
             "target_comeback_5x": comeback,
             "target_max_post_dump_multiple": str(
@@ -457,6 +458,7 @@ def materialize_phase4_discovery_entry(
         "continuous_max_post_dump_multiple_retained": True,
         "exact_confirmation_cutoff_alignment": True,
         "matched_feature_coverage_equal": True,
+        "universe_context_retained": True,
         "labels_joined_after_feature_freeze": True,
         "feature_values_mutated": False,
         "phase4_discovery_only": True,
@@ -491,6 +493,7 @@ def build_phase4_discovery_entry_handoff(
         "continuous_max_post_dump_multiple_retained",
         "exact_confirmation_cutoff_alignment",
         "matched_feature_coverage_equal",
+        "universe_context_retained",
         "labels_joined_after_feature_freeze",
         "phase4_discovery_only",
         "phase4_discovery_entry_ready",
@@ -546,6 +549,7 @@ def build_phase4_discovery_entry_handoff(
         "continuous_max_post_dump_multiple_retained": True,
         "exact_confirmation_cutoff_alignment": True,
         "matched_feature_coverage_equal": True,
+        "universe_context_retained": True,
         "labels_joined_after_feature_freeze": True,
         "feature_values_mutated": False,
         "phase4_discovery_only": True,

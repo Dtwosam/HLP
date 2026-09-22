@@ -183,12 +183,14 @@ def test_discovery_entry_joins_labels_only_after_feature_freeze(tmp_path):
     assert row["target_comeback_5x"] is True
     assert row["target_max_post_dump_multiple"] == "6"
     assert row["feature_values"]["price.a"] == "1"
+    assert row["universe"] == {"token": TOKEN_A}
     assert row["feature_values_mutated"] is False
     assert row["labels_joined_after_feature_freeze"] is True
     assert manifest["records"] == 1
     assert summary["discovery_subjects"] == 1
     assert summary["comeback_5x_tokens"] == 1
     assert summary["comeback_5x_base_rate"] == "1"
+    assert summary["universe_context_retained"] is True
     assert summary["phase4_discovery_checkpoint_claimed"] is False
 
 
@@ -239,6 +241,7 @@ def test_discovery_entry_handoff_never_claims_phase4_checkpoint():
         "continuous_max_post_dump_multiple_retained": True,
         "exact_confirmation_cutoff_alignment": True,
         "matched_feature_coverage_equal": True,
+        "universe_context_retained": True,
         "labels_joined_after_feature_freeze": True,
         "feature_values_mutated": False,
         "phase4_discovery_only": True,
@@ -254,6 +257,7 @@ def test_discovery_entry_handoff_never_claims_phase4_checkpoint():
         feature_entry_handoff_sha256=ENTRY_SHA,
     )
     assert handoff["version"] == PHASE4_DISCOVERY_ENTRY_HANDOFF_VERSION
+    assert handoff["universe_context_retained"] is True
     assert handoff["labels_joined_after_feature_freeze"] is True
     assert handoff["feature_values_mutated"] is False
     assert handoff["phase4_discovery_checkpoint_claimed"] is False
