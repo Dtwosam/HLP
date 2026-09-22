@@ -198,6 +198,36 @@ jobs:
               str(tx["hash"]).lower(): tx
               for tx in transactions
           }
+          receipts = {
+              tx_hash: rpc.call(
+                  "eth_getTransactionReceipt",
+                  [tx_hash],
+              )
+              for tx_hash in sample_hashes
+          }
+          if any(receipt is None for receipt in receipts.values()):
+              raise SystemExit(
+                  "CCA audit sample transaction receipt is missing"
+              )
+
+          def input_word_address_candidates(input_data):
+              raw = str(input_data or "").removeprefix("0x")
+              if len(raw) < 8:
+                  return []
+              payload = raw[8:]
+              output = []
+              for index in range(0, len(payload) - 63, 64):
+                  word = payload[index:index + 64]
+                  if (
+                      word[:24] == "0" * 24
+                      and int(word[-40:], 16) != 0
+                  ):
+                      output.append({
+                          "word_index": index // 64,
+                          "address": "0x" + word[-40:],
+                      })
+              return output
+
           senders_by_topic = {}
           for sample in samples:
               tx = tx_by_hash.get(
@@ -215,6 +245,12 @@ jobs:
               sample["input_selector"] = (
                   input_data[:10] if len(input_data) >= 10 else input_data
               )
+              sample["input_bytes"] = (
+                  max(0, len(input_data.removeprefix("0x")) // 2)
+              )
+              sample["input_word_address_candidates"] = (
+                  input_word_address_candidates(input_data)
+              )
               sample["transaction_value_raw"] = int(
                   str(tx.get("value") or "0x0"),
                   16,
@@ -225,6 +261,100 @@ jobs:
                   else "<none>"
               )
               senders_by_topic.setdefault(topic0, set()).add(sender)
+
+          receipt_inventory = {}
+          candidate_addresses = set()
+          for tx_hash in sample_hashes:
+              receipt = receipts[tx_hash]
+              tx = tx_by_hash[tx_hash]
+              tx_block = int(str(tx["blockNumber"]), 16)
+              sender = str(tx.get("from") or "").lower()
+              sender_code = rpc.get_code(sender, tx_block)
+              receipt_logs = []
+              address_topic_counts = Counter()
+              for raw_log in receipt.get("logs") or []:
+                  log_address = str(
+                      raw_log.get("address") or ""
+                  ).lower()
+                  raw_topics = [
+                      str(value).lower()
+                      for value in raw_log.get("topics") or []
+                  ]
+                  topic0 = raw_topics[0] if raw_topics else "<none>"
+                  address_topic_counts[(log_address, topic0)] += 1
+                  receipt_logs.append({
+                      "address": log_address,
+                      "topic0": topic0,
+                      "topics": raw_topics,
+                      "data": str(raw_log.get("data") or ""),
+                      "log_index": int(
+                          str(raw_log.get("logIndex") or "0x0"),
+                          16,
+                      ),
+                  })
+              input_candidates = input_word_address_candidates(
+                  tx.get("input")
+              )
+              candidate_addresses.update(
+                  value["address"].lower()
+                  for value in input_candidates
+              )
+              receipt_inventory[tx_hash] = {
+                  "transaction_from": sender,
+                  "transaction_from_code_bytes": len(
+                      sender_code.removeprefix("0x")
+                  ) // 2,
+                  "transaction_to": str(
+                      tx.get("to") or ""
+                  ).lower(),
+                  "input_selector": str(
+                      tx.get("input") or ""
+                  )[:10],
+                  "input_bytes": (
+                      len(
+                          str(tx.get("input") or "")
+                          .removeprefix("0x")
+                      )
+                      // 2
+                  ),
+                  "input_word_address_candidates": input_candidates,
+                  "receipt_status": int(
+                      str(receipt.get("status") or "0x0"),
+                      16,
+                  ),
+                  "receipt_log_count": len(receipt_logs),
+                  "receipt_address_topic_counts": [
+                      {
+                          "address": address,
+                          "topic0": topic0,
+                          "count": count,
+                      }
+                      for (address, topic0), count in sorted(
+                          address_topic_counts.items()
+                      )
+                  ],
+                  "receipt_logs": receipt_logs,
+              }
+
+          candidate_code = {}
+          if sample_hashes:
+              reference_block = int(
+                  str(tx_by_hash[sample_hashes[-1]]["blockNumber"]),
+                  16,
+              )
+              for candidate in sorted(candidate_addresses):
+                  try:
+                      code = rpc.get_code(candidate, reference_block)
+                  except Exception as exc:
+                      candidate_code[candidate] = {
+                          "error": str(exc),
+                      }
+                  else:
+                      candidate_code[candidate] = {
+                          "code_bytes": len(
+                              code.removeprefix("0x")
+                          ) // 2,
+                      }
 
           known_topic_roles = {
               CCA_CLEARING_PRICE_TOPIC: "clearing_price",
@@ -317,6 +447,8 @@ jobs:
               "topic_counts": dict(topic_counts),
               "unique_sampled_transactions": len(sample_hashes),
               "unique_sampled_transaction_senders": all_sampled_senders,
+              "receipt_inventory": receipt_inventory,
+              "input_candidate_code_at_final_sample": candidate_code,
               "address_candidates_by_topic": (
                   address_candidates_by_topic
               ),
@@ -363,6 +495,8 @@ jobs:
                   "topic_counts",
                   "unique_sampled_transactions",
                   "unique_sampled_transaction_senders",
+                  "receipt_inventory",
+                  "input_candidate_code_at_final_sample",
                   "address_candidates_by_topic",
                   "non_sender_address_candidates_by_topic",
                   "unclassified_topics",
