@@ -443,6 +443,12 @@ jobs:
           selector_workflow = str(
               handoff["selector_freeze_workflow"]
           )
+          if selector_workflow != (
+              "phase2-direct-market-selector-freeze.yml"
+          ):
+              raise SystemExit(
+                  "selector approval handoff workflow identity drift"
+              )
           planner_workflow = "phase2-coverage-execution-plan.yml"
           for workflow in (selector_workflow, planner_workflow):
               expected_interface = workflow_dispatch_interface_sha256(
