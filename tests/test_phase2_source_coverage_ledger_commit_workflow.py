@@ -33,14 +33,15 @@ def test_ledger_commit_is_exact_artifact_and_sha_bound():
     assert "proposed ledger/handoff SHA linkage drift" in text
 
 
-def test_ledger_commit_rejects_stale_or_multi_source_proposals():
+def test_ledger_commit_uses_unit_tested_stale_safe_policy():
     text = WORKFLOW.read_text()
 
     assert "base_ledger_sha256" in text
-    assert "current canonical ledger SHA drift; promotion is stale" in text
-    assert "proposed ledger regresses complete sources" in text
-    assert "proposed ledger must complete exactly the expected" in text
-    assert "validate_phase2_coverage_ledger" in text
+    assert "validate_phase2_coverage_ledger_commit" in text
+    assert "phase2_coverage_promotion" in text
+    assert "expected_source_id=source" in text
+    assert "current_ledger_sha256=current_sha" in text
+    assert "proposed_ledger_sha256=proposed_sha" in text
 
 
 def test_ledger_commit_uses_atomic_contents_api_update():
