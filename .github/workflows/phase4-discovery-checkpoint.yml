@@ -747,6 +747,16 @@ jobs:
               hypothesis_freeze_handoff=freeze_handoff,
               hypothesis_freeze_handoff_sha256=freeze_handoff_sha,
               validation_handoff=validation_handoff,
+              magnitude_strata_handoff=magnitude_handoff,
+              magnitude_strata_handoff_sha256=magnitude_handoff_sha,
+              nonlinear_handoff=nonlinear_handoff,
+              nonlinear_handoff_sha256=nonlinear_handoff_sha,
+              interaction_handoff=interaction_handoff,
+              interaction_handoff_sha256=interaction_handoff_sha,
+              simple_model_handoff=simple_model_handoff,
+              simple_model_handoff_sha256=simple_model_handoff_sha,
+              stability_handoff=stability_handoff,
+              stability_handoff_sha256=stability_handoff_sha,
           )
           ledger.update({
               "chronological_split_run_id": descriptors["split"][
@@ -758,6 +768,17 @@ jobs:
                   "run_id"
               ],
               "validation_run_id": descriptors["validation"]["run_id"],
+              "magnitude_strata_run_id": descriptors["magnitude"][
+                  "run_id"
+              ],
+              "nonlinear_run_id": descriptors["nonlinear"]["run_id"],
+              "interaction_run_id": descriptors["interaction"][
+                  "run_id"
+              ],
+              "simple_model_run_id": descriptors["simple_model"][
+                  "run_id"
+              ],
+              "stability_run_id": descriptors["stability"]["run_id"],
           })
           ledger_path = Path(
               "artifacts/phase4-discovery-ledger.json"
@@ -778,6 +799,11 @@ jobs:
               univariate_handoff_sha256=univariate_handoff_sha,
               hypothesis_freeze_handoff_sha256=freeze_handoff_sha,
               validation_handoff_sha256=validation_handoff_sha,
+              magnitude_strata_handoff_sha256=magnitude_handoff_sha,
+              nonlinear_handoff_sha256=nonlinear_handoff_sha,
+              interaction_handoff_sha256=interaction_handoff_sha,
+              simple_model_handoff_sha256=simple_model_handoff_sha,
+              stability_handoff_sha256=stability_handoff_sha,
           )
           handoff_path = Path(
               "artifacts/phase4-discovery-handoff.json"
@@ -818,6 +844,13 @@ jobs:
                   "hypotheses_rejected"
               ],
               "rejected_hypotheses_logged": True,
+              "magnitude_strata_examined": True,
+              "nonlinear_relationships_examined": True,
+              "pairwise_interactions_examined": True,
+              "transparent_simple_models_examined": True,
+              "repeated_sampling_stability_examined": True,
+              "chronological_stability_examined": True,
+              "optional_cluster_sequence_disposition_recorded": True,
               "final_test_rows_consumed": False,
               "signal_promoted": False,
               "phase5_model_started": False,
@@ -863,6 +896,13 @@ jobs:
             echo "- rejected_hypotheses_logged: true"
             echo "- unseen_slice_validation_complete: true"
             echo "- multiple_testing_control_applied: true"
+            echo "- magnitude_strata_examined: true"
+            echo "- nonlinear_relationships_examined: true"
+            echo "- pairwise_interactions_examined: true"
+            echo "- transparent_simple_models_examined: true"
+            echo "- repeated_sampling_stability_examined: true"
+            echo "- chronological_stability_examined: true"
+            echo "- optional_cluster_sequence_disposition_recorded: true"
             echo "- final_test_rows_consumed: false"
             echo "- signal_promoted: false"
             echo "- phase5_model_started: false"
