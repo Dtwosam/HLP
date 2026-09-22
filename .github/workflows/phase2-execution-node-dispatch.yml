@@ -416,6 +416,9 @@ jobs:
               "target_workflow": target_workflow,
               "target_ref": branch,
               "target_head_sha": current_head,
+              "node_dispatch_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
               "planner_run_id": planner_run_id,
               "planner_artifact_digest": actual_digest,
               "canonical_coverage_ledger_sha256": ledger_sha,
@@ -463,6 +466,7 @@ jobs:
           {
             echo "## Phase-2 execution node dispatch"
             echo
+            echo "- node_dispatch_control_run_id: ${GITHUB_RUN_ID}"
             echo "- node_id: ${DISPATCHED_NODE}"
             echo "- target_workflow: ${TARGET_WORKFLOW}"
             echo "- dispatched_run_id: ${TARGET_RUN_ID}"
