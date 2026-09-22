@@ -50,6 +50,7 @@ jobs:
           mkdir -p artifacts
           python - <<'PY'
           import base64
+          import hashlib
           import json
           import os
           import subprocess
@@ -141,7 +142,17 @@ jobs:
               expected,
               bootstrap,
           )
+          surface_hasher = hashlib.sha256()
+          for name in sorted(required):
+              surface_hasher.update(name.encode())
+              surface_hasher.update(b"\0")
+              surface_hasher.update(bootstrap[name].encode())
+              surface_hasher.update(b"\0")
+          bootstrap_surface_sha256 = surface_hasher.hexdigest()
           report["bootstrap_head_sha"] = bootstrap_head_sha
+          report["bootstrap_workflow_surface_sha256"] = (
+              bootstrap_surface_sha256
+          )
           report["working_branch"] = os.environ["GITHUB_REF_NAME"]
           report["working_head_sha"] = subprocess.check_output(
               ["git", "rev-parse", "HEAD"],
@@ -176,6 +187,10 @@ jobs:
                   f"bootstrap_head={bootstrap_head_sha}\n"
               )
               handle.write(
+                  "surface_sha256="
+                  f"{bootstrap_surface_sha256}\n"
+              )
+              handle.write(
                   "mismatches="
                   + str(
                       len(report["content_mismatch_workflow_names"])
@@ -207,6 +222,7 @@ jobs:
           PRESENT: ${{ steps.compatibility.outputs.present }}
           ALLOWED_VARIANTS: ${{ steps.compatibility.outputs.allowed_variants }}
           BOOTSTRAP_HEAD: ${{ steps.compatibility.outputs.bootstrap_head }}
+          SURFACE_SHA256: ${{ steps.compatibility.outputs.surface_sha256 }}
           MISMATCHES: ${{ steps.compatibility.outputs.mismatches }}
         run: |
           {
@@ -214,6 +230,7 @@ jobs:
             echo
             echo "- bootstrap_branch: ${BOOTSTRAP_BRANCH}"
             echo "- bootstrap_head_sha: ${BOOTSTRAP_HEAD}"
+            echo "- bootstrap_workflow_surface_sha256: ${SURFACE_SHA256}"
             echo "- required_workflows: ${REQUIRED}"
             echo "- present_required_workflows: ${PRESENT}"
             echo "- exact_or_allowed_variant_workflows: ${ALLOWED_VARIANTS}"
