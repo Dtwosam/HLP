@@ -71,6 +71,14 @@ PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS = (
 PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS = (
     "promote:pools_fun",
 )
+PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS = (
+    "coverage:direct_uniswap_v3",
+    "coverage:direct_sushiswap_v3",
+    "coverage:direct_uniswap_v4",
+)
+PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS = (
+    "promote:pools_fun",
+)
 
 
 def validate_phase2_post_fanout_stage(
@@ -1817,6 +1825,167 @@ def validate_phase2_selector_freeze_completion(
             PHASE2_AFTER_SELECTOR_MANUAL_NODE_IDS
         ),
         "manual_promotion_inputs": actual_manual,
+        "pools_fun_promotion_held_for_operator": True,
+        "selector_approval_performed": True,
+        "selector_freeze_completed": True,
+        "canonical_coverage_sources_unchanged": True,
+        "coverage_promotion_performed": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+
+def validate_phase2_post_selector_wave_completion(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze the planner boundary after the two post-selector nodes succeed."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+
+    if execution.get("canonical_complete_source_ids") != list(
+        PHASE2_INITIAL_COMPLETE_SOURCE_IDS
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion changed canonical sources"
+        )
+    if int(execution.get("complete_sources", -1)) != 2:
+        raise ValueError(
+            "Phase-2 post-selector completion changed source count"
+        )
+    if int(execution.get("incomplete_sources", -1)) != 12:
+        raise ValueError(
+            "Phase-2 post-selector completion incomplete count drift"
+        )
+
+    expected_completed = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+    )
+    completed = execution.get("completed_node_ids")
+    ready = execution.get("ready_to_dispatch_node_ids")
+    approval = execution.get("awaiting_explicit_approval_node_ids")
+    if (
+        not isinstance(completed, list)
+        or not isinstance(ready, list)
+        or not isinstance(approval, list)
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion lacks node-state lists"
+        )
+    if set(completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 post-selector completion node-credit drift"
+        )
+    expected_ready = set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS) | set(
+        PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+    )
+    if set(ready) != expected_ready:
+        raise ValueError(
+            "Phase-2 direct-coverage ready-node set drift: "
+            f"{sorted(ready)}"
+        )
+    if approval:
+        raise ValueError(
+            "Phase-2 post-selector completion unexpectedly has approvals"
+        )
+
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError(
+            "Phase-2 post-selector completion lacks lineage proof"
+        )
+    receipt_completed = verified.get("completed_node_ids")
+    if not isinstance(receipt_completed, list):
+        raise ValueError(
+            "Phase-2 post-selector verified node list is missing"
+        )
+    if set(receipt_completed) != expected_completed:
+        raise ValueError(
+            "Phase-2 post-selector verified node-credit drift"
+        )
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 37
+        or len(set(int(value) for value in control_ids)) != 37
+    ):
+        raise ValueError(
+            "Phase-2 post-selector completion requires exactly 37 "
+            "dispatcher control runs"
+        )
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError(
+            "Phase-2 direct-coverage dispatch rows are missing"
+        )
+    by_id = {
+        str(row.get("node_id") or ""): dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != expected_ready:
+        raise ValueError(
+            "Phase-2 direct-coverage dispatch row set drift"
+        )
+
+    auto_rows = []
+    for node_id in PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS:
+        row = by_id[node_id]
+        if str(row.get("status") or "") != "ready_to_dispatch":
+            raise ValueError(
+                f"Phase-2 direct coverage node not ready: {node_id}"
+            )
+        if row.get("requires_explicit_approval") is not False:
+            raise ValueError(
+                f"Phase-2 direct coverage node requires approval: {node_id}"
+            )
+        run_inputs = row.get("run_id_inputs")
+        if not isinstance(run_inputs, Mapping) or not run_inputs:
+            raise ValueError(
+                f"Phase-2 direct coverage node lacks generated run inputs: "
+                f"{node_id}"
+            )
+        if list(row.get("remaining_manual_inputs") or []):
+            raise ValueError(
+                f"Phase-2 direct coverage node has manual inputs: {node_id}"
+            )
+        if set(str(value) for value in row.get(
+            "all_dispatch_input_names"
+        ) or []) != set(run_inputs):
+            raise ValueError(
+                f"Phase-2 direct coverage input schema drift: {node_id}"
+            )
+        auto_rows.append({
+            "node_id": node_id,
+            "workflow": str(row.get("workflow") or ""),
+            "run_id_inputs": dict(run_inputs),
+        })
+
+    promotion = by_id["promote:pools_fun"]
+    if str(promotion.get("status") or "") != "ready_to_dispatch":
+        raise ValueError(
+            "Phase-2 pools.fun promotion is not ready after post-selector wave"
+        )
+
+    return {
+        "version": "phase2-post-selector-wave-completion-v1",
+        "completed_execution_node_ids": sorted(expected_completed),
+        "completed_execution_nodes": len(expected_completed),
+        "node_dispatch_control_runs_consumed": len(control_ids),
+        "auto_node_ids": list(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS),
+        "auto_nodes": auto_rows,
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_SELECTOR_MANUAL_NODE_IDS
+        ),
         "pools_fun_promotion_held_for_operator": True,
         "selector_approval_performed": True,
         "selector_freeze_completed": True,
