@@ -12,6 +12,7 @@ from hlp.data.phase2_post_fanout import (
     PHASE2_POST_FANOUT_AUTO_NODE_IDS,
     PHASE2_POST_FANOUT_MANUAL_NODE_IDS,
     validate_phase2_after_post_fanout_wave_completion,
+    validate_phase2_after_post_fanout_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
     validate_phase2_post_fanout_wave_completion,
     validate_phase2_post_fanout_wave_completion_receipt,
@@ -401,3 +402,54 @@ def test_after_post_fanout_completion_rejects_next_ready_drift():
             verified,
             dispatch,
         )
+
+
+
+def after_post_fanout_launch_receipt():
+    return {
+        "version": "phase2-after-post-fanout-wave-launch-receipt-v1",
+        "after_post_fanout_control_run_id": 13001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "post_fanout_wave_completion_run_id": 13002,
+        "post_fanout_wave_completion_artifact_digest": (
+            "sha256:" + "ef" * 32
+        ),
+        "planner_run_id": 13003,
+        "planner_artifact_digest": "sha256:" + "12" * 32,
+        "node_dispatch_control_run_ids": {
+            node_id: 13100 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS
+            )
+        },
+        "target_run_ids": {
+            node_id: 13200 + index
+            for index, node_id in enumerate(
+                PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS
+            )
+        },
+        "auto_node_ids": list(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_POST_FANOUT_MANUAL_NODE_IDS
+        ),
+        "pools_fun_promotion_held_for_operator": True,
+        "target_runs_created": 7,
+        "target_runs_waited_for_completion": False,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_after_post_fanout_launch_receipt_validates_seven_node_handoff():
+    report = validate_phase2_after_post_fanout_wave_launch_receipt(
+        after_post_fanout_launch_receipt()
+    )
+
+    assert report["after_post_fanout_control_run_id"] == 13001
+    assert report["target_runs_created"] == 7
+    assert report["pools_fun_promotion_held_for_operator"] is True
