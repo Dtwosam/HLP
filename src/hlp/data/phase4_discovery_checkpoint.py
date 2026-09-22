@@ -1009,6 +1009,11 @@ def build_phase4_discovery_handoff(
     univariate_handoff_sha256: str,
     hypothesis_freeze_handoff_sha256: str,
     validation_handoff_sha256: str,
+    magnitude_strata_handoff_sha256: str,
+    nonlinear_handoff_sha256: str,
+    interaction_handoff_sha256: str,
+    simple_model_handoff_sha256: str,
+    stability_handoff_sha256: str,
 ) -> dict:
     """Publish the Phase-4 checkpoint without promoting a production signal."""
 
@@ -1026,6 +1031,13 @@ def build_phase4_discovery_handoff(
         "rejected_hypotheses_logged",
         "unseen_slice_validation_complete",
         "multiple_testing_control_applied",
+        "magnitude_strata_examined",
+        "nonlinear_relationships_examined",
+        "pairwise_interactions_examined",
+        "transparent_simple_models_examined",
+        "repeated_sampling_stability_examined",
+        "chronological_stability_examined",
+        "optional_cluster_sequence_disposition_recorded",
         "phase4_discovery_checkpoint_claimed",
         "phase4_discovery_complete",
     ):
@@ -1077,6 +1089,26 @@ def build_phase4_discovery_handoff(
             validation_handoff_sha256,
             label="Phase-4 discovery validation handoff",
         ),
+        "magnitude_strata_handoff_sha256": _sha256(
+            magnitude_strata_handoff_sha256,
+            label="Phase-4 discovery magnitude-strata handoff",
+        ),
+        "nonlinear_handoff_sha256": _sha256(
+            nonlinear_handoff_sha256,
+            label="Phase-4 discovery nonlinear handoff",
+        ),
+        "interaction_handoff_sha256": _sha256(
+            interaction_handoff_sha256,
+            label="Phase-4 discovery interaction handoff",
+        ),
+        "simple_model_handoff_sha256": _sha256(
+            simple_model_handoff_sha256,
+            label="Phase-4 discovery simple-model handoff",
+        ),
+        "stability_handoff_sha256": _sha256(
+            stability_handoff_sha256,
+            label="Phase-4 discovery stability handoff",
+        ),
         "base_rate_subjects": int(row["base_rate_subjects"]),
         "features_considered": int(row["features_considered"]),
         "hypotheses_tested": tested,
@@ -1094,6 +1126,21 @@ def build_phase4_discovery_handoff(
         "rejected_hypotheses_logged": True,
         "unseen_slice_validation_complete": True,
         "multiple_testing_control_applied": True,
+        "magnitude_strata_examined": True,
+        "nonlinear_relationships_examined": True,
+        "pairwise_interactions_examined": True,
+        "transparent_simple_models_examined": True,
+        "repeated_sampling_stability_examined": True,
+        "chronological_stability_examined": True,
+        "sequence_analysis_performed": False,
+        "sequence_analysis_disposition": str(
+            row["sequence_analysis_disposition"]
+        ),
+        "cluster_analysis_performed": False,
+        "cluster_analysis_disposition": str(
+            row["cluster_analysis_disposition"]
+        ),
+        "optional_cluster_sequence_disposition_recorded": True,
         "validated_relationships_present": bool(
             row["validated_relationships_present"]
         ),
