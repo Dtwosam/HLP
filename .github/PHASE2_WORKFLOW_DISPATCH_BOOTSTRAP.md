@@ -1,19 +1,35 @@
 # Phase 2 workflow-dispatch bootstrap
 
-This branch is intentionally narrow. It copies only the Phase 2 manual workflow
-surface from `phase1/data-acquisition-spike` so those workflow files can exist on the repository
-default branch, which GitHub requires before `workflow_dispatch` can be used.
+This branch is intentionally narrow. It exposes only the Phase 2 manual
+workflow surface on the repository default-branch lineage, which GitHub
+requires before `workflow_dispatch` can be used.
 
-Source workflow commit: `625aa9152be87a61ddd83cf7a74c0b270c042f35`
+Compatibility target:
+`phase1/data-acquisition-spike@2892a52833e30a80a0da17c24259e65bfd44589c`
 
-After this bootstrap is merged, run the Phase 2 workflows against
-`phase1/data-acquisition-spike` (or a later branch containing the matching implementation).
+The bootstrap currently contains 43 Phase 2 workflow files:
+
+- 42 are byte-for-byte identical to the compatibility target;
+- `phase2-coverage-execution-plan.yml` keeps the exact same
+  `workflow_dispatch` interface but intentionally removes its feature-branch
+  `push` and `pull_request` triggers in this default-branch bootstrap copy.
+
+All 43 workflow files are manual-only on this branch: `workflow_dispatch`
+is present and no `push` or `pull_request` trigger is enabled.
+
+After this bootstrap is merged, dispatch Phase 2 workflows against
+`phase1/data-acquisition-spike` (or a later branch whose manual-dispatch
+interfaces remain compatible). GitHub will use the workflow version at that
+selected dispatch ref.
+
 The default branch still does not contain the Phase 2 Python implementation or
-canonical execution state, so selecting `main` for these manual workflows is
-not an execution path.
+canonical execution state, so selecting `main` itself as the execution ref is
+not an execution path yet.
 
 This bootstrap does not:
+
 - advance the Phase 2 source-coverage ledger;
+- run a historical backfill;
 - freeze the Phase 2 universe;
 - claim any Phase 3 or Phase 4 checkpoint;
 - merge the main project-development branch.
