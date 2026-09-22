@@ -816,6 +816,50 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_trade_tape",
             "missingness_policy": "null_with_flag",
         },
+        {
+            "feature_id": "lifecycle.blocks_deployment_to_cutoff",
+            "family": "lifecycle_age",
+            "dtype": "integer",
+            "formula": (
+                "confirmation cutoff block minus the token's verified first "
+                "contract-code block"
+            ),
+            "data_dependency": "phase3_transfer_token_coverage",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "lifecycle.blocks_initial_mint_to_cutoff",
+            "family": "lifecycle_age",
+            "dtype": "integer",
+            "formula": (
+                "confirmation cutoff block minus the exact first positive "
+                "initial-mint block in complete ERC-20 transfer history"
+            ),
+            "data_dependency": "phase3_transfer_token_coverage",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "lifecycle.blocks_deployment_to_initial_mint",
+            "family": "lifecycle_age",
+            "dtype": "integer",
+            "formula": (
+                "exact initial-mint block minus the verified first "
+                "contract-code block"
+            ),
+            "data_dependency": "phase3_transfer_token_coverage",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "lifecycle.initial_mint_in_deployment_block",
+            "family": "lifecycle_age",
+            "dtype": "boolean",
+            "formula": (
+                "true when the exact initial mint occurs in the same block "
+                "as the verified first contract-code block"
+            ),
+            "data_dependency": "phase3_transfer_token_coverage",
+            "missingness_policy": "error_if_missing",
+        },
     ]
     return [
         {
