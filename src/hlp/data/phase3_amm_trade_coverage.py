@@ -92,6 +92,11 @@ def materialize_phase3_amm_trade_coverage(
             raise ValueError(
                 f"{source_id} Phase-3 AMM market repeats: {market_id}"
             )
+        if token in market_tokens:
+            raise ValueError(
+                f"{source_id} Phase-3 AMM token has multiple markets: "
+                f"{token}"
+            )
         quote = normalize_address(str(row.get("quote_token") or ""))
         if quote == token:
             raise ValueError(
