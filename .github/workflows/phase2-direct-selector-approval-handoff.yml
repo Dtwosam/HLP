@@ -1,0 +1,572 @@
+name: phase2-direct-selector-approval-handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      pre_selector_completion_run_id:
+        description: Exact successful phase2-pre-selector-wave-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_completion_artifact_digest:
+        description: Exact pre-selector completion artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_prepare_review:
+        description: Explicitly prepare selector-review identities without approving the selector
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-direct-selector-approval-handoff-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRE_SELECTOR_COMPLETION_RUN_ID: ${{ inputs.pre_selector_completion_run_id }}
+  EXPECTED_COMPLETION_ARTIFACT_DIGEST: ${{ inputs.expected_completion_artifact_digest }}
+  CONFIRM_PREPARE_REVIEW: ${{ inputs.confirm_prepare_review }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit read-only review preparation
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_PREPARE_REVIEW}" != "true" ]; then
+            echo "selector review handoff requires confirm_prepare_review=true" >&2
+            exit 1
+          fi
+
+      - id: handoff
+        name: Verify selector evidence and prepare exact approval inputs
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_post_fanout import (
+              validate_phase2_pre_selector_wave_completion_receipt,
+          )
+          from hlp.data.phase2_selector_approval import (
+              SELECTOR_EVIDENCE_ARTIFACT_NAME,
+              SELECTOR_FREEZE_WORKFLOW,
+              build_phase2_selector_approval_handoff,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args):
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ])
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([
+                  f"/repos/{repo}/actions/runs/{run_id}",
+              ])
+
+          def assert_successful_run(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      f"run {run_id} is not completed"
+                  )
+              if run.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"run {run_id} did not succeed"
+                  )
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              digest = str(matches[0].get("digest") or "").lower()
+              if (
+                  not digest.startswith("sha256:")
+                  or len(digest) != 71
+              ):
+                  raise SystemExit(
+                      f"artifact digest is invalid: {name}"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"artifact digest is not hexadecimal: {name}"
+                  ) from exc
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(path),
+              ])
+              return path
+
+          try:
+              completion_run_id = int(
+                  os.environ["PRE_SELECTOR_COMPLETION_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "pre_selector_completion_run_id is invalid"
+              ) from exc
+          if completion_run_id <= 0:
+              raise SystemExit(
+                  "pre_selector_completion_run_id must be positive"
+              )
+
+          expected_completion_digest = str(
+              os.environ["EXPECTED_COMPLETION_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_completion_digest.startswith("sha256:")
+              or len(expected_completion_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_completion_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+          try:
+              int(
+                  expected_completion_digest.split(":", 1)[1],
+                  16,
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected completion artifact digest is not hexadecimal"
+              ) from exc
+
+          ledger_sha = hashlib.sha256(
+              Path(".github/phase2-source-coverage.json").read_bytes()
+          ).hexdigest()
+
+          completion_workflow = (
+              "phase2-pre-selector-wave-completion.yml"
+          )
+          completion_run = get_run(completion_run_id)
+          assert_successful_run(
+              completion_run,
+              workflow=completion_workflow,
+              run_id=completion_run_id,
+          )
+          completion_artifact_name = (
+              "phase2-pre-selector-wave-completion"
+          )
+          completion_artifact = artifact_row(
+              completion_run_id,
+              completion_artifact_name,
+          )
+          actual_completion_digest = str(
+              completion_artifact.get("digest") or ""
+          ).lower()
+          if actual_completion_digest != expected_completion_digest:
+              raise SystemExit(
+                  "pre-selector completion artifact digest drift"
+              )
+          completion_dir = download_artifact(
+              completion_run_id,
+              completion_artifact_name,
+              "upstream/pre-selector-completion",
+          )
+          completion_receipt_path = (
+              completion_dir
+              / "phase2-pre-selector-wave-completion-receipt.json"
+          )
+          if not completion_receipt_path.is_file():
+              raise SystemExit(
+                  "pre-selector completion artifact lacks receipt"
+              )
+          try:
+              completion_receipt = (
+                  validate_phase2_pre_selector_wave_completion_receipt(
+                      json.loads(completion_receipt_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if completion_receipt[
+              "pre_selector_completion_control_run_id"
+          ] != completion_run_id:
+              raise SystemExit(
+                  "pre-selector completion receipt/control identity drift"
+              )
+          if completion_receipt["execution_branch"] != branch:
+              raise SystemExit(
+                  "pre-selector completion receipt branch drift"
+              )
+          if completion_receipt["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "pre-selector completion receipt HEAD drift"
+              )
+          if completion_receipt[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "pre-selector completion receipt ledger SHA drift"
+              )
+          if completion_receipt["approval_node_ids"] != [
+              "shared:direct_selector_freeze"
+          ]:
+              raise SystemExit(
+                  "pre-selector completion approval-node drift"
+              )
+
+          planner_run_id = int(completion_receipt["planner_run_id"])
+          planner_digest = str(
+              completion_receipt["planner_artifact_digest"]
+          )
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          planner_run = get_run(planner_run_id)
+          assert_successful_run(
+              planner_run,
+              workflow=planner_workflow,
+              run_id=planner_run_id,
+          )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          if str(
+              planner_artifact.get("digest") or ""
+          ).lower() != planner_digest:
+              raise SystemExit(
+                  "pre-selector planner artifact digest drift"
+              )
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/pre-selector-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit(
+                  "pre-selector planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "pre-selector planner canonical-ledger SHA drift"
+              )
+          if execution_plan.get(
+              "awaiting_explicit_approval_node_ids"
+          ) != ["shared:direct_selector_freeze"]:
+              raise SystemExit(
+                  "selector approval node is not the exact planner gate"
+              )
+
+          dispatch_rows = dispatch_plan.get("nodes")
+          if not isinstance(dispatch_rows, list):
+              raise SystemExit(
+                  "pre-selector dispatch plan nodes are missing"
+              )
+          selector_rows = [
+              row
+              for row in dispatch_rows
+              if isinstance(row, dict)
+              and row.get("node_id")
+              == "shared:direct_selector_freeze"
+          ]
+          if len(selector_rows) != 1:
+              raise SystemExit(
+                  "expected exactly one selector-freeze dispatch row"
+              )
+          selector_row = selector_rows[0]
+          if selector_row.get("status") != "awaiting_explicit_approval":
+              raise SystemExit(
+                  "selector-freeze row is not awaiting explicit approval"
+              )
+          if selector_row.get("requires_explicit_approval") is not True:
+              raise SystemExit(
+                  "selector-freeze row lost explicit-approval gate"
+              )
+          if selector_row.get("workflow") != SELECTOR_FREEZE_WORKFLOW:
+              raise SystemExit(
+                  "selector-freeze workflow identity drift"
+              )
+          run_inputs = selector_row.get("run_id_inputs")
+          if not isinstance(run_inputs, dict) or set(run_inputs) != {
+              "evidence_run_id"
+          }:
+              raise SystemExit(
+                  "selector-freeze evidence-run binding drift"
+              )
+          expected_manual = sorted([
+              "expected_artifact_digest",
+              "expected_handoff_sha256",
+              "freeze_active_quote_liquidity_causal_v1",
+          ])
+          actual_manual = sorted(
+              str(value)
+              for value in selector_row.get(
+                  "remaining_manual_inputs",
+                  [],
+              )
+          )
+          if actual_manual != expected_manual:
+              raise SystemExit(
+                  "selector-freeze manual-input contract drift"
+              )
+
+          try:
+              evidence_run_id = int(run_inputs["evidence_run_id"])
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "selector evidence run ID is invalid"
+              ) from exc
+          expected_evidence_run_id = int(
+              completion_receipt["verified_target_run_ids"][
+                  "shared:direct_quality_evidence"
+              ]
+          )
+          if evidence_run_id != expected_evidence_run_id:
+              raise SystemExit(
+                  "selector planner/evidence target run identity drift"
+              )
+
+          evidence_workflow = (
+              "phase2-direct-market-quality-evidence.yml"
+          )
+          evidence_run = get_run(evidence_run_id)
+          assert_successful_run(
+              evidence_run,
+              workflow=evidence_workflow,
+              run_id=evidence_run_id,
+          )
+          evidence_artifact = artifact_row(
+              evidence_run_id,
+              SELECTOR_EVIDENCE_ARTIFACT_NAME,
+          )
+          evidence_artifact_digest = str(
+              evidence_artifact.get("digest") or ""
+          ).lower()
+          evidence_dir = download_artifact(
+              evidence_run_id,
+              SELECTOR_EVIDENCE_ARTIFACT_NAME,
+              "upstream/selector-evidence",
+          )
+
+          handoff_path = (
+              evidence_dir
+              / "direct-market-quality-evidence-handoff.json"
+          )
+          if not handoff_path.is_file():
+              raise SystemExit(
+                  "selector evidence artifact lacks handoff"
+              )
+          handoff_bytes = handoff_path.read_bytes()
+          evidence_handoff_sha = hashlib.sha256(
+              handoff_bytes
+          ).hexdigest()
+          evidence_handoff = json.loads(handoff_bytes)
+
+          final_paths = {
+              "direct-market-quality-trace.jsonl": (
+                  evidence_dir
+                  / "direct-market-quality-trace.jsonl"
+              ),
+              "direct-market-candidate-series.jsonl": (
+                  evidence_dir
+                  / "direct-market-candidate-series.jsonl"
+              ),
+              "direct-market-quality-report.json": (
+                  evidence_dir
+                  / "direct-market-quality-report.json"
+              ),
+          }
+          final_file_sha = {}
+          for name, path in final_paths.items():
+              if not path.is_file():
+                  raise SystemExit(
+                      f"selector evidence artifact lacks {name}"
+                  )
+              final_file_sha[name] = hashlib.sha256(
+                  path.read_bytes()
+              ).hexdigest()
+
+          try:
+              approval = build_phase2_selector_approval_handoff(
+                  evidence_handoff,
+                  evidence_run_id=evidence_run_id,
+                  evidence_artifact_digest=evidence_artifact_digest,
+                  evidence_handoff_sha256=evidence_handoff_sha,
+                  final_file_sha256=final_file_sha,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          output = {
+              **approval,
+              "pre_selector_completion_run_id": completion_run_id,
+              "pre_selector_completion_artifact_digest": (
+                  actual_completion_digest
+              ),
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": planner_digest,
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+          }
+          Path(
+              "artifacts/phase2-direct-selector-approval-handoff.json"
+          ).write_text(
+              json.dumps(output, indent=2, sort_keys=True) + "\n"
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"evidence_run_id={evidence_run_id}\n"
+              )
+              handle.write(
+                  "evidence_artifact_digest="
+                  f"{evidence_artifact_digest}\n"
+              )
+              handle.write(
+                  f"evidence_handoff_sha256={evidence_handoff_sha}\n"
+              )
+              handle.write(
+                  f"sample_tokens={approval['sample_tokens']}\n"
+              )
+              handle.write(
+                  f"sample_markets={approval['sample_markets']}\n"
+              )
+              handle.write(
+                  "multi_market_snapshots="
+                  f"{approval['multi_market_snapshots']}\n"
+              )
+              handle.write(
+                  f"candidate_points={approval['candidate_points']}\n"
+              )
+          print(json.dumps(output, sort_keys=True))
+          PY
+
+      - name: Upload selector approval handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-selector-approval-handoff
+          path: artifacts/phase2-direct-selector-approval-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish selector review identities
+        env:
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          EVIDENCE_RUN_ID: ${{ steps.handoff.outputs.evidence_run_id }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ steps.handoff.outputs.evidence_artifact_digest }}
+          EVIDENCE_HANDOFF_SHA256: ${{ steps.handoff.outputs.evidence_handoff_sha256 }}
+          SAMPLE_TOKENS: ${{ steps.handoff.outputs.sample_tokens }}
+          SAMPLE_MARKETS: ${{ steps.handoff.outputs.sample_markets }}
+          MULTI_MARKET_SNAPSHOTS: ${{ steps.handoff.outputs.multi_market_snapshots }}
+          CANDIDATE_POINTS: ${{ steps.handoff.outputs.candidate_points }}
+        run: |
+          {
+            echo "## Phase-2 direct selector approval handoff"
+            echo
+            echo "- handoff_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- evidence_run_id: ${EVIDENCE_RUN_ID}"
+            echo "- evidence_artifact_name: phase2-direct-market-quality-evidence"
+            echo "- expected_artifact_digest: ${EVIDENCE_ARTIFACT_DIGEST}"
+            echo "- expected_handoff_sha256: ${EVIDENCE_HANDOFF_SHA256}"
+            echo "- sample_tokens: ${SAMPLE_TOKENS}"
+            echo "- sample_markets: ${SAMPLE_MARKETS}"
+            echo "- multi_market_snapshots: ${MULTI_MARKET_SNAPSHOTS}"
+            echo "- candidate_points: ${CANDIDATE_POINTS}"
+            echo "- selector_workflow: phase2-direct-market-selector-freeze.yml"
+            echo "- freeze_active_quote_liquidity_causal_v1: NOT SET"
+            echo "- approval_required: true"
+            echo "- selector_approval_performed: false"
+            echo "- selector_workflow_dispatched: false"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
