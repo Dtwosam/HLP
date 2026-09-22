@@ -401,7 +401,7 @@ jobs:
           except ValueError as exc:
               raise SystemExit(str(exc)) from exc
           if prior_receipt[
-              "after_pre_selector_completion_control_run_id"
+              "pre_selector_completion_control_run_id"
           ] != prior_completion_run_id:
               raise SystemExit(
                   "post-fanout completion receipt/control drift"
@@ -517,7 +517,7 @@ jobs:
 
           receipt = {
               "version": "phase2-pre-selector-wave-completion-receipt-v1",
-              "after_pre_selector_completion_control_run_id": int(
+              "pre_selector_completion_control_run_id": int(
                   os.environ["GITHUB_RUN_ID"]
               ),
               "execution_branch": branch,
