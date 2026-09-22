@@ -39,6 +39,18 @@ on:
         description: Exact SHA-256 of phase3-venue-mechanics-features-handoff.json
         required: true
         type: string
+      holder_feature_run_id:
+        description: Exact phase3-holder-features run ID
+        required: true
+        type: string
+      expected_holder_feature_artifact_digest:
+        description: Exact phase3-holder-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_holder_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-holder-features-handoff.json
+        required: true
+        type: string
       price_feature_run_id:
         description: Exact phase3-price-features run ID
         required: true
@@ -82,6 +94,9 @@ env:
   VENUE_FEATURE_RUN_ID: ${{ inputs.venue_feature_run_id }}
   EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_venue_feature_artifact_digest }}
   EXPECTED_VENUE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_venue_feature_handoff_sha256 }}
+  HOLDER_FEATURE_RUN_ID: ${{ inputs.holder_feature_run_id }}
+  EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_holder_feature_artifact_digest }}
+  EXPECTED_HOLDER_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_holder_feature_handoff_sha256 }}
   PRICE_FEATURE_RUN_ID: ${{ inputs.price_feature_run_id }}
   EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_price_feature_artifact_digest }}
   EXPECTED_PRICE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_price_feature_handoff_sha256 }}
@@ -132,6 +147,9 @@ jobs:
           from hlp.data.phase3_feature_registry import (
               build_phase3_feature_registry,
               validate_phase3_feature_registry,
+          )
+          from hlp.data.phase3_holder_features import (
+              build_phase3_holder_feature_handoff,
           )
           from hlp.data.phase3_price_features import (
               build_phase3_price_feature_handoff,
@@ -224,6 +242,7 @@ jobs:
           entry_root = Path("inputs/entry")
           chain_root = Path("inputs/chain-regime")
           venue_root = Path("inputs/venue")
+          holder_root = Path("inputs/holder")
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
 
@@ -247,6 +266,13 @@ jobs:
               venue_root,
               "Phase-3 venue-mechanics features",
               os.environ["EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["HOLDER_FEATURE_RUN_ID"]),
+              "phase3-holder-features",
+              holder_root,
+              "Phase-3 holder features",
+              os.environ["EXPECTED_HOLDER_FEATURE_ARTIFACT_DIGEST"],
           )
           download_named(
               int(os.environ["PRICE_FEATURE_RUN_ID"]),
@@ -415,6 +441,58 @@ jobs:
                   "Phase-3 venue-feature/entry linkage drift"
               )
 
+          holder_rows_path = find_unique(
+              holder_root,
+              "phase3-holder-features.jsonl",
+          )
+          holder_manifest_path = find_unique(
+              holder_root,
+              "phase3-holder-features.jsonl.manifest.json",
+          )
+          holder_manifest = json.loads(
+              holder_manifest_path.read_text()
+          )
+          holder_summary_path = find_unique(
+              holder_root,
+              "phase3-holder-features-summary.json",
+          )
+          holder_summary = json.loads(holder_summary_path.read_text())
+          holder_summary_sha = sha256_path(holder_summary_path)
+          holder_handoff_path = find_unique(
+              holder_root,
+              "phase3-holder-features-handoff.json",
+          )
+          holder_handoff_sha = sha256_path(holder_handoff_path)
+          if holder_handoff_sha != os.environ[
+              "EXPECTED_HOLDER_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 holder-feature handoff SHA drift")
+          holder_handoff = json.loads(holder_handoff_path.read_text())
+          rebuilt_holder = build_phase3_holder_feature_handoff(
+              holder_summary,
+              feature_summary_sha256=holder_summary_sha,
+              feature_entry_handoff_sha256=holder_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=holder_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_holder != holder_handoff:
+              raise SystemExit(
+                  "Phase-3 holder-feature handoff content drift"
+              )
+          if holder_manifest.get("sha256") != holder_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 holder-feature manifest SHA drift")
+          if holder_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 holder-feature/entry linkage drift"
+              )
+
           price_rows_path = find_unique(
               price_root,
               "phase3-price-features.jsonl",
@@ -522,6 +600,8 @@ jobs:
               raise SystemExit("Phase-3 chain-regime registry SHA drift")
           if venue_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 venue registry SHA drift")
+          if holder_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 holder registry SHA drift")
           if price_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 price registry SHA drift")
           if trade_handoff["feature_registry_sha256"] != registry_sha:
@@ -544,6 +624,10 @@ jobs:
                       venue_rows_path,
                       venue_manifest_path,
                   ),
+                  "holder_state": iter_validated_jsonl(
+                      holder_rows_path,
+                      holder_manifest_path,
+                  ),
                   "price_drawdown": iter_validated_jsonl(
                       price_rows_path,
                       price_manifest_path,
@@ -556,12 +640,14 @@ jobs:
               {
                   "chain_regime": chain_handoff,
                   "venue_mechanics": venue_handoff,
+                  "holder_state": holder_handoff,
                   "price_drawdown": price_handoff,
                   "trade_flow": trade_handoff,
               },
               feature_registry=registry,
               required_families=[
                   "chain_regime",
+                  "holder_state",
                   "price_drawdown",
                   "trade_flow",
                   "venue_mechanics",
@@ -581,6 +667,10 @@ jobs:
                   os.environ["VENUE_FEATURE_RUN_ID"]
               ),
               "venue_feature_handoff_sha256": venue_handoff_sha,
+              "holder_feature_run_id": int(
+                  os.environ["HOLDER_FEATURE_RUN_ID"]
+              ),
+              "holder_feature_handoff_sha256": holder_handoff_sha,
               "price_feature_run_id": int(
                   os.environ["PRICE_FEATURE_RUN_ID"]
               ),
@@ -684,7 +774,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: chain_regime,price_drawdown,trade_flow,venue_mechanics"
+            echo "- required_families: chain_regime,holder_state,price_drawdown,trade_flow,venue_mechanics"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
