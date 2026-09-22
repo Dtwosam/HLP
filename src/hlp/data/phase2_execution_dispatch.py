@@ -9,6 +9,7 @@ from hlp.data.phase2_coverage_execution import COVERAGE_NODE_BY_SOURCE
 
 
 PHASE2_DISPATCH_INPUT_PLAN_VERSION = "phase2-dispatch-input-plan-v1"
+PHASE2_NODE_DISPATCH_REQUEST_VERSION = "phase2-node-dispatch-request-v1"
 
 RUN_ID_INPUT_BINDINGS: dict[str, dict[str, str]] = {
     "shared:direct_market_registry": {
@@ -327,4 +328,128 @@ def build_phase2_dispatch_input_plan(
         "run_id_inputs_generated_from_verified_receipts": True,
         "non_run_inputs_left_explicit": True,
         "workflow_dispatch_performed": False,
+    }
+
+
+
+def _dispatch_input_value(value: object, *, label: str) -> object:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if not value:
+            raise ValueError(f"{label} cannot be empty")
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise ValueError(
+        f"{label} must be a string, integer, or boolean"
+    )
+
+
+def build_phase2_node_dispatch_request(
+    dispatch_input_plan: Mapping[str, object],
+    *,
+    node_id: str,
+    manual_inputs: Mapping[str, object],
+) -> dict:
+    """Prepare one exact non-approval workflow_dispatch request."""
+
+    plan = dict(dispatch_input_plan)
+    if str(plan.get("version") or "") != PHASE2_DISPATCH_INPUT_PLAN_VERSION:
+        raise ValueError("Phase-2 dispatch input plan version changed")
+    if plan.get("run_id_inputs_generated_from_verified_receipts") is not True:
+        raise ValueError("Phase-2 dispatch plan lacks verified run inputs")
+    if plan.get("non_run_inputs_left_explicit") is not True:
+        raise ValueError("Phase-2 dispatch plan hides non-run inputs")
+    if plan.get("workflow_dispatch_performed") is not False:
+        raise ValueError("Phase-2 dispatch plan already claims dispatch")
+
+    requested_node = str(node_id or "")
+    rows = plan.get("nodes")
+    if not isinstance(rows, list):
+        raise ValueError("Phase-2 dispatch plan nodes are missing")
+    matches = [
+        dict(row)
+        for row in rows
+        if isinstance(row, Mapping)
+        and str(row.get("node_id") or "") == requested_node
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Phase-2 dispatch node must match exactly once: {requested_node}"
+        )
+    row = matches[0]
+    if str(row.get("status") or "") != "ready_to_dispatch":
+        raise ValueError(
+            f"Phase-2 node is not ready_to_dispatch: {requested_node}"
+        )
+    if row.get("requires_explicit_approval") is not False:
+        raise ValueError(
+            f"Phase-2 node requires explicit approval: {requested_node}"
+        )
+    if requested_node.startswith("ledger_commit:"):
+        raise ValueError(
+            "Phase-2 canonical ledger writes cannot use the node dispatcher"
+        )
+
+    workflow = str(row.get("workflow") or "")
+    if not workflow.endswith(".yml"):
+        raise ValueError("Phase-2 dispatch workflow identity is invalid")
+
+    run_inputs_raw = row.get("run_id_inputs")
+    if not isinstance(run_inputs_raw, Mapping):
+        raise ValueError("Phase-2 dispatch run_id_inputs are invalid")
+    run_inputs = {
+        str(name): _dispatch_input_value(
+            value,
+            label=f"{requested_node} run input {name}",
+        )
+        for name, value in run_inputs_raw.items()
+    }
+
+    remaining_raw = row.get("remaining_manual_inputs")
+    all_raw = row.get("all_dispatch_input_names")
+    if not isinstance(remaining_raw, list) or not isinstance(all_raw, list):
+        raise ValueError("Phase-2 dispatch input-name lists are invalid")
+    remaining = [str(value) for value in remaining_raw]
+    all_names = [str(value) for value in all_raw]
+    if len(remaining) != len(set(remaining)):
+        raise ValueError("Phase-2 dispatch plan repeats a manual input name")
+    if len(all_names) != len(set(all_names)):
+        raise ValueError("Phase-2 dispatch plan repeats an input name")
+
+    supplied = {
+        str(name): _dispatch_input_value(
+            value,
+            label=f"{requested_node} manual input {name}",
+        )
+        for name, value in dict(manual_inputs).items()
+    }
+    missing = sorted(set(remaining) - set(supplied))
+    extra = sorted(set(supplied) - set(remaining))
+    if missing or extra:
+        raise ValueError(
+            f"Phase-2 dispatch manual input mismatch; "
+            f"missing={missing} extra={extra}"
+        )
+
+    combined = {**run_inputs, **supplied}
+    if set(combined) != set(all_names):
+        raise ValueError(
+            "Phase-2 dispatch combined inputs do not match workflow schema"
+        )
+
+    return {
+        "version": PHASE2_NODE_DISPATCH_REQUEST_VERSION,
+        "node_id": requested_node,
+        "workflow": workflow,
+        "inputs": combined,
+        "input_names": sorted(combined),
+        "requires_archive_secret": bool(
+            row.get("requires_archive_secret")
+        ),
+        "requires_explicit_approval": False,
+        "planner_status": "ready_to_dispatch",
+        "workflow_dispatch_authorized": True,
+        "canonical_ledger_write_authorized": False,
     }
