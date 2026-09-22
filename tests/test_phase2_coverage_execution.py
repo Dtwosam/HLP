@@ -107,22 +107,17 @@ def test_current_shape_targets_twelve_sources_and_shared_spine():
         COVERAGE_NODE_BY_SOURCE
     )
     ready = set(report["ready_to_dispatch_node_ids"])
-    assert {
+    assert ready == {
+        "preflight:archive_authenticated",
         "shared:quote_registry",
-        "shared:v3_pool_created",
-        "shared:v3_initialize",
-        "shared:v4_initialize",
-        "shared:v3_swap",
-        "shared:v4_swap",
-        "shared:supply_delta",
-        "registry:pools_fun",
-        "registry:pools_trade_launcher",
-        "registry:flap",
-        "registry:trench",
-        "coverage:hood_fun_current",
-        "derive:hood_fun_previous_semantics",
-        "registry:noxa",
-    }.issubset(ready)
+    }
+    assert report[
+        "ready_requiring_archive_secret_node_ids"
+    ] == ["preflight:archive_authenticated"]
+    assert report[
+        "ready_without_archive_secret_node_ids"
+    ] == ["shared:quote_registry"]
+    assert "shared:v3_initialize" not in ready
     assert "coverage:pools_fun" not in ready
     assert report["coverage_acquisition_parallelizable"] is True
     assert report["ledger_promotion_serialized"] is True
@@ -198,3 +193,24 @@ def test_completed_nodes_must_include_dependency_closure():
 def test_manual_ledger_commit_cannot_be_declared_complete():
     with pytest.raises(ValueError, match="canonical ledger"):
         build({"ledger_commit:pools_fun"})
+
+
+
+def test_authenticated_preflight_unlocks_archive_batch():
+    report = build({"preflight:archive_authenticated"})
+    ready = set(report["ready_to_dispatch_node_ids"])
+
+    assert "shared:quote_registry" in ready
+    assert "shared:v3_pool_created" in ready
+    assert "shared:v3_initialize" in ready
+    assert "shared:v4_initialize" in ready
+    assert "shared:v3_swap" in ready
+    assert "shared:v4_swap" in ready
+    assert "shared:supply_delta" in ready
+    assert "registry:pools_fun" in ready
+    assert "registry:pools_trade_launcher" in ready
+    assert "registry:flap" in ready
+    assert "registry:trench" in ready
+    assert "coverage:hood_fun_current" in ready
+    assert "derive:hood_fun_previous_semantics" in ready
+    assert "registry:noxa" in ready
