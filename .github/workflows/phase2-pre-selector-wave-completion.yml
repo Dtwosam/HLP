@@ -1,0 +1,637 @@
+name: phase2-pre-selector-wave-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      pre_selector_wave_launch_run_id:
+        description: Exact successful phase2-pre-selector-wave-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_wave_artifact_digest:
+        description: Exact pre-selector wave artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_completion_refresh:
+        description: Explicitly verify all nine targets and create the next planner
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-pre-selector-wave-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PRE_SELECTOR_WAVE_LAUNCH_RUN_ID: ${{ inputs.pre_selector_wave_launch_run_id }}
+  EXPECTED_WAVE_ARTIFACT_DIGEST: ${{ inputs.expected_wave_artifact_digest }}
+  CONFIRM_COMPLETION_REFRESH: ${{ inputs.confirm_completion_refresh }}
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit completion refresh approval
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_COMPLETION_REFRESH}" != "true" ]; then
+            echo "Phase-2 post-fan-out completion requires confirm_completion_refresh=true" >&2
+            exit 1
+          fi
+
+      - id: complete
+        name: Verify four pre-selector target runs and build the selector-gate planner
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_execution import (
+              build_phase2_coverage_execution_nodes,
+          )
+          from hlp.data.phase2_post_fanout import (
+              PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+              validate_phase2_after_post_fanout_wave_completion_receipt,
+              validate_phase2_pre_selector_wave_completion,
+              validate_phase2_pre_selector_wave_launch_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([
+                  f"/repos/{repo}/actions/runs/{run_id}",
+              ])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def wait_run(run_id, *, workflow, timeout_seconds=900):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(path),
+              ])
+              return path
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method",
+                      "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input",
+                      "-",
+                  ],
+                  payload={
+                      "ref": branch,
+                      "inputs": inputs,
+                  },
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          try:
+              pre_selector_wave_run_id = int(
+                  os.environ["PRE_SELECTOR_WAVE_LAUNCH_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "pre_selector_wave_launch_run_id is invalid"
+              ) from exc
+          if pre_selector_wave_run_id <= 0:
+              raise SystemExit(
+                  "pre_selector_wave_launch_run_id must be positive"
+              )
+
+          expected_digest = str(
+              os.environ["EXPECTED_WAVE_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_wave_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+          try:
+              int(expected_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_wave_artifact_digest is not hexadecimal"
+              ) from exc
+
+          ledger_sha = hashlib.sha256(
+              Path(".github/phase2-source-coverage.json").read_bytes()
+          ).hexdigest()
+
+          wave_workflow = "phase2-pre-selector-wave-launch.yml"
+          wave_run = get_run(pre_selector_wave_run_id)
+          assert_run_identity(
+              wave_run,
+              workflow=wave_workflow,
+              run_id=pre_selector_wave_run_id,
+          )
+          if wave_run.get("status") != "completed":
+              raise SystemExit("pre-selector wave run is not completed")
+          if wave_run.get("conclusion") != "success":
+              raise SystemExit("pre-selector wave run did not succeed")
+
+          wave_artifact_name = "phase2-pre-selector-wave-launch"
+          wave_artifact = artifact_row(
+              pre_selector_wave_run_id,
+              wave_artifact_name,
+          )
+          actual_digest = str(
+              wave_artifact.get("digest") or ""
+          ).lower()
+          if actual_digest != expected_digest:
+              raise SystemExit(
+                  "pre-selector wave artifact digest drift"
+              )
+          wave_dir = download_artifact(
+              pre_selector_wave_run_id,
+              wave_artifact_name,
+              "upstream/post-fanout-wave",
+          )
+          wave_receipt_path = (
+              wave_dir
+              / "phase2-pre-selector-wave-launch-receipt.json"
+          )
+          if not wave_receipt_path.is_file():
+              raise SystemExit(
+                  "pre-selector wave artifact lacks launch receipt"
+              )
+          try:
+              wave_receipt = validate_phase2_pre_selector_wave_launch_receipt(
+                  json.loads(wave_receipt_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if wave_receipt[
+              "pre_selector_control_run_id"
+          ] != pre_selector_wave_run_id:
+              raise SystemExit(
+                  "post-fan-out receipt/control run identity drift"
+              )
+          if wave_receipt["execution_branch"] != branch:
+              raise SystemExit(
+                  "post-fan-out receipt branch drift"
+              )
+          if wave_receipt["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "post-fan-out receipt HEAD drift"
+              )
+          if wave_receipt[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "post-fan-out receipt canonical-ledger SHA drift"
+              )
+
+          workflow_by_node = {
+              str(row["node_id"]): str(row["workflow"])
+              for row in build_phase2_coverage_execution_nodes()
+          }
+          for node_id in PHASE2_PRE_SELECTOR_AUTO_NODE_IDS:
+              target_run_id = wave_receipt["target_run_ids"][node_id]
+              run = get_run(target_run_id)
+              assert_run_identity(
+                  run,
+                  workflow=workflow_by_node[node_id],
+                  run_id=target_run_id,
+              )
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      f"after-post-fan-out target not completed: "
+                      f"{node_id} -> {target_run_id}"
+                  )
+              if run.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"after-post-fan-out target failed: {node_id} -> "
+                      f"{target_run_id}: {run.get('conclusion')!r}"
+                  )
+
+          prior_completion_run_id = int(
+              wave_receipt["after_post_fanout_wave_completion_run_id"]
+          )
+          prior_completion_digest = str(
+              wave_receipt[
+                  "after_post_fanout_wave_completion_artifact_digest"
+              ]
+          )
+          prior_workflow = "phase2-after-post-fanout-wave-completion.yml"
+          prior_run = get_run(prior_completion_run_id)
+          assert_run_identity(
+              prior_run,
+              workflow=prior_workflow,
+              run_id=prior_completion_run_id,
+          )
+          if prior_run.get("status") != "completed":
+              raise SystemExit(
+                  "seven-node completion run is not completed"
+              )
+          if prior_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "seven-node completion run did not succeed"
+              )
+          prior_artifact = artifact_row(
+              prior_completion_run_id,
+              "phase2-after-post-fanout-wave-completion",
+          )
+          if str(
+              prior_artifact.get("digest") or ""
+          ).lower() != prior_completion_digest:
+              raise SystemExit(
+                  "seven-node completion artifact digest drift"
+              )
+          prior_dir = download_artifact(
+              prior_completion_run_id,
+              "phase2-after-post-fanout-wave-completion",
+              "upstream/seven-node-completion",
+          )
+          prior_receipt_path = (
+              prior_dir
+              / "phase2-pre-selector-wave-completion-receipt.json"
+          )
+          try:
+              prior_receipt = (
+                  validate_phase2_after_post_fanout_wave_completion_receipt(
+                      json.loads(prior_receipt_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if prior_receipt[
+              "after_pre_selector_completion_control_run_id"
+          ] != prior_completion_run_id:
+              raise SystemExit(
+                  "post-fanout completion receipt/control drift"
+              )
+          if prior_receipt["execution_branch"] != branch:
+              raise SystemExit(
+                  "post-fanout completion receipt branch drift"
+              )
+          if prior_receipt["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "post-fanout completion receipt HEAD drift"
+              )
+          if prior_receipt[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "post-fanout completion receipt ledger SHA drift"
+              )
+
+          all_control_run_ids = sorted(
+              list(
+                  prior_receipt[
+                      "node_dispatch_control_run_ids_consumed"
+                  ]
+              )
+              + list(
+                  wave_receipt[
+                      "node_dispatch_control_run_ids"
+                  ].values()
+              )
+          )
+          if len(all_control_run_ids) != 35 or len(
+              set(all_control_run_ids)
+          ) != 35:
+              raise SystemExit(
+                  "post-fan-out completion requires exactly 35 unique "
+                  "dispatcher control runs"
+              )
+
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          planner_run_id = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": "{}",
+                  "node_dispatch_run_ids_json": json.dumps(
+                      all_control_run_ids,
+                      separators=(",", ":"),
+                  ),
+              },
+          )
+          wait_run(
+              planner_run_id,
+              workflow=planner_workflow,
+          )
+
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          if (
+              not planner_digest.startswith("sha256:")
+              or len(planner_digest) != 71
+          ):
+              raise SystemExit(
+                  "pre-selector-complete planner artifact digest is invalid"
+              )
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/pre-selector-complete-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit(
+                  "pre-selector-complete planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "pre-selector-complete planner canonical-ledger SHA drift"
+              )
+          try:
+              completion_contract = (
+                  validate_phase2_pre_selector_wave_completion(
+                      execution_plan,
+                      verified_receipts,
+                      dispatch_plan,
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          receipt = {
+              "version": "phase2-pre-selector-wave-completion-receipt-v1",
+              "after_pre_selector_completion_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+              "pre_selector_wave_launch_run_id": pre_selector_wave_run_id,
+              "pre_selector_wave_artifact_digest": actual_digest,
+              "verified_target_run_ids": wave_receipt[
+                  "target_run_ids"
+              ],
+              "node_dispatch_control_run_ids_consumed": (
+                  all_control_run_ids
+              ),
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": planner_digest,
+              "auto_node_ids": completion_contract["auto_node_ids"],
+              "manual_promotion_node_ids": completion_contract[
+                  "manual_promotion_node_ids"
+              ],
+              "approval_node_ids": completion_contract[
+                  "approval_node_ids"
+              ],
+              "selector_manual_inputs": completion_contract[
+                  "selector_manual_inputs"
+              ],
+              "pools_fun_promotion_held_for_operator": True,
+              "completion_contract": completion_contract,
+              "pre_selector_targets_completed_successfully": True,
+              "planner_refreshed": True,
+              "coverage_promotion_performed": False,
+              "selector_approval_performed": False,
+              "canonical_coverage_ledger_mutated": False,
+              "canonical_ledger_write_authorized": False,
+          }
+          Path(
+              "artifacts/phase2-pre-selector-wave-completion-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"planner_run_id={planner_run_id}\n")
+              handle.write(
+                  f"planner_digest={planner_digest}\n"
+              )
+              handle.write(
+                  "auto_node_ids_json="
+                  + json.dumps(
+                      completion_contract["auto_node_ids"],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "manual_promotion_node_ids_json="
+                  + json.dumps(
+                      completion_contract[
+                          "manual_promotion_node_ids"
+                      ],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "approval_node_ids_json="
+                  + json.dumps(
+                      completion_contract["approval_node_ids"],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  "selector_manual_inputs_json="
+                  + json.dumps(
+                      completion_contract["selector_manual_inputs"],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload after-seven-node completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pre-selector-wave-completion
+          path: artifacts/phase2-pre-selector-wave-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish pre-selector completion summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          PLANNER_RUN_ID: ${{ steps.complete.outputs.planner_run_id }}
+          PLANNER_DIGEST: ${{ steps.complete.outputs.planner_digest }}
+          AUTO_NODE_IDS_JSON: ${{ steps.complete.outputs.auto_node_ids_json }}
+          MANUAL_PROMOTION_NODE_IDS_JSON: ${{ steps.complete.outputs.manual_promotion_node_ids_json }}
+          APPROVAL_NODE_IDS_JSON: ${{ steps.complete.outputs.approval_node_ids_json }}
+          SELECTOR_MANUAL_INPUTS_JSON: ${{ steps.complete.outputs.selector_manual_inputs_json }}
+        run: |
+          {
+            echo "## Phase-2 pre-selector wave completion"
+            echo
+            echo "- completion_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- pre_selector_targets_completed_successfully: true"
+            echo "- planner_run_id: ${PLANNER_RUN_ID}"
+            echo "- planner_artifact_digest: ${PLANNER_DIGEST}"
+            echo "- auto_node_ids: ${AUTO_NODE_IDS_JSON}"
+            echo "- manual_promotion_node_ids: ${MANUAL_PROMOTION_NODE_IDS_JSON}"
+            echo "- approval_node_ids: ${APPROVAL_NODE_IDS_JSON}"
+            echo "- selector_manual_inputs: ${SELECTOR_MANUAL_INPUTS_JSON}"
+            echo "- pools_fun_promotion_held_for_operator: true"
+            echo "- coverage_promotion_performed: false"
+            echo "- selector_approval_performed: false"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
