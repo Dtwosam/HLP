@@ -3,10 +3,10 @@ name: phase2-coverage-execution-plan
 on:
   workflow_dispatch:
     inputs:
-      completed_node_ids_json:
-        description: JSON array of planner node IDs backed by successful runs
+      completed_node_runs_json:
+        description: JSON object mapping planner node IDs to successful workflow_dispatch run IDs
         required: false
-        default: '[]'
+        default: '{}'
         type: string
   push:
     branches:
@@ -34,6 +34,7 @@ on:
       - 'tests/test_phase2_coverage_execution.py'
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -41,7 +42,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  COMPLETED_NODE_IDS_JSON: ${{ inputs.completed_node_ids_json }}
+  COMPLETED_NODE_RUNS_JSON: ${{ inputs.completed_node_runs_json }}
 
 jobs:
   plan:
@@ -63,31 +64,95 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
 
           from hlp.data.phase2_coverage_execution import (
               build_phase2_coverage_execution_plan,
           )
+          from hlp.data.phase2_execution_runs import (
+              validate_phase2_execution_run_receipts,
+          )
           from hlp.data.phase2_sources import (
               build_phase2_source_inventory,
           )
 
-          raw = os.environ.get("COMPLETED_NODE_IDS_JSON", "").strip()
+          raw = os.environ.get("COMPLETED_NODE_RUNS_JSON", "").strip()
           if not raw:
-              raw = "[]"
+              raw = "{}"
           try:
-              completed = json.loads(raw)
+              completed_runs = json.loads(raw)
           except json.JSONDecodeError as exc:
               raise SystemExit(
-                  "completed_node_ids_json must be valid JSON"
+                  "completed_node_runs_json must be valid JSON"
               ) from exc
-          if not isinstance(completed, list) or any(
-              not isinstance(value, str)
-              for value in completed
-          ):
+          if not isinstance(completed_runs, dict):
               raise SystemExit(
-                  "completed_node_ids_json must be a JSON string array"
+                  "completed_node_runs_json must be a JSON object"
               )
+          for node_id, run_id in completed_runs.items():
+              if not isinstance(node_id, str):
+                  raise SystemExit(
+                      "completed_node_runs_json keys must be strings"
+                  )
+              try:
+                  parsed = int(run_id)
+              except (TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"invalid run ID for {node_id}: {run_id!r}"
+                  ) from exc
+              if parsed <= 0:
+                  raise SystemExit(
+                      f"run ID for {node_id} must be positive"
+                  )
+              completed_runs[node_id] = parsed
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          receipts = []
+          for node_id, run_id in sorted(completed_runs.items()):
+              payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/actions/runs/{run_id}",
+                  ])
+              )
+              receipts.append({
+                  "node_id": node_id,
+                  "run_id": int(payload["id"]),
+                  "workflow_path": str(payload.get("path") or ""),
+                  "event": str(payload.get("event") or ""),
+                  "status": str(payload.get("status") or ""),
+                  "conclusion": str(payload.get("conclusion") or ""),
+                  "head_branch": str(payload.get("head_branch") or ""),
+                  "head_sha": str(payload.get("head_sha") or ""),
+                  "run_attempt": int(payload.get("run_attempt") or 0),
+                  "repository_full_name": str(
+                      (payload.get("repository") or {}).get(
+                          "full_name"
+                      ) or ""
+                  ),
+                  "head_repository_full_name": str(
+                      (payload.get("head_repository") or {}).get(
+                          "full_name"
+                      ) or ""
+                  ),
+              })
+
+          verified = validate_phase2_execution_run_receipts(
+              receipts,
+              repository_full_name=repo,
+              branch=branch,
+          )
+          verified_path = Path(
+              "artifacts/phase2-execution-run-receipts.json"
+          )
+          verified_path.write_text(
+              json.dumps(verified, indent=2, sort_keys=True) + "\n"
+          )
 
           ledger = json.loads(
               Path(".github/phase2-source-coverage.json").read_text()
@@ -95,7 +160,7 @@ jobs:
           plan = build_phase2_coverage_execution_plan(
               ledger,
               build_phase2_source_inventory(),
-              completed_node_ids=completed,
+              completed_node_ids=verified["completed_node_ids"],
           )
           output = Path(
               "artifacts/phase2-coverage-execution-plan.json"
@@ -154,6 +219,7 @@ jobs:
               "canonical_ledger_mutation_automatic": False,
               "canonical_ledger_commit_workflow_available": True,
               "ledger_commit_requires_explicit_approval": True,
+              "verified_completed_runs": verified["verified_runs"],
               "workflow_dispatch_performed": False,
           }, sort_keys=True))
 
@@ -200,6 +266,15 @@ jobs:
                       "canonical ledger promotion is serialized\n"
                   )
                   handle.write(
+                      f"- verified successful workflow runs: "
+                      f"{verified['verified_runs']}\n"
+                  )
+                  handle.write(
+                      "- planner completion credit is accepted only from "
+                      "successful workflow_dispatch run IDs whose workflow, "
+                      "repo and branch identities match the DAG\n"
+                  )
+                  handle.write(
                       "- this planner does not dispatch workflows or mutate "
                       "the canonical ledger; the separate ledger-commit "
                       "workflow requires explicit approval and exact SHA "
@@ -211,6 +286,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: phase2-coverage-execution-plan
-          path: artifacts/phase2-coverage-execution-plan.json
+          path: |
+            artifacts/phase2-coverage-execution-plan.json
+            artifacts/phase2-execution-run-receipts.json
           if-no-files-found: error
           retention-days: 30
