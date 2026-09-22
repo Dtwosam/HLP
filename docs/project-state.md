@@ -604,9 +604,28 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `price_drawdown`: 11 price/path features are computed in one streaming pass
   over the canonical research price path, require an exact canonical point at
   the confirmation cutoff, validate the full source tape, and count later
-  subject rows only as ignored. No Phase-3 feature-store checkpoint is claimed
-  yet; broader trade-flow, participant, holder, liquidity, relationship and
-  regime families still remain to be implemented and coverage-tested.
+  subject rows only as ignored. A second 11-feature `trade_flow` /
+  participant family is now implemented behind a fail-closed canonical
+  wallet-trade tape. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and
+  trench.today all have source-specific adapters that use transaction
+  initiator identity rather than router/protocol sender identity. The
+  canonical trade-tape assembler binds exact frozen source membership,
+  requires complete historical event scan + transaction identity + adapter
+  evidence for all 14 sources, and collapses only economically identical
+  cross-source duplicate swaps. The current trade-source readiness plan is
+  **13/14 adapter-ready**; `pools_trade_lbp` remains explicitly blocked
+  because the frozen CCA/LBP surface contains aggregate clearing/checkpoint
+  state rather than verified wallet-level fill attribution. Downstream trade
+  feature, equal-family-coverage and feature-staging workflows are prepared
+  but cannot bypass that gap. The staging bundle combines only equal-coverage,
+  exact-cutoff feature rows, validates each value against the registry dtype
+  and missingness policy, preserves per-family data-quality flags, consumes no
+  outcome rows, and explicitly publishes
+  `final_checkpoint_claimed=false`. No
+  `hlp-v1-phase3-feature-store` checkpoint is claimed yet; holder,
+  concentration/redistribution, creator/early-wallet, relationship, liquidity,
+  absorption, retention, venue-mechanics and chain-regime families still
+  remain to be implemented and coverage-tested.
 
 
 ### Live/current chain access
