@@ -36,6 +36,7 @@ def coverage():
         "tokens_discovered": 1,
         "price_points": 4,
         "priced_points": 4,
+        "provenance_sha256": SHA,
     }
 
 
@@ -66,6 +67,7 @@ def test_launchpad_eligibility_handoff_reconciles_coverage():
     assert rows[0]["canonical_price_series"] is True
     assert summary["version"] == PHASE2_LAUNCHPAD_ELIGIBILITY_VERSION
     assert summary["eligible_tokens"] == 1
+    assert summary["coverage_provenance_sha256"] == SHA
     assert summary["phase2_universe_source_ready"] is True
     assert summary["phase2_universe_frozen"] is False
 
@@ -111,3 +113,18 @@ def test_launchpad_eligibility_handoff_requires_exact_point_accounting():
             source_inventory=INVENTORY,
             provenance_sha256=SHA,
         )
+
+
+def test_launchpad_eligibility_handoff_requires_coverage_provenance():
+    report = coverage()
+    report["provenance_sha256"] = "bad"
+
+    with pytest.raises(ValueError, match="coverage provenance"):
+        build_launchpad_eligibility_handoff(
+            "launch",
+            [summary_row()],
+            report,
+            source_inventory=INVENTORY,
+            provenance_sha256=SHA,
+        )
+

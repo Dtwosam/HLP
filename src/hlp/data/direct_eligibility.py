@@ -95,6 +95,7 @@ def build_direct_eligibility_handoff(
         raise ValueError("direct eligibility selector snapshot is invalid")
 
     memberships: dict[str, set[str]] = {}
+    coverage_provenance_by_source: dict[str, str] = {}
     for source_id in sorted(sources):
         spec = inventory.get(source_id)
         if spec is None or spec.get("source_kind") != "direct_dex":
@@ -168,6 +169,10 @@ def build_direct_eligibility_handoff(
             raise ValueError(
                 f"direct eligibility coverage pre-applied selector: {source_id}"
             )
+        coverage_provenance_by_source[source_id] = _sha256(
+            coverage.get("provenance_sha256"),
+            label=f"{source_id} coverage provenance",
+        )
 
     if (
         str(canonical_report.get("version") or "")
@@ -263,6 +268,9 @@ def build_direct_eligibility_handoff(
         groups[source_id] = normalized
         source_summaries[source_id] = {
             "tokens": len(normalized),
+            "coverage_provenance_sha256": (
+                coverage_provenance_by_source[source_id]
+            ),
             "canonical_price_points": sum(
                 int(row["price_points"]) for row in normalized
             ),
@@ -277,6 +285,9 @@ def build_direct_eligibility_handoff(
         "selector_version": DIRECT_SELECTOR_VERSION,
         "selector_descriptor_sha256": selector_sha,
         "eligibility_provenance_sha256": provenance,
+        "coverage_provenance_sha256": dict(sorted(
+            coverage_provenance_by_source.items()
+        )),
         "canonical_tokens": len(canonical_rows),
         "canonical_price_points": canonical_points,
         "canonical_selected_markets": int(

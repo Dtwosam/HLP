@@ -59,6 +59,7 @@ def coverage(source, tokens):
         "selector_version": DIRECT_SELECTOR_VERSION,
         "selector_descriptor_sha256": SHA,
         "selector_rule_applied_to_coverage_points": False,
+        "provenance_sha256": SHA,
     }
 
 
@@ -120,6 +121,9 @@ def test_direct_eligibility_splits_one_canonical_series_by_population():
     assert summary["version"] == DIRECT_ELIGIBILITY_HANDOFF_VERSION
     assert summary["canonical_tokens"] == 2
     assert summary["direct_population_overlap_tokens"] == 1
+    assert summary["coverage_provenance_sha256"] == {
+        source: SHA for source in SOURCES
+    }
     assert summary["phase2_universe_source_ready"] is True
 
 
@@ -181,3 +185,22 @@ def test_direct_eligibility_requires_every_population_token_in_canonical_series(
             provenance_sha256=SHA,
             selector_descriptor_sha256=SHA,
         )
+
+
+def test_direct_eligibility_requires_coverage_provenance():
+    memberships = {source: [] for source in SOURCES}
+    reports = {source: coverage(source, 0) for source in SOURCES}
+    reports["direct_uniswap_v3"]["provenance_sha256"] = "bad"
+
+    with pytest.raises(ValueError, match="coverage provenance"):
+        build_direct_eligibility_handoff(
+            [],
+            canonical_report(points=0, tokens=0),
+            memberships,
+            reports,
+            selector(),
+            source_inventory=inventory(),
+            provenance_sha256=SHA,
+            selector_descriptor_sha256=SHA,
+        )
+

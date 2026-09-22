@@ -449,11 +449,15 @@ Implemented foundation:
   verifies both artifact digests and file SHAs, requires the coverage report to
   be complete/continuous through the snapshot, normalizes every token to the
   universe schema, and reconciles token count plus aggregate price/priced-point
-  counts exactly against the coverage report. The output is SHA-bound and
-  `canonical_price_series=true`, but remains
+  counts exactly against the coverage report. Each normalized handoff now also
+  carries the exact coverage `provenance_sha256` that must match the later
+  canonical ledger row; the direct eligibility handoff carries the same
+  per-source coverage-provenance map. This prevents a complete eligibility
+  artifact from being paired with a different promoted coverage proof. The
+  output is SHA-bound and `canonical_price_series=true`, but remains
   `phase2_universe_frozen=false`. Direct DEX sources are deliberately rejected
-  by this handoff because their three venue histories still require the frozen
-  cross-venue selector before becoming canonical;
+  by the launchpad handoff because their three venue histories require the
+  frozen cross-venue selector before becoming canonical;
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 

@@ -14,6 +14,17 @@ PHASE2_LAUNCHPAD_ELIGIBILITY_VERSION = (
 )
 
 
+def _sha256(value: object, *, label: str) -> str:
+    text = str(value or "").lower().removeprefix("sha256:")
+    if len(text) != 64:
+        raise ValueError(f"{label} SHA-256 is invalid")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} SHA-256 is invalid") from exc
+    return text
+
+
 def build_launchpad_eligibility_handoff(
     source_id: str,
     raw_summary_rows: Iterable[Mapping[str, object]],
@@ -67,6 +78,10 @@ def build_launchpad_eligibility_handoff(
         raise ValueError(
             "launchpad eligibility coverage has missing ranges"
         )
+    coverage_provenance = _sha256(
+        coverage_report.get("provenance_sha256"),
+        label="launchpad eligibility coverage provenance",
+    )
 
     normalized = normalize_phase2_source_eligibility_rows(
         source_id,
@@ -114,6 +129,7 @@ def build_launchpad_eligibility_handoff(
         "source_id": source_id,
         "source_readiness": expected_readiness,
         "snapshot_head_block": snapshot,
+        "coverage_provenance_sha256": coverage_provenance,
         "tokens": token_count,
         "price_points": price_points,
         "priced_points": priced_points,

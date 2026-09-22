@@ -38,6 +38,7 @@ def test_launchpad_eligibility_binds_coverage_and_full_summary():
     assert "expected_eligibility_artifact_digest:" in text
     assert "expected_eligibility_summary_sha256:" in text
     assert "coverage report SHA drift" in text
+    assert "coverage_provenance_sha256" in text
     assert "eligibility summary SHA drift" in text
     assert "build_launchpad_eligibility_handoff" in text
     assert "phase2-source-eligibility.jsonl" in text

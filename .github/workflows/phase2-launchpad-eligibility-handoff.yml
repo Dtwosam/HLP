@@ -245,6 +245,9 @@ jobs:
                   "COVERAGE_REPORT_PATH"
               ],
               "coverage_report_sha256": coverage_sha,
+              "coverage_provenance_sha256": str(
+                  coverage.get("provenance_sha256") or ""
+              ).lower(),
               "eligibility_run_id": int(
                   os.environ["ELIGIBILITY_RUN_ID"]
               ),
