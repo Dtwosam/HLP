@@ -325,8 +325,8 @@ jobs:
           rebuilt_chain = build_phase3_chain_regime_handoff(
               chain_summary,
               feature_summary_sha256=chain_summary_sha,
-              feature_coverage_summary["feature_entry_handoff_sha256"]256=chain_summary[
-                  "feature_coverage_summary["feature_entry_handoff_sha256"]256"
+              feature_entry_handoff_sha256=chain_summary[
+                  "feature_entry_handoff_sha256"
               ],
               price_path_handoff_sha256=chain_summary[
                   "price_path_handoff_sha256"
@@ -342,11 +342,11 @@ jobs:
               raise SystemExit(
                   "Phase-3 chain-regime manifest SHA drift"
               )
-          if chain_handoff["feature_coverage_summary["feature_entry_handoff_sha256"]256"] != (
+          if chain_handoff["feature_entry_handoff_sha256"] != (
               coverage_summary["feature_entry_handoff_sha256"]
           ):
               raise SystemExit(
-                  "Phase-3 chain-regime/entry linkage drift"
+                  "Phase-3 chain-regime/coverage entry linkage drift"
               )
 
           price_path = find_unique(
