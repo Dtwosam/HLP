@@ -9,6 +9,7 @@ from hlp.data.phase2_first_wave import (
     validate_phase2_archive_fanout_launch,
     validate_phase2_first_wave_completion,
     validate_phase2_first_wave_launch,
+    validate_phase2_first_wave_launch_receipt,
 )
 
 
@@ -264,3 +265,93 @@ def test_archive_fanout_rejects_manual_input_or_secret_drift():
     dispatch["nodes"][0]["requires_archive_secret"] = False
     with pytest.raises(ValueError, match="lost archive-secret gate"):
         validate_phase2_archive_fanout_launch(execution, dispatch)
+
+
+
+def first_wave_receipt():
+    return {
+        "version": "phase2-first-wave-launch-receipt-v1",
+        "first_wave_control_run_id": 500,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "initial_planner_run_id": 501,
+        "initial_planner_artifact_digest": "sha256:" + "ef" * 32,
+        "node_dispatch_control_run_ids": {
+            "preflight:archive_authenticated": 502,
+            "shared:quote_registry": 503,
+        },
+        "target_run_ids": {
+            "preflight:archive_authenticated": 504,
+            "shared:quote_registry": 505,
+        },
+        "refreshed_planner_run_id": 506,
+        "refreshed_planner_artifact_digest": "sha256:" + "12" * 32,
+        "ready_after_first_wave": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+        "launch_contract": {
+            "first_wave_launch_authorized": True,
+        },
+        "completion_contract": {
+            "first_wave_targets_credited": True,
+            "archive_fanout_unlocked": True,
+        },
+        "first_wave_targets_completed_successfully": True,
+        "archive_fanout_unlocked": True,
+        "canonical_coverage_ledger_mutated": False,
+        "selector_approval_performed": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_first_wave_receipt_validates_archive_fanout_handoff():
+    row = validate_phase2_first_wave_launch_receipt(
+        first_wave_receipt()
+    )
+
+    assert row["first_wave_control_run_id"] == 500
+    assert row["refreshed_planner_run_id"] == 506
+    assert row["archive_fanout_unlocked"] is True
+    assert row["canonical_ledger_write_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("version", "other", "version changed"),
+        (
+            "archive_fanout_unlocked",
+            False,
+            "archive_fanout_unlocked",
+        ),
+        (
+            "canonical_coverage_ledger_mutated",
+            True,
+            "canonical_coverage_ledger_mutated",
+        ),
+        (
+            "canonical_ledger_write_authorized",
+            True,
+            "canonical_ledger_write_authorized",
+        ),
+    ],
+)
+def test_first_wave_receipt_rejects_tampering(field, value, match):
+    row = first_wave_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_first_wave_launch_receipt(row)
+
+
+def test_first_wave_receipt_rejects_fanout_or_run_mapping_drift():
+    row = first_wave_receipt()
+    row["ready_after_first_wave"] = ["shared:v3_initialize"]
+    with pytest.raises(ValueError, match="archive-fanout set drift"):
+        validate_phase2_first_wave_launch_receipt(row)
+
+    row = first_wave_receipt()
+    row["target_run_ids"]["shared:quote_registry"] = 504
+    with pytest.raises(ValueError, match="reuses a target run"):
+        validate_phase2_first_wave_launch_receipt(row)

@@ -413,3 +413,192 @@ def validate_phase2_archive_fanout_launch(
         "canonical_ledger_write_authorized": False,
         "archive_fanout_launch_authorized": True,
     }
+
+
+
+def _phase2_receipt_commit_sha(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if len(text) != 40:
+        raise ValueError(f"{label} must be a 40-char commit SHA")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def _phase2_receipt_digest(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if not text.startswith("sha256:") or len(text) != 71:
+        raise ValueError(f"{label} must be sha256:<64 hex chars>")
+    try:
+        int(text.split(":", 1)[1], 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def _phase2_receipt_sha256(value: object, *, label: str) -> str:
+    text = str(value or "").lower().removeprefix("sha256:")
+    if len(text) != 64:
+        raise ValueError(f"{label} must be 64 hex chars")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def validate_phase2_first_wave_launch_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff from first wave to archive fan-out."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-first-wave-launch-receipt-v1"
+    ):
+        raise ValueError("Phase-2 first-wave receipt version changed")
+
+    control_run_id = int(row.get("first_wave_control_run_id") or 0)
+    initial_planner_run_id = int(row.get("initial_planner_run_id") or 0)
+    refreshed_planner_run_id = int(
+        row.get("refreshed_planner_run_id") or 0
+    )
+    if (
+        control_run_id <= 0
+        or initial_planner_run_id <= 0
+        or refreshed_planner_run_id <= 0
+    ):
+        raise ValueError(
+            "Phase-2 first-wave receipt control/planner run IDs "
+            "must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("Phase-2 first-wave receipt branch is empty")
+    head_sha = _phase2_receipt_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 first-wave execution head",
+    )
+    ledger_sha = _phase2_receipt_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 first-wave canonical coverage ledger",
+    )
+    initial_digest = _phase2_receipt_digest(
+        row.get("initial_planner_artifact_digest"),
+        label="Phase-2 first-wave initial planner artifact",
+    )
+    refreshed_digest = _phase2_receipt_digest(
+        row.get("refreshed_planner_artifact_digest"),
+        label="Phase-2 first-wave refreshed planner artifact",
+    )
+
+    controls = row.get("node_dispatch_control_run_ids")
+    targets = row.get("target_run_ids")
+    if not isinstance(controls, Mapping) or not isinstance(targets, Mapping):
+        raise ValueError(
+            "Phase-2 first-wave receipt dispatch/target mappings are invalid"
+        )
+    expected_nodes = set(PHASE2_FIRST_WAVE_NODE_IDS)
+    if set(controls) != expected_nodes or set(targets) != expected_nodes:
+        raise ValueError(
+            "Phase-2 first-wave receipt node mapping drift"
+        )
+    normalized_controls = {}
+    normalized_targets = {}
+    for node_id in PHASE2_FIRST_WAVE_NODE_IDS:
+        control_id = int(controls.get(node_id) or 0)
+        target_id = int(targets.get(node_id) or 0)
+        if control_id <= 0 or target_id <= 0:
+            raise ValueError(
+                f"Phase-2 first-wave receipt run ID invalid: {node_id}"
+            )
+        normalized_controls[node_id] = control_id
+        normalized_targets[node_id] = target_id
+    if len(set(normalized_controls.values())) != 2:
+        raise ValueError(
+            "Phase-2 first-wave receipt reuses a dispatcher control run"
+        )
+    if len(set(normalized_targets.values())) != 2:
+        raise ValueError(
+            "Phase-2 first-wave receipt reuses a target run"
+        )
+
+    ready_after = row.get("ready_after_first_wave")
+    if (
+        not isinstance(ready_after, list)
+        or sorted(str(value) for value in ready_after)
+        != sorted(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+    ):
+        raise ValueError(
+            "Phase-2 first-wave receipt archive-fanout set drift"
+        )
+
+    launch_contract = row.get("launch_contract")
+    completion_contract = row.get("completion_contract")
+    if not isinstance(launch_contract, Mapping):
+        raise ValueError(
+            "Phase-2 first-wave receipt launch contract is missing"
+        )
+    if not isinstance(completion_contract, Mapping):
+        raise ValueError(
+            "Phase-2 first-wave receipt completion contract is missing"
+        )
+    if launch_contract.get("first_wave_launch_authorized") is not True:
+        raise ValueError(
+            "Phase-2 first-wave receipt lacks launch authorization"
+        )
+    if completion_contract.get("first_wave_targets_credited") is not True:
+        raise ValueError(
+            "Phase-2 first-wave receipt lacks target-credit proof"
+        )
+    if completion_contract.get("archive_fanout_unlocked") is not True:
+        raise ValueError(
+            "Phase-2 first-wave receipt lacks archive-fanout proof"
+        )
+
+    required_true = (
+        "first_wave_targets_completed_successfully",
+        "archive_fanout_unlocked",
+        "workflow_dispatch_performed",
+    )
+    for field in required_true:
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 first-wave receipt lacks {field}"
+            )
+    required_false = (
+        "canonical_coverage_ledger_mutated",
+        "selector_approval_performed",
+        "canonical_ledger_write_authorized",
+    )
+    for field in required_false:
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 first-wave receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-first-wave-launch-receipt-v1",
+        "first_wave_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "initial_planner_run_id": initial_planner_run_id,
+        "initial_planner_artifact_digest": initial_digest,
+        "node_dispatch_control_run_ids": normalized_controls,
+        "target_run_ids": normalized_targets,
+        "refreshed_planner_run_id": refreshed_planner_run_id,
+        "refreshed_planner_artifact_digest": refreshed_digest,
+        "ready_after_first_wave": list(
+            PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS
+        ),
+        "first_wave_targets_completed_successfully": True,
+        "archive_fanout_unlocked": True,
+        "canonical_coverage_ledger_mutated": False,
+        "selector_approval_performed": False,
+        "canonical_ledger_write_authorized": False,
+        "workflow_dispatch_performed": True,
+    }
