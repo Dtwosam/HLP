@@ -21,7 +21,8 @@ env:
   INITIALIZER: '0x3f555c266afd8ca3bbd2b0ee9669620d90d82068'
   CREATED_BLOCK: '30493016'
   MIGRATION_BLOCK: '30493816'
-  MAX_PROBE_BLOCKS: '1000'
+  MAX_PROBE_BLOCKS: '10000'
+  POST_MIGRATION_BLOCKS: '5000'
 
 jobs:
   audit:
@@ -52,15 +53,23 @@ jobs:
               SOLIDRPC_PUBLIC_RPC_URL,
           )
           from hlp.data.rpc import RpcClient
+          from hlp.data.pools_trade_cca_bids import (
+              reconcile_cca_bid_fills,
+          )
           from hlp.protocols.pools_trade_lbp import (
+              CCA_BID_EXITED_TOPIC,
+              CCA_BID_SUBMITTED_TOPIC,
               CCA_CHECKPOINT_TOPIC,
               CCA_CLEARING_PRICE_TOPIC,
+              decode_pools_trade_cca_bid_exited,
+              decode_pools_trade_cca_bid_submitted,
           )
 
           address = os.environ["INITIALIZER"].lower()
           created = int(os.environ["CREATED_BLOCK"])
           migration = int(os.environ["MIGRATION_BLOCK"])
           max_probe = int(os.environ["MAX_PROBE_BLOCKS"])
+          post_migration = int(os.environ["POST_MIGRATION_BLOCKS"])
 
           key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
           url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
@@ -79,7 +88,10 @@ jobs:
           if code in {"0x", "0x0", ""}:
               raise SystemExit("proven CCA initializer has no code at creation")
 
-          end = min(migration, created + max_probe - 1)
+          end = min(
+              migration + post_migration,
+              created + max_probe - 1,
+          )
           chunk = 50_000 if key else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
           logs = []
           topic_counts = Counter()
@@ -357,9 +369,28 @@ jobs:
                       }
 
           known_topic_roles = {
+              CCA_BID_SUBMITTED_TOPIC: "bid_submitted",
+              CCA_BID_EXITED_TOPIC: "bid_exited",
               CCA_CLEARING_PRICE_TOPIC: "clearing_price",
               CCA_CHECKPOINT_TOPIC: "checkpoint",
           }
+
+          bid_submissions = [
+              decode_pools_trade_cca_bid_submitted(row)
+              for row in logs
+              if row.topics
+              and row.topics[0] == CCA_BID_SUBMITTED_TOPIC
+          ]
+          bid_exits = [
+              decode_pools_trade_cca_bid_exited(row)
+              for row in logs
+              if row.topics
+              and row.topics[0] == CCA_BID_EXITED_TOPIC
+          ]
+          executed_fills, bid_fill_summary = reconcile_cca_bid_fills(
+              bid_submissions,
+              bid_exits,
+          )
           all_sampled_senders = sorted({
               str(sample["transaction_from"])
               for sample in samples
@@ -440,6 +471,8 @@ jobs:
               "initializer": address,
               "created_block": created,
               "migration_block": migration,
+              "post_migration_blocks_requested": post_migration,
+              "post_migration_blocks_scanned": max(0, end - migration),
               "probe_limit_block": end,
               "last_scanned_block": last_scanned,
               "chunks_scanned": chunks_scanned,
@@ -459,6 +492,12 @@ jobs:
                   CCA_CLEARING_PRICE_TOPIC: "clearing_price",
                   CCA_CHECKPOINT_TOPIC: "checkpoint",
               },
+              "known_bid_topics": {
+                  CCA_BID_SUBMITTED_TOPIC: "bid_submitted",
+                  CCA_BID_EXITED_TOPIC: "bid_exited",
+              },
+              "bid_fill_summary": bid_fill_summary,
+              "executed_fills": executed_fills,
               "unclassified_topics": sorted(
                   topic
                   for topic in topic_counts
@@ -489,12 +528,15 @@ jobs:
                   "initializer",
                   "created_block",
                   "migration_block",
+                  "post_migration_blocks_scanned",
                   "last_scanned_block",
                   "chunks_scanned",
                   "logs_observed",
                   "topic_counts",
                   "unique_sampled_transactions",
                   "unique_sampled_transaction_senders",
+                  "bid_fill_summary",
+                  "executed_fills",
                   "receipt_inventory",
                   "input_candidate_code_at_final_sample",
                   "address_candidates_by_topic",
