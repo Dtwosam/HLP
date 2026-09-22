@@ -57,6 +57,16 @@ def validate_phase2_first_wave_launch(
             "Phase-2 first wave must precede universe coverage completion"
         )
 
+    completed = execution.get("completed_node_ids")
+    if not isinstance(completed, list):
+        raise ValueError(
+            "Phase-2 execution plan completed-node list is missing"
+        )
+    if completed:
+        raise ValueError(
+            "Phase-2 first wave requires zero credited execution nodes"
+        )
+
     ready = execution.get("ready_to_dispatch_node_ids")
     if not isinstance(ready, list):
         raise ValueError("Phase-2 execution plan ready-node list is missing")
@@ -86,6 +96,11 @@ def validate_phase2_first_wave_launch(
         for row in rows
         if isinstance(row, Mapping)
     }
+    if set(by_id) != set(PHASE2_FIRST_WAVE_NODE_IDS):
+        raise ValueError(
+            "Phase-2 initial dispatch plan must contain exactly the two "
+            f"first-wave nodes: {sorted(by_id)}"
+        )
 
     validated = []
     for node_id in PHASE2_FIRST_WAVE_NODE_IDS:

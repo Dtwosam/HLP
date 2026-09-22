@@ -17,6 +17,7 @@ def plans():
         "complete_sources": 2,
         "incomplete_sources": 12,
         "phase2_universe_coverage_complete": False,
+        "completed_node_ids": [],
         "ready_to_dispatch_node_ids": list(PHASE2_FIRST_WAVE_NODE_IDS),
     }
     dispatch = {
@@ -172,3 +173,25 @@ def test_first_wave_completion_rejects_wrong_dispatch_receipts():
     )
     with pytest.raises(ValueError, match="do not match first-wave"):
         validate_phase2_first_wave_completion(execution, verified)
+
+
+
+def test_first_wave_rejects_existing_execution_credit_or_extra_dispatch_node():
+    execution, dispatch = plans()
+    execution["completed_node_ids"] = ["shared:quote_registry"]
+    with pytest.raises(ValueError, match="zero credited"):
+        validate_phase2_first_wave_launch(execution, dispatch)
+
+    execution, dispatch = plans()
+    dispatch["nodes"].append({
+        "node_id": "registry:pools_fun",
+        "workflow": "phase2-pools-fun-registry-backfill.yml",
+        "status": "ready_to_dispatch",
+        "run_id_inputs": {},
+        "remaining_manual_inputs": [],
+        "all_dispatch_input_names": [],
+        "requires_archive_secret": True,
+        "requires_explicit_approval": False,
+    })
+    with pytest.raises(ValueError, match="exactly the two"):
+        validate_phase2_first_wave_launch(execution, dispatch)
