@@ -358,6 +358,63 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_canonical_transfer_tape",
             "missingness_policy": "error_if_missing",
         },
+        {
+            "feature_id": "regime.observed_tokens_so_far",
+            "family": "chain_regime",
+            "dtype": "integer",
+            "formula": (
+                "distinct eligible tokens with at least one canonical price "
+                "point at or before the confirmation cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "regime.tokens_above_100k_at_cutoff",
+            "family": "chain_regime",
+            "dtype": "integer",
+            "formula": (
+                "count of observed eligible tokens whose latest canonical "
+                "market-cap proxy at the confirmation cutoff is >= 100000 USD"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "regime.median_latest_market_cap_proxy_usd",
+            "family": "chain_regime",
+            "dtype": "decimal_string",
+            "formula": (
+                "cross-sectional median of each observed eligible token's "
+                "latest canonical market-cap proxy at the confirmation cutoff"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "regime.price_points_last_1000_blocks",
+            "family": "chain_regime",
+            "dtype": "integer",
+            "formula": (
+                "count of canonical eligible-token price points in the "
+                "inclusive 1000-block window ending at the confirmation block "
+                "and not after the exact confirmation event"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "regime.active_tokens_last_1000_blocks",
+            "family": "chain_regime",
+            "dtype": "integer",
+            "formula": (
+                "distinct eligible tokens with at least one canonical price "
+                "point in the inclusive 1000-block window ending at the "
+                "confirmation block and not after the confirmation event"
+            ),
+            "data_dependency": "phase2_research_price_path",
+            "missingness_policy": "error_if_missing",
+        },
     ]
     return [
         {
