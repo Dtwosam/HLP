@@ -472,6 +472,21 @@ Implemented foundation:
 
 Current blockers before a chain-wide Phase-2 universe can be frozen:
 
+- **default-branch dispatch surface:** GitHub only accepts
+  `workflow_dispatch` when the workflow file exists on the repository default
+  branch. The repository default branch is still `main` at the original
+  Phase-0 freeze, while the prepared Phase-2 manual workflows live on
+  `phase1/data-acquisition-spike`. Therefore the first-wave archive preflight
+  and quote-registry jobs are not yet manually dispatchable despite being
+  implementation-ready. Draft PR **#3** is clean/mergeable and has been updated
+  to reflect the current Phase-1 PASS plus guarded Phase-2–4 architecture, but
+  remains draft and unmerged. The read-only
+  `phase2-default-branch-dispatch-readiness` workflow now compares the actual
+  default-branch workflow directory against the execution DAG and separately
+  reports first-wave and full-DAG dispatch readiness. Promoting workflow files
+  to `main` enables execution; it does **not** claim Phase-2 data coverage or
+  any later checkpoint;
+
 - the canonical coverage ledger remains **2/14 complete**. A deterministic
   execution DAG is now prepared in `phase2_coverage_execution.py` plus the
   read-only `phase2-coverage-execution-plan` workflow. It expands only the
