@@ -230,6 +230,38 @@ jobs:
               CCA_CLEARING_PRICE_TOPIC: "clearing_price",
               CCA_CHECKPOINT_TOPIC: "checkpoint",
           }
+          all_sampled_senders = sorted({
+              str(sample["transaction_from"])
+              for sample in samples
+              if sample.get("transaction_from")
+          })
+          address_candidates_by_topic = {}
+          non_sender_address_candidates_by_topic = {}
+          for topic0 in sorted(topic_counts):
+              topic_samples = [
+                  sample
+                  for sample in samples
+                  if (
+                      sample["topics"][0]
+                      if sample["topics"]
+                      else "<none>"
+                  ) == topic0
+              ]
+              candidates = sorted({
+                  str(candidate["address"]).lower()
+                  for sample in topic_samples
+                  for candidate in (
+                      list(sample["indexed_address_candidates"])
+                      + list(sample["data_word_address_candidates"])
+                  )
+              })
+              address_candidates_by_topic[topic0] = candidates
+              non_sender_address_candidates_by_topic[topic0] = [
+                  candidate
+                  for candidate in candidates
+                  if candidate not in all_sampled_senders
+              ]
+
           topic_inventory = {}
           for topic0, count in sorted(topic_counts.items()):
               topic_samples = [
@@ -283,6 +315,14 @@ jobs:
               "chunks_scanned": chunks_scanned,
               "logs_observed": len(logs),
               "topic_counts": dict(topic_counts),
+              "unique_sampled_transactions": len(sample_hashes),
+              "unique_sampled_transaction_senders": all_sampled_senders,
+              "address_candidates_by_topic": (
+                  address_candidates_by_topic
+              ),
+              "non_sender_address_candidates_by_topic": (
+                  non_sender_address_candidates_by_topic
+              ),
               "known_price_topics": {
                   CCA_CLEARING_PRICE_TOPIC: "clearing_price",
                   CCA_CHECKPOINT_TOPIC: "checkpoint",
@@ -321,6 +361,10 @@ jobs:
                   "chunks_scanned",
                   "logs_observed",
                   "topic_counts",
+                  "unique_sampled_transactions",
+                  "unique_sampled_transaction_senders",
+                  "address_candidates_by_topic",
+                  "non_sender_address_candidates_by_topic",
                   "unclassified_topics",
                   "topic_inventory",
                   "first_by_topic",
