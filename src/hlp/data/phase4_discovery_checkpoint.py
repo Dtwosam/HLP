@@ -15,6 +15,15 @@ from hlp.data.phase4_hypothesis_freeze import (
     PHASE4_HYPOTHESIS_FREEZE_HANDOFF_VERSION,
     PHASE4_HYPOTHESIS_FREEZE_VERSION,
 )
+from hlp.data.phase4_interaction import PHASE4_INTERACTION_HANDOFF_VERSION
+from hlp.data.phase4_magnitude_strata import (
+    PHASE4_MAGNITUDE_STRATA_HANDOFF_VERSION,
+)
+from hlp.data.phase4_nonlinear import PHASE4_NONLINEAR_HANDOFF_VERSION
+from hlp.data.phase4_simple_models import (
+    PHASE4_SIMPLE_MODEL_HANDOFF_VERSION,
+)
+from hlp.data.phase4_stability import PHASE4_STABILITY_HANDOFF_VERSION
 from hlp.data.phase4_univariate import PHASE4_UNIVARIATE_HANDOFF_VERSION
 from hlp.data.phase4_validation import (
     PHASE4_VALIDATION_HANDOFF_VERSION,
@@ -302,6 +311,341 @@ def _validate_parent_chain(
 
     return split, base, univariate, freeze, validation
 
+
+
+def _validate_experiment_suite(
+    *,
+    split: Mapping[str, object],
+    split_handoff_sha256: str,
+    freeze: Mapping[str, object],
+    freeze_handoff_sha256: str,
+    validation: Mapping[str, object],
+    magnitude_strata_handoff: Mapping[str, object],
+    magnitude_strata_handoff_sha256: str,
+    nonlinear_handoff: Mapping[str, object],
+    nonlinear_handoff_sha256: str,
+    interaction_handoff: Mapping[str, object],
+    interaction_handoff_sha256: str,
+    simple_model_handoff: Mapping[str, object],
+    simple_model_handoff_sha256: str,
+    stability_handoff: Mapping[str, object],
+    stability_handoff_sha256: str,
+) -> dict:
+    magnitude = dict(magnitude_strata_handoff)
+    nonlinear = dict(nonlinear_handoff)
+    interaction = dict(interaction_handoff)
+    simple_model = dict(simple_model_handoff)
+    stability = dict(stability_handoff)
+
+    for label, value, version in (
+        (
+            "magnitude-strata",
+            magnitude,
+            PHASE4_MAGNITUDE_STRATA_HANDOFF_VERSION,
+        ),
+        ("nonlinear", nonlinear, PHASE4_NONLINEAR_HANDOFF_VERSION),
+        ("interaction", interaction, PHASE4_INTERACTION_HANDOFF_VERSION),
+        (
+            "simple-model",
+            simple_model,
+            PHASE4_SIMPLE_MODEL_HANDOFF_VERSION,
+        ),
+        ("stability", stability, PHASE4_STABILITY_HANDOFF_VERSION),
+    ):
+        if str(value.get("version") or "") != version:
+            raise ValueError(
+                f"Phase-4 discovery {label} version changed"
+            )
+        _require_checkpoint(value, label=label)
+
+    for flag in (
+        "ordinary_5x_vs_10x_plus_compared",
+        "ordinary_5x_vs_20x_plus_compared",
+        "phase4_magnitude_strata_report_ready",
+    ):
+        if magnitude.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 discovery magnitude-strata lacks {flag}"
+            )
+    for flag in (
+        "validation_rows_consumed",
+        "final_test_rows_consumed",
+        "candidate_features_ranked",
+        "signal_promoted",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if magnitude.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 discovery magnitude-strata violates {flag}"
+            )
+
+    for flag in (
+        "nonlinear_relationships_examined",
+        "phase4_nonlinear_report_ready",
+    ):
+        if nonlinear.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 discovery nonlinear lacks {flag}"
+            )
+    for flag in (
+        "validation_rows_consumed",
+        "final_test_rows_consumed",
+        "candidate_thresholds_promoted",
+        "candidate_features_ranked",
+        "signal_promoted",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if nonlinear.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 discovery nonlinear violates {flag}"
+            )
+
+    for flag in (
+        "pairwise_interactions_examined",
+        "phase4_interaction_report_ready",
+    ):
+        if interaction.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 discovery interaction lacks {flag}"
+            )
+    for flag in (
+        "interaction_pairs_ranked",
+        "validation_rows_consumed",
+        "final_test_rows_consumed",
+        "signal_promoted",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if interaction.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 discovery interaction violates {flag}"
+            )
+
+    for flag in (
+        "preprocessing_fit_on_discovery_only",
+        "models_fit_on_discovery_only",
+        "validation_rows_consumed",
+        "transparent_simple_models_examined",
+        "phase4_simple_model_report_ready",
+    ):
+        if simple_model.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 discovery simple-model lacks {flag}"
+            )
+    for flag in (
+        "final_test_rows_consumed",
+        "production_model_selected",
+        "signal_threshold_selected",
+        "signal_promoted",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if simple_model.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 discovery simple-model violates {flag}"
+            )
+
+    for flag in (
+        "repeated_sampling_stability_examined",
+        "chronological_stability_examined",
+        "phase4_stability_report_ready",
+    ):
+        if stability.get(flag) is not True:
+            raise ValueError(
+                f"Phase-4 discovery stability lacks {flag}"
+            )
+    for flag in (
+        "stability_pass_fail_threshold_applied",
+        "validation_rows_consumed",
+        "final_test_rows_consumed",
+        "signal_promoted",
+        "phase4_discovery_checkpoint_claimed",
+    ):
+        if stability.get(flag) is not False:
+            raise ValueError(
+                f"Phase-4 discovery stability violates {flag}"
+            )
+
+    split_sha = _sha256(
+        split_handoff_sha256,
+        label="Phase-4 experiment-suite split handoff",
+    )
+    freeze_sha = _sha256(
+        freeze_handoff_sha256,
+        label="Phase-4 experiment-suite freeze handoff",
+    )
+    discovery_rows_sha = _sha256(
+        split.get("discovery_split_rows_sha256"),
+        label="Phase-4 experiment-suite discovery rows",
+    )
+    validation_rows_sha = _sha256(
+        split.get("validation_split_rows_sha256"),
+        label="Phase-4 experiment-suite validation rows",
+    )
+    registry_sha = _sha256(
+        split.get("feature_registry_sha256"),
+        label="Phase-4 experiment-suite registry",
+    )
+    registry_file_sha = _sha256(
+        split.get("feature_registry_file_sha256"),
+        label="Phase-4 experiment-suite registry file",
+    )
+
+    for label, value in (
+        ("magnitude-strata", magnitude),
+        ("nonlinear", nonlinear),
+        ("interaction", interaction),
+        ("simple-model", simple_model),
+        ("stability", stability),
+    ):
+        if _sha256(
+            value.get("chronological_split_handoff_sha256"),
+            label=f"Phase-4 {label} split link",
+        ) != split_sha:
+            raise ValueError(
+                f"Phase-4 discovery {label}/split linkage drift"
+            )
+        if _sha256(
+            value.get("feature_registry_sha256"),
+            label=f"Phase-4 {label} registry",
+        ) != registry_sha:
+            raise ValueError(
+                f"Phase-4 discovery {label} registry drift"
+            )
+        if _sha256(
+            value.get("discovery_split_rows_sha256"),
+            label=f"Phase-4 {label} discovery rows",
+        ) != discovery_rows_sha:
+            raise ValueError(
+                f"Phase-4 discovery {label} discovery-slice drift"
+            )
+
+    for label, value in (
+        ("magnitude-strata", magnitude),
+        ("nonlinear", nonlinear),
+        ("interaction", interaction),
+        ("simple-model", simple_model),
+    ):
+        if _sha256(
+            value.get("feature_registry_file_sha256"),
+            label=f"Phase-4 {label} registry file",
+        ) != registry_file_sha:
+            raise ValueError(
+                f"Phase-4 discovery {label} registry-file drift"
+            )
+
+    if _sha256(
+        simple_model.get("validation_rows_sha256"),
+        label="Phase-4 simple-model validation rows",
+    ) != validation_rows_sha:
+        raise ValueError(
+            "Phase-4 discovery simple-model validation-slice drift"
+        )
+    if _sha256(
+        validation.get("validation_rows_sha256"),
+        label="Phase-4 validation handoff rows",
+    ) != validation_rows_sha:
+        raise ValueError(
+            "Phase-4 discovery validation handoff slice drift"
+        )
+    if _sha256(
+        stability.get("hypothesis_freeze_handoff_sha256"),
+        label="Phase-4 stability freeze link",
+    ) != freeze_sha:
+        raise ValueError(
+            "Phase-4 discovery stability/freeze linkage drift"
+        )
+    if _sha256(
+        stability.get("hypothesis_plan_sha256"),
+        label="Phase-4 stability plan",
+    ) != _sha256(
+        freeze.get("hypothesis_plan_sha256"),
+        label="Phase-4 frozen hypothesis plan",
+    ):
+        raise ValueError(
+            "Phase-4 discovery stability hypothesis-plan drift"
+        )
+
+    discovery_subjects = int(split.get("discovery_split_rows", -1))
+    validation_subjects = int(split.get("validation_split_rows", -1))
+    for label, value, field in (
+        ("magnitude-strata", magnitude, "analysis_subjects"),
+        ("nonlinear", nonlinear, "analysis_subjects"),
+        ("interaction", interaction, "analysis_subjects"),
+        ("stability", stability, "analysis_subjects"),
+        ("simple-model", simple_model, "discovery_rows"),
+    ):
+        if int(value.get(field, -2)) != discovery_subjects:
+            raise ValueError(
+                f"Phase-4 discovery {label} subject-count drift"
+            )
+    if int(simple_model.get("validation_rows", -1)) != validation_subjects:
+        raise ValueError(
+            "Phase-4 discovery simple-model validation-count drift"
+        )
+
+    features_considered = int(freeze.get("features_considered", -1))
+    if int(magnitude.get("features_analyzed", -2)) != features_considered:
+        raise ValueError(
+            "Phase-4 discovery magnitude feature-count drift"
+        )
+    if (
+        int(nonlinear.get("numeric_features_analyzed", -1))
+        + int(nonlinear.get("non_numeric_features_excluded", -1))
+        != features_considered
+    ):
+        raise ValueError(
+            "Phase-4 discovery nonlinear feature-count drift"
+        )
+    if (
+        int(interaction.get("eligible_features", -1))
+        + int(interaction.get("excluded_feature_count", -1))
+        != features_considered
+    ):
+        raise ValueError(
+            "Phase-4 discovery interaction feature-count drift"
+        )
+    if (
+        int(simple_model.get("eligible_features", -1))
+        + int(simple_model.get("excluded_feature_count", -1))
+        != features_considered
+    ):
+        raise ValueError(
+            "Phase-4 discovery simple-model feature-count drift"
+        )
+    if int(stability.get("hypotheses_examined", -1)) != int(
+        freeze.get("validation_hypotheses", -2)
+    ):
+        raise ValueError(
+            "Phase-4 discovery stability hypothesis-count drift"
+        )
+
+    return {
+        "magnitude_strata_handoff_sha256": _sha256(
+            magnitude_strata_handoff_sha256,
+            label="Phase-4 magnitude-strata handoff",
+        ),
+        "nonlinear_handoff_sha256": _sha256(
+            nonlinear_handoff_sha256,
+            label="Phase-4 nonlinear handoff",
+        ),
+        "interaction_handoff_sha256": _sha256(
+            interaction_handoff_sha256,
+            label="Phase-4 interaction handoff",
+        ),
+        "simple_model_handoff_sha256": _sha256(
+            simple_model_handoff_sha256,
+            label="Phase-4 simple-model handoff",
+        ),
+        "stability_handoff_sha256": _sha256(
+            stability_handoff_sha256,
+            label="Phase-4 stability handoff",
+        ),
+        "magnitude_strata_examined": True,
+        "nonlinear_relationships_examined": True,
+        "pairwise_interactions_examined": True,
+        "transparent_simple_models_examined": True,
+        "repeated_sampling_stability_examined": True,
+        "chronological_stability_examined": True,
+    }
 
 def build_phase4_discovery_ledger(
     hypothesis_freeze_report: Mapping[str, object],
