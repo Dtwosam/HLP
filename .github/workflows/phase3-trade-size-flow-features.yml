@@ -505,6 +505,7 @@ jobs:
               "trade_coverage_complete": True,
               "transfer_coverage_complete": True,
               "initial_mint_coverage_complete": True,
+              "future_trade_rows_used": False,
               "future_transfer_rows_used": False,
               "outcome_rows_consumed": False,
               "phase3_trade_size_flow_features_ready": True,
@@ -563,6 +564,7 @@ jobs:
             echo "- trade_coverage_complete: true"
             echo "- transfer_coverage_complete: true"
             echo "- initial_mint_coverage_complete: true"
+            echo "- future_trade_rows_used: false"
             echo "- future_transfer_rows_used: false"
             echo "- outcome_rows_consumed: false"
             echo "- phase3_trade_size_flow_features_ready: true"
