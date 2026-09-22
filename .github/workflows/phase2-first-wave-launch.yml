@@ -66,7 +66,7 @@ jobs:
               workflow_dispatch_interface_sha256,
           )
           from hlp.data.phase2_execution_dispatch import (
-              validate_phase2_node_dispatch_receipt,
+              validate_phase2_node_dispatch_evidence,
           )
           from hlp.data.phase2_first_wave import (
               PHASE2_FIRST_WAVE_NODE_IDS,
@@ -386,17 +386,27 @@ jobs:
                   "phase2-execution-node-dispatch",
                   f"upstream/control-{control_run_id}",
               )
+              attempt_path = (
+                  control_dir
+                  / "phase2-execution-node-dispatch-attempt.json"
+              )
               receipt_path = (
                   control_dir
                   / "phase2-execution-node-dispatch.json"
               )
-              if not receipt_path.is_file():
+              if not attempt_path.is_file() or not receipt_path.is_file():
                   raise SystemExit(
-                      f"dispatcher run {control_run_id} lacks receipt"
+                      f"dispatcher run {control_run_id} lacks "
+                      "attempt/final evidence"
                   )
+              attempt_bytes = attempt_path.read_bytes()
               try:
-                  receipt = validate_phase2_node_dispatch_receipt(
-                      json.loads(receipt_path.read_text())
+                  receipt = validate_phase2_node_dispatch_evidence(
+                      json.loads(attempt_bytes),
+                      json.loads(receipt_path.read_text()),
+                      attempt_file_sha256=hashlib.sha256(
+                          attempt_bytes
+                      ).hexdigest(),
                   )
               except ValueError as exc:
                   raise SystemExit(str(exc)) from exc
