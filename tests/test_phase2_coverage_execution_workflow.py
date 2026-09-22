@@ -77,3 +77,12 @@ def test_phase2_execution_plan_rejects_stale_run_lineage():
     assert "current_head_sha=current_head" in text
     assert "all_runs_current_or_ledger_only_ancestors" in text
     assert "canonical-ledger-only ancestor" in text
+
+
+
+def test_phase2_execution_plan_binds_exact_canonical_ledger():
+    text = WORKFLOW.read_text()
+
+    assert "canonical_coverage_ledger_sha256" in text
+    assert "ledger_sha256 = hashlib.sha256" in text
+    assert 'plan["planner_head_sha"] = current_head' in text
