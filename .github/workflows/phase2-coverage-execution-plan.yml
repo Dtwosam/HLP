@@ -383,6 +383,7 @@ jobs:
           PY
 
       - name: Upload Phase-2 execution plan
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: phase2-coverage-execution-plan
@@ -392,3 +393,20 @@ jobs:
             artifacts/phase2-dispatch-input-plan.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish planner artifact identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo
+            echo "### Planner artifact identity"
+            echo
+            echo "- planner_run_id: ${GITHUB_RUN_ID}"
+            echo "- planner_artifact_name: phase2-coverage-execution-plan"
+            echo "- planner_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- planner_head_sha: ${GITHUB_SHA}"
+            echo "- node-dispatch inputs now require this exact run ID and digest"
+          } >> "${GITHUB_STEP_SUMMARY}"
