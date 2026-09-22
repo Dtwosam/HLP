@@ -600,11 +600,12 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   `phase3_feature_registry.py` now gives every implemented feature a versioned
   formula, snapshot semantics, data dependency, dtype and missingness policy;
   registry definitions are SHA-bound and explicitly forbid future state or
-  outcome dependence. The registry now contains **61 causal features across
-  seven families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
-  8 `holder_state` / concentration, 8 `participant_retention`, 8
-  `supply_redistribution`, 5 `chain_regime`, and 10 `venue_mechanics`
-  features. `price_drawdown`, `chain_regime`, and `venue_mechanics` all
+  outcome dependence. The registry now contains **70 causal features across
+  eight families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  9 `trade_size_flow`, 8 `holder_state` / concentration, 8
+  `participant_retention`, 8 `supply_redistribution`, 5 `chain_regime`,
+  and 10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
+  and `venue_mechanics` all
   use the canonical research price path and enforce the exact confirmation
   event as an inclusive cutoff. Chain regime replays the full cross-sectional
   price tape for contemporaneous market-cap and 1000-block activity state;
@@ -616,7 +617,11 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   the latest participant is returning without consuming trades after the
   cutoff. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and trench.today all
   have source-specific adapters that use transaction initiator identity rather
-  than router/protocol sender identity. The canonical trade-tape assembler
+  than router/protocol sender identity. `trade_size_flow` uses the canonical
+  per-trade token amount but never compares raw quote amounts across assets;
+  buy/sell sizes and net/gross flow are normalized by the token's accounted
+  ERC-20 supply at the exact feature cutoff, so mixed quote decimals cannot
+  leak into the feature scale. The canonical trade-tape assembler
   binds exact frozen source membership, requires complete historical event scan
   + transaction identity + adapter evidence for all 14 sources, and collapses
   only economically identical cross-source duplicate swaps. The current
@@ -638,8 +643,8 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
   verified 200-block keyless filtered-log route is rejected for this job rather
   than launching an impractical millions-request backfill. The
-  equal-family-coverage and feature-staging workflows now require all seven
-  implemented families, giving a prepared **61-feature** label-free bundle at
+  equal-family-coverage and feature-staging workflows now require all eight
+  implemented families, giving a prepared **70-feature** label-free bundle at
   exactly matched subject cutoffs. The staging bundle validates every value
   against registry dtype and missingness policy, preserves per-family
   data-quality flags, consumes no outcome rows, and explicitly publishes
