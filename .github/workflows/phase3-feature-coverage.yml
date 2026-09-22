@@ -15,6 +15,18 @@ on:
         description: Exact SHA-256 of phase3-feature-entry-handoff.json
         required: true
         type: string
+      chain_regime_run_id:
+        description: Exact phase3-chain-regime-features run ID
+        required: true
+        type: string
+      expected_chain_regime_artifact_digest:
+        description: Exact phase3-chain-regime-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_chain_regime_handoff_sha256:
+        description: Exact SHA-256 of phase3-chain-regime-features-handoff.json
+        required: true
+        type: string
       price_feature_run_id:
         description: Exact phase3-price-features run ID
         required: true
@@ -52,6 +64,9 @@ env:
   FEATURE_ENTRY_RUN_ID: ${{ inputs.feature_entry_run_id }}
   EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
   EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
+  CHAIN_REGIME_RUN_ID: ${{ inputs.chain_regime_run_id }}
+  EXPECTED_CHAIN_REGIME_ARTIFACT_DIGEST: ${{ inputs.expected_chain_regime_artifact_digest }}
+  EXPECTED_CHAIN_REGIME_HANDOFF_SHA256: ${{ inputs.expected_chain_regime_handoff_sha256 }}
   PRICE_FEATURE_RUN_ID: ${{ inputs.price_feature_run_id }}
   EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_price_feature_artifact_digest }}
   EXPECTED_PRICE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_price_feature_handoff_sha256 }}
@@ -88,6 +103,9 @@ jobs:
 
           from hlp.data.github_actions import (
               select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_chain_regime import (
+              build_phase3_chain_regime_handoff,
           )
           from hlp.data.phase3_feature_coverage import (
               build_phase3_feature_coverage_handoff,
@@ -186,6 +204,7 @@ jobs:
               return matches[0]
 
           entry_root = Path("inputs/entry")
+          chain_root = Path("inputs/chain-regime")
           price_root = Path("inputs/price")
           trade_root = Path("inputs/trade")
 
@@ -195,6 +214,13 @@ jobs:
               entry_root,
               "Phase-3 feature entry",
               os.environ["EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["CHAIN_REGIME_RUN_ID"]),
+              "phase3-chain-regime-features",
+              chain_root,
+              "Phase-3 chain-regime features",
+              os.environ["EXPECTED_CHAIN_REGIME_ARTIFACT_DIGEST"],
           )
           download_named(
               int(os.environ["PRICE_FEATURE_RUN_ID"]),
@@ -256,6 +282,60 @@ jobs:
               "feature_subjects_sha256"
           ]:
               raise SystemExit("Phase-3 subject manifest SHA drift")
+
+          chain_rows_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features.jsonl",
+          )
+          chain_manifest_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features.jsonl.manifest.json",
+          )
+          chain_manifest = json.loads(
+              chain_manifest_path.read_text()
+          )
+          chain_summary_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features-summary.json",
+          )
+          chain_summary = json.loads(chain_summary_path.read_text())
+          chain_summary_sha = sha256_path(chain_summary_path)
+          chain_handoff_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features-handoff.json",
+          )
+          chain_handoff_sha = sha256_path(chain_handoff_path)
+          if chain_handoff_sha != os.environ[
+              "EXPECTED_CHAIN_REGIME_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 chain-regime handoff SHA drift")
+          chain_handoff = json.loads(chain_handoff_path.read_text())
+          rebuilt_chain = build_phase3_chain_regime_handoff(
+              chain_summary,
+              feature_summary_sha256=chain_summary_sha,
+              feature_entry_handoff_sha256=chain_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              price_path_handoff_sha256=chain_summary[
+                  "price_path_handoff_sha256"
+              ],
+          )
+          if rebuilt_chain != chain_handoff:
+              raise SystemExit(
+                  "Phase-3 chain-regime handoff content drift"
+              )
+          if chain_manifest.get("sha256") != chain_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 chain-regime manifest SHA drift"
+              )
+          if chain_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 chain-regime/entry linkage drift"
+              )
 
           price_rows_path = find_unique(
               price_root,
@@ -360,6 +440,8 @@ jobs:
           registry = build_phase3_feature_registry()
           registry_report = validate_phase3_feature_registry(registry)
           registry_sha = registry_report["registry_sha256"]
+          if chain_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 chain-regime registry SHA drift")
           if price_handoff["feature_registry_sha256"] != registry_sha:
               raise SystemExit("Phase-3 price registry SHA drift")
           if trade_handoff["feature_registry_sha256"] != registry_sha:
@@ -374,6 +456,10 @@ jobs:
                   subjects_manifest_path,
               ),
               {
+                  "chain_regime": iter_validated_jsonl(
+                      chain_rows_path,
+                      chain_manifest_path,
+                  ),
                   "price_drawdown": iter_validated_jsonl(
                       price_rows_path,
                       price_manifest_path,
@@ -384,11 +470,13 @@ jobs:
                   ),
               },
               {
+                  "chain_regime": chain_handoff,
                   "price_drawdown": price_handoff,
                   "trade_flow": trade_handoff,
               },
               feature_registry=registry,
               required_families=[
+                  "chain_regime",
                   "price_drawdown",
                   "trade_flow",
               ],
@@ -399,6 +487,10 @@ jobs:
                   os.environ["FEATURE_ENTRY_RUN_ID"]
               ),
               "feature_entry_handoff_sha256": entry_handoff_sha,
+              "chain_regime_run_id": int(
+                  os.environ["CHAIN_REGIME_RUN_ID"]
+              ),
+              "chain_regime_handoff_sha256": chain_handoff_sha,
               "price_feature_run_id": int(
                   os.environ["PRICE_FEATURE_RUN_ID"]
               ),
@@ -502,7 +594,7 @@ jobs:
             echo "- summary_sha256: ${SUMMARY_SHA256}"
             echo "- handoff_sha256: ${HANDOFF_SHA256}"
             echo "- feature_subjects: ${SUBJECTS}"
-            echo "- required_families: price_drawdown,trade_flow"
+            echo "- required_families: chain_regime,price_drawdown,trade_flow"
             echo "- matched_subject_coverage_equal: true"
             echo "- missingness_recorded: true"
             echo "- outcome_fields_exposed: false"
