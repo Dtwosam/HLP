@@ -20,6 +20,7 @@ from hlp.data.phase2_post_fanout import (
     validate_phase2_after_post_fanout_wave_completion_receipt,
     validate_phase2_after_post_fanout_wave_launch_receipt,
     validate_phase2_pre_selector_wave_completion,
+    validate_phase2_pre_selector_wave_completion_receipt,
     validate_phase2_pre_selector_wave_launch_receipt,
     validate_phase2_post_fanout_stage,
     validate_phase2_post_fanout_wave_completion,
@@ -658,3 +659,50 @@ def test_pre_selector_launch_receipt_validates_four_node_handoff():
     assert report["pre_selector_control_run_id"] == 16001
     assert report["target_runs_created"] == 4
     assert report["pools_fun_promotion_held_for_operator"] is True
+
+
+
+def pre_selector_completion_receipt():
+    return {
+        "version": "phase2-pre-selector-wave-completion-receipt-v1",
+        "pre_selector_completion_control_run_id": 17001,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ab" * 20,
+        "canonical_coverage_ledger_sha256": "cd" * 32,
+        "pre_selector_wave_launch_run_id": 17002,
+        "pre_selector_wave_artifact_digest": "sha256:" + "ef" * 32,
+        "verified_target_run_ids": {
+            node_id: 17100 + index
+            for index, node_id in enumerate(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        },
+        "node_dispatch_control_run_ids_consumed": list(range(17200, 17235)),
+        "planner_run_id": 17003,
+        "planner_artifact_digest": "sha256:" + "12" * 32,
+        "auto_node_ids": ["coverage:trench_today"],
+        "manual_promotion_node_ids": ["promote:pools_fun"],
+        "approval_node_ids": ["shared:direct_selector_freeze"],
+        "selector_manual_inputs": [
+            "expected_artifact_digest",
+            "expected_handoff_sha256",
+            "freeze_active_quote_liquidity_causal_v1",
+        ],
+        "pools_fun_promotion_held_for_operator": True,
+        "pre_selector_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def test_pre_selector_completion_receipt_validates_approval_handoff():
+    report = validate_phase2_pre_selector_wave_completion_receipt(
+        pre_selector_completion_receipt()
+    )
+    assert report["pre_selector_completion_control_run_id"] == 17001
+    assert report["auto_node_ids"] == ["coverage:trench_today"]
+    assert report["approval_node_ids"] == [
+        "shared:direct_selector_freeze"
+    ]
+    assert report["selector_approval_performed"] is False

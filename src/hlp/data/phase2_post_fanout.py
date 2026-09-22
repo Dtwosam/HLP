@@ -1492,3 +1492,152 @@ def validate_phase2_pre_selector_wave_launch_receipt(
         "canonical_ledger_write_authorized": False,
         "workflow_dispatch_performed": True,
     }
+
+
+
+def validate_phase2_pre_selector_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable handoff at the selector approval boundary."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-pre-selector-wave-completion-receipt-v1"
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector completion receipt version changed"
+        )
+
+    control_run_id = int(
+        row.get("pre_selector_completion_control_run_id") or 0
+    )
+    launch_run_id = int(row.get("pre_selector_wave_launch_run_id") or 0)
+    planner_run_id = int(row.get("planner_run_id") or 0)
+    if min(control_run_id, launch_run_id, planner_run_id) <= 0:
+        raise ValueError(
+            "Phase-2 pre-selector completion receipt run IDs must be positive"
+        )
+
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "Phase-2 pre-selector completion receipt branch is empty"
+        )
+    head_sha = _post_fanout_commit_sha(
+        row.get("execution_head_sha"),
+        label="Phase-2 pre-selector completion head",
+    )
+    ledger_sha = _post_fanout_sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Phase-2 pre-selector completion coverage ledger",
+    )
+    launch_digest = _post_fanout_artifact_digest(
+        row.get("pre_selector_wave_artifact_digest"),
+        label="Phase-2 pre-selector launch artifact",
+    )
+    planner_digest = _post_fanout_artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Phase-2 pre-selector completion planner artifact",
+    )
+
+    targets = _post_fanout_run_map(
+        row.get("verified_target_run_ids"),
+        label="Phase-2 pre-selector verified target runs",
+        expected_nodes=PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "Phase-2 pre-selector completion control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 35
+        or len(set(controls)) != 35
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "Phase-2 pre-selector completion requires exactly 35 unique "
+            "positive dispatcher control runs"
+        )
+
+    auto_nodes = row.get("auto_node_ids")
+    if auto_nodes != list(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS):
+        raise ValueError(
+            "Phase-2 pre-selector completion auto-node drift"
+        )
+    manual_nodes = row.get("manual_promotion_node_ids")
+    if manual_nodes != list(PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 pre-selector completion promotion-hold drift"
+        )
+    approval_nodes = row.get("approval_node_ids")
+    if approval_nodes != list(PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS):
+        raise ValueError(
+            "Phase-2 pre-selector completion approval-node drift"
+        )
+    expected_selector_manual = sorted([
+        "expected_artifact_digest",
+        "expected_handoff_sha256",
+        "freeze_active_quote_liquidity_causal_v1",
+    ])
+    actual_selector_manual = sorted(
+        str(value)
+        for value in row.get("selector_manual_inputs") or []
+    )
+    if actual_selector_manual != expected_selector_manual:
+        raise ValueError(
+            "Phase-2 pre-selector completion selector-input drift"
+        )
+    if row.get("pools_fun_promotion_held_for_operator") is not True:
+        raise ValueError(
+            "Phase-2 pre-selector completion did not hold pools.fun promotion"
+        )
+
+    for field in (
+        "pre_selector_targets_completed_successfully",
+        "planner_refreshed",
+    ):
+        if row.get(field) is not True:
+            raise ValueError(
+                f"Phase-2 pre-selector completion receipt violates {field}"
+            )
+    for field in (
+        "coverage_promotion_performed",
+        "selector_approval_performed",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Phase-2 pre-selector completion receipt violates {field}"
+            )
+
+    return {
+        "version": "phase2-pre-selector-wave-completion-receipt-v1",
+        "pre_selector_completion_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "pre_selector_wave_launch_run_id": launch_run_id,
+        "pre_selector_wave_artifact_digest": launch_digest,
+        "verified_target_run_ids": targets,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "auto_node_ids": list(PHASE2_AFTER_PRE_SELECTOR_AUTO_NODE_IDS),
+        "manual_promotion_node_ids": list(
+            PHASE2_AFTER_PRE_SELECTOR_MANUAL_NODE_IDS
+        ),
+        "approval_node_ids": list(
+            PHASE2_AFTER_PRE_SELECTOR_APPROVAL_NODE_IDS
+        ),
+        "selector_manual_inputs": actual_selector_manual,
+        "pools_fun_promotion_held_for_operator": True,
+        "pre_selector_targets_completed_successfully": True,
+        "planner_refreshed": True,
+        "coverage_promotion_performed": False,
+        "selector_approval_performed": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
