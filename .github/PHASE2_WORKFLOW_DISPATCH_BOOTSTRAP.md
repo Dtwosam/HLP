@@ -10,14 +10,14 @@ required workflow surface, permits only the planner's documented automatic-
 trigger removal, and publishes an exact workflow-surface digest plus the
 bootstrap HEAD it inspected.
 
-The bootstrap currently contains 45 Phase 2 workflow files:
+The bootstrap currently contains 46 Phase 2 workflow files:
 
-- 44 are byte-for-byte identical to the compatibility target;
+- 45 are byte-for-byte identical to the compatibility target;
 - `phase2-coverage-execution-plan.yml` keeps the exact same
   `workflow_dispatch` interface but intentionally removes its feature-branch
   `push` and `pull_request` triggers in this default-branch bootstrap copy.
 
-All 45 workflow files are manual-only on this branch: `workflow_dispatch`
+All 46 workflow files are manual-only on this branch: `workflow_dispatch`
 is present and no `push` or `pull_request` trigger is enabled.
 
 After this bootstrap is merged, dispatch Phase 2 workflows against
