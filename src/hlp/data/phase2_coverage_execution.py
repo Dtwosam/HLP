@@ -658,19 +658,21 @@ def _promotion_node(
     }
 
 
-def _manual_commit_node(source_id: str) -> dict:
+def _ledger_commit_node(source_id: str) -> dict:
     return {
         "node_id": f"ledger_commit:{source_id}",
-        "workflow": None,
-        "kind": "manual_ledger_commit",
+        "workflow": "phase2-source-coverage-ledger-commit.yml",
+        "kind": "coverage_ledger_commit",
         "depends_on": [f"promote:{source_id}"],
         "requires_archive_secret": False,
-        "requires_explicit_approval": False,
-        "manual_action": True,
+        "requires_explicit_approval": True,
+        "manual_action": False,
         "notes": (
-            "Review the proposed ledger and commit it to "
-            ".github/phase2-source-coverage.json, then regenerate this plan. "
-            "Do not mark this node completed through planner input."
+            "Explicitly approve the exact SHA-bound promotion proposal. "
+            "The commit workflow rejects a stale base-ledger SHA and writes "
+            "the canonical ledger atomically. After success, regenerate this "
+            "plan from the new canonical ledger instead of declaring this "
+            "node completed through planner input."
         ),
     }
 
@@ -738,15 +740,16 @@ def build_phase2_coverage_execution_plan(
             "Phase-2 execution plan has unknown completed nodes: "
             f"{unknown_completed}"
         )
-    manual_declared = sorted(
+    ledger_commit_declared = sorted(
         node_id
         for node_id in declared_set
         if node_id.startswith("ledger_commit:")
     )
-    if manual_declared:
+    if ledger_commit_declared:
         raise ValueError(
-            "manual ledger commits must be represented by the canonical "
-            f"ledger, not completed_node_ids: {manual_declared}"
+            "ledger commit completion must be represented by the canonical "
+            "ledger after the approved commit workflow succeeds, not "
+            f"completed_node_ids: {ledger_commit_declared}"
         )
 
     promotion_candidates = [
@@ -769,7 +772,7 @@ def build_phase2_coverage_execution_plan(
                 else None
             ),
         )
-        commit = _manual_commit_node(source_id)
+        commit = _ledger_commit_node(source_id)
         dynamic_rows.extend((promotion, commit))
         required_for[promotion["node_id"]] = {source_id}
         required_for[commit["node_id"]] = {source_id}
@@ -854,6 +857,13 @@ def build_phase2_coverage_execution_plan(
         row["node_id"] for row in output_rows
         if row["status"] == "manual_ledger_commit_required"
     ]
+    ledger_commit_approval = [
+        row["node_id"] for row in output_rows
+        if (
+            row["kind"] == "coverage_ledger_commit"
+            and row["status"] == "awaiting_explicit_approval"
+        )
+    ]
     blocked = [
         row["node_id"] for row in output_rows
         if row["status"] == "blocked_by_dependencies"
@@ -913,11 +923,14 @@ def build_phase2_coverage_execution_plan(
         ],
         "awaiting_explicit_approval_node_ids": approval,
         "manual_ledger_commit_node_ids": manual,
+        "ledger_commit_approval_node_ids": ledger_commit_approval,
         "blocked_node_ids": blocked,
         "completed_node_ids": completed,
         "coverage_acquisition_parallelizable": True,
         "ledger_promotion_serialized": True,
         "canonical_ledger_mutation_automatic": False,
+        "canonical_ledger_commit_workflow_available": True,
+        "ledger_commit_requires_explicit_approval": True,
         "canonical_ledger_is_source_of_truth": True,
         "operator_completion_assertions_are_planning_only": True,
         "workflow_dispatch_performed": False,
