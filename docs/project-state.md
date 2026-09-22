@@ -480,6 +480,13 @@ Current blockers before a chain-wide Phase-2 universe can be frozen:
   the three direct DEX sources, and identifies exactly which workflow nodes are
   ready, blocked, archive-secret dependent, awaiting explicit selector
   approval, or waiting for an explicitly approved canonical-ledger write.
+  Manual planner refreshes no longer trust bare completed-node names: they take
+  a node-to-run-ID map, fetch each exact GitHub Actions run, and grant completion
+  credit only when the run belongs to this repository and branch, matches the
+  DAG node's exact workflow path, was triggered by `workflow_dispatch`, and
+  completed successfully. Ledger-commit runs are deliberately excluded from
+  that receipt mechanism because a successful canonical write must instead be
+  visible in the source-of-truth coverage ledger after the planner regenerates.
   Coverage acquisition/derivation can run in parallel; canonical source
   promotion is deliberately serialized only among coverage reports that are
   actually ready. `phase2-source-coverage-promotion` remains read-only and now
