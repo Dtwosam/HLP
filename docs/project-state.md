@@ -232,6 +232,16 @@ Implemented foundation:
   pools.fun coverage workflow now publishes the exact run ID, artifact digest,
   report path and report SHA needed to feed that promotion handoff without
   reconstructing identities by hand;
+- the deterministic Phase-2 exclusion registry is now implemented as a
+  dispatch-only evidence path. It always excludes canonical WETH and USDG by
+  configured address and freezes every Robinhood Chain deployment returned by
+  Robinhood's official RHJ asset registry as a canonical non-memecoin asset.
+  Matching is **exact normalized address only**; symbol/name heuristics and
+  broader asset-class guesses are explicitly forbidden. The workflow preserves
+  the official canonical-asset snapshot, binds its SHA into the exclusion
+  registry, and publishes registry/summary/artifact identities while keeping
+  `phase2_universe_frozen=false` until chain-wide source coverage and the
+  later universe gate are actually complete;
 - the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
   handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
   **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;

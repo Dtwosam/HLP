@@ -1,0 +1,138 @@
+name: phase2-exclusion-registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-exclusion-registry-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Freeze deterministic address exclusions
+        id: freeze
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_exclusions import (
+              build_phase2_exclusion_registry,
+          )
+          from hlp.data.robinhood_assets import (
+              DEFAULT_RHJ_ASSETS_URL,
+              RobinhoodAssetsClient,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          client = RobinhoodAssetsClient(
+              timeout=20,
+              attempts=4,
+              backoff_seconds=0.5,
+          )
+          official = client.canonical_chain_assets()
+          official_manifest = write_jsonl_snapshot(
+              official,
+              output=Path(
+                  "artifacts/robinhood-canonical-assets.jsonl"
+              ),
+              provenance={
+                  "source": "official_robinhood_rhj_assets",
+                  "url": DEFAULT_RHJ_ASSETS_URL,
+                  "chain_id": 4663,
+                  "identity_semantics": (
+                      "contract address deployment on chain 4663"
+                  ),
+              },
+          )
+
+          rows, summary = build_phase2_exclusion_registry(official)
+          registry_manifest = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/phase2-exclusion-registry.jsonl"
+              ),
+              provenance={
+                  "source": "phase2_deterministic_exclusion_registry",
+                  "chain_id": 4663,
+                  "official_assets_sha256": official_manifest["sha256"],
+                  "matching_semantics": (
+                      "exact_normalized_address_only"
+                  ),
+              },
+          )
+          summary = {
+              **summary,
+              "official_assets_sha256": official_manifest["sha256"],
+              "exclusion_registry_sha256": registry_manifest["sha256"],
+              "official_asset_requests": client.requests_made,
+              "official_asset_bytes": client.bytes_received,
+              "registry_acceptance_ready": True,
+              "phase2_universe_frozen": False,
+          }
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path = Path(
+              "artifacts/phase2-exclusion-registry-summary.json"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode("utf-8")
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"registry_sha256={registry_manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+          print(json.dumps(summary, sort_keys=True))
+          PY
+
+      - name: Upload exclusion registry evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-exclusion-registry
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish exclusion-registry identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REGISTRY_SHA256: ${{ steps.freeze.outputs.registry_sha256 }}
+          SUMMARY_SHA256: ${{ steps.freeze.outputs.summary_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REGISTRY_SHA256}"
+          test -n "${SUMMARY_SHA256}"
+          {
+            echo "## Phase 2 deterministic exclusions"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-exclusion-registry"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- registry_sha256: ${REGISTRY_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- matching: exact normalized address only"
+            echo "- phase2_universe_frozen: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
