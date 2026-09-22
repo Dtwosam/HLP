@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from hlp.data.phase2_bootstrap_readiness import (
@@ -157,3 +159,20 @@ def test_bootstrap_readiness_rejects_automatic_trigger_or_planner_job_drift():
     assert PHASE2_PLANNER_WORKFLOW in report[
         "content_mismatch_workflow_names"
     ]
+
+
+
+BOOTSTRAP_WORKFLOW = Path(
+    ".github/workflows/phase2-bootstrap-workflow-compatibility.yml"
+)
+
+
+def test_bootstrap_compatibility_workflow_binds_exact_inspected_surface():
+    text = BOOTSTRAP_WORKFLOW.read_text()
+
+    assert "bootstrap_head_sha" in text
+    assert "bootstrap_workflow_surface_sha256" in text
+    assert "surface_hasher = hashlib.sha256()" in text
+    assert "surface_sha256=" in text
+    assert "exact_or_allowed_variant_workflows" in text
+    assert "Enforce bootstrap compatibility" in text
