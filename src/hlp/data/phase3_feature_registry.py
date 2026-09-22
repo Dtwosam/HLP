@@ -860,6 +860,72 @@ def build_phase3_feature_registry() -> list[dict]:
             "data_dependency": "phase3_transfer_token_coverage",
             "missingness_policy": "error_if_missing",
         },
+        {
+            "feature_id": "early.cohort_size",
+            "family": "early_recipient_activity",
+            "dtype": "integer",
+            "formula": (
+                "count of the first up to 10 distinct nonzero addresses to "
+                "receive a positive ERC-20 transfer through the cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "early.cohort_nonzero_balance_count",
+            "family": "early_recipient_activity",
+            "dtype": "integer",
+            "formula": (
+                "count of early-recipient cohort addresses with positive "
+                "ERC-20 balance at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "early.cohort_retention_share",
+            "family": "early_recipient_activity",
+            "dtype": "decimal_string",
+            "formula": (
+                "early-recipient cohort addresses with positive cutoff "
+                "balance divided by early-recipient cohort size"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "early.cohort_current_supply_share",
+            "family": "early_recipient_activity",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of early-recipient cohort balances divided by accounted "
+                "ERC-20 supply at the confirmation cutoff"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "early.cohort_received_supply_multiple_so_far",
+            "family": "early_recipient_activity",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of positive token value received by early-recipient "
+                "cohort addresses through cutoff divided by cutoff supply"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
+        {
+            "feature_id": "early.cohort_sent_supply_multiple_so_far",
+            "family": "early_recipient_activity",
+            "dtype": "decimal_string",
+            "formula": (
+                "sum of positive token value sent by early-recipient cohort "
+                "addresses through cutoff divided by cutoff supply"
+            ),
+            "data_dependency": "phase3_canonical_transfer_tape",
+            "missingness_policy": "error_if_missing",
+        },
     ]
     return [
         {
