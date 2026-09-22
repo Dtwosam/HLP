@@ -857,11 +857,11 @@ jobs:
             --input "inputs/raw/direct-v3-swap-${SHARD}.jsonl" \
             --out "artifacts/trench-v3-swaps-${SHARD}.jsonl" \
             --summary-out "artifacts/trench-v3-filter-${SHARD}.json"
-          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
-            CHUNK=50000
-          else
-            CHUNK=200
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
           fi
+          CHUNK=50000
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             phase2-trench-v3-market-window \
             --registry inputs/setup/trench-v3-handoff-registry.jsonl \
@@ -995,11 +995,11 @@ jobs:
             --input "inputs/raw/direct-v4-swap-${SHARD}.jsonl" \
             --out "artifacts/trench-v4-swaps-${SHARD}.jsonl" \
             --summary-out "artifacts/trench-v4-filter-${SHARD}.json"
-          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
-            CHUNK=50000
-          else
-            CHUNK=200
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
           fi
+          CHUNK=50000
           hlp --timeout 30 --attempts 5 --min-interval 0.1 \
             phase2-trench-v4-market-window \
             --registry inputs/setup/trench-v4-handoff-registry.jsonl \
