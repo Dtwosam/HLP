@@ -341,12 +341,12 @@ jobs:
               )
               if run.get("status") != "completed":
                   raise SystemExit(
-                      f"post-fan-out target not completed: "
+                      f"after-post-fan-out target not completed: "
                       f"{node_id} -> {target_run_id}"
                   )
               if run.get("conclusion") != "success":
                   raise SystemExit(
-                      f"post-fan-out target failed: {node_id} -> "
+                      f"after-post-fan-out target failed: {node_id} -> "
                       f"{target_run_id}: {run.get('conclusion')!r}"
                   )
 
