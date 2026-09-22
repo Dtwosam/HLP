@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from typing import Iterable, Mapping
 
 from hlp.config import normalize_address
@@ -15,6 +16,7 @@ from hlp.data.transaction_identity import attach_transaction_identities
 
 PHASE3_PONS_TRADE_ADAPTER_VERSION = "phase3-pons-trade-adapter-v1"
 PHASE3_AMM_TRADE_ADAPTER_VERSION = "phase3-amm-trade-adapter-v1"
+PHASE3_CURVE_TRADE_ADAPTER_VERSION = "phase3-curve-trade-adapter-v1"
 
 
 def _event_key(row: Mapping[str, object]) -> tuple[int, int, int]:
@@ -110,7 +112,10 @@ def adapt_pons_trades_to_phase3(
 
 
 
-def _source_inventory_row(source_id: str, required_phase: str) -> dict:
+def _source_inventory_row(
+    source_id: str,
+    required_phase: str | Iterable[str],
+) -> dict:
     rows = {
         str(row["source_id"]): dict(row)
         for row in build_phase2_source_inventory()
@@ -120,9 +125,16 @@ def _source_inventory_row(source_id: str, required_phase: str) -> dict:
         raise ValueError(
             f"unknown Phase-3 AMM trade source id: {source_id}"
         )
-    if required_phase not in set(source.get("market_phases") or []):
+    required = (
+        {required_phase}
+        if isinstance(required_phase, str)
+        else {str(value) for value in required_phase}
+    )
+    advertised = set(source.get("market_phases") or [])
+    if not (required & advertised):
         raise ValueError(
-            f"{source_id} does not advertise {required_phase}"
+            f"{source_id} does not advertise any of "
+            f"{sorted(required)}"
         )
     return source
 
@@ -246,7 +258,10 @@ def adapt_v3_swaps_to_phase3(
 ) -> list[dict]:
     """Adapt raw V3/Sushi V3 swaps using tx.from as the wallet identity."""
 
-    source = _source_inventory_row(source_id, "uniswap_v3")
+    source = _source_inventory_row(
+        source_id,
+        ("uniswap_v3", "sushiswap_v3"),
+    )
     markets = _market_map(
         market_rows,
         key_field="pool",
@@ -337,6 +352,321 @@ def adapt_v4_swaps_to_phase3(
         if identity in seen:
             raise ValueError(
                 f"Phase-3 V4 trade repeats token event: {identity}"
+            )
+        seen.add(identity)
+        output.append(canonical)
+    output.sort(
+        key=lambda row: (
+            *_event_key(row),
+            row["token"],
+            row["source_id"],
+        )
+    )
+    return output
+
+
+
+def _as_row(raw: object) -> dict:
+    if is_dataclass(raw):
+        return asdict(raw)
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    raise TypeError(
+        f"unsupported Phase-3 curve trade row: {type(raw)!r}"
+    )
+
+
+def _canonical_curve_trade(
+    row: Mapping[str, object],
+    *,
+    source_id: str,
+    venue: str,
+    side: str,
+    token_amount_raw: int,
+    quote_amount_raw: int,
+    quote_token: str,
+) -> dict:
+    token = normalize_address(str(row.get("token") or ""))
+    quote = normalize_address(str(quote_token))
+    event = _event_key(row)
+    if side not in {"buy", "sell"}:
+        raise ValueError("Phase-3 curve trade side is invalid")
+    token_amount = int(token_amount_raw)
+    quote_amount = int(quote_amount_raw)
+    if token_amount <= 0 or quote_amount <= 0:
+        raise ValueError(
+            "Phase-3 curve trade amounts must be positive"
+        )
+    transaction_hash = str(
+        row.get("transaction_hash") or ""
+    ).lower()
+    if not transaction_hash.startswith("0x") or len(
+        transaction_hash
+    ) != 66:
+        raise ValueError(
+            "Phase-3 curve trade transaction hash is invalid"
+        )
+    protocol_actor = row.get("actor")
+    canonical = {
+        "version": PHASE3_CANONICAL_TRADE_VERSION,
+        "adapter_version": PHASE3_CURVE_TRADE_ADAPTER_VERSION,
+        "token": token,
+        "source_id": source_id,
+        "venue": venue,
+        "phase": "curve",
+        "side": side,
+        "initiator": normalize_address(
+            str(row.get("initiator") or "")
+        ),
+        "protocol_actor": (
+            None
+            if protocol_actor is None
+            else normalize_address(str(protocol_actor))
+        ),
+        "transaction_hash": transaction_hash,
+        "transaction_to": row.get("transaction_to"),
+        "input_selector": row.get("input_selector"),
+        "block_number": event[0],
+        "block_timestamp": (
+            None
+            if row.get("block_timestamp") is None
+            else int(row["block_timestamp"])
+        ),
+        "transaction_index": (
+            None if event[1] == -1 else event[1]
+        ),
+        "log_index": event[2],
+        "token_amount_raw": token_amount,
+        "quote_amount_raw": quote_amount,
+        "quote_token": quote,
+        "canonical_phase3_trade": True,
+        "outcome_derived": False,
+    }
+    return validate_phase3_canonical_trade_row(canonical)
+
+
+def adapt_flap_trades_to_phase3(
+    curve_rows: Iterable[Mapping[str, object]],
+    transaction_rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Adapt Flap TokenBought/TokenSold rows using tx.from identity."""
+
+    source = _source_inventory_row("flap", "bonding_curve")
+    trades = []
+    for raw in curve_rows:
+        row = _as_row(raw)
+        if row.get("event_type") in {"token_bought", "token_sold"}:
+            trades.append(row)
+    enriched = attach_transaction_identities(
+        trades,
+        transaction_rows,
+        label="Flap trade",
+    )
+
+    output = []
+    seen = set()
+    for row in enriched:
+        event_type = str(row.get("event_type") or "")
+        side = "buy" if event_type == "token_bought" else "sell"
+        quote_token = row.get("quote_token")
+        if quote_token is None:
+            raise ValueError(
+                "Flap Phase-3 trade has no quote token"
+            )
+        canonical = _canonical_curve_trade(
+            row,
+            source_id="flap",
+            venue=str(source["venue"]),
+            side=side,
+            token_amount_raw=int(row.get("amount_raw") or 0),
+            quote_amount_raw=int(
+                row.get("quote_amount_raw") or 0
+            ),
+            quote_token=str(quote_token),
+        )
+        identity = (
+            canonical["token"],
+            *_event_key(canonical),
+        )
+        if identity in seen:
+            raise ValueError(
+                f"Flap Phase-3 trade repeats token event: {identity}"
+            )
+        seen.add(identity)
+        output.append(canonical)
+    output.sort(
+        key=lambda row: (
+            *_event_key(row),
+            row["token"],
+            row["source_id"],
+        )
+    )
+    return output
+
+
+def adapt_hood_fun_trades_to_phase3(
+    curve_rows: Iterable[Mapping[str, object]],
+    transaction_rows: Iterable[Mapping[str, object]],
+    *,
+    source_id: str,
+) -> list[dict]:
+    """Adapt current/previous hood.fun trade rows using tx.from identity."""
+
+    if source_id not in {
+        "hood_fun_current",
+        "hood_fun_previous",
+    }:
+        raise ValueError(
+            f"unsupported hood.fun Phase-3 source id: {source_id}"
+        )
+    source = _source_inventory_row(
+        source_id,
+        ("bonding_curve", "curve"),
+    )
+    trades = []
+    for raw in curve_rows:
+        row = _as_row(raw)
+        if row.get("event_type") == "trade":
+            generation = row.get("generation")
+            if generation is not None:
+                expected = (
+                    "current"
+                    if source_id == "hood_fun_current"
+                    else "previous"
+                )
+                if str(generation) != expected:
+                    raise ValueError(
+                        f"{source_id} hood.fun generation drift: "
+                        f"{generation}"
+                    )
+            trades.append(row)
+    enriched = attach_transaction_identities(
+        trades,
+        transaction_rows,
+        label="hood.fun trade",
+    )
+
+    output = []
+    seen = set()
+    for row in enriched:
+        is_buy = row.get("is_buy")
+        if is_buy not in {True, False}:
+            raise ValueError(
+                "hood.fun Phase-3 trade is_buy is invalid"
+            )
+        quote_token = row.get("quote_token")
+        if quote_token is None:
+            raise ValueError(
+                "hood.fun Phase-3 trade has no quote token"
+            )
+        canonical = _canonical_curve_trade(
+            row,
+            source_id=source_id,
+            venue=str(source["venue"]),
+            side="buy" if is_buy else "sell",
+            token_amount_raw=int(
+                row.get("token_amount_raw") or 0
+            ),
+            quote_amount_raw=int(
+                row.get("quote_amount_raw") or 0
+            ),
+            quote_token=str(quote_token),
+        )
+        identity = (
+            canonical["token"],
+            *_event_key(canonical),
+        )
+        if identity in seen:
+            raise ValueError(
+                "hood.fun Phase-3 trade repeats token event: "
+                f"{identity}"
+            )
+        seen.add(identity)
+        output.append(canonical)
+    output.sort(
+        key=lambda row: (
+            *_event_key(row),
+            row["token"],
+            row["source_id"],
+        )
+    )
+    return output
+
+
+def adapt_trench_trades_to_phase3(
+    event_rows: Iterable[object],
+    registry_rows: Iterable[Mapping[str, object]],
+    transaction_rows: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Adapt trench.today purchase/sale events using frozen launch quotes."""
+
+    source = _source_inventory_row(
+        "trench_today",
+        "bonding_curve",
+    )
+    registry = {}
+    for raw in registry_rows:
+        row = dict(raw)
+        token = normalize_address(str(row.get("token") or ""))
+        quote = normalize_address(
+            str(row.get("quote_token") or "")
+        )
+        if token in registry:
+            raise ValueError(
+                f"trench.today Phase-3 registry repeats token: {token}"
+            )
+        registry[token] = quote
+    if not registry:
+        raise ValueError("trench.today Phase-3 registry is empty")
+
+    trades = []
+    for raw in event_rows:
+        row = _as_row(raw)
+        if row.get("event_type") in {
+            "token_purchase",
+            "token_sale",
+        }:
+            trades.append(row)
+    enriched = attach_transaction_identities(
+        trades,
+        transaction_rows,
+        label="trench.today trade",
+    )
+
+    output = []
+    seen = set()
+    for row in enriched:
+        token = normalize_address(str(row.get("token") or ""))
+        quote = registry.get(token)
+        if quote is None:
+            raise KeyError(
+                "trench.today Phase-3 trade token absent from registry: "
+                f"{token}"
+            )
+        event_type = str(row.get("event_type") or "")
+        canonical = _canonical_curve_trade(
+            row,
+            source_id="trench_today",
+            venue=str(source["venue"]),
+            side=(
+                "buy"
+                if event_type == "token_purchase"
+                else "sell"
+            ),
+            token_amount_raw=int(row.get("amount_raw") or 0),
+            quote_amount_raw=int(
+                row.get("quote_amount_raw") or 0
+            ),
+            quote_token=quote,
+        )
+        identity = (
+            canonical["token"],
+            *_event_key(canonical),
+        )
+        if identity in seen:
+            raise ValueError(
+                "trench.today Phase-3 trade repeats token event: "
+                f"{identity}"
             )
         seen.add(identity)
         output.append(canonical)
