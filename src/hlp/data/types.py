@@ -90,6 +90,32 @@ class HoodFunEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class CcaBidSubmitted:
+    auction: str
+    bid_id: int
+    owner: str
+    price_q96: int
+    amount_raw: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class CcaBidExited:
+    auction: str
+    bid_id: int
+    owner: str
+    tokens_filled_raw: int
+    currency_refunded_raw: int
+    block_number: int
+    transaction_hash: str
+    transaction_index: int | None
+    log_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class CcaPriceEvent:
     auction: str
     event_type: str

@@ -1,10 +1,14 @@
 from hlp.config import normalize_address
 from hlp.data.types import RawLog
 from hlp.protocols.pools_trade_lbp import (
+    CCA_BID_EXITED_TOPIC,
+    CCA_BID_SUBMITTED_TOPIC,
     CCA_CHECKPOINT_TOPIC,
     CCA_CLEARING_PRICE_TOPIC,
     INITIALIZER_CREATED_TOPIC,
     POOLS_TRADE_LBP_STRATEGY,
+    decode_pools_trade_cca_bid_exited,
+    decode_pools_trade_cca_bid_submitted,
     decode_pools_trade_cca_price_event,
     decode_pools_trade_lbp_initializer_created,
 )
@@ -136,3 +140,55 @@ def test_decode_observed_cca_checkpoint_event():
     assert row.checkpoint_block == 30_001_805
     assert row.clearing_price_x96 == 41_616_825_089_465_157_800
     assert row.cumulative_mps == 3_264
+
+
+
+def test_decode_cca_bid_submitted_uses_event_owner_not_tx_sender():
+    owner = "0x" + "55" * 20
+    log = RawLog(
+        chain_id=4663,
+        block_number=30_493_314,
+        block_hash=None,
+        transaction_hash="0x" + "cc" * 32,
+        transaction_index=8,
+        log_index=46,
+        address=INITIALIZER,
+        topics=(
+            CCA_BID_SUBMITTED_TOPIC,
+            "0x" + word(7),
+            topic_addr(owner),
+        ),
+        data="0x" + word(79_228_162_514_264_337_593_543_000) + word(100_500_000_000_000),
+        removed=False,
+    )
+    row = decode_pools_trade_cca_bid_submitted(log)
+    assert row.auction == INITIALIZER
+    assert row.bid_id == 7
+    assert row.owner == owner
+    assert row.price_q96 == 79_228_162_514_264_337_593_543_000
+    assert row.amount_raw == 100_500_000_000_000
+
+
+def test_decode_cca_bid_exited_has_exact_fill_and_refund():
+    owner = "0x" + "55" * 20
+    log = RawLog(
+        chain_id=4663,
+        block_number=30_494_000,
+        block_hash=None,
+        transaction_hash="0x" + "dd" * 32,
+        transaction_index=1,
+        log_index=9,
+        address=INITIALIZER,
+        topics=(
+            CCA_BID_EXITED_TOPIC,
+            "0x" + word(7),
+            topic_addr(owner),
+        ),
+        data="0x" + word(25 * 10**18) + word(500_000),
+        removed=False,
+    )
+    row = decode_pools_trade_cca_bid_exited(log)
+    assert row.bid_id == 7
+    assert row.owner == owner
+    assert row.tokens_filled_raw == 25 * 10**18
+    assert row.currency_refunded_raw == 500_000

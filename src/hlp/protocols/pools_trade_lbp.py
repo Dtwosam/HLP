@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from hlp.config import normalize_address
-from hlp.data.types import CcaPriceEvent, PoolsTradeLbpInitializerCreated, RawLog
+from hlp.data.types import (
+    CcaBidExited,
+    CcaBidSubmitted,
+    CcaPriceEvent,
+    PoolsTradeLbpInitializerCreated,
+    RawLog,
+)
 from hlp.protocols.evm import data_words, event_topic, signed_word, topic_address, word_address
 
 
@@ -26,6 +32,10 @@ CCA_CLEARING_PRICE_TOPIC = (
 CCA_CHECKPOINT_TOPIC = (
     "0xf1e4b6d7d0d7c5deb6393a39862d66a2f2ecb034f3283a8a597f9bf0c36f76fa"
 )
+CCA_BID_SUBMITTED_SIG = "BidSubmitted(uint256,address,uint256,uint128)"
+CCA_BID_EXITED_SIG = "BidExited(uint256,address,uint256,uint256)"
+CCA_BID_SUBMITTED_TOPIC = event_topic(CCA_BID_SUBMITTED_SIG)
+CCA_BID_EXITED_TOPIC = event_topic(CCA_BID_EXITED_SIG)
 CCA_PRICE_TOPICS = (
     CCA_CLEARING_PRICE_TOPIC,
     CCA_CHECKPOINT_TOPIC,
@@ -109,6 +119,69 @@ def decode_pools_trade_cca_price_event(log: RawLog) -> CcaPriceEvent:
         checkpoint_block=checkpoint_block,
         clearing_price_x96=clearing_price_x96,
         cumulative_mps=cumulative_mps,
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+
+def decode_pools_trade_cca_bid_submitted(log: RawLog) -> CcaBidSubmitted:
+    """Decode one CCA bid submission with the event owner as bidder identity."""
+
+    if not log.topics or log.topics[0] != CCA_BID_SUBMITTED_TOPIC:
+        raise ValueError("not pools.trade CCA BidSubmitted")
+    if len(log.topics) != 3:
+        raise ValueError("unexpected pools.trade CCA BidSubmitted topic count")
+    words = data_words(log.data)
+    if len(words) != 2:
+        raise ValueError("unexpected pools.trade CCA BidSubmitted data length")
+
+    bid_id = int(log.topics[1], 16)
+    owner = topic_address(log.topics[2])
+    price_q96, amount_raw = words
+    if price_q96 <= 0:
+        raise ValueError("pools.trade CCA bid price must be positive")
+    if amount_raw <= 0 or amount_raw >= 1 << 128:
+        raise ValueError("pools.trade CCA bid amount is invalid")
+
+    return CcaBidSubmitted(
+        auction=normalize_address(log.address),
+        bid_id=bid_id,
+        owner=owner,
+        price_q96=price_q96,
+        amount_raw=amount_raw,
+        block_number=log.block_number,
+        transaction_hash=log.transaction_hash,
+        transaction_index=log.transaction_index,
+        log_index=log.log_index,
+    )
+
+
+def decode_pools_trade_cca_bid_exited(log: RawLog) -> CcaBidExited:
+    """Decode exact finalized fill/refund amounts for one CCA bid."""
+
+    if not log.topics or log.topics[0] != CCA_BID_EXITED_TOPIC:
+        raise ValueError("not pools.trade CCA BidExited")
+    if len(log.topics) != 3:
+        raise ValueError("unexpected pools.trade CCA BidExited topic count")
+    words = data_words(log.data)
+    if len(words) != 2:
+        raise ValueError("unexpected pools.trade CCA BidExited data length")
+
+    bid_id = int(log.topics[1], 16)
+    owner = topic_address(log.topics[2])
+    tokens_filled_raw, currency_refunded_raw = words
+    if tokens_filled_raw < 0 or currency_refunded_raw < 0:
+        raise ValueError("pools.trade CCA exit amounts are invalid")
+
+    return CcaBidExited(
+        auction=normalize_address(log.address),
+        bid_id=bid_id,
+        owner=owner,
+        tokens_filled_raw=tokens_filled_raw,
+        currency_refunded_raw=currency_refunded_raw,
         block_number=log.block_number,
         transaction_hash=log.transaction_hash,
         transaction_index=log.transaction_index,
