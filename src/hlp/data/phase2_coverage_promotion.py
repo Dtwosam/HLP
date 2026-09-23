@@ -2994,3 +2994,129 @@ def validate_phase2_doppler_post_commit_frontier(
         "canonical_ledger_advanced": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+
+def validate_phase2_doppler_ledger_approved_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 6/14 handoff after Doppler commit."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-doppler-ledger-approved-receipt-v1"
+    ):
+        raise ValueError("Doppler approved-ledger receipt version changed")
+    control_run_id = _positive_run_id(
+        row.get("ledger_approval_control_run_id"),
+        label="Doppler ledger approval control run ID",
+    )
+    proposal_run_id = _positive_run_id(
+        row.get("promotion_proposal_run_id"),
+        label="Doppler proposal run ID",
+    )
+    ledger_run_id = _positive_run_id(
+        row.get("ledger_commit_run_id"),
+        label="Doppler ledger commit run ID",
+    )
+    selector_run_id = _positive_run_id(
+        row.get("selector_run_id"),
+        label="Doppler selector run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="Doppler post-commit planner run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("Doppler approved-ledger branch is empty")
+    approval_head = _commit_sha(
+        row.get("approval_execution_head_sha"),
+        label="Doppler approval execution head",
+    )
+    proposal_digest = _artifact_digest(
+        row.get("promotion_proposal_artifact_digest"),
+        label="Doppler proposal artifact digest",
+    )
+    ledger_digest = _artifact_digest(
+        row.get("ledger_commit_artifact_digest"),
+        label="Doppler ledger commit artifact digest",
+    )
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="Doppler canonical ledger commit",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="Doppler approved base ledger",
+    )
+    canonical_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Doppler approved canonical ledger",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Doppler post-commit planner artifact digest",
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError("Doppler approved control-run list is missing")
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 44
+        or len(set(controls)) != 44
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "Doppler approved handoff requires exactly 44 control runs"
+        )
+    expected_complete = [
+        "doppler",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    if row.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("Doppler approved canonical source set drift")
+    if row.get("next_promotion_node_id") != "promote:flap":
+        raise ValueError("Doppler approved next promotion drift")
+    if row.get("human_approval_input") != "apply_doppler_ledger":
+        raise ValueError("Doppler approved human-input identity drift")
+    if row.get("human_approval_value") is not True:
+        raise ValueError(
+            "Doppler approved receipt lacks affirmative approval"
+        )
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("Doppler approved receipt lacks ledger mutation")
+    if row.get("automatic_acquisition_complete") is not True:
+        raise ValueError("Doppler approved receipt lost acquisition proof")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError(
+            "Doppler approved receipt unexpectedly closes Phase 2"
+        )
+    return {
+        **row,
+        "ledger_approval_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "approval_execution_head_sha": approval_head,
+        "promotion_proposal_run_id": proposal_run_id,
+        "promotion_proposal_artifact_digest": proposal_digest,
+        "ledger_commit_run_id": ledger_run_id,
+        "ledger_commit_artifact_digest": ledger_digest,
+        "canonical_ledger_commit_sha": commit_sha,
+        "base_ledger_sha256": base_sha,
+        "canonical_coverage_ledger_sha256": canonical_sha,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "selector_run_id": selector_run_id,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_complete_source_ids": expected_complete,
+        "next_promotion_node_id": "promote:flap",
+        "human_approval_input": "apply_doppler_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }

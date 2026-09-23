@@ -25,10 +25,10 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_pools_trade_lbp_ledger_commit_receipt,
     validate_phase2_pools_trade_lbp_ledger_approved_receipt,
     validate_phase2_pools_trade_lbp_post_commit_frontier,
-    validate_phase2_pools_trade_lbp_ledger_approved_receipt,
     validate_phase2_doppler_promotion_review_receipt,
     validate_phase2_doppler_promotion_proposal_receipt,
     validate_phase2_doppler_ledger_commit_receipt,
+    validate_phase2_doppler_ledger_approved_receipt,
     validate_phase2_doppler_post_commit_frontier,
     validate_phase2_pools_trade_instant_post_commit_frontier,
 )
@@ -1493,3 +1493,61 @@ def test_doppler_post_commit_frontier_unlocks_flap_only():
     assert report["active_completed_execution_nodes"] == 37
     assert report["node_dispatch_control_runs_consumed"] == 44
     assert report["next_promotion_node_id"] == "promote:flap"
+
+
+
+def doppler_ledger_approved_receipt():
+    return {
+        "version": "phase2-doppler-ledger-approved-receipt-v1",
+        "ledger_approval_control_run_id": 1701,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "approval_execution_head_sha": "11" * 20,
+        "promotion_proposal_run_id": 1702,
+        "promotion_proposal_artifact_digest": "sha256:" + "22" * 32,
+        "ledger_commit_run_id": 1703,
+        "ledger_commit_artifact_digest": "sha256:" + "33" * 32,
+        "canonical_ledger_commit_sha": "44" * 20,
+        "base_ledger_sha256": "55" * 32,
+        "canonical_coverage_ledger_sha256": "66" * 32,
+        "node_dispatch_control_run_ids_consumed": list(range(1800, 1844)),
+        "selector_run_id": 1704,
+        "planner_run_id": 1705,
+        "planner_artifact_digest": "sha256:" + "77" * 32,
+        "canonical_complete_source_ids": [
+            "doppler",
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+            "pools_trade_lbp",
+        ],
+        "next_promotion_node_id": "promote:flap",
+        "human_approval_input": "apply_doppler_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+def test_doppler_approved_receipt_validates_6_of_14_handoff():
+    report = validate_phase2_doppler_ledger_approved_receipt(
+        doppler_ledger_approved_receipt()
+    )
+    assert report["canonical_ledger_commit_sha"] == "44" * 20
+    assert report["next_promotion_node_id"] == "promote:flap"
+    assert len(report["node_dispatch_control_run_ids_consumed"]) == 44
+
+
+def test_doppler_approved_receipt_rejects_wrong_source_order():
+    row = doppler_ledger_approved_receipt()
+    row["canonical_complete_source_ids"] = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "doppler",
+    ]
+    with pytest.raises(ValueError, match="canonical source set drift"):
+        validate_phase2_doppler_ledger_approved_receipt(row)
