@@ -1,0 +1,409 @@
+name: phase2-flap-promotion-review
+
+on:
+  workflow_dispatch:
+    inputs:
+      doppler_ledger_approval_run_id:
+        description: Exact successful phase2-doppler-ledger-approved workflow_dispatch run ID
+        required: true
+        type: string
+      expected_approval_artifact_digest:
+        description: Exact Flap approved-ledger handoff artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_prepare_review:
+        description: Explicitly prepare exact Flap promotion inputs without dispatching promotion
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-flap-promotion-review-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOPPLER_LEDGER_APPROVAL_RUN_ID: ${{ inputs.doppler_ledger_approval_run_id }}
+  EXPECTED_APPROVAL_ARTIFACT_DIGEST: ${{ inputs.expected_approval_artifact_digest }}
+  CONFIRM_PREPARE_REVIEW: ${{ inputs.confirm_prepare_review }}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit read-only review preparation
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_PREPARE_REVIEW}" != "true" ]; then
+            echo "Flap promotion review requires confirm_prepare_review=true" >&2
+            exit 1
+          fi
+
+      - id: review
+        name: Verify 6/14 frontier and prepare exact Flap inputs
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_promotion import (
+              FLAP_COVERAGE_ARTIFACT,
+              FLAP_COVERAGE_REPORT_PATH,
+              FLAP_COVERAGE_WORKFLOW,
+              build_phase2_flap_promotion_review_handoff,
+              validate_phase2_doppler_ledger_approved_receipt,
+              validate_phase2_doppler_post_commit_frontier,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args):
+              raw = subprocess.check_output([
+                  "gh", "api",
+                  "-H", "Accept: application/vnd.github+json",
+                  "-H", f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ])
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_base(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(f"run {run_id} workflow identity drift")
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(f"run {run_id} is not workflow_dispatch")
+              if run.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} branch identity drift")
+              if run.get("status") != "completed":
+                  raise SystemExit(f"run {run_id} is not completed")
+              if run.get("conclusion") != "success":
+                  raise SystemExit(f"run {run_id} did not succeed")
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(path),
+              ])
+              return path
+
+          try:
+              approval_run_id = int(
+                  os.environ["DOPPLER_LEDGER_APPROVAL_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "doppler_ledger_approval_run_id is invalid"
+              ) from exc
+          if approval_run_id <= 0:
+              raise SystemExit(
+                  "doppler_ledger_approval_run_id must be positive"
+              )
+          expected_digest = str(
+              os.environ["EXPECTED_APPROVAL_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_approval_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+
+          approval_workflow = "phase2-doppler-ledger-approved.yml"
+          approval_run = get_run(approval_run_id)
+          assert_run_base(
+              approval_run,
+              workflow=approval_workflow,
+              run_id=approval_run_id,
+          )
+          approval_artifact_name = "phase2-doppler-ledger-approved"
+          approval_artifact = artifact_row(
+              approval_run_id,
+              approval_artifact_name,
+          )
+          actual_digest = str(
+              approval_artifact.get("digest") or ""
+          ).lower()
+          if actual_digest != expected_digest:
+              raise SystemExit(
+                  "Doppler approved-ledger artifact digest drift"
+              )
+          approval_dir = download_artifact(
+              approval_run_id,
+              approval_artifact_name,
+              "upstream/doppler-approved-ledger",
+          )
+          approval_path = (
+              approval_dir
+              / "phase2-doppler-ledger-approved-receipt.json"
+          )
+          try:
+              approval = validate_phase2_doppler_ledger_approved_receipt(
+                  json.loads(approval_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if approval["ledger_approval_control_run_id"] != approval_run_id:
+              raise SystemExit(
+                  "Doppler approved-ledger receipt/control identity drift"
+              )
+          if approval["execution_branch"] != branch:
+              raise SystemExit(
+                  "Doppler approved-ledger receipt branch drift"
+              )
+          if approval["canonical_ledger_commit_sha"] != current_head:
+              raise SystemExit(
+                  "Doppler canonical commit is not review HEAD"
+              )
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_bytes = ledger_path.read_bytes()
+          ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+          if ledger_sha != approval["canonical_coverage_ledger_sha256"]:
+              raise SystemExit(
+                  "Doppler approved-ledger canonical SHA drift"
+              )
+
+          planner_run_id = int(approval["planner_run_id"])
+          planner_run = get_run(planner_run_id)
+          assert_run_base(
+              planner_run,
+              workflow="phase2-coverage-execution-plan.yml",
+              run_id=planner_run_id,
+          )
+          if str(planner_run.get("head_sha") or "").lower() != current_head:
+              raise SystemExit(
+                  "Doppler post-commit planner HEAD drift"
+              )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          if planner_digest != approval["planner_artifact_digest"]:
+              raise SystemExit(
+                  "Doppler post-commit planner artifact digest drift"
+              )
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/pools-fun-post-commit-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          try:
+              frontier = validate_phase2_doppler_post_commit_frontier(
+                  execution_plan,
+                  verified_receipts,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if frontier["next_promotion_node_id"] != (
+              "promote:flap"
+          ):
+              raise SystemExit(
+                  "6/14 frontier no longer points to Flap"
+              )
+
+          promotion_rows = [
+              dict(row)
+              for row in dispatch_plan.get("nodes") or []
+              if row.get("node_id") == "promote:flap"
+          ]
+          if len(promotion_rows) != 1:
+              raise SystemExit(
+                  "expected one Flap promotion row"
+              )
+          run_inputs = dict(
+              promotion_rows[0].get("run_id_inputs") or {}
+          )
+          try:
+              coverage_run_id = int(run_inputs["coverage_run_id"])
+          except (KeyError, TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "Flap promotion coverage run is invalid"
+              ) from exc
+
+          if FLAP_COVERAGE_WORKFLOW != (
+              "phase2-flap-source-coverage.yml"
+          ):
+              raise SystemExit(
+                  "Flap coverage workflow identity drift"
+              )
+          coverage_run = get_run(coverage_run_id)
+          assert_run_base(
+              coverage_run,
+              workflow=FLAP_COVERAGE_WORKFLOW,
+              run_id=coverage_run_id,
+          )
+          coverage_artifact = artifact_row(
+              coverage_run_id,
+              FLAP_COVERAGE_ARTIFACT,
+          )
+          coverage_digest = str(
+              coverage_artifact.get("digest") or ""
+          ).lower()
+          coverage_dir = download_artifact(
+              coverage_run_id,
+              FLAP_COVERAGE_ARTIFACT,
+              "upstream/flap-coverage",
+          )
+          report_path = coverage_dir / FLAP_COVERAGE_REPORT_PATH
+          if not report_path.is_file():
+              raise SystemExit(
+                  "Flap coverage artifact lacks report"
+              )
+          report_bytes = report_path.read_bytes()
+          report_sha = hashlib.sha256(report_bytes).hexdigest()
+          report = json.loads(report_bytes)
+          try:
+              review = (
+                  build_phase2_flap_promotion_review_handoff(
+                      json.loads(ledger_bytes),
+                      report,
+                      build_phase2_source_inventory(),
+                      coverage_run_id=coverage_run_id,
+                      coverage_artifact_digest=coverage_digest,
+                      coverage_report_sha256=report_sha,
+                      planner_run_id=planner_run_id,
+                      planner_artifact_digest=planner_digest,
+                      canonical_ledger_sha256=ledger_sha,
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          output = {
+              **review,
+              "promotion_review_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "doppler_ledger_approval_run_id": approval_run_id,
+              "doppler_ledger_approval_artifact_digest": actual_digest,
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+          }
+          Path(
+              "artifacts/phase2-flap-promotion-review.json"
+          ).write_text(
+              json.dumps(output, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"coverage_run_id={coverage_run_id}\n")
+              handle.write(
+                  f"coverage_artifact_digest={coverage_digest}\n"
+              )
+              handle.write(f"coverage_report_sha256={report_sha}\n")
+          print(json.dumps(output, sort_keys=True))
+          PY
+
+      - name: Upload Flap promotion review handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-flap-promotion-review
+          path: artifacts/phase2-flap-promotion-review.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish exact proposal inputs for human review
+        env:
+          REVIEW_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          COVERAGE_RUN_ID: ${{ steps.review.outputs.coverage_run_id }}
+          COVERAGE_ARTIFACT_DIGEST: ${{ steps.review.outputs.coverage_artifact_digest }}
+          COVERAGE_REPORT_SHA256: ${{ steps.review.outputs.coverage_report_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 Flap promotion review"
+            echo
+            echo "- promotion_review_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- promotion_review_artifact_digest: ${REVIEW_ARTIFACT_DIGEST}"
+            echo "- promotion_workflow: phase2-source-coverage-promotion.yml"
+            echo "- coverage_run_id: ${COVERAGE_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-flap-source-coverage"
+            echo "- expected_artifact_digest: ${COVERAGE_ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: flap-source-coverage-report.json"
+            echo "- expected_report_sha256: ${COVERAGE_REPORT_SHA256}"
+            echo "- expected_source_id: flap"
+            echo "- promotion_review_required: true"
+            echo "- promotion_dispatched: false"
+            echo "- proposal_created: false"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
