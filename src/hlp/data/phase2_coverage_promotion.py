@@ -4502,3 +4502,708 @@ def validate_phase2_trench_today_ledger_approved_receipt(
         "automatic_acquisition_complete": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+PHASE2_HOOD_FUN_CURRENT_PROMOTION_REVIEW_VERSION = (
+    "phase2-hood-fun-current-promotion-review-v1"
+)
+HOOD_FUN_CURRENT_COVERAGE_WORKFLOW = "phase2-hoodfun-current-coverage.yml"
+HOOD_FUN_CURRENT_COVERAGE_ARTIFACT = "phase2-hoodfun-current-coverage"
+HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH = "hood-current-coverage.json"
+PHASE2_HOOD_FUN_CURRENT_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-hood-fun-current-promotion-proposal-v1"
+)
+
+
+def build_phase2_hood_fun_current_promotion_review_handoff(
+    current_ledger: Mapping[str, object],
+    coverage_report: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    *,
+    coverage_run_id: int,
+    coverage_artifact_digest: str,
+    coverage_report_sha256: str,
+    planner_run_id: int,
+    planner_artifact_digest: str,
+    canonical_ledger_sha256: str,
+) -> dict:
+    """Prepare exact hood.fun current promotion inputs at 8/14."""
+
+    inventory = [dict(row) for row in source_inventory]
+    before = validate_phase2_coverage_ledger(dict(current_ledger), inventory)
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    if before["complete_source_ids"] != expected_before:
+        raise ValueError("hood.fun current review requires exact 8/14 trench.today ledger")
+
+    report = dict(coverage_report)
+    if report.get("source_id") != "hood_fun_current":
+        raise ValueError("hood.fun current review source identity drift")
+    if report.get("coverage_status") != "complete":
+        raise ValueError("hood.fun current review requires complete coverage report")
+
+    _, after = apply_phase2_source_coverage_report(
+        dict(current_ledger), inventory, report
+    )
+    expected_after = sorted(expected_before + ["hood_fun_current"])
+    if after["complete_source_ids"] != expected_after:
+        raise ValueError(
+            "hood.fun current review does not complete exactly next source"
+        )
+    if after["phase2_universe_coverage_complete"]:
+        raise ValueError("hood.fun current review unexpectedly closes Phase 2")
+
+    run_id = _positive_run_id(
+        coverage_run_id, label="hood.fun current coverage run ID"
+    )
+    artifact_digest = _artifact_digest(
+        coverage_artifact_digest,
+        label="hood.fun current coverage artifact digest",
+    )
+    report_sha = _sha256(
+        coverage_report_sha256, label="hood.fun current coverage report"
+    )
+    planner_id = _positive_run_id(
+        planner_run_id, label="hood.fun current promotion planner run ID"
+    )
+    planner_digest = _artifact_digest(
+        planner_artifact_digest,
+        label="hood.fun current planner artifact digest",
+    )
+    ledger_sha = _sha256(
+        canonical_ledger_sha256, label="hood.fun current canonical ledger"
+    )
+    generated_inputs = {
+        "coverage_run_id": str(run_id),
+        "coverage_artifact_name": HOOD_FUN_CURRENT_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": artifact_digest,
+        "coverage_report_path": HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "hood_fun_current",
+    }
+    return {
+        "version": PHASE2_HOOD_FUN_CURRENT_PROMOTION_REVIEW_VERSION,
+        "source_id": "hood_fun_current",
+        "coverage_workflow": HOOD_FUN_CURRENT_COVERAGE_WORKFLOW,
+        "coverage_run_id": run_id,
+        "coverage_artifact_name": HOOD_FUN_CURRENT_COVERAGE_ARTIFACT,
+        "coverage_artifact_digest": artifact_digest,
+        "coverage_report_path": HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "complete_source_ids_before": expected_before,
+        "complete_source_ids_after_if_promoted": expected_after,
+        "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+        "promotion_generated_inputs": generated_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_hood_fun_current_promotion_review_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 8/14 hood.fun current review handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_HOOD_FUN_CURRENT_PROMOTION_REVIEW_VERSION
+    ):
+        raise ValueError("hood.fun current promotion review version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_review_control_run_id"),
+        label="hood.fun current review control run ID",
+    )
+    prior_run_id = _positive_run_id(
+        row.get("trench_today_ledger_approval_run_id"),
+        label="trench.today ledger approval run ID",
+    )
+    coverage_run_id = _positive_run_id(
+        row.get("coverage_run_id"),
+        label="hood.fun current coverage run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="hood.fun current planner run ID",
+    )
+    prior_digest = _artifact_digest(
+        row.get("trench_today_ledger_approval_artifact_digest"),
+        label="trench.today ledger approval artifact digest",
+    )
+    coverage_digest = _artifact_digest(
+        row.get("coverage_artifact_digest"),
+        label="hood.fun current coverage artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="hood.fun current planner artifact digest",
+    )
+    report_sha = _sha256(
+        row.get("coverage_report_sha256"),
+        label="hood.fun current coverage report",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="hood.fun current canonical ledger",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("hood.fun current review execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="hood.fun current review execution head",
+    )
+    if row.get("source_id") != "hood_fun_current":
+        raise ValueError("hood.fun current review source drift")
+    if row.get("coverage_workflow") != HOOD_FUN_CURRENT_COVERAGE_WORKFLOW:
+        raise ValueError("hood.fun current coverage workflow drift")
+    if row.get("coverage_artifact_name") != HOOD_FUN_CURRENT_COVERAGE_ARTIFACT:
+        raise ValueError("hood.fun current artifact-name drift")
+    if row.get("coverage_report_path") != HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH:
+        raise ValueError("hood.fun current report-path drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("hood.fun current promotion workflow drift")
+    expected_inputs = {
+        "coverage_run_id": str(coverage_run_id),
+        "coverage_artifact_name": HOOD_FUN_CURRENT_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": coverage_digest,
+        "coverage_report_path": HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "hood_fun_current",
+    }
+    if row.get("promotion_generated_inputs") != expected_inputs:
+        raise ValueError("hood.fun current promotion generated-input drift")
+    if row.get("promotion_review_required") is not True:
+        raise ValueError("hood.fun current promotion lost review requirement")
+    for field in (
+        "promotion_dispatched",
+        "proposal_created",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"hood.fun current review violates read-only field {field}"
+            )
+    return {
+        **row,
+        "promotion_review_control_run_id": control_run_id,
+        "trench_today_ledger_approval_run_id": prior_run_id,
+        "trench_today_ledger_approval_artifact_digest": prior_digest,
+        "coverage_run_id": coverage_run_id,
+        "coverage_artifact_digest": coverage_digest,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_generated_inputs": expected_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_hood_fun_current_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate hood.fun current proposal before ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_HOOD_FUN_CURRENT_PROMOTION_PROPOSAL_VERSION
+    ):
+        raise ValueError("hood.fun current promotion proposal receipt version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="hood.fun current proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="hood.fun current review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="hood.fun current promotion dispatcher run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="hood.fun current promotion run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("hood.fun current proposal execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="hood.fun current proposal execution head",
+    )
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="hood.fun current review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="hood.fun current promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="hood.fun current promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="hood.fun current proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="hood.fun current proposal base ledger",
+    )
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    expected_after = sorted(expected_before + ["hood_fun_current"])
+    if row.get("source_id") != "hood_fun_current":
+        raise ValueError("hood.fun current proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("hood.fun current proposal workflow identity drift")
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("hood.fun current proposal before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("hood.fun current proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("hood.fun current proposal unexpectedly closes Phase 2")
+    if row.get("proposal_created") is not True:
+        raise ValueError("hood.fun current proposal lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("hood.fun current proposal lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("hood.fun current proposal unexpectedly mutates ledger")
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError("hood.fun current proposal authorizes ledger commit")
+    if row.get("ledger_commit_approval_input") != "apply_proposed_ledger":
+        raise ValueError("hood.fun current proposal ledger approval input drift")
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError("hood.fun current proposal already supplies approval")
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "hood_fun_current",
+    }
+    if row.get("ledger_commit_generated_inputs") != expected_generated:
+        raise ValueError("hood.fun current proposal ledger-commit input drift")
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "hood_fun_current",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def validate_phase2_hood_fun_current_ledger_commit_receipt(
+    receipt: Mapping[str, object],
+    *,
+    expected_promotion_run_id: int,
+    expected_promotion_artifact_digest: str,
+    expected_promotion_handoff_sha256: str,
+    expected_proposed_ledger_sha256: str,
+) -> dict:
+    """Validate approved hood.fun current canonical-ledger write."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-source-coverage-ledger-commit-v1"
+    ):
+        raise ValueError("hood.fun current ledger commit receipt version changed")
+    if row.get("source_id") != "hood_fun_current":
+        raise ValueError("hood.fun current ledger commit source identity drift")
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="hood.fun current ledger promotion run ID",
+    )
+    if promotion_run_id != int(expected_promotion_run_id):
+        raise ValueError("hood.fun current ledger commit promotion run drift")
+    if row.get("promotion_artifact_name") != (
+        "phase2-source-coverage-promotion-hood_fun_current"
+    ):
+        raise ValueError("hood.fun current ledger commit artifact-name drift")
+    artifact_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="hood.fun current promotion artifact digest",
+    )
+    if artifact_digest != _artifact_digest(
+        expected_promotion_artifact_digest,
+        label="expected hood.fun current promotion artifact digest",
+    ):
+        raise ValueError("hood.fun current ledger commit promotion artifact drift")
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="hood.fun current promotion handoff",
+    )
+    if handoff_sha != _sha256(
+        expected_promotion_handoff_sha256,
+        label="expected hood.fun current promotion handoff",
+    ):
+        raise ValueError("hood.fun current ledger commit promotion handoff drift")
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="hood.fun current proposed ledger",
+    )
+    if proposed_sha != _sha256(
+        expected_proposed_ledger_sha256,
+        label="expected hood.fun current proposed ledger",
+    ):
+        raise ValueError("hood.fun current ledger commit proposed-ledger drift")
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="hood.fun current base ledger",
+    )
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    expected_after = sorted(expected_before + ["hood_fun_current"])
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("hood.fun current ledger commit before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("hood.fun current ledger commit after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("hood.fun current commit unexpectedly closes Phase 2")
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="hood.fun current canonical ledger commit",
+    )
+    if row.get("explicit_approval") is not True:
+        raise ValueError("hood.fun current ledger commit lacks explicit approval")
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("hood.fun current ledger commit lacks mutation proof")
+    return {
+        **row,
+        "promotion_run_id": promotion_run_id,
+        "promotion_artifact_digest": artifact_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "base_ledger_sha256": base_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "canonical_ledger_commit_sha": commit_sha,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def validate_phase2_hood_fun_current_post_commit_frontier(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze exact 9/14 frontier after hood.fun current is canonical."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+    expected_complete = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+        "hood_fun_current",
+    ]
+    if execution.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("hood.fun current post-commit canonical source set drift")
+    if int(execution.get("complete_sources", -1)) != 9:
+        raise ValueError("hood.fun current post-commit source count drift")
+    if int(execution.get("incomplete_sources", -1)) != 5:
+        raise ValueError("hood.fun current post-commit incomplete count drift")
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("hood.fun current post-commit unexpectedly closes Phase 2")
+
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    canonical_coverages = {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+        "coverage:pools_trade_lbp",
+        "coverage:doppler",
+        "coverage:flap",
+        "coverage:trench_today",
+        "coverage:hood_fun_current",
+    }
+    removed = canonical_coverages | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+        "promote:hood_fun_current",
+    }
+    expected_active = pre_frontier - canonical_coverages
+    if set(execution.get("completed_node_ids") or []) != expected_active:
+        raise ValueError("hood.fun current post-commit active completion drift")
+    if set(execution.get("ignored_completed_node_ids") or []) != removed:
+        raise ValueError("hood.fun current post-commit ignored-completion drift")
+    if execution.get("ready_to_dispatch_node_ids") != [
+        "promote:hood_fun_current"
+    ]:
+        raise ValueError("hood.fun current post-commit next promotion drift")
+    if execution.get("awaiting_explicit_approval_node_ids") != []:
+        raise ValueError("hood.fun current post-commit unexpected approvals")
+    if execution.get("ledger_commit_approval_node_ids") != []:
+        raise ValueError("hood.fun current post-commit unexpected ledger approval")
+
+    expected_verified = pre_frontier | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+        "promote:hood_fun_current",
+    }
+    if set(verified.get("completed_node_ids") or []) != expected_verified:
+        raise ValueError("hood.fun current post-commit verified completion drift")
+    controls = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(controls, list)
+        or len(controls) != 47
+        or len(set(int(value) for value in controls)) != 46
+    ):
+        raise ValueError(
+            "hood.fun current post-commit requires exactly 47 dispatcher receipts"
+        )
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError("hood.fun current post-commit lacks lineage proof")
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise ValueError("hood.fun current post-commit dispatch row count drift")
+    row = dict(rows[0])
+    if row.get("node_id") != "promote:hood_fun_previous":
+        raise ValueError("hood.fun current post-commit dispatch node drift")
+    if row.get("workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("hood.fun current post-commit promotion workflow drift")
+    if set(dict(row.get("run_id_inputs") or {})) != {"coverage_run_id"}:
+        raise ValueError("hood.fun previous promotion coverage-run binding drift")
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value) for value in row.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError("hood.fun previous promotion manual-input drift")
+    return {
+        "version": "phase2-hood-fun-current-post-commit-frontier-v1",
+        "canonical_complete_source_ids": expected_complete,
+        "complete_sources": 9,
+        "incomplete_sources": 5,
+        "active_completed_execution_nodes": len(expected_active),
+        "ignored_completed_node_ids": sorted(removed),
+        "node_dispatch_control_runs_consumed": len(controls),
+        "next_promotion_node_id": "promote:hood_fun_previous",
+        "next_promotion_manual_inputs": actual_manual,
+        "automatic_acquisition_complete": True,
+        "canonical_ledger_advanced": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+
+def validate_phase2_hood_fun_current_ledger_approved_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 9/14 handoff after hood.fun current commit."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-hood-fun-current-ledger-approved-receipt-v1"
+    ):
+        raise ValueError(
+            "hood.fun current approved-ledger receipt version changed"
+        )
+    control_run_id = _positive_run_id(
+        row.get("ledger_approval_control_run_id"),
+        label="hood.fun current ledger approval control run ID",
+    )
+    proposal_run_id = _positive_run_id(
+        row.get("promotion_proposal_run_id"),
+        label="hood.fun current proposal run ID",
+    )
+    ledger_run_id = _positive_run_id(
+        row.get("ledger_commit_run_id"),
+        label="hood.fun current ledger commit run ID",
+    )
+    selector_run_id = _positive_run_id(
+        row.get("selector_run_id"),
+        label="hood.fun current selector run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="hood.fun current post-commit planner run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("hood.fun current approved-ledger branch is empty")
+    approval_head = _commit_sha(
+        row.get("approval_execution_head_sha"),
+        label="hood.fun current approval execution head",
+    )
+    proposal_digest = _artifact_digest(
+        row.get("promotion_proposal_artifact_digest"),
+        label="hood.fun current proposal artifact digest",
+    )
+    ledger_digest = _artifact_digest(
+        row.get("ledger_commit_artifact_digest"),
+        label="hood.fun current ledger commit artifact digest",
+    )
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="hood.fun current canonical ledger commit",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="hood.fun current approved base ledger",
+    )
+    canonical_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="hood.fun current approved canonical ledger",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="hood.fun current post-commit planner artifact digest",
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "hood.fun current approved control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 47
+        or len(set(controls)) != 46
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "hood.fun current approved handoff requires exactly 47 control runs"
+        )
+    expected_complete = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+        "hood_fun_current",
+    ]
+    if row.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError(
+            "hood.fun current approved canonical source set drift"
+        )
+    if row.get("next_promotion_node_id") != "promote:hood_fun_previous":
+        raise ValueError("hood.fun current approved next promotion drift")
+    if row.get("human_approval_input") != "apply_hood_fun_current_ledger":
+        raise ValueError(
+            "hood.fun current approved human-input identity drift"
+        )
+    if row.get("human_approval_value") is not True:
+        raise ValueError(
+            "hood.fun current approved receipt lacks affirmative approval"
+        )
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError(
+            "hood.fun current approved receipt lacks ledger mutation"
+        )
+    if row.get("automatic_acquisition_complete") is not True:
+        raise ValueError(
+            "hood.fun current approved receipt lost acquisition proof"
+        )
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError(
+            "hood.fun current approved receipt unexpectedly closes Phase 2"
+        )
+    return {
+        **row,
+        "ledger_approval_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "approval_execution_head_sha": approval_head,
+        "promotion_proposal_run_id": proposal_run_id,
+        "promotion_proposal_artifact_digest": proposal_digest,
+        "ledger_commit_run_id": ledger_run_id,
+        "ledger_commit_artifact_digest": ledger_digest,
+        "canonical_ledger_commit_sha": commit_sha,
+        "base_ledger_sha256": base_sha,
+        "canonical_coverage_ledger_sha256": canonical_sha,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "selector_run_id": selector_run_id,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_complete_source_ids": expected_complete,
+        "next_promotion_node_id": "promote:hood_fun_previous",
+        "human_approval_input": "apply_hood_fun_current_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }

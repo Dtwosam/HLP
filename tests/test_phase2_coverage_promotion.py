@@ -12,6 +12,7 @@ from hlp.data.phase2_coverage_promotion import (
     build_phase2_doppler_promotion_review_handoff,
     build_phase2_flap_promotion_review_handoff,
     build_phase2_trench_today_promotion_review_handoff,
+    build_phase2_hood_fun_current_promotion_review_handoff,
     validate_phase2_coverage_ledger_commit,
     validate_phase2_pools_fun_promotion_review_receipt,
     validate_phase2_pools_fun_promotion_proposal_receipt,
@@ -38,10 +39,15 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_flap_ledger_approved_receipt,
     validate_phase2_flap_post_commit_frontier,
     validate_phase2_trench_today_promotion_review_receipt,
+    validate_phase2_hood_fun_current_promotion_review_receipt,
     validate_phase2_trench_today_promotion_proposal_receipt,
+    validate_phase2_hood_fun_current_promotion_proposal_receipt,
     validate_phase2_trench_today_ledger_commit_receipt,
+    validate_phase2_hood_fun_current_ledger_commit_receipt,
     validate_phase2_trench_today_ledger_approved_receipt,
+    validate_phase2_hood_fun_current_ledger_approved_receipt,
     validate_phase2_trench_today_post_commit_frontier,
+    validate_phase2_hood_fun_current_post_commit_frontier,
     validate_phase2_pools_trade_instant_post_commit_frontier,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
@@ -2166,3 +2172,289 @@ def test_trench_today_approved_receipt_rejects_wrong_next_source():
     row["next_promotion_node_id"] = "promote:hood_fun_previous"
     with pytest.raises(ValueError, match="next promotion drift"):
         validate_phase2_trench_today_ledger_approved_receipt(row)
+
+
+def hood_fun_current_report():
+    return {
+        "source_id": "hood_fun_current",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "complete",
+        "required_start_block": 0,
+        "first_block": 0,
+        "last_block": SNAPSHOT,
+        "continuous": True,
+        "missing_ranges": [],
+        "tokens_discovered": 2,
+        "price_points": 3,
+        "priced_points": 3,
+        "observed_volume_usd": None,
+        "provenance_sha256": "ef" * 32,
+        "blocking_reason": None,
+        "snapshot_head_block": SNAPSHOT,
+    }
+
+
+def test_hood_fun_current_review_prepares_exact_9_of_14_advance():
+    before = {
+        "doppler", "flap", "pons_v1", "pons_v2", "pools_fun",
+        "pools_trade_instant", "pools_trade_lbp", "trench_today",
+    }
+    report = build_phase2_hood_fun_current_promotion_review_handoff(
+        ledger(before),
+        hood_fun_current_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=2301,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=2302,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+    assert report["complete_source_ids_after_if_promoted"] == ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today","hood_fun_current"]
+
+
+def hood_fun_current_review_receipt():
+    before = {
+        "doppler", "flap", "pons_v1", "pons_v2", "pools_fun",
+        "pools_trade_instant", "pools_trade_lbp", "trench_today",
+    }
+    row = build_phase2_hood_fun_current_promotion_review_handoff(
+        ledger(before),
+        hood_fun_current_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=2301,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=2302,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+    row.update({
+        "promotion_review_control_run_id": 2303,
+        "trench_today_ledger_approval_run_id": 2304,
+        "trench_today_ledger_approval_artifact_digest": "sha256:" + "55" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "66" * 20,
+    })
+    return row
+
+
+def test_hood_fun_current_review_receipt_is_read_only():
+    report = validate_phase2_hood_fun_current_promotion_review_receipt(
+        hood_fun_current_review_receipt()
+    )
+    assert report["coverage_run_id"] == 2301
+    assert report["promotion_generated_inputs"]["expected_source_id"] == (
+        "hood_fun_current"
+    )
+    assert report["canonical_coverage_ledger_mutated"] is False
+
+
+def hood_fun_current_proposal_receipt():
+    before = ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today"]
+    return {
+        "version": "phase2-hood-fun-current-promotion-proposal-v1",
+        "promotion_proposal_control_run_id": 2401,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "11" * 20,
+        "promotion_review_run_id": 2402,
+        "promotion_review_artifact_digest": "sha256:" + "22" * 32,
+        "node_dispatch_control_run_id": 2403,
+        "promotion_run_id": 2404,
+        "promotion_workflow": "phase2-source-coverage-promotion.yml",
+        "promotion_artifact_digest": "sha256:" + "33" * 32,
+        "promotion_handoff_sha256": "44" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "proposed_ledger_sha256": "66" * 32,
+        "source_id": "hood_fun_current",
+        "complete_source_ids_before": before,
+        "complete_source_ids_after": sorted(before + ["hood_fun_current"]),
+        "phase2_universe_coverage_complete": False,
+        "ledger_commit_generated_inputs": {
+            "promotion_run_id": "2404",
+            "expected_artifact_digest": "sha256:" + "33" * 32,
+            "expected_handoff_sha256": "44" * 32,
+            "expected_proposed_ledger_sha256": "66" * 32,
+            "expected_source_id": "hood_fun_current",
+        },
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def test_hood_fun_current_proposal_receipt_is_approval_free():
+    report = validate_phase2_hood_fun_current_promotion_proposal_receipt(
+        hood_fun_current_proposal_receipt()
+    )
+    assert report["promotion_run_id"] == 2404
+    assert report["ledger_commit_generated_inputs"]["expected_source_id"] == (
+        "hood_fun_current"
+    )
+
+
+def hood_fun_current_ledger_commit_receipt():
+    before = ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today"]
+    return {
+        "version": "phase2-source-coverage-ledger-commit-v1",
+        "source_id": "hood_fun_current",
+        "promotion_run_id": 2404,
+        "promotion_artifact_name": (
+            "phase2-source-coverage-promotion-hood_fun_current"
+        ),
+        "promotion_artifact_digest": "sha256:" + "33" * 32,
+        "promotion_handoff_sha256": "44" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "proposed_ledger_sha256": "66" * 32,
+        "complete_source_ids_before": before,
+        "complete_source_ids_after": sorted(before + ["hood_fun_current"]),
+        "phase2_universe_coverage_complete": False,
+        "canonical_ledger_commit_sha": "77" * 20,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def test_hood_fun_current_ledger_commit_receipt_validates_9_of_14():
+    report = validate_phase2_hood_fun_current_ledger_commit_receipt(
+        hood_fun_current_ledger_commit_receipt(),
+        expected_promotion_run_id=2404,
+        expected_promotion_artifact_digest="sha256:" + "33" * 32,
+        expected_promotion_handoff_sha256="44" * 32,
+        expected_proposed_ledger_sha256="66" * 32,
+    )
+    assert report["canonical_ledger_commit_sha"] == "77" * 20
+
+
+def hood_fun_current_post_commit_plans():
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    canonical_coverages = {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+        "coverage:pools_trade_lbp",
+        "coverage:doppler",
+        "coverage:flap",
+        "coverage:trench_today",
+        "coverage:hood_fun_current"
+    }
+    promotions = {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+        "promote:hood_fun_previous"
+    }
+    active = sorted(pre_frontier - canonical_coverages)
+    execution = {
+        "canonical_complete_source_ids": ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today","hood_fun_current"],
+        "complete_sources": 8,
+        "incomplete_sources": 6,
+        "phase2_universe_coverage_complete": False,
+        "completed_node_ids": active,
+        "ignored_completed_node_ids": sorted(
+            canonical_coverages | promotions
+        ),
+        "ready_to_dispatch_node_ids": ["promote:hood_fun_previous"],
+        "awaiting_explicit_approval_node_ids": [],
+        "ledger_commit_approval_node_ids": [],
+    }
+    verified = {
+        "completed_node_ids": sorted(pre_frontier | promotions),
+        "node_dispatch_run_ids_consumed": list(range(56000, 56047)),
+        "all_runs_current_or_ledger_only_ancestors": True,
+    }
+    dispatch = {
+        "nodes": [{
+            "node_id": "promote:hood_fun_previous",
+            "workflow": "phase2-source-coverage-promotion.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"coverage_run_id": "57000"},
+            "remaining_manual_inputs": [
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+        }],
+    }
+    return execution, verified, dispatch
+
+
+def test_hood_fun_current_post_commit_frontier_unlocks_hood_current_only():
+    execution, verified, dispatch = hood_fun_current_post_commit_plans()
+    report = validate_phase2_hood_fun_current_post_commit_frontier(
+        execution, verified, dispatch
+    )
+    assert report["complete_sources"] == 9
+    assert report["active_completed_execution_nodes"] == 35
+    assert report["node_dispatch_control_runs_consumed"] == 47
+    assert report["next_promotion_node_id"] == "promote:hood_fun_previous"
+
+
+
+def hood_fun_current_ledger_approved_receipt():
+    return {
+        "version": "phase2-hood-fun-current-ledger-approved-receipt-v1",
+        "ledger_approval_control_run_id": 2501,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "approval_execution_head_sha": "11" * 20,
+        "promotion_proposal_run_id": 2502,
+        "promotion_proposal_artifact_digest": "sha256:" + "22" * 32,
+        "ledger_commit_run_id": 2503,
+        "ledger_commit_artifact_digest": "sha256:" + "33" * 32,
+        "canonical_ledger_commit_sha": "44" * 20,
+        "base_ledger_sha256": "55" * 32,
+        "canonical_coverage_ledger_sha256": "66" * 32,
+        "node_dispatch_control_run_ids_consumed": list(range(2600, 2647)),
+        "selector_run_id": 2504,
+        "planner_run_id": 2505,
+        "planner_artifact_digest": "sha256:" + "77" * 32,
+        "canonical_complete_source_ids": [
+            "doppler",
+            "flap",
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+            "pools_trade_lbp",
+            "trench_today",
+            "hood_fun_current",
+        ],
+        "next_promotion_node_id": "promote:hood_fun_previous",
+        "human_approval_input": "apply_hood_fun_current_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+def test_hood_fun_current_approved_receipt_validates_9_of_14_handoff():
+    report = validate_phase2_hood_fun_current_ledger_approved_receipt(
+        hood_fun_current_ledger_approved_receipt()
+    )
+    assert report["canonical_ledger_commit_sha"] == "44" * 20
+    assert report["next_promotion_node_id"] == "promote:hood_fun_previous"
+    assert len(report["node_dispatch_control_run_ids_consumed"]) == 47
+
+
+def test_hood_fun_current_approved_receipt_rejects_wrong_next_source():
+    row = hood_fun_current_ledger_approved_receipt()
+    row["next_promotion_node_id"] = "promote:hood_fun_previous"
+    with pytest.raises(ValueError, match="next promotion drift"):
+        validate_phase2_hood_fun_current_ledger_approved_receipt(row)
