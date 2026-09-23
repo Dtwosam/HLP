@@ -1,0 +1,698 @@
+name: phase3-pools-trade-cca-fills
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Exact successful phase2-pools-trade-lbp-registry-backfill run ID
+        required: true
+        type: string
+      expected_registry_artifact_digest:
+        description: Exact phase2-pools-trade-lbp-registry artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_registry_sha256:
+        description: Exact SHA-256 of pools-trade-lbp-registry.jsonl
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-pools-trade-cca-fills-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '6222785'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+  REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+  EXPECTED_REGISTRY_ARTIFACT_DIGEST: ${{ inputs.expected_registry_artifact_digest }}
+  EXPECTED_REGISTRY_SHA256: ${{ inputs.expected_registry_sha256 }}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      shards: ${{ steps.setup.outputs.shards }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: setup
+        name: Verify frozen LBP registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_id = int(os.environ["REGISTRY_RUN_ID"])
+          expected_digest = os.environ[
+              "EXPECTED_REGISTRY_ARTIFACT_DIGEST"
+          ].lower()
+          expected_registry_sha = os.environ[
+              "EXPECTED_REGISTRY_SHA256"
+          ].lower().removeprefix("sha256:")
+
+          raw = subprocess.check_output([
+              "gh", "api",
+              "-H", "Accept: application/vnd.github+json",
+              f"/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
+          ])
+          matches = [
+              row
+              for row in json.loads(raw).get("artifacts", [])
+              if not row.get("expired")
+              and row.get("name")
+              == "phase2-pools-trade-lbp-registry"
+          ]
+          try:
+              selected = select_equivalent_artifact_retry(
+                  matches,
+                  label="pools.trade LBP registry",
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if str(selected.get("digest") or "").lower() != expected_digest:
+              raise SystemExit(
+                  "pools.trade LBP registry artifact digest drift"
+              )
+
+          root = Path("inputs/registry")
+          if root.exists():
+              shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call([
+              "gh", "run", "download", str(run_id),
+              "--repo", repo,
+              "--name", "phase2-pools-trade-lbp-registry",
+              "--dir", str(root),
+          ])
+
+          registry_path = root / "pools-trade-lbp-registry.jsonl"
+          summary_path = root / "pools-trade-lbp-registry-summary.json"
+          manifest_path = root / (
+              "pools-trade-lbp-registry.jsonl.manifest.json"
+          )
+          for path in (registry_path, summary_path, manifest_path):
+              if not path.is_file():
+                  raise SystemExit(
+                      f"missing LBP registry artifact file: {path.name}"
+                  )
+          registry_sha = hashlib.sha256(
+              registry_path.read_bytes()
+          ).hexdigest()
+          if registry_sha != expected_registry_sha:
+              raise SystemExit(
+                  "pools.trade LBP registry SHA drift"
+              )
+          manifest = json.loads(manifest_path.read_text())
+          if manifest.get("sha256") != registry_sha:
+              raise SystemExit(
+                  "pools.trade LBP registry manifest SHA drift"
+              )
+          summary = json.loads(summary_path.read_text())
+          if summary.get("version") != (
+              "phase2-pools-trade-lbp-registry-v1"
+          ):
+              raise SystemExit(
+                  "pools.trade LBP registry summary version drift"
+              )
+          if summary.get("source_id") != "pools_trade_lbp":
+              raise SystemExit(
+                  "pools.trade LBP registry source id drift"
+              )
+          if summary.get("continuous_initializer_scan") is not True:
+              raise SystemExit(
+                  "pools.trade LBP registry scan is incomplete"
+              )
+          if summary.get("missing_ranges") != []:
+              raise SystemExit(
+                  "pools.trade LBP registry has missing ranges"
+              )
+          if int(summary.get("required_start_block", -1)) != int(
+              os.environ["REQUIRED_START_BLOCK"]
+          ):
+              raise SystemExit(
+                  "pools.trade LBP registry start block drift"
+              )
+          if int(summary.get("snapshot_head_block", -1)) != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit(
+                  "pools.trade LBP registry snapshot drift"
+              )
+          if summary.get("registry_sha256") != registry_sha:
+              raise SystemExit(
+                  "pools.trade LBP registry summary SHA drift"
+              )
+          if int(summary.get("initializers", -1)) != int(
+              manifest.get("records", -2)
+          ):
+              raise SystemExit(
+                  "pools.trade LBP registry initializer count drift"
+              )
+          if int(summary.get("initializers", 0)) <= 0:
+              raise SystemExit(
+                  "pools.trade LBP registry is empty"
+              )
+
+          for name in (
+              "pools-trade-lbp-registry.jsonl",
+              "pools-trade-lbp-registry.jsonl.manifest.json",
+              "pools-trade-lbp-registry-summary.json",
+          ):
+              (Path("artifacts") / name).write_bytes(
+                  (root / name).read_bytes()
+              )
+          descriptor = {
+              "version": "phase3-pools-trade-cca-fill-setup-v1",
+              "registry_run_id": run_id,
+              "registry_artifact_digest": expected_digest,
+              "registry_sha256": registry_sha,
+              "registered_initializers": int(
+                  summary["initializers"]
+              ),
+              "required_start_block": int(
+                  os.environ["REQUIRED_START_BLOCK"]
+              ),
+              "snapshot_head_block": int(
+                  os.environ["SNAPSHOT_HEAD"]
+              ),
+              "historical_event_scan_required": True,
+              "wallet_identity_kind": "cca_bid_owner",
+              "outcome_rows_consumed": False,
+              "future_state_allowed": False,
+          }
+          Path(
+              "artifacts/phase3-pools-trade-cca-fill-setup.json"
+          ).write_text(
+              json.dumps(descriptor, indent=2, sort_keys=True)
+              + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "shards="
+                  + json.dumps(
+                      list(range(int(os.environ["SHARD_COUNT"])))
+                  )
+                  + "\n"
+              )
+          print(json.dumps(descriptor, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fill-setup
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+  shard:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.setup.outputs.shards) }}
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fill-setup
+          path: inputs
+      - id: bounds
+        name: Compute exact CCA fill shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty CCA fill shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\n")
+              handle.write(f"hi={hi}\n")
+          PY
+      - name: Acquire complete CCA bid and exit shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            CHUNK=50000
+          else
+            CHUNK=200
+          fi
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pools-trade-lbp-cca-bid-window \
+            --registry inputs/pools-trade-lbp-registry.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --submitted-out "artifacts/cca-bids-submitted-$SHARD.jsonl" \
+            --exited-out "artifacts/cca-bids-exited-$SHARD.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fill-shard-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+  merge:
+    needs: [setup, shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fill-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase3-pools-trade-cca-fill-shard-*
+          path: inputs/shards
+          merge-multiple: true
+      - id: merge
+        name: Reconcile complete CCA fills and canonical trades
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.pools_trade_cca_bids import (
+              build_phase3_cca_fill_handoff,
+              reconcile_cca_bid_fills,
+          )
+          from hlp.data.phase3_trade_adapters import (
+              adapt_pools_trade_cca_fills_to_phase3,
+          )
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.types import CcaBidExited, CcaBidSubmitted
+          from hlp.protocols.pools_trade_lbp import (
+              CCA_BID_EXITED_TOPIC,
+              CCA_BID_SUBMITTED_TOPIC,
+          )
+
+          setup = json.loads(
+              Path(
+                  "inputs/setup/phase3-pools-trade-cca-fill-setup.json"
+              ).read_text()
+          )
+          registry_path = Path(
+              "inputs/setup/pools-trade-lbp-registry.jsonl"
+          )
+          registry_sha = hashlib.sha256(
+              registry_path.read_bytes()
+          ).hexdigest()
+          if registry_sha != setup["registry_sha256"]:
+              raise SystemExit(
+                  "CCA fill setup registry SHA drift"
+              )
+          registry = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          initializers = {
+              str(row["initializer"]).lower()
+              for row in registry
+          }
+          if len(initializers) != int(
+              setup["registered_initializers"]
+          ):
+              raise SystemExit(
+                  "CCA fill registry initializer count drift"
+              )
+
+          root = Path("inputs/shards")
+          count = int(os.environ["SHARD_COUNT"])
+          submitted_files = sorted(
+              root.glob("cca-bids-submitted-*.jsonl")
+          )
+          exited_files = sorted(
+              root.glob("cca-bids-exited-*.jsonl")
+          )
+          if len(submitted_files) != count or len(exited_files) != count:
+              raise SystemExit(
+                  "CCA fill shard artifact count changed: "
+                  f"submitted={len(submitted_files)} "
+                  f"exited={len(exited_files)} expected={count}"
+              )
+
+          submitted_rows = []
+          exited_rows = []
+          coverage = []
+          submitted_digest = hashlib.sha256()
+          exited_digest = hashlib.sha256()
+          for submitted_path in submitted_files:
+              suffix = submitted_path.stem.rsplit("-", 1)[-1]
+              exited_path = root / f"cca-bids-exited-{suffix}.jsonl"
+              submitted_manifest = json.loads(
+                  submitted_path.with_suffix(
+                      submitted_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              exited_manifest = json.loads(
+                  exited_path.with_suffix(
+                      exited_path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              sub_prov = submitted_manifest.get("provenance") or {}
+              exit_prov = exited_manifest.get("provenance") or {}
+              lo = int(sub_prov["from_block"])
+              hi = int(sub_prov["to_block"])
+              if (
+                  int(exit_prov["from_block"]) != lo
+                  or int(exit_prov["to_block"]) != hi
+              ):
+                  raise SystemExit(
+                      f"{suffix}: CCA bid/exit range drift"
+                  )
+              for prov, event_kind, topic in (
+                  (
+                      sub_prov,
+                      "BidSubmitted",
+                      CCA_BID_SUBMITTED_TOPIC,
+                  ),
+                  (
+                      exit_prov,
+                      "BidExited",
+                      CCA_BID_EXITED_TOPIC,
+                  ),
+              ):
+                  if prov.get("source") != (
+                      "pools_trade_lbp_cca_bid_topic_scan"
+                  ):
+                      raise SystemExit(
+                          f"{suffix}: CCA fill source drift"
+                      )
+                  if prov.get("event_kind") != event_kind:
+                      raise SystemExit(
+                          f"{suffix}: CCA fill event-kind drift"
+                      )
+                  if prov.get("address_filter") is not None:
+                      raise SystemExit(
+                          f"{suffix}: CCA fill scan unexpectedly address-filtered"
+                      )
+                  topics = set(prov.get("event_topic0_or") or [])
+                  if topics != {
+                      CCA_BID_SUBMITTED_TOPIC,
+                      CCA_BID_EXITED_TOPIC,
+                  }:
+                      raise SystemExit(
+                          f"{suffix}: CCA fill topic set drift"
+                      )
+                  if prov.get("registry_sha256") != registry_sha:
+                      raise SystemExit(
+                          f"{suffix}: CCA fill registry SHA drift"
+                      )
+              sub_blob = submitted_path.read_bytes()
+              exit_blob = exited_path.read_bytes()
+              sub_sha = hashlib.sha256(sub_blob).hexdigest()
+              exit_sha = hashlib.sha256(exit_blob).hexdigest()
+              if sub_sha != submitted_manifest["sha256"]:
+                  raise SystemExit(
+                      f"{suffix}: CCA submission SHA drift"
+                  )
+              if exit_sha != exited_manifest["sha256"]:
+                  raise SystemExit(
+                      f"{suffix}: CCA exit SHA drift"
+                  )
+              submitted_digest.update(sub_blob)
+              exited_digest.update(exit_blob)
+              coverage.append({
+                  "from_block": lo,
+                  "to_block": hi,
+                  "file": submitted_path.name,
+                  "records": int(submitted_manifest["records"]),
+                  "sha256": sub_sha,
+              })
+              for raw in sub_blob.splitlines():
+                  if not raw.strip():
+                      continue
+                  row = json.loads(raw)
+                  if str(row["auction"]).lower() not in initializers:
+                      raise SystemExit(
+                          "CCA submission outside frozen registry"
+                      )
+                  submitted_rows.append(CcaBidSubmitted(**row))
+              for raw in exit_blob.splitlines():
+                  if not raw.strip():
+                      continue
+                  row = json.loads(raw)
+                  if str(row["auction"]).lower() not in initializers:
+                      raise SystemExit(
+                          "CCA exit outside frozen registry"
+                      )
+                  exited_rows.append(CcaBidExited(**row))
+
+          validate_shard_block_coverage(
+              coverage,
+              start_block=int(setup["required_start_block"]),
+              end_block=int(setup["snapshot_head_block"]),
+          )
+          fills, reconciliation = reconcile_cca_bid_fills(
+              submitted_rows,
+              exited_rows,
+          )
+          if reconciliation["complete_fill_attribution"] is not True:
+              raise SystemExit(
+                  "pools.trade CCA fill attribution is incomplete: "
+                  f"unresolved={reconciliation['unresolved_bids']}"
+              )
+          canonical = adapt_pools_trade_cca_fills_to_phase3(
+              fills,
+              registry,
+          )
+          fill_manifest = write_jsonl_snapshot(
+              fills,
+              output=Path(
+                  "artifacts/pools-trade-cca-finalized-fills.jsonl"
+              ),
+              provenance={
+                  "version": "phase3-pools-trade-cca-fill-backfill-v1",
+                  "source_id": "pools_trade_lbp",
+                  "registry_sha256": registry_sha,
+                  "submitted_sharded_sha256": (
+                      submitted_digest.hexdigest()
+                  ),
+                  "exited_sharded_sha256": exited_digest.hexdigest(),
+                  "wallet_identity_kind": "cca_bid_owner",
+                  "fill_finalization_kind": "cca_bid_exit",
+                  "historical_event_scan_complete": True,
+                  "complete_fill_attribution": True,
+                  "outcome_rows_consumed": False,
+                  "future_state_allowed": False,
+              },
+          )
+          canonical_manifest = write_jsonl_snapshot(
+              canonical,
+              output=Path(
+                  "artifacts/pools-trade-lbp-canonical-trades.jsonl"
+              ),
+              provenance={
+                  "version": "phase3-pools-trade-cca-fill-backfill-v1",
+                  "source_id": "pools_trade_lbp",
+                  "registry_sha256": registry_sha,
+                  "finalized_fills_sha256": fill_manifest["sha256"],
+                  "wallet_identity_kind": "cca_bid_owner",
+                  "historical_event_scan_complete": True,
+                  "canonical_trade_adapter_complete": True,
+                  "outcome_rows_consumed": False,
+                  "future_state_allowed": False,
+              },
+          )
+          summary = {
+              "version": "phase3-pools-trade-cca-fill-backfill-v1",
+              "source_id": "pools_trade_lbp",
+              "registry_run_id": int(setup["registry_run_id"]),
+              "registry_artifact_digest": setup[
+                  "registry_artifact_digest"
+              ],
+              "registry_sha256": registry_sha,
+              "registered_initializers": len(initializers),
+              "required_start_block": int(
+                  setup["required_start_block"]
+              ),
+              "snapshot_head_block": int(
+                  setup["snapshot_head_block"]
+              ),
+              "submitted_bids": reconciliation["submitted_bids"],
+              "exited_bids": reconciliation["exited_bids"],
+              "executed_fills": reconciliation["executed_fills"],
+              "fully_refunded_bids": reconciliation[
+                  "fully_refunded_bids"
+              ],
+              "unresolved_bids": reconciliation["unresolved_bids"],
+              "submitted_sharded_sha256": (
+                  submitted_digest.hexdigest()
+              ),
+              "exited_sharded_sha256": exited_digest.hexdigest(),
+              "finalized_fills_sha256": fill_manifest["sha256"],
+              "canonical_trade_rows": canonical_manifest["records"],
+              "canonical_trade_rows_sha256": (
+                  canonical_manifest["sha256"]
+              ),
+              "wallet_identity_kind": "cca_bid_owner",
+              "wallet_identity_source": reconciliation[
+                  "wallet_identity_source"
+              ],
+              "fill_amount_source": reconciliation[
+                  "fill_amount_source"
+              ],
+              "historical_event_scan_complete": True,
+              "complete_fill_attribution": True,
+              "canonical_trade_adapter_complete": True,
+              "source_membership_bound_to_phase2_registry": True,
+              "source_coverage_complete": False,
+              "outcome_rows_consumed": False,
+              "future_state_allowed": False,
+              "phase3_cca_fill_backfill_ready": True,
+          }
+          Path(
+              "artifacts/phase3-pools-trade-cca-fill-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_sha = hashlib.sha256(
+              Path(
+                  "artifacts/phase3-pools-trade-cca-fill-summary.json"
+              ).read_bytes()
+          ).hexdigest()
+          handoff = build_phase3_cca_fill_handoff(
+              summary,
+              summary_sha256=summary_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-pools-trade-cca-fill-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"canonical_trade_rows_sha256="
+                  f"{canonical_manifest['sha256']}\n"
+              )
+              handle.write(
+                  f"finalized_fills_sha256={fill_manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"canonical_trade_rows="
+                  f"{canonical_manifest['records']}\n"
+              )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload pools.trade CCA finalized fills
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fills
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact CCA fill handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-pools-trade-cca-fills-handoff
+          path: |
+            artifacts/pools-trade-lbp-canonical-trades.jsonl.manifest.json
+            artifacts/pools-trade-cca-finalized-fills.jsonl.manifest.json
+            artifacts/phase3-pools-trade-cca-fill-summary.json
+            artifacts/phase3-pools-trade-cca-fill-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish CCA fill identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CANONICAL_SHA: ${{ steps.merge.outputs.canonical_trade_rows_sha256 }}
+          FILLS_SHA: ${{ steps.merge.outputs.finalized_fills_sha256 }}
+          SUMMARY_SHA: ${{ steps.merge.outputs.summary_sha256 }}
+          HANDOFF_SHA: ${{ steps.merge.outputs.handoff_sha256 }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          ROWS: ${{ steps.merge.outputs.canonical_trade_rows }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Phase-3 pools.trade CCA finalized fills"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-pools-trade-cca-fills"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- canonical_trade_rows_sha256: ${CANONICAL_SHA}"
+            echo "- finalized_fills_sha256: ${FILLS_SHA}"
+            echo "- summary_sha256: ${SUMMARY_SHA}"
+            echo "- handoff_artifact_name: phase3-pools-trade-cca-fills-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA}"
+            echo "- canonical_trade_rows: ${ROWS}"
+            echo "- wallet_identity_kind: cca_bid_owner"
+            echo "- historical_event_scan_complete: true"
+            echo "- complete_fill_attribution: true"
+            echo "- canonical_trade_adapter_complete: true"
+            echo "- source_coverage_complete: false"
+            echo "- outcome_rows_consumed: false"
+            echo "- future_state_allowed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

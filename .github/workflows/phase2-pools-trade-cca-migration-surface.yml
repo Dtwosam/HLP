@@ -1,0 +1,251 @@
+name: phase2-pools-trade-cca-migration-surface
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-cca-migration-surface-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INITIALIZER: '0xc5137968f7e6802736ba40e59acd164071ba73cf'
+  TOKEN: '0x89e71858d3c13c0ea1d135edc9fccb32740c9dbc'
+  MIGRATION_BLOCK: '30145704'
+  WINDOW: '1200'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Inventory exact migration surface
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.pools_trade import (
+              TOKEN_LAUNCHED_TOPIC,
+              decode_pools_trade_token_launched,
+          )
+          from hlp.protocols.pools_trade_lbp import (
+              POOLS_TRADE_LBP_STRATEGY,
+          )
+          from hlp.protocols.uniswap import (
+              V4_INITIALIZE_TOPIC,
+              decode_v4_pool_initialized,
+          )
+
+          initializer = os.environ["INITIALIZER"].lower()
+          token = os.environ["TOKEN"].lower()
+          migration = int(os.environ["MIGRATION_BLOCK"])
+          window = int(os.environ["WINDOW"])
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          chunk = (
+              50_000
+              if key
+              else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          )
+          lo = max(0, migration - window)
+          hi = migration + window
+
+          def compact(raw):
+              return {
+                  "address": raw.address,
+                  "topics": list(raw.topics),
+                  "data": raw.data,
+                  "data_bytes": (
+                      len(raw.data.removeprefix("0x")) // 2
+                  ),
+                  "block_number": raw.block_number,
+                  "transaction_hash": raw.transaction_hash,
+                  "transaction_index": raw.transaction_index,
+                  "log_index": raw.log_index,
+              }
+
+          initializer_logs = []
+          strategy_logs = []
+          v4_initializes = []
+          strategy_token_launched = []
+          initializer_topics = Counter()
+          strategy_topics = Counter()
+
+          for part_lo in range(lo, hi + 1, chunk):
+              part_hi = min(hi, part_lo + chunk - 1)
+
+              for raw in rpc.get_logs(
+                  part_lo,
+                  part_hi,
+                  address=initializer,
+              ):
+                  initializer_logs.append(compact(raw))
+                  if raw.topics:
+                      initializer_topics[raw.topics[0]] += 1
+
+              for raw in rpc.get_logs(
+                  part_lo,
+                  part_hi,
+                  address=POOLS_TRADE_LBP_STRATEGY,
+              ):
+                  strategy_logs.append(compact(raw))
+                  if raw.topics:
+                      strategy_topics[raw.topics[0]] += 1
+                  if (
+                      raw.topics
+                      and raw.topics[0] == TOKEN_LAUNCHED_TOPIC
+                  ):
+                      row = decode_pools_trade_token_launched(
+                          raw,
+                          allowed_strategies={
+                              POOLS_TRADE_LBP_STRATEGY
+                          },
+                      )
+                      if row.token.lower() == token:
+                          strategy_token_launched.append({
+                              "pool_id": row.pool_id,
+                              "token": row.token,
+                              "currency0": row.currency0,
+                              "currency1": row.currency1,
+                              "fee": row.fee,
+                              "tick_spacing": row.tick_spacing,
+                              "hooks": row.hooks,
+                              "block_number": row.block_number,
+                              "transaction_hash": row.transaction_hash,
+                              "transaction_index": row.transaction_index,
+                              "log_index": row.log_index,
+                          })
+
+              for raw in rpc.get_logs(
+                  part_lo,
+                  part_hi,
+                  address=UNISWAP_V4_POOL_MANAGER,
+                  topics=[V4_INITIALIZE_TOPIC],
+              ):
+                  row = decode_v4_pool_initialized(raw)
+                  currencies = {
+                      row.currency0.lower(),
+                      row.currency1.lower(),
+                  }
+                  if token in currencies:
+                      v4_initializes.append({
+                          "pool_id": row.pool_id,
+                          "currency0": row.currency0,
+                          "currency1": row.currency1,
+                          "fee": row.fee,
+                          "tick_spacing": row.tick_spacing,
+                          "hooks": row.hooks,
+                          "sqrt_price_x96": row.sqrt_price_x96,
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                      })
+
+          txs = {}
+          for group_name, rows in (
+              ("initializer", initializer_logs),
+              ("strategy", strategy_logs),
+              ("v4_initialize", v4_initializes),
+          ):
+              for row in rows:
+                  tx = row["transaction_hash"]
+                  txs.setdefault(tx, {
+                      "block_number": row["block_number"],
+                      "sources": set(),
+                  })
+                  txs[tx]["sources"].add(group_name)
+
+          correlated = [
+              {
+                  "transaction_hash": tx,
+                  "block_number": row["block_number"],
+                  "sources": sorted(row["sources"]),
+              }
+              for tx, row in txs.items()
+              if len(row["sources"]) > 1
+          ]
+          correlated.sort(
+              key=lambda row: (
+                  row["block_number"],
+                  row["transaction_hash"],
+              )
+          )
+
+          report = {
+              "chain_id": 4663,
+              "initializer": initializer,
+              "strategy": POOLS_TRADE_LBP_STRATEGY.lower(),
+              "token": token,
+              "migration_block_parameter": migration,
+              "from_block": lo,
+              "to_block": hi,
+              "initializer_logs": initializer_logs,
+              "initializer_topic_counts": dict(initializer_topics),
+              "strategy_logs": strategy_logs,
+              "strategy_topic_counts": dict(strategy_topics),
+              "strategy_token_launched": strategy_token_launched,
+              "v4_initializes_for_token": v4_initializes,
+              "correlated_transactions": correlated,
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          Path(
+              "artifacts/pools-trade-cca-migration-surface.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              "migration_block_parameter": migration,
+              "from_block": lo,
+              "to_block": hi,
+              "initializer_logs": len(initializer_logs),
+              "initializer_topic_counts": dict(initializer_topics),
+              "strategy_logs": len(strategy_logs),
+              "strategy_topic_counts": dict(strategy_topics),
+              "strategy_token_launched": len(strategy_token_launched),
+              "v4_initializes_for_token": len(v4_initializes),
+              "correlated_transactions": correlated,
+              "rpc_requests": rpc.requests_made,
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-cca-migration-surface
+          path: artifacts/
+          if-no-files-found: error

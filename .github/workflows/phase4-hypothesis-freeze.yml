@@ -1,0 +1,442 @@
+name: phase4-hypothesis-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      univariate_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-univariate
+        required: true
+        type: string
+      chronological_split_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-chronological-split
+        required: true
+        type: string
+      hypothesis_plan_json:
+        description: Explicit phase4-hypothesis-plan-v1 JSON selected from discovery-only diagnostics
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-hypothesis-freeze-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UNIVARIATE_HANDOFF_JSON: ${{ inputs.univariate_handoff_json }}
+  CHRONOLOGICAL_SPLIT_HANDOFF_JSON: ${{ inputs.chronological_split_handoff_json }}
+  HYPOTHESIS_PLAN_JSON: ${{ inputs.hypothesis_plan_json }}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: freeze
+        name: Freeze manual discovery hypotheses before validation
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase4_chronological_split import (
+              build_phase4_chronological_split_handoff,
+          )
+          from hlp.data.phase4_hypothesis_freeze import (
+              build_phase4_hypothesis_freeze,
+              build_phase4_hypothesis_freeze_handoff,
+          )
+          from hlp.data.phase4_univariate import (
+              build_phase4_univariate_handoff,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor(env_name, label):
+              try:
+                  value = json.loads(os.environ[env_name])
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(
+                      f"{label} descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(
+                      f"{label} descriptor must be an object"
+                  )
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"{label} run_id is invalid"
+                  ) from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      f"{label} artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      f"{label} handoff_sha256 is invalid"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} digest/SHA is not hexadecimal"
+                  ) from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(
+              run_id,
+              name,
+              destination,
+              label,
+              expected_digest,
+          ):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          uni_run, uni_digest, uni_expected_sha = descriptor(
+              "UNIVARIATE_HANDOFF_JSON",
+              "Phase-4 univariate",
+          )
+          split_run, split_digest, split_expected_sha = descriptor(
+              "CHRONOLOGICAL_SPLIT_HANDOFF_JSON",
+              "Phase-4 chronological split",
+          )
+          try:
+              hypothesis_plan = json.loads(
+                  os.environ["HYPOTHESIS_PLAN_JSON"]
+              )
+          except (KeyError, json.JSONDecodeError) as exc:
+              raise SystemExit(
+                  "Phase-4 hypothesis plan is invalid JSON"
+              ) from exc
+          if not isinstance(hypothesis_plan, dict):
+              raise SystemExit(
+                  "Phase-4 hypothesis plan must be an object"
+              )
+
+          uni_root = Path("inputs/univariate")
+          split_root = Path("inputs/split")
+          download_named(
+              uni_run,
+              "phase4-univariate",
+              uni_root,
+              "Phase-4 univariate",
+              uni_digest,
+          )
+          download_named(
+              split_run,
+              "phase4-chronological-split",
+              split_root,
+              "Phase-4 chronological split",
+              split_digest,
+          )
+
+          if list(split_root.rglob("phase4-validation.jsonl")):
+              raise SystemExit(
+                  "Phase-4 hypothesis freeze exposes validation rows"
+              )
+          if list(split_root.rglob("phase4-final-test.jsonl")):
+              raise SystemExit(
+                  "Phase-4 hypothesis freeze exposes final-test rows"
+              )
+
+          uni_report_path = find_unique(
+              uni_root,
+              "phase4-univariate-report.json",
+          )
+          uni_report = json.loads(uni_report_path.read_text())
+          uni_report_sha = sha256_path(uni_report_path)
+          uni_handoff_path = find_unique(
+              uni_root,
+              "phase4-univariate-handoff.json",
+          )
+          uni_handoff_sha = sha256_path(uni_handoff_path)
+          if uni_handoff_sha != uni_expected_sha:
+              raise SystemExit(
+                  "Phase-4 univariate handoff SHA drift"
+              )
+          uni_handoff = json.loads(uni_handoff_path.read_text())
+          rebuilt_uni = build_phase4_univariate_handoff(
+              uni_report,
+              report_sha256=uni_report_sha,
+              chronological_split_handoff_sha256=uni_report[
+                  "chronological_split_handoff_sha256"
+              ],
+              base_rate_handoff_sha256=uni_report[
+                  "base_rate_handoff_sha256"
+              ],
+              feature_registry_file_sha256=uni_report[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_uni != uni_handoff:
+              raise SystemExit(
+                  "Phase-4 univariate handoff content drift"
+              )
+
+          split_summary_path = find_unique(
+              split_root,
+              "phase4-chronological-split-summary.json",
+          )
+          split_summary = json.loads(
+              split_summary_path.read_text()
+          )
+          split_summary_sha = sha256_path(split_summary_path)
+          split_handoff_path = find_unique(
+              split_root,
+              "phase4-chronological-split-handoff.json",
+          )
+          split_handoff_sha = sha256_path(split_handoff_path)
+          if split_handoff_sha != split_expected_sha:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff SHA drift"
+              )
+          split_handoff = json.loads(
+              split_handoff_path.read_text()
+          )
+          rebuilt_split = build_phase4_chronological_split_handoff(
+              split_summary,
+              split_summary_sha256=split_summary_sha,
+              discovery_entry_handoff_sha256=split_summary[
+                  "discovery_entry_handoff_sha256"
+              ],
+              feature_registry_file_sha256=split_summary[
+                  "feature_registry_file_sha256"
+              ],
+          )
+          if rebuilt_split != split_handoff:
+              raise SystemExit(
+                  "Phase-4 chronological-split handoff content drift"
+              )
+          if uni_handoff[
+              "chronological_split_handoff_sha256"
+          ] != split_handoff_sha:
+              raise SystemExit(
+                  "Phase-4 univariate/split linkage drift"
+              )
+
+          report = build_phase4_hypothesis_freeze(
+              uni_report,
+              univariate_handoff=uni_handoff,
+              chronological_split_handoff=split_handoff,
+              chronological_split_handoff_sha256=split_handoff_sha,
+              hypothesis_plan=hypothesis_plan,
+          )
+          report.update({
+              "univariate_run_id": uni_run,
+              "chronological_split_run_id": split_run,
+              "univariate_handoff_sha256": uni_handoff_sha,
+          })
+
+          normalized_plan = report[
+              "normalized_hypothesis_plan"
+          ]
+          normalized_plan_text = (
+              json.dumps(
+                  normalized_plan,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              )
+              + "\n"
+          )
+          plan_path = Path(
+              "artifacts/phase4-hypothesis-plan.json"
+          )
+          plan_path.write_text(normalized_plan_text)
+          if hashlib.sha256(
+              normalized_plan_text.encode()
+          ).hexdigest() != report["hypothesis_plan_sha256"]:
+              raise SystemExit(
+                  "Phase-4 normalized hypothesis-plan SHA drift"
+              )
+
+          report_path = Path(
+              "artifacts/phase4-hypothesis-freeze-report.json"
+          )
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(
+              report_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase4_hypothesis_freeze_handoff(
+              report,
+              report_sha256=report_sha,
+              univariate_handoff_sha256=uni_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase4-hypothesis-freeze-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"features={report['features_considered']}\n"
+              )
+              handle.write(
+                  f"selected={report['selected_features']}\n"
+              )
+              handle.write(
+                  f"hypotheses={report['validation_hypotheses']}\n"
+              )
+          print(json.dumps({
+              "features_considered": report["features_considered"],
+              "selected_features": report["selected_features"],
+              "validation_hypotheses": report["validation_hypotheses"],
+              "selection_manual": True,
+              "automatic_feature_ranking_used": False,
+              "all_feature_dispositions_logged": True,
+              "multiple_testing_plan_frozen": True,
+              "validation_rows_consumed": False,
+              "final_test_rows_consumed": False,
+              "signal_promoted": False,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-4 hypothesis freeze
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-hypothesis-freeze
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 hypothesis-freeze identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_SHA256: ${{ steps.freeze.outputs.handoff_sha256 }}
+          FEATURES: ${{ steps.freeze.outputs.features }}
+          SELECTED: ${{ steps.freeze.outputs.selected }}
+          HYPOTHESES: ${{ steps.freeze.outputs.hypotheses }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 hypothesis freeze"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-hypothesis-freeze"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- features_considered: ${FEATURES}"
+            echo "- selected_features: ${SELECTED}"
+            echo "- validation_hypotheses: ${HYPOTHESES}"
+            echo "- selection_manual: true"
+            echo "- automatic_feature_ranking_used: false"
+            echo "- all_feature_dispositions_logged: true"
+            echo "- multiple_testing_plan_frozen: true"
+            echo "- validation_rows_consumed: false"
+            echo "- final_test_rows_consumed: false"
+            echo "- signal_promoted: false"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

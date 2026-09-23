@@ -1,0 +1,472 @@
+name: phase4-chronological-split
+
+on:
+  workflow_dispatch:
+    inputs:
+      discovery_entry_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase4-discovery-entry
+        required: true
+        type: string
+      discovery_end_block:
+        description: Inclusive final block of discovery/train slice
+        required: true
+        type: string
+      validation_end_block:
+        description: Inclusive final block of validation slice; later rows remain final test
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase4-chronological-split-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DISCOVERY_ENTRY_HANDOFF_JSON: ${{ inputs.discovery_entry_handoff_json }}
+  DISCOVERY_END_BLOCK: ${{ inputs.discovery_end_block }}
+  VALIDATION_END_BLOCK: ${{ inputs.validation_end_block }}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: split
+        name: Freeze chronological discovery validation final-test slices
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_feature_registry import (
+              validate_phase3_feature_registry,
+          )
+          from hlp.data.phase4_chronological_split import (
+              build_phase4_chronological_split_handoff,
+              materialize_phase4_chronological_split,
+          )
+          from hlp.data.phase4_discovery_entry import (
+              build_phase4_discovery_entry_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def descriptor():
+              try:
+                  value = json.loads(
+                      os.environ["DISCOVERY_ENTRY_HANDOFF_JSON"]
+                  )
+              except (KeyError, json.JSONDecodeError) as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(value, dict):
+                  raise SystemExit(
+                      "Phase-4 discovery-entry descriptor must be an object"
+                  )
+              try:
+                  run_id = int(value["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry run_id is invalid"
+                  ) from exc
+              digest = str(value.get("artifact_digest") or "").lower()
+              handoff_sha = str(
+                  value.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry handoff_sha256 is invalid"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry digest/SHA is not hexadecimal"
+                  ) from exc
+              return run_id, digest, handoff_sha
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(
+              run_id,
+              name,
+              destination,
+              expected_digest,
+          ):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label="Phase-4 discovery entry",
+                  )
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"Phase-4 discovery entry: {exc}"
+                  ) from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != expected_digest:
+                  raise SystemExit(
+                      "Phase-4 discovery-entry artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          run_id, digest, expected_handoff_sha = descriptor()
+          root = Path("inputs/discovery-entry")
+          download_named(
+              run_id,
+              "phase4-discovery-entry",
+              root,
+              digest,
+          )
+
+          rows_path = find_unique(
+              root,
+              "phase4-discovery-entry.jsonl",
+          )
+          manifest_path = find_unique(
+              root,
+              "phase4-discovery-entry.jsonl.manifest.json",
+          )
+          manifest = json.loads(manifest_path.read_text())
+          summary_path = find_unique(
+              root,
+              "phase4-discovery-entry-summary.json",
+          )
+          summary = json.loads(summary_path.read_text())
+          summary_sha = sha256_path(summary_path)
+          handoff_path = find_unique(
+              root,
+              "phase4-discovery-entry-handoff.json",
+          )
+          discovery_handoff_sha = sha256_path(handoff_path)
+          if discovery_handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-4 discovery-entry handoff SHA drift"
+              )
+          discovery_handoff = json.loads(handoff_path.read_text())
+          rebuilt = build_phase4_discovery_entry_handoff(
+              summary,
+              discovery_summary_sha256=summary_sha,
+              phase2_dataset_handoff_sha256=summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              feature_store_handoff_sha256=summary[
+                  "feature_store_handoff_sha256"
+              ],
+              feature_coverage_handoff_sha256=summary[
+                  "feature_coverage_handoff_sha256"
+              ],
+              feature_entry_handoff_sha256=summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt != discovery_handoff:
+              raise SystemExit(
+                  "Phase-4 discovery-entry handoff content drift"
+              )
+          if manifest.get("sha256") != discovery_handoff[
+              "discovery_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 discovery-entry manifest SHA drift"
+              )
+          if int(manifest.get("records", -1)) != int(
+              discovery_handoff["discovery_subjects"]
+          ):
+              raise SystemExit(
+                  "Phase-4 discovery-entry subject count drift"
+              )
+
+          registry_path = find_unique(
+              root,
+              "phase4-feature-registry.json",
+          )
+          registry_file_sha = sha256_path(registry_path)
+          if registry_file_sha != discovery_handoff[
+              "feature_registry_file_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 feature-registry file SHA drift"
+              )
+          registry = json.loads(registry_path.read_text())
+          registry_report = validate_phase3_feature_registry(
+              registry
+          )
+          if registry_report["registry_sha256"] != discovery_handoff[
+              "feature_registry_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-4 feature-registry definition drift"
+              )
+
+          try:
+              discovery_end = int(os.environ["DISCOVERY_END_BLOCK"])
+              validation_end = int(os.environ["VALIDATION_END_BLOCK"])
+          except ValueError as exc:
+              raise SystemExit(
+                  "Phase-4 split boundaries must be integer blocks"
+              ) from exc
+
+          discovery_output = Path(
+              "artifacts/phase4-discovery-train.jsonl"
+          )
+          validation_output = Path(
+              "artifacts/phase4-validation.jsonl"
+          )
+          final_test_output = Path(
+              "artifacts/phase4-final-test.jsonl"
+          )
+          manifests, split_summary = (
+              materialize_phase4_chronological_split(
+                  iter_validated_jsonl(
+                      rows_path,
+                      manifest_path,
+                  ),
+                  discovery_entry_handoff=discovery_handoff,
+                  discovery_end_block=discovery_end,
+                  validation_end_block=validation_end,
+                  discovery_output=discovery_output,
+                  validation_output=validation_output,
+                  final_test_output=final_test_output,
+              )
+          )
+          split_summary.update({
+              "discovery_entry_run_id": run_id,
+              "discovery_entry_handoff_sha256": (
+                  discovery_handoff_sha
+              ),
+              "feature_registry_file_sha256": registry_file_sha,
+          })
+          split_summary_path = Path(
+              "artifacts/phase4-chronological-split-summary.json"
+          )
+          split_summary_text = json.dumps(
+              split_summary,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          split_summary_path.write_text(split_summary_text)
+          split_summary_sha = hashlib.sha256(
+              split_summary_text.encode()
+          ).hexdigest()
+
+          split_handoff = build_phase4_chronological_split_handoff(
+              split_summary,
+              split_summary_sha256=split_summary_sha,
+              discovery_entry_handoff_sha256=discovery_handoff_sha,
+              feature_registry_file_sha256=registry_file_sha,
+          )
+          split_handoff_path = Path(
+              "artifacts/phase4-chronological-split-handoff.json"
+          )
+          split_handoff_text = json.dumps(
+              split_handoff,
+              indent=2,
+              sort_keys=True,
+          ) + "\n"
+          split_handoff_path.write_text(split_handoff_text)
+          split_handoff_sha = hashlib.sha256(
+              split_handoff_text.encode()
+          ).hexdigest()
+
+          shutil.copyfile(
+              registry_path,
+              Path("artifacts/phase4-feature-registry.json"),
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"handoff_sha256={split_handoff_sha}\n"
+              )
+              handle.write(
+                  f"discovery_rows="
+                  f"{split_handoff['discovery_split_rows']}\n"
+              )
+              handle.write(
+                  f"validation_rows="
+                  f"{split_handoff['validation_split_rows']}\n"
+              )
+              handle.write(
+                  f"final_test_rows="
+                  f"{split_handoff['final_test_split_rows']}\n"
+              )
+          print(json.dumps({
+              "discovery_end_block": discovery_end,
+              "validation_end_block": validation_end,
+              "discovery_split_rows": (
+                  split_handoff["discovery_split_rows"]
+              ),
+              "validation_split_rows": (
+                  split_handoff["validation_split_rows"]
+              ),
+              "final_test_split_rows": (
+                  split_handoff["final_test_split_rows"]
+              ),
+              "split_assignment_uses_feature_values": False,
+              "split_assignment_uses_outcome_values": False,
+              "random_shuffle_used": False,
+              "final_test_separated": True,
+              "phase4_split_frozen": True,
+              "phase4_discovery_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload discovery-safe Phase-4 split bundle
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-chronological-split
+          path: |
+            artifacts/phase4-discovery-train.jsonl
+            artifacts/phase4-discovery-train.jsonl.manifest.json
+            artifacts/phase4-chronological-split-summary.json
+            artifacts/phase4-chronological-split-handoff.json
+            artifacts/phase4-feature-registry.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload Phase-4 validation slice
+        id: validation_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-validation-slice
+          path: |
+            artifacts/phase4-validation.jsonl
+            artifacts/phase4-validation.jsonl.manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload untouched Phase-4 final-test slice
+        id: final_test_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-final-test-slice
+          path: |
+            artifacts/phase4-final-test.jsonl
+            artifacts/phase4-final-test.jsonl.manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Phase-4 split identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          VALIDATION_ARTIFACT_DIGEST: ${{ steps.validation_upload.outputs.artifact-digest }}
+          FINAL_TEST_ARTIFACT_DIGEST: ${{ steps.final_test_upload.outputs.artifact-digest }}
+          HANDOFF_SHA256: ${{ steps.split.outputs.handoff_sha256 }}
+          DISCOVERY_ROWS: ${{ steps.split.outputs.discovery_rows }}
+          VALIDATION_ROWS: ${{ steps.split.outputs.validation_rows }}
+          FINAL_TEST_ROWS: ${{ steps.split.outputs.final_test_rows }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${VALIDATION_ARTIFACT_DIGEST}"
+          test -n "${FINAL_TEST_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-4 chronological split"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase4-chronological-split"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- validation_artifact_name: phase4-validation-slice"
+            echo "- validation_artifact_digest: ${VALIDATION_ARTIFACT_DIGEST}"
+            echo "- final_test_artifact_name: phase4-final-test-slice"
+            echo "- final_test_artifact_digest: ${FINAL_TEST_ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- discovery_end_block: ${DISCOVERY_END_BLOCK}"
+            echo "- validation_end_block: ${VALIDATION_END_BLOCK}"
+            echo "- discovery_split_rows: ${DISCOVERY_ROWS}"
+            echo "- validation_split_rows: ${VALIDATION_ROWS}"
+            echo "- final_test_split_rows: ${FINAL_TEST_ROWS}"
+            echo "- split_assignment_uses_feature_values: false"
+            echo "- split_assignment_uses_outcome_values: false"
+            echo "- random_shuffle_used: false"
+            echo "- final_test_separated: true"
+            echo "- phase4_split_frozen: true"
+            echo "- phase4_discovery_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

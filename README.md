@@ -34,6 +34,12 @@ The project does not begin with assumptions such as “holders must rise” or �
 
 ## Current phase
 
-Phase 0 — Source of Truth & Free-Data Viability.
+Phase 2 — Chain-Wide Universe & Outcome Dataset.
 
-The next gate is not “build a model.” It is to prove that the historical and live data required to study Robinhood Chain can be acquired reproducibly at $0.
+Phase 1 data viability is accepted at checkpoint
+`hlp-v1-phase1-data-viability` (canonical acceptance run **35601191874** on
+2026-09-21). The current execution gate is the real 14-source Phase-2 coverage,
+frozen universe/detector, and immutable outcome dataset. Guarded Phase-3
+feature-store and early Phase-4 discovery plumbing may be prepared in code, but
+neither later checkpoint is claimed until its required upstream artifacts have
+actually executed and passed.

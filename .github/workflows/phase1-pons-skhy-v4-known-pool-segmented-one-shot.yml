@@ -1,0 +1,22 @@
+name: phase1-pons-skhy-v4-known-pool-segmented-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/workflows/phase1-pons-skhy-v4-known-pool-segmented-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  scan:
+    if: ${{ contains(github.event.head_commit.message, 'launch SKHY V4 known-pool continuation') }}
+    uses: ./.github/workflows/phase1-pons-skhy-v4-known-pool-segmented.yml
+    with:
+      prior_probe_run_id: "33926428274"
+      prior_probe_artifact_name: "phase1-pons-residual-v4-forward-probe"
+      prior_probe_filename: "pons-residual-v4-forward-probe.jsonl"
+    secrets: inherit

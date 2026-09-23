@@ -61,7 +61,9 @@ Acceptance:
 - a credible full-history plan fits $0 OR a different free path is identified and proven;
 - if full-history acquisition cannot fit $0, Phase 1 is BLOCKED and later modeling does not begin.
 
-Checkpoint: hlp-v1-phase1-data-viability
+Checkpoint: hlp-v1-phase1-data-viability — PASS
+
+Canonical acceptance: run **35601191874** on 2026-09-21.
 
 ## Phase 2 — Chain-Wide Universe & Outcome Dataset
 

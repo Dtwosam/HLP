@@ -1,0 +1,83 @@
+name: phase2-pons-primary-population-handoff
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/phase2-pons-eligible-handoff.json'
+      - '.github/workflows/phase2-pons-primary-population-handoff.yml'
+      - 'src/hlp/data/phase2_pons_handoff.py'
+      - 'tests/test_phase2_pons_handoff.py'
+  pull_request:
+    paths:
+      - '.github/phase2-pons-eligible-handoff.json'
+      - '.github/workflows/phase2-pons-primary-population-handoff.yml'
+      - 'src/hlp/data/phase2_pons_handoff.py'
+      - 'tests/test_phase2_pons_handoff.py'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Download accepted Phase 1 eligible-universe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-eligible-universe
+          path: artifacts/phase1-pons-eligible-universe
+          github-token: ${{ github.token }}
+          repository: Dtwosam/HLP
+          run-id: 35576917452
+      - name: Validate Phase 1 to Phase 2 population handoff
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_pons_handoff import (
+              validate_pons_handoff_descriptor,
+              validate_pons_handoff_directory,
+          )
+
+          descriptor_path = Path(".github/phase2-pons-eligible-handoff.json")
+          descriptor = json.loads(descriptor_path.read_text())
+          expected = validate_pons_handoff_descriptor(descriptor)
+          report = validate_pons_handoff_directory(
+              "artifacts/phase1-pons-eligible-universe",
+              expected,
+          )
+          print(json.dumps(report, sort_keys=True))
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write("## Phase 2 Pons primary population handoff\n\n")
+                  handle.write(
+                      f"- eligible tokens: {report['records']} "
+                      f"(V1 {report['eligible_v1']}, "
+                      f"V2 {report['eligible_v2']})\n"
+                  )
+                  handle.write(
+                      f"- snapshot: {report['snapshot_head_block']}\n"
+                  )
+                  handle.write(
+                      f"- universe SHA-256: {report['universe_sha256']}\n"
+                  )
+                  handle.write(
+                      "- handoff valid: "
+                      f"{report['phase2_primary_population_handoff_valid']}\n"
+                  )
+          PY

@@ -1,0 +1,331 @@
+name: phase2-direct-source-population-handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      direct_launch_run_id:
+        description: Exact phase2-direct-launch-population run ID
+        required: true
+        type: string
+      expected_direct_launch_artifact_digest:
+        description: Exact direct-launch artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_direct_launch_handoff_sha256:
+        description: Exact SHA-256 of direct-launch-population-handoff.json
+        required: true
+        type: string
+      selector_run_id:
+        description: Exact phase2-direct-market-selector-freeze run ID
+        required: true
+        type: string
+      expected_selector_artifact_digest:
+        description: Exact selector-freeze artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_selector_descriptor_sha256:
+        description: Exact SHA-256 of direct-market-selector-freeze.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DIRECT_LAUNCH_RUN_ID: ${{ inputs.direct_launch_run_id }}
+      EXPECTED_DIRECT_LAUNCH_ARTIFACT_DIGEST: ${{ inputs.expected_direct_launch_artifact_digest }}
+      EXPECTED_DIRECT_LAUNCH_HANDOFF_SHA256: ${{ inputs.expected_direct_launch_handoff_sha256 }}
+      SELECTOR_RUN_ID: ${{ inputs.selector_run_id }}
+      EXPECTED_SELECTOR_ARTIFACT_DIGEST: ${{ inputs.expected_selector_artifact_digest }}
+      EXPECTED_SELECTOR_DESCRIPTOR_SHA256: ${{ inputs.expected_selector_descriptor_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify exact prerequisite artifacts
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          specs = [
+              (
+                  "direct launch",
+                  int(os.environ["DIRECT_LAUNCH_RUN_ID"]),
+                  "phase2-direct-launch-population",
+                  os.environ[
+                      "EXPECTED_DIRECT_LAUNCH_ARTIFACT_DIGEST"
+                  ],
+              ),
+              (
+                  "selector freeze",
+                  int(os.environ["SELECTOR_RUN_ID"]),
+                  "phase2-direct-market-selector-freeze",
+                  os.environ[
+                      "EXPECTED_SELECTOR_ARTIFACT_DIGEST"
+                  ],
+              ),
+          ]
+          for label, run_id, name, expected in specs:
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                      f"actions/runs/{run_id}/artifacts?name={name}"
+                  ),
+              ])
+              payload = json.loads(raw)
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{label}: expected one artifact; "
+                      f"found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(f"{label}: artifact is expired")
+              actual = str(artifact.get("digest") or "").lower()
+              expected = expected.lower()
+              if not expected.startswith("sha256:"):
+                  raise SystemExit(
+                      f"{label}: expected digest must use sha256:<hex>"
+                  )
+              if actual != expected:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected}"
+                  )
+          PY
+
+      - name: Download prerequisite artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p inputs/direct-launch inputs/selector
+          gh run download "${DIRECT_LAUNCH_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name phase2-direct-launch-population \
+            --dir inputs/direct-launch
+          gh run download "${SELECTOR_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name phase2-direct-market-selector-freeze \
+            --dir inputs/selector
+
+      - name: Validate exact prerequisite files
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          launch_root = Path("inputs/direct-launch")
+          handoff_path = launch_root / (
+              "direct-launch-population-handoff.json"
+          )
+          handoff_bytes = handoff_path.read_bytes()
+          actual_handoff_sha = hashlib.sha256(
+              handoff_bytes
+          ).hexdigest()
+          expected_handoff_sha = os.environ[
+              "EXPECTED_DIRECT_LAUNCH_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if actual_handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "direct launch handoff SHA drift"
+              )
+          handoff = json.loads(handoff_bytes)
+          if (
+              handoff.get("version")
+              != "phase2-direct-launch-population-handoff-v2"
+          ):
+              raise SystemExit("direct launch handoff version changed")
+
+          population = launch_root / "direct-launch-population.jsonl"
+          summary = launch_root / (
+              "direct-launch-population-summary.json"
+          )
+          if hashlib.sha256(population.read_bytes()).hexdigest() != (
+              handoff["direct_launch_population_sha256"]
+          ):
+              raise SystemExit("direct launch population SHA drift")
+          if hashlib.sha256(summary.read_bytes()).hexdigest() != (
+              handoff["direct_launch_population_summary_sha256"]
+          ):
+              raise SystemExit(
+                  "direct launch population summary SHA drift"
+              )
+
+          selector_path = Path(
+              "inputs/selector/direct-market-selector-freeze.json"
+          )
+          selector_bytes = selector_path.read_bytes()
+          actual_selector_sha = hashlib.sha256(
+              selector_bytes
+          ).hexdigest()
+          expected_selector_sha = os.environ[
+              "EXPECTED_SELECTOR_DESCRIPTOR_SHA256"
+          ].lower().removeprefix("sha256:")
+          if actual_selector_sha != expected_selector_sha:
+              raise SystemExit(
+                  "direct selector descriptor SHA drift"
+              )
+          selector = json.loads(selector_bytes)
+          if selector.get("selection_rule_frozen") is not True:
+              raise SystemExit("direct selector is not frozen")
+          if selector.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "direct selector cannot close source coverage"
+              )
+          PY
+
+      - name: Build source-specific direct populations
+        id: build
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.direct_source_population import (
+              DIRECT_SOURCE_IDS,
+              build_direct_source_populations,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          launch_root = Path("inputs/direct-launch")
+          rows = [
+              json.loads(line)
+              for line in (
+                  launch_root / "direct-launch-population.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          launch_handoff = json.loads(
+              (
+                  launch_root
+                  / "direct-launch-population-handoff.json"
+              ).read_text()
+          )
+          selector_path = Path(
+              "inputs/selector/direct-market-selector-freeze.json"
+          )
+          selector = json.loads(selector_path.read_text())
+
+          groups, summary = build_direct_source_populations(
+              rows,
+              launch_handoff,
+              selector,
+          )
+          manifests = {}
+          for source_id in DIRECT_SOURCE_IDS:
+              manifest = write_jsonl_snapshot(
+                  groups[source_id],
+                  output=Path(
+                      f"artifacts/{source_id}-direct-population.jsonl"
+                  ),
+                  provenance={
+                      "source": (
+                          "phase2_conclusive_direct_source_population"
+                      ),
+                      "chain_id": 4663,
+                      "source_id": source_id,
+                      "snapshot_head_block": summary[
+                          "snapshot_head_block"
+                      ],
+                      "selector_version": summary[
+                          "selector_version"
+                      ],
+                      "selector_rule_frozen": True,
+                      "source_coverage_complete": False,
+                  },
+              )
+              manifests[source_id] = {
+                  "records": manifest["records"],
+                  "sha256": manifest["sha256"],
+              }
+
+          handoff = {
+              **summary,
+              "version": (
+                  "phase2-direct-source-population-handoff-v1"
+              ),
+              "direct_launch_run_id": int(
+                  os.environ["DIRECT_LAUNCH_RUN_ID"]
+              ),
+              "direct_launch_artifact_digest": os.environ[
+                  "EXPECTED_DIRECT_LAUNCH_ARTIFACT_DIGEST"
+              ].lower(),
+              "direct_launch_handoff_sha256": os.environ[
+                  "EXPECTED_DIRECT_LAUNCH_HANDOFF_SHA256"
+              ].lower().removeprefix("sha256:"),
+              "selector_run_id": int(os.environ["SELECTOR_RUN_ID"]),
+              "selector_artifact_digest": os.environ[
+                  "EXPECTED_SELECTOR_ARTIFACT_DIGEST"
+              ].lower(),
+              "selector_descriptor_sha256": os.environ[
+                  "EXPECTED_SELECTOR_DESCRIPTOR_SHA256"
+              ].lower().removeprefix("sha256:"),
+              "source_manifests": manifests,
+          }
+          out = Path(
+              "artifacts/direct-source-population-handoff.json"
+          )
+          out.write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          digest = hashlib.sha256(out.read_bytes()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"handoff_sha256={digest}\n")
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+
+      - name: Upload direct source populations
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-source-population-handoff
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish downstream identities
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_SHA256: ${{ steps.build.outputs.handoff_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_SHA256}"
+          {
+            echo "## Direct source populations"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-direct-source-population-handoff"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- selector_rule_frozen: true"
+            echo "- canonical_market_selection_applied: false"
+            echo "- source_coverage_complete: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

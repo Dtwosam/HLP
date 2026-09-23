@@ -1,0 +1,556 @@
+name: phase2-pools-trade-cca-event-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-cca-event-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-cca-event-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Frozen successful LBP orientation anchor. Its final CCA checkpoint and
+  # exact derived-PoolId V4 Initialize occur in the same transaction.
+  INITIALIZER: '0x3f555c266afd8ca3bbd2b0ee9669620d90d82068'
+  CREATED_BLOCK: '30493016'
+  MIGRATION_BLOCK: '30493816'
+  MAX_PROBE_BLOCKS: '10000'
+  POST_MIGRATION_BLOCKS: '5000'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Audit one proven pools.trade CCA initializer
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.data.pools_trade_cca_bids import (
+              reconcile_cca_bid_fills,
+          )
+          from hlp.protocols.pools_trade_lbp import (
+              CCA_BID_EXITED_TOPIC,
+              CCA_BID_SUBMITTED_TOPIC,
+              CCA_CHECKPOINT_TOPIC,
+              CCA_CLEARING_PRICE_TOPIC,
+              decode_pools_trade_cca_bid_exited,
+              decode_pools_trade_cca_bid_submitted,
+          )
+
+          address = os.environ["INITIALIZER"].lower()
+          created = int(os.environ["CREATED_BLOCK"])
+          migration = int(os.environ["MIGRATION_BLOCK"])
+          max_probe = int(os.environ["MAX_PROBE_BLOCKS"])
+          post_migration = int(os.environ["POST_MIGRATION_BLOCKS"])
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+
+          code = rpc.get_code(address, created)
+          if code in {"0x", "0x0", ""}:
+              raise SystemExit("proven CCA initializer has no code at creation")
+
+          end = min(
+              migration + post_migration,
+              created + max_probe - 1,
+          )
+          chunk = 50_000 if key else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          logs = []
+          topic_counts = Counter()
+          first_by_topic = {}
+          last_scanned = created - 1
+          chunks_scanned = 0
+
+          for lo in range(created, end + 1, chunk):
+              hi = min(end, lo + chunk - 1)
+              rows = rpc.get_logs(lo, hi, address=address)
+              chunks_scanned += 1
+              last_scanned = hi
+              for row in rows:
+                  logs.append(row)
+                  topic0 = row.topics[0] if row.topics else "<none>"
+                  topic_counts[topic0] += 1
+                  first_by_topic.setdefault(
+                      topic0,
+                      {
+                          "block_number": row.block_number,
+                          "transaction_hash": row.transaction_hash,
+                          "transaction_index": row.transaction_index,
+                          "log_index": row.log_index,
+                          "topics": list(row.topics),
+                          "data": row.data,
+                          "data_bytes": len(
+                              row.data.removeprefix("0x")
+                          ) // 2,
+                          "data_words": (
+                              len(row.data.removeprefix("0x")) // 64
+                              if len(row.data.removeprefix("0x")) % 64 == 0
+                              else None
+                          ),
+                      },
+                  )
+
+          def topic_address_candidates(topics):
+              output = []
+              for index, topic in enumerate(topics[1:], start=1):
+                  value = topic.removeprefix("0x")
+                  if (
+                      len(value) == 64
+                      and value[:24] == "0" * 24
+                      and int(value[-40:], 16) != 0
+                  ):
+                      output.append({
+                          "topic_index": index,
+                          "address": "0x" + value[-40:],
+                      })
+              return output
+
+          def data_word_address_candidates(data):
+              raw = data.removeprefix("0x")
+              if len(raw) % 64 != 0:
+                  return []
+              output = []
+              for index in range(0, len(raw), 64):
+                  word = raw[index:index + 64]
+                  if (
+                      word[:24] == "0" * 24
+                      and int(word[-40:], 16) != 0
+                  ):
+                      output.append({
+                          "word_index": index // 64,
+                          "address": "0x" + word[-40:],
+                      })
+              return output
+
+          samples = []
+          per_topic = Counter()
+          for row in logs:
+              topic0 = row.topics[0] if row.topics else "<none>"
+              if per_topic[topic0] >= 16:
+                  continue
+              per_topic[topic0] += 1
+              samples.append({
+                  "block_number": row.block_number,
+                  "transaction_hash": row.transaction_hash,
+                  "transaction_index": row.transaction_index,
+                  "log_index": row.log_index,
+                  "topics": list(row.topics),
+                  "indexed_address_candidates": (
+                      topic_address_candidates(row.topics)
+                  ),
+                  "data": row.data,
+                  "data_words": (
+                      [
+                          int(
+                              row.data.removeprefix("0x")[i:i+64],
+                              16,
+                          )
+                          for i in range(
+                              0,
+                              len(row.data.removeprefix("0x")),
+                              64,
+                          )
+                      ]
+                      if len(row.data.removeprefix("0x")) % 64 == 0
+                      else None
+                  ),
+                  "data_word_address_candidates": (
+                      data_word_address_candidates(row.data)
+                  ),
+              })
+
+          sample_hashes = sorted({
+              row["transaction_hash"]
+              for row in samples
+          })
+          transactions = rpc.get_transactions_batched(
+              sample_hashes,
+              batch_size=50,
+              min_batch_size=1,
+          )
+          tx_by_hash = {
+              str(tx["hash"]).lower(): tx
+              for tx in transactions
+          }
+          receipts = {
+              tx_hash: rpc.call(
+                  "eth_getTransactionReceipt",
+                  [tx_hash],
+              )
+              for tx_hash in sample_hashes
+          }
+          if any(receipt is None for receipt in receipts.values()):
+              raise SystemExit(
+                  "CCA audit sample transaction receipt is missing"
+              )
+
+          def input_word_address_candidates(input_data):
+              raw = str(input_data or "").removeprefix("0x")
+              if len(raw) < 8:
+                  return []
+              payload = raw[8:]
+              output = []
+              for index in range(0, len(payload) - 63, 64):
+                  word = payload[index:index + 64]
+                  if (
+                      word[:24] == "0" * 24
+                      and int(word[-40:], 16) != 0
+                  ):
+                      output.append({
+                          "word_index": index // 64,
+                          "address": "0x" + word[-40:],
+                      })
+              return output
+
+          senders_by_topic = {}
+          for sample in samples:
+              tx = tx_by_hash.get(
+                  str(sample["transaction_hash"]).lower()
+              )
+              if tx is None:
+                  raise SystemExit(
+                      "CCA audit sample transaction is missing"
+                  )
+              sender = str(tx.get("from") or "").lower()
+              target = str(tx.get("to") or "").lower()
+              input_data = str(tx.get("input") or "")
+              sample["transaction_from"] = sender
+              sample["transaction_to"] = target
+              sample["input_selector"] = (
+                  input_data[:10] if len(input_data) >= 10 else input_data
+              )
+              sample["input_bytes"] = (
+                  max(0, len(input_data.removeprefix("0x")) // 2)
+              )
+              sample["input_word_address_candidates"] = (
+                  input_word_address_candidates(input_data)
+              )
+              sample["transaction_value_raw"] = int(
+                  str(tx.get("value") or "0x0"),
+                  16,
+              )
+              topic0 = (
+                  sample["topics"][0]
+                  if sample["topics"]
+                  else "<none>"
+              )
+              senders_by_topic.setdefault(topic0, set()).add(sender)
+
+          receipt_inventory = {}
+          candidate_addresses = set()
+          for tx_hash in sample_hashes:
+              receipt = receipts[tx_hash]
+              tx = tx_by_hash[tx_hash]
+              tx_block = int(str(tx["blockNumber"]), 16)
+              sender = str(tx.get("from") or "").lower()
+              sender_code = rpc.get_code(sender, tx_block)
+              receipt_logs = []
+              address_topic_counts = Counter()
+              for raw_log in receipt.get("logs") or []:
+                  log_address = str(
+                      raw_log.get("address") or ""
+                  ).lower()
+                  raw_topics = [
+                      str(value).lower()
+                      for value in raw_log.get("topics") or []
+                  ]
+                  topic0 = raw_topics[0] if raw_topics else "<none>"
+                  address_topic_counts[(log_address, topic0)] += 1
+                  receipt_logs.append({
+                      "address": log_address,
+                      "topic0": topic0,
+                      "topics": raw_topics,
+                      "data": str(raw_log.get("data") or ""),
+                      "log_index": int(
+                          str(raw_log.get("logIndex") or "0x0"),
+                          16,
+                      ),
+                  })
+              input_candidates = input_word_address_candidates(
+                  tx.get("input")
+              )
+              candidate_addresses.update(
+                  value["address"].lower()
+                  for value in input_candidates
+              )
+              receipt_inventory[tx_hash] = {
+                  "transaction_from": sender,
+                  "transaction_from_code_bytes": len(
+                      sender_code.removeprefix("0x")
+                  ) // 2,
+                  "transaction_to": str(
+                      tx.get("to") or ""
+                  ).lower(),
+                  "input_selector": str(
+                      tx.get("input") or ""
+                  )[:10],
+                  "input_bytes": (
+                      len(
+                          str(tx.get("input") or "")
+                          .removeprefix("0x")
+                      )
+                      // 2
+                  ),
+                  "input_word_address_candidates": input_candidates,
+                  "receipt_status": int(
+                      str(receipt.get("status") or "0x0"),
+                      16,
+                  ),
+                  "receipt_log_count": len(receipt_logs),
+                  "receipt_address_topic_counts": [
+                      {
+                          "address": address,
+                          "topic0": topic0,
+                          "count": count,
+                      }
+                      for (address, topic0), count in sorted(
+                          address_topic_counts.items()
+                      )
+                  ],
+                  "receipt_logs": receipt_logs,
+              }
+
+          candidate_code = {}
+          if sample_hashes:
+              reference_block = int(
+                  str(tx_by_hash[sample_hashes[-1]]["blockNumber"]),
+                  16,
+              )
+              for candidate in sorted(candidate_addresses):
+                  try:
+                      code = rpc.get_code(candidate, reference_block)
+                  except Exception as exc:
+                      candidate_code[candidate] = {
+                          "error": str(exc),
+                      }
+                  else:
+                      candidate_code[candidate] = {
+                          "code_bytes": len(
+                              code.removeprefix("0x")
+                          ) // 2,
+                      }
+
+          known_topic_roles = {
+              CCA_BID_SUBMITTED_TOPIC: "bid_submitted",
+              CCA_BID_EXITED_TOPIC: "bid_exited",
+              CCA_CLEARING_PRICE_TOPIC: "clearing_price",
+              CCA_CHECKPOINT_TOPIC: "checkpoint",
+          }
+
+          bid_submissions = [
+              decode_pools_trade_cca_bid_submitted(row)
+              for row in logs
+              if row.topics
+              and row.topics[0] == CCA_BID_SUBMITTED_TOPIC
+          ]
+          bid_exits = [
+              decode_pools_trade_cca_bid_exited(row)
+              for row in logs
+              if row.topics
+              and row.topics[0] == CCA_BID_EXITED_TOPIC
+          ]
+          executed_fills, bid_fill_summary = reconcile_cca_bid_fills(
+              bid_submissions,
+              bid_exits,
+          )
+          all_sampled_senders = sorted({
+              str(sample["transaction_from"])
+              for sample in samples
+              if sample.get("transaction_from")
+          })
+          address_candidates_by_topic = {}
+          non_sender_address_candidates_by_topic = {}
+          for topic0 in sorted(topic_counts):
+              topic_samples = [
+                  sample
+                  for sample in samples
+                  if (
+                      sample["topics"][0]
+                      if sample["topics"]
+                      else "<none>"
+                  ) == topic0
+              ]
+              candidates = sorted({
+                  str(candidate["address"]).lower()
+                  for sample in topic_samples
+                  for candidate in (
+                      list(sample["indexed_address_candidates"])
+                      + list(sample["data_word_address_candidates"])
+                  )
+              })
+              address_candidates_by_topic[topic0] = candidates
+              non_sender_address_candidates_by_topic[topic0] = [
+                  candidate
+                  for candidate in candidates
+                  if candidate not in all_sampled_senders
+              ]
+
+          topic_inventory = {}
+          for topic0, count in sorted(topic_counts.items()):
+              topic_samples = [
+                  sample
+                  for sample in samples
+                  if (
+                      sample["topics"][0]
+                      if sample["topics"]
+                      else "<none>"
+                  ) == topic0
+              ]
+              topic_inventory[topic0] = {
+                  "count": count,
+                  "known_role": known_topic_roles.get(
+                      topic0,
+                      "unclassified",
+                  ),
+                  "sampled_transaction_senders": sorted(
+                      value
+                      for value in senders_by_topic.get(
+                          topic0,
+                          set(),
+                      )
+                      if value
+                  ),
+                  "sampled_input_selectors": sorted({
+                      str(sample["input_selector"])
+                      for sample in topic_samples
+                  }),
+                  "sampled_topic_counts": sorted({
+                      len(sample["topics"])
+                      for sample in topic_samples
+                  }),
+                  "sampled_data_word_counts": sorted({
+                      (
+                          None
+                          if sample["data_words"] is None
+                          else len(sample["data_words"])
+                      )
+                      for sample in topic_samples
+                  }, key=lambda value: (-1 if value is None else value)),
+              }
+
+          report = {
+              "chain_id": 4663,
+              "initializer": address,
+              "created_block": created,
+              "migration_block": migration,
+              "post_migration_blocks_requested": post_migration,
+              "post_migration_blocks_scanned": max(0, end - migration),
+              "probe_limit_block": end,
+              "last_scanned_block": last_scanned,
+              "chunks_scanned": chunks_scanned,
+              "logs_observed": len(logs),
+              "topic_counts": dict(topic_counts),
+              "unique_sampled_transactions": len(sample_hashes),
+              "unique_sampled_transaction_senders": all_sampled_senders,
+              "receipt_inventory": receipt_inventory,
+              "input_candidate_code_at_final_sample": candidate_code,
+              "address_candidates_by_topic": (
+                  address_candidates_by_topic
+              ),
+              "non_sender_address_candidates_by_topic": (
+                  non_sender_address_candidates_by_topic
+              ),
+              "known_price_topics": {
+                  CCA_CLEARING_PRICE_TOPIC: "clearing_price",
+                  CCA_CHECKPOINT_TOPIC: "checkpoint",
+              },
+              "known_bid_topics": {
+                  CCA_BID_SUBMITTED_TOPIC: "bid_submitted",
+                  CCA_BID_EXITED_TOPIC: "bid_exited",
+              },
+              "bid_fill_summary": bid_fill_summary,
+              "executed_fills": executed_fills,
+              "unclassified_topics": sorted(
+                  topic
+                  for topic in topic_counts
+                  if topic not in {
+                      CCA_CLEARING_PRICE_TOPIC,
+                      CCA_CHECKPOINT_TOPIC,
+                  }
+              ),
+              "topic_inventory": topic_inventory,
+              "first_by_topic": first_by_topic,
+              "samples": samples,
+              "code_bytes": len(code.removeprefix("0x")) // 2,
+              "code_sha256": hashlib.sha256(
+                  bytes.fromhex(code.removeprefix("0x"))
+              ).hexdigest(),
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          Path("artifacts/pools-trade-cca-event-audit.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({
+              key: report[key]
+              for key in (
+                  "initializer",
+                  "created_block",
+                  "migration_block",
+                  "post_migration_blocks_scanned",
+                  "last_scanned_block",
+                  "chunks_scanned",
+                  "logs_observed",
+                  "topic_counts",
+                  "unique_sampled_transactions",
+                  "unique_sampled_transaction_senders",
+                  "bid_fill_summary",
+                  "executed_fills",
+                  "receipt_inventory",
+                  "input_candidate_code_at_final_sample",
+                  "address_candidates_by_topic",
+                  "non_sender_address_candidates_by_topic",
+                  "unclassified_topics",
+                  "topic_inventory",
+                  "first_by_topic",
+                  "rpc_requests",
+                  "rpc_route",
+              )
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-cca-event-audit
+          path: artifacts/
+          if-no-files-found: error

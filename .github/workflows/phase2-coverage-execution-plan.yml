@@ -1,0 +1,606 @@
+name: phase2-coverage-execution-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      completed_node_runs_json:
+        description: JSON object mapping planner node IDs to successful workflow_dispatch run IDs
+        required: false
+        default: '{}'
+        type: string
+      node_dispatch_run_ids_json:
+        description: JSON array of successful phase2-execution-node-dispatch run IDs
+        required: false
+        default: '[]'
+        type: string
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-archive-rpc-preflight.yml'
+      - '.github/workflows/phase2-source-coverage-promotion.yml'
+      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+      - 'tests/test_phase2_coverage_execution.py'
+  pull_request:
+    paths:
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-archive-rpc-preflight.yml'
+      - '.github/workflows/phase2-source-coverage-promotion.yml'
+      - '.github/workflows/phase2-source-coverage-ledger-commit.yml'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'src/hlp/data/phase2_sources.py'
+      - 'tests/test_phase2_coverage_execution.py'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-coverage-execution-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPLETED_NODE_RUNS_JSON: ${{ inputs.completed_node_runs_json }}
+  NODE_DISPATCH_RUN_IDS_JSON: ${{ inputs.node_dispatch_run_ids_json }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: plan
+        name: Build deterministic Phase-2 coverage execution plan
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_execution import (
+              build_phase2_coverage_execution_plan,
+          )
+          from hlp.data.phase2_execution_dispatch import (
+              build_phase2_dispatch_input_plan,
+              validate_phase2_node_dispatch_evidence,
+          )
+          from hlp.data.phase2_execution_runs import (
+              validate_phase2_execution_run_receipts,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          raw = os.environ.get("COMPLETED_NODE_RUNS_JSON", "").strip()
+          if not raw:
+              raw = "{}"
+          try:
+              completed_runs = json.loads(raw)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "completed_node_runs_json must be valid JSON"
+              ) from exc
+          if not isinstance(completed_runs, dict):
+              raise SystemExit(
+                  "completed_node_runs_json must be a JSON object"
+              )
+          for node_id, run_id in completed_runs.items():
+              if not isinstance(node_id, str):
+                  raise SystemExit(
+                      "completed_node_runs_json keys must be strings"
+                  )
+              try:
+                  parsed = int(run_id)
+              except (TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"invalid run ID for {node_id}: {run_id!r}"
+                  ) from exc
+              if parsed <= 0:
+                  raise SystemExit(
+                      f"run ID for {node_id} must be positive"
+                  )
+              completed_runs[node_id] = parsed
+
+          dispatch_raw = os.environ.get(
+              "NODE_DISPATCH_RUN_IDS_JSON",
+              "",
+          ).strip()
+          if not dispatch_raw:
+              dispatch_raw = "[]"
+          try:
+              dispatch_run_ids = json.loads(dispatch_raw)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "node_dispatch_run_ids_json must be valid JSON"
+              ) from exc
+          if not isinstance(dispatch_run_ids, list):
+              raise SystemExit(
+                  "node_dispatch_run_ids_json must be a JSON array"
+              )
+          normalized_dispatch_run_ids = []
+          for value in dispatch_run_ids:
+              try:
+                  parsed = int(value)
+              except (TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"invalid node-dispatch run ID: {value!r}"
+                  ) from exc
+              if parsed <= 0:
+                  raise SystemExit(
+                      "node-dispatch run IDs must be positive"
+                  )
+              normalized_dispatch_run_ids.append(parsed)
+          if len(normalized_dispatch_run_ids) != len(
+              set(normalized_dispatch_run_ids)
+          ):
+              raise SystemExit(
+                  "node_dispatch_run_ids_json repeats a run ID"
+              )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          resolved_dispatch_receipts = []
+          for dispatch_run_id in normalized_dispatch_run_ids:
+              control_run = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/actions/runs/{dispatch_run_id}",
+                  ])
+              )
+              if control_run.get("path") != (
+                  ".github/workflows/"
+                  "phase2-execution-node-dispatch.yml"
+              ):
+                  raise SystemExit(
+                      "node-dispatch control run workflow identity drift"
+                  )
+              if control_run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      "node-dispatch control run was not workflow_dispatch"
+                  )
+              if control_run.get("status") != "completed":
+                  raise SystemExit(
+                      "node-dispatch control run is not completed"
+                  )
+              if control_run.get("conclusion") != "success":
+                  raise SystemExit(
+                      "node-dispatch control run did not succeed"
+                  )
+              if control_run.get("head_branch") != branch:
+                  raise SystemExit(
+                      "node-dispatch control run branch drift"
+                  )
+
+              artifact_name = "phase2-execution-node-dispatch"
+              artifact_payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/"
+                          f"{dispatch_run_id}/artifacts?"
+                          f"name={artifact_name}"
+                      ),
+                  ])
+              )
+              matches = [
+                  row
+                  for row in artifact_payload.get("artifacts", [])
+                  if row.get("name") == artifact_name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "expected exactly one live node-dispatch artifact "
+                      f"for run {dispatch_run_id}; found {len(matches)}"
+                  )
+
+              destination = Path(
+                  "upstream",
+                  f"node-dispatch-{dispatch_run_id}",
+              )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(dispatch_run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  artifact_name,
+                  "--dir",
+                  str(destination),
+              ])
+              attempt_path = (
+                  destination
+                  / "phase2-execution-node-dispatch-attempt.json"
+              )
+              receipt_path = (
+                  destination
+                  / "phase2-execution-node-dispatch.json"
+              )
+              if not attempt_path.is_file() or not receipt_path.is_file():
+                  raise SystemExit(
+                      "node-dispatch artifact lacks attempt/final evidence"
+                  )
+              attempt_bytes = attempt_path.read_bytes()
+              try:
+                  dispatch_evidence = (
+                      validate_phase2_node_dispatch_evidence(
+                          json.loads(attempt_bytes),
+                          json.loads(receipt_path.read_text()),
+                          attempt_file_sha256=hashlib.sha256(
+                              attempt_bytes
+                          ).hexdigest(),
+                      )
+                  )
+              except ValueError as exc:
+                  raise SystemExit(str(exc)) from exc
+              if dispatch_evidence["target_ref"] != branch:
+                  raise SystemExit(
+                      "node-dispatch evidence target ref drift"
+                  )
+              if dispatch_evidence[
+                  "node_dispatch_control_run_id"
+              ] != dispatch_run_id:
+                  raise SystemExit(
+                      "node-dispatch evidence/control run identity drift"
+                  )
+              node_id = dispatch_evidence["node_id"]
+              target_run_id = int(
+                  dispatch_evidence["dispatched_run_id"]
+              )
+              existing = completed_runs.get(node_id)
+              if (
+                  existing is not None
+                  and int(existing) != target_run_id
+              ):
+                  raise SystemExit(
+                      f"conflicting target run IDs for {node_id}: "
+                      f"{existing} != {target_run_id}"
+                  )
+              completed_runs[node_id] = target_run_id
+              resolved_dispatch_receipts.append({
+                  "control_run_id": dispatch_run_id,
+                  "node_id": node_id,
+                  "target_run_id": target_run_id,
+              })
+
+          receipts = []
+          for node_id, run_id in sorted(completed_runs.items()):
+              payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/actions/runs/{run_id}",
+                  ])
+              )
+              run_head = str(payload.get("head_sha") or "").lower()
+              if run_head == current_head:
+                  lineage_status = "identical"
+                  changed_paths = []
+              else:
+                  comparison = json.loads(
+                      subprocess.check_output([
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          (
+                              f"/repos/{repo}/compare/"
+                              f"{run_head}...{current_head}"
+                          ),
+                      ])
+                  )
+                  lineage_status = str(
+                      comparison.get("status") or ""
+                  )
+                  comparison_files = comparison.get(
+                      "files",
+                      [],
+                  )
+                  if not isinstance(comparison_files, list):
+                      raise SystemExit(
+                          f"compare files are invalid for {node_id}"
+                      )
+                  if len(comparison_files) >= 300:
+                      raise SystemExit(
+                          f"compare file list reached API cap for "
+                          f"{node_id}; rerun the dependency"
+                      )
+                  changed_paths = sorted(
+                      str(row.get("filename") or "")
+                      for row in comparison_files
+                      if isinstance(row, dict)
+                      and str(row.get("filename") or "")
+                  )
+
+              receipts.append({
+                  "node_id": node_id,
+                  "run_id": int(payload["id"]),
+                  "workflow_path": str(payload.get("path") or ""),
+                  "event": str(payload.get("event") or ""),
+                  "status": str(payload.get("status") or ""),
+                  "conclusion": str(payload.get("conclusion") or ""),
+                  "head_branch": str(payload.get("head_branch") or ""),
+                  "head_sha": run_head,
+                  "lineage_status": lineage_status,
+                  "changed_paths_since_run": changed_paths,
+                  "run_attempt": int(payload.get("run_attempt") or 0),
+                  "repository_full_name": str(
+                      (payload.get("repository") or {}).get(
+                          "full_name"
+                      ) or ""
+                  ),
+                  "head_repository_full_name": str(
+                      (payload.get("head_repository") or {}).get(
+                          "full_name"
+                      ) or ""
+                  ),
+              })
+
+          verified = validate_phase2_execution_run_receipts(
+              receipts,
+              repository_full_name=repo,
+              branch=branch,
+              current_head_sha=current_head,
+          )
+          verified["node_dispatch_run_ids_consumed"] = sorted(
+              normalized_dispatch_run_ids
+          )
+          verified["node_dispatch_receipts_consumed"] = sorted(
+              resolved_dispatch_receipts,
+              key=lambda row: row["node_id"],
+          )
+          verified_path = Path(
+              "artifacts/phase2-execution-run-receipts.json"
+          )
+          verified_path.write_text(
+              json.dumps(verified, indent=2, sort_keys=True) + "\n"
+          )
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_bytes = ledger_path.read_bytes()
+          ledger_sha256 = hashlib.sha256(ledger_bytes).hexdigest()
+          ledger = json.loads(ledger_bytes)
+          plan = build_phase2_coverage_execution_plan(
+              ledger,
+              build_phase2_source_inventory(),
+              completed_node_ids=verified["completed_node_ids"],
+          )
+          plan["canonical_coverage_ledger_sha256"] = ledger_sha256
+          plan["planner_head_sha"] = current_head
+          output = Path(
+              "artifacts/phase2-coverage-execution-plan.json"
+          )
+          output.write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+
+          workflow_names = {
+              str(row["workflow"])
+              for row in plan["nodes"]
+              if row.get("workflow")
+          }
+          workflow_text_by_name = {
+              name: Path(
+                  ".github/workflows",
+                  name,
+              ).read_text()
+              for name in workflow_names
+          }
+          dispatch_plan = build_phase2_dispatch_input_plan(
+              plan,
+              verified,
+              workflow_text_by_name=workflow_text_by_name,
+          )
+          dispatch_path = Path(
+              "artifacts/phase2-dispatch-input-plan.json"
+          )
+          dispatch_path.write_text(
+              json.dumps(
+                  dispatch_plan,
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+
+          ready = plan["ready_to_dispatch_node_ids"]
+          ready_secret = plan[
+              "ready_requiring_archive_secret_node_ids"
+          ]
+          ready_public = plan[
+              "ready_without_archive_secret_node_ids"
+          ]
+          approvals = plan[
+              "awaiting_explicit_approval_node_ids"
+          ]
+          manual = plan["manual_ledger_commit_node_ids"]
+          ledger_approvals = plan[
+              "ledger_commit_approval_node_ids"
+          ]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"complete={plan['complete_sources']}\n"
+              )
+              handle.write(
+                  f"incomplete={plan['incomplete_sources']}\n"
+              )
+              handle.write(f"ready={len(ready)}\n")
+              handle.write(
+                  f"ready_secret={len(ready_secret)}\n"
+              )
+              handle.write(
+                  f"ready_public={len(ready_public)}\n"
+              )
+              handle.write(
+                  f"approvals={len(approvals)}\n"
+              )
+              handle.write(f"manual={len(manual)}\n")
+              handle.write(
+                  f"ledger_approvals={len(ledger_approvals)}\n"
+              )
+
+          print(json.dumps({
+              "complete_sources": plan["complete_sources"],
+              "incomplete_sources": plan["incomplete_sources"],
+              "canonical_coverage_ledger_sha256": ledger_sha256,
+              "planner_head_sha": current_head,
+              "ready_to_dispatch_node_ids": ready,
+              "ready_requiring_archive_secret_node_ids": ready_secret,
+              "ready_without_archive_secret_node_ids": ready_public,
+              "awaiting_explicit_approval_node_ids": approvals,
+              "manual_ledger_commit_node_ids": manual,
+              "ledger_commit_approval_node_ids": ledger_approvals,
+              "ledger_promotion_serialized": True,
+              "canonical_ledger_mutation_automatic": False,
+              "canonical_ledger_commit_workflow_available": True,
+              "ledger_commit_requires_explicit_approval": True,
+              "verified_completed_runs": verified["verified_runs"],
+              "node_dispatch_receipts_consumed": len(
+                  resolved_dispatch_receipts
+              ),
+              "all_runs_current_or_ledger_only_ancestors": verified[
+                  "all_runs_current_or_ledger_only_ancestors"
+              ],
+              "dispatchable_input_plans": dispatch_plan[
+                  "dispatchable_nodes"
+              ],
+              "workflow_dispatch_performed": False,
+          }, sort_keys=True))
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## Phase-2 coverage execution plan\n\n"
+                  )
+                  handle.write(
+                      f"- canonical complete: "
+                      f"{plan['complete_sources']}/"
+                      f"{plan['inventory_sources']}\n"
+                  )
+                  handle.write(
+                      f"- incomplete targets: "
+                      f"{plan['incomplete_sources']}\n"
+                  )
+                  handle.write(
+                      f"- ready workflow nodes: {len(ready)}\n"
+                  )
+                  handle.write(
+                      f"- ready without archive secret: "
+                      f"{len(ready_public)}\n"
+                  )
+                  handle.write(
+                      f"- ready requiring archive secret: "
+                      f"{len(ready_secret)}\n"
+                  )
+                  handle.write(
+                      f"- explicit approvals ready: "
+                      f"{len(approvals)}\n"
+                  )
+                  handle.write(
+                      f"- manual ledger commits ready: "
+                      f"{len(manual)}\n"
+                  )
+                  handle.write(
+                      f"- approved ledger-commit gates ready: "
+                      f"{len(ledger_approvals)}\n"
+                  )
+                  handle.write(
+                      "- coverage acquisition may run in parallel; "
+                      "canonical ledger promotion is serialized\n"
+                  )
+                  handle.write(
+                      f"- verified successful workflow runs: "
+                      f"{verified['verified_runs']}\n"
+                  )
+                  handle.write(
+                      f"- node-dispatch receipts consumed: "
+                      f"{len(resolved_dispatch_receipts)}\n"
+                  )
+                  handle.write(
+                      "- verified run lineage: current HEAD or "
+                      "canonical-ledger-only ancestor\n"
+                  )
+                  handle.write(
+                      f"- dispatch input plans emitted: "
+                      f"{dispatch_plan['dispatchable_nodes']}\n"
+                  )
+                  handle.write(
+                      "- planner completion credit is accepted only from "
+                      "successful workflow_dispatch run IDs whose workflow, "
+                      "repo and branch identities match the DAG\n"
+                  )
+                  handle.write(
+                      "- this planner does not dispatch workflows or mutate "
+                      "the canonical ledger; the separate ledger-commit "
+                      "workflow requires explicit approval and exact SHA "
+                      "lineage\n"
+                  )
+          PY
+
+      - name: Upload Phase-2 execution plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-coverage-execution-plan
+          path: |
+            artifacts/phase2-coverage-execution-plan.json
+            artifacts/phase2-execution-run-receipts.json
+            artifacts/phase2-dispatch-input-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish planner artifact identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo
+            echo "### Planner artifact identity"
+            echo
+            echo "- planner_run_id: ${GITHUB_RUN_ID}"
+            echo "- planner_artifact_name: phase2-coverage-execution-plan"
+            echo "- planner_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- planner_head_sha: ${GITHUB_SHA}"
+            echo "- node-dispatch inputs now require this exact run ID and digest"
+          } >> "${GITHUB_STEP_SUMMARY}"

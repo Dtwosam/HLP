@@ -1,0 +1,29 @@
+{
+  "version": "phase2-hoodfun-deployments-v1",
+  "evidence_run_id": 35610799811,
+  "artifact_id": 10643538645,
+  "artifact_name": "phase2-hoodfun-deployment-discovery",
+  "artifact_digest": "sha256:b8188f22217b122f7f3547a9d629e772168d90107fea805f2f958212dde7e4f5",
+  "chain_id": 4663,
+  "snapshot_head_block": 54486035,
+  "pricing_anchor": {
+    "address": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+    "first_code_block": 1506281,
+    "code_bytes": 22142,
+    "code_sha256": "5bfe1ffc7875eed633c994216495e0fb3d63e5bd12db03690114c27d3a1761eb"
+  },
+  "generations": {
+    "previous": {
+      "address": "0x6a63d96ef77ae569fcb85934cf1bd1ec7fe9b33d",
+      "first_code_block": 1676992,
+      "code_bytes": 19734,
+      "code_sha256": "f33f2b11578c71dcae609ae5ea74e9199e4d913d600316421d8a14660ac5b91c"
+    },
+    "current": {
+      "address": "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c",
+      "first_code_block": 5611265,
+      "code_bytes": 20518,
+      "code_sha256": "be00244ed6f9c39ad25cc42cd05983c63f64ea97f93a7237200a5854d9060141"
+    }
+  }
+}

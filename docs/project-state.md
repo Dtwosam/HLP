@@ -1,73 +1,3080 @@
 # HLP Project State
 
-Updated: 2026-09-04
+Updated: 2026-09-21
 Repository: Dtwosam/HLP
-Current phase: Phase 0 — Source of Truth & Free-Data Viability
-Status: IN PROGRESS
-Next phase: Phase 1 — Historical/Live Data Acquisition Spike
+Current phase: Phase 2 — Chain-Wide Universe & Outcome Dataset
+Status: ACTIVE
+Next phase: Phase 3 — Point-in-Time Feature Store (LOCKED until Phase 2 PASS)
 
 ## Frozen user requirements
 
 - Robinhood Chain only.
-- Study every eligible speculative/memecoin token that reaches at least $100,000 market-cap proxy at any point.
+- Pons-launched tokens are the primary research universe; non-Pons launchpads are secondary/background only.
+- Include a Pons token if it reaches at least $100,000 market-cap proxy at any point in its complete observed lifecycle.
 - The only precommitted positive threshold is >=5x after the first major dump.
+- Do not predefine what counts as a major dump; derive/test candidate dump thresholds from historical data.
 - 5x is the minimum, not the target/cap.
-- Preserve full upside magnitude so 10x/20x/50x+ runners teach the model more than a binary label.
-- Do not pre-assume what holder/wallet/volume/liquidity signal matters.
+- Preserve full upside magnitude so 10x/20x/50x+ runners remain distinct outcomes.
+- Do not pre-assume holder/wallet/volume/liquidity/chart signals.
 - Derive predictive patterns from the studied population.
-- End product is a live buy-signal/ranking tool.
-- Live coins continue becoming training data.
-- Model updates are controlled, validated and versioned.
-- User expects HLP to be built end to end in this repository.
+- End product is a live comeback/buy-signal ranking tool.
+- Live coins continue becoming future training data.
+- Production-model updates are controlled champion/challenger promotions.
 - Development/data/infrastructure must remain $0.
 
-## Phase 0 completed
+## Phase 0 — PASS
 
-- [x] correct repository confirmed
-- [x] repository inspected: clean baseline
-- [x] official Robinhood network/access sources verified
-- [x] current official Pons source repository inspected
-- [x] Pons V1/V2 factory generations/events identified
-- [x] Alchemy free-tier capabilities/eth_getLogs limitation verified
-- [x] The Graph/Substreams Robinhood support/free allowance verified
-- [x] Robinhood canonical Stock Token registry/API verified
-- [x] local/hosted storage options reviewed
-- [x] source-of-truth documents drafted on phase0/source-of-truth
+Source-of-truth PR #2 was merged to main at:
+- `10ba7dc07f4f830211a2da70bac0327f8085dd87`
 
-## Phase 0 remaining gate
+The master spec, build order, anti-leakage standard and $0 rules are frozen.
 
-- [ ] review source-of-truth PR
-- [ ] record Phase 0 PASS/checkpoint after merge
+## Phase 1 — PASS
 
-## Known viability risk
+Checkpoint **`hlp-v1-phase1-data-viability`** passed canonically on 2026-09-21 in
+finalizer run **35601191874** at commit
+`05b0966ce0bf967649422ff3153f189921250c3d`. The fail-closed acceptance
+artifact `phase1-pons-acceptance-gate` (artifact **10639187021**, SHA-256
+`82cf0d8a61c9f2bf82651050f7a905076a2ff5cda11af1acb96586e93f9e1706`)
+reported `phase1_acceptance_status=pass`.
 
-Full historical bulk ingestion is not yet proven at $0.
+The accepted same-snapshot evidence contains **494,639** Pons launches and
+**6,972** eligible tokens (**5,161 V1**, **1,811 V2**). All **10/10**
+representative tokens passed end-to-end validation with **30,734** canonical
+price points and no unexplained block gaps. The nine distinct viability routes
+all passed their exact **50,000-block** measurement contracts.
 
-Alchemy Free cannot efficiently crawl all Robinhood logs because free eth_getLogs queries are capped at 10 blocks.
+Canonical acquisition accounting measured **500,000** route work blocks,
+**4,887** network requests and **1.130 GiB** of response data with zero missing
+executed-job logs or invalid runtimes. The conservative full-history projection
+covers **331,011,903** required work blocks and estimates **3,266,838** requests,
+**327** free-quota days, **806.45 GiB** of response data and **39.23 GiB** of
+artifacts. Every observed measurement route was the approved
+`solidrpc_keyless_public` free/public route, so
+`zero_cost_route_evidence=true`.
 
-The Graph/Substreams is the leading bulk path, but the current free plan includes 7M processed blocks / 5 GiB egress while Robinhood Chain history is larger. Existing cached Uniswap packages and protocol-specific start blocks may make the required dataset practical; Phase 1 must measure this.
+**Phase 2 is unlocked.**
 
-This is not a modeling problem and must be resolved before dataset construction.
+## Phase 2 — active implementation state
 
-## Immediate next action after Phase 0
+Phase 2 is **ACTIVE** and has not passed its acceptance gate. The current code
+separates adapter capability from historical coverage so implementation progress
+cannot be mistaken for a complete chain-wide universe.
 
-Build the Phase 1 acquisition spike:
-1. Python project scaffold + tests.
-2. Reusable Substreams package discovery.
-3. Pons V1/V2 adapters.
-4. Uniswap adapter/tape.
-5. bounded historical sample.
-6. cross-check with explorer/DEX views.
-7. quota/cost projection.
-8. PASS/BLOCK decision for full history.
+Implemented foundation:
+
+- a frozen **14-source** launch/trading inventory with explicit readiness states
+  (`phase1_proven`, `adapter_ready`, `registry_ready`, `decoder_ready`,
+  `discovery_pending`);
+- deterministic address-only exclusions for WETH, USDG, Robinhood canonical
+  Stock Token/ETF assets, plus explicitly verified LP/system/bridge assets;
+- a source-agnostic universe merger preserving `eligible`, `unknown`,
+  `ineligible` and `excluded` semantics plus per-source provenance;
+- a persistent NOXA launch registry joined fail-closed to exact launch-block
+  state, moving NOXA to `adapter_ready`. Phase-2 acquisition now also has a
+  sharding-safe NOXA registry-window command that reads `getLaunchedToken` at
+  each exact launch block, plus an exact pool-address join to the shared V3
+  Initialize tape. A dispatch-only **256-shard** registry backfill is now
+  prepared from block **61,688** through snapshot **54,486,035**; its merge
+  requires exact block continuity, per-shard SHA identity, launch-block state,
+  chronological event order and globally unique token/pool identities. It
+  emits a SHA-bound merged registry but deliberately keeps
+  `source_coverage_complete=false` until the shared V3 Swap history is
+  filtered/priced through the snapshot;
+- deterministic Uniswap V3, Uniswap V4 and Sushi V3 candidate-market discovery
+  requiring exactly one supported quote side and exact-initialization-block
+  ERC-20 supply; these sources are `adapter_ready` for candidate market paths;
+- exact-address launch-origin attribution for discovered DEX markets. Unmatched
+  markets remain `unattributed`; absence from known launch registries is never
+  treated as proof of a direct launch;
+- a persistent pools.trade Crowd Launch/LBP registry reconciling token creation,
+  strategy distribution, supply, reserved LP allocation and initializer state.
+  CCA price orientation is now frozen as `quote_per_token` from a
+  same-transaction CCA-checkpoint → V4-Initialize anchor, the registry derives
+  the exact V4 PoolId/PoolKey, and CCA plus migrated-V4 summaries merge into one
+  fail-closed lifecycle. `pools_trade_lbp` is therefore `adapter_ready`;
+  historical coverage remains `not_started`;
+- a fail-closed Phase-2 historical coverage contract, CI-proven in run
+  **35605506698**, that requires every source to report continuous
+  reconstruction through the frozen snapshot with SHA-256 provenance before
+  `phase2_universe_coverage_complete` can become true;
+- a causal concentrated-liquidity market-quality audit: generic V3/V4 paths now
+  retain market identity, raw active liquidity and point-in-time active
+  quote-USD depth. This is research evidence for multi-pool selection only;
+  **no canonical selector is frozen yet**. The integrated V3/V4 annotation suite
+  passed in run **35605822567**;
+- the concrete multi-pool candidate policy is now implemented but remains
+  **research-only**: at each event it selects the deepest latest-observed
+  active quote-side USD market with stable market-ID tie-breaking, emits a
+  candidate canonical point only when the selected market updates or leadership
+  switches, and excludes non-selected pool events from canonical volume. The
+  `phase2-market-quality-audit` CLI emits the causal competition trace,
+  candidate single-market series and SHA-bound audit report; empirical
+  real-market evidence is still required before freezing the selector;
+- generic direct-DEX acquisition primitives are now in place:
+  `rpc-v3-pool-created-window` and `rpc-v4-initialize-window`. Dispatch-only
+  sharded backfill contracts are prepared for direct Uniswap V4 Initialize
+  history from block **9,070** and for Uniswap V3/Sushi V3 PoolCreated history
+  from blocks **8,930**/**6,292,626** through snapshot **54,486,035**. These
+  workflows intentionally report `source_coverage_complete=false` until
+  supported-quote filtering, exact initialization-block ERC-20 state, market
+  event reconstruction and selector evidence are complete;
+- the direct-DEX discovery path now has a canonical address-level quote
+  registry built from official Robinhood asset identity plus exact Chainlink
+  directory matches. WETH/native ETH and USDG use the existing canonical
+  anchor semantics; the previously verified cbBTC Chainlink route is retained.
+  Robinhood assets with no official feed remain visible as
+  `missing_chainlink_feed` and are excluded from the priceable quote allowlist
+  rather than silently treated as priceable;
+- shared direct V3/V4 Swap acquisition and ERC-20 mint/burn supply-delta
+  acquisition are implemented with dispatch-only **128-shard** backfill
+  contracts. Their aggregate manifests preserve exact block continuity and
+  SHA-256 identity without materializing the full swap/supply histories into
+  one in-memory tape;
+- direct V3/V4 market-window reconstruction now consumes those sharded inputs,
+  carries Initialize-block-end supply seeds forward with causal mint/burn
+  deltas, and retains every candidate market independently. WETH/USD uses the
+  sparse causal V3 anchor path; Chainlink-priced direct quotes now have an
+  analogous sparse causal sampler that reads state immediately before only the
+  windows containing target market events and replays same-window
+  `AnswerUpdated` events in transaction/log order;
+- a dispatch-only real-market selector-evidence pilot is prepared. It samples
+  up to **20** competing tokens by deterministic chronological even spacing,
+  studies **100,000-block** overlap windows beginning only after all sampled
+  markets exist, filters each full raw tape once into compact evidence inputs,
+  reconstructs Uniswap V3/Sushi V3/Uniswap V4 market points, then feeds the
+  existing `phase2-market-quality-audit`. The pilot is intentionally
+  research-only: `selector_freeze_ready=false`,
+  `source_coverage_complete=false`, and no threshold/universe labels are
+  emitted. The final evidence artifact now self-binds the exact causal trace,
+  candidate canonical series, market-quality report and handoff SHA-256 values
+  in addition to all upstream run/plan/quote/point identities, so any later
+  selector-freeze decision can be tied to the exact evidence that was reviewed.
+  It has not yet produced empirical evidence because the required upstream
+  direct-market backfill artifacts still need to be executed. An explicit
+  dispatch-only selector-freeze gate is now prepared on top of that v2
+  evidence contract. It requires a human-triggered approval plus the exact
+  evidence run, artifact digest and handoff SHA; it rechecks the final trace,
+  candidate-series and report hashes, requires real competing usable snapshots,
+  and can freeze only `active-quote-liquidity-causal-v1` with stable market-id
+  tie-breaking and selected-pool-only volume. The resulting descriptor keeps
+  `source_coverage_complete=false`, so selector policy cannot substitute for
+  the still-required direct DEX historical backfills. A subsequent
+  dispatch-only direct-source population handoff is now prepared behind both
+  gates: it requires the exact conclusive direct-launch artifact and exact
+  selector-freeze descriptor, verifies their internal SHAs/snapshot agreement,
+  and emits separate Uniswap V3, Sushi V3 and Uniswap V4 direct-launch
+  registries. Every row binds the frozen selector contract but remains
+  `canonical_market_selected=false` and
+  `source_coverage_complete=false`; the registries are inputs to historical
+  replay, not a shortcut around it. A reusable dispatch-only direct-source
+  coverage workflow is now prepared for each of those three venues. It
+  validates the exact source-population artifact, complete shared Initialize,
+  Swap and mint/burn surfaces plus canonical quote registry, filters Initialize
+  and supply inputs once, then replays all **128** swap shards. Completion is
+  audited at market level rather than token level so multiple pools for one
+  token remain distinct: every registered pool/PoolId must emit exactly one
+  Initialize point, every market must have history, and every point must be
+  priced. The replay intentionally does not apply the selector or emit
+  threshold labels; the frozen selector identity is bound in provenance while
+  all competing market histories remain available. Only after those checks does
+  the workflow validate a proposed per-venue `complete` coverage row in memory
+  and publish exact promotion metadata, without mutating the ledger. A final
+  dispatch-only direct eligibility handoff is now prepared behind all three
+  complete direct-source coverage artifacts plus the exact frozen selector. It
+  revalidates every source report, every one of the **128** point shards per
+  venue and each aggregate SHA, derives exact per-source token memberships,
+  k-way merges the three chronological histories without loading the full tapes
+  into memory, and applies the frozen selector exactly once across venues. The
+  resulting canonical cross-venue series is summarized per token, then split
+  back across the three conclusive direct source memberships so the universe
+  gate still receives one source entry for Uniswap V3, Sushi V3 and Uniswap V4
+  while non-selected competing-pool prices never become alternate eligibility
+  histories. The handoff is SHA-bound, preserves selected-pool-only volume
+  semantics and remains `phase2_universe_frozen=false`;
+- direct-market launch-origin attribution is now progressive and fail-closed.
+  Exact address matches can immediately mark a market as originating from a
+  known launch source, but unmatched markets remain `unattributed` until every
+  launchpad population is coverage-complete and supplied. A dispatch-only
+  Pons attribution workflow is prepared against the exact accepted V1/V2
+  lifecycle artifact IDs/SHA values; it can remove known Pons overlap from
+  direct-market research without treating the remaining unmatched markets as
+  proven direct launches. Once a later attribution artifact proves every
+  launchpad population complete and supplied, a new dispatch-only conclusive
+  direct-launch workflow can materialize only the unmatched direct markets.
+  It binds the exact attribution run/artifact, attributed-registry SHA and
+  attribution-report SHA, plus the population summary SHA, frozen snapshot and
+  exact direct/launch source sets. It emits a versioned population/handoff and
+  explicitly keeps `selector_freeze_ready=false` and
+  `source_coverage_complete=false`; this separates launch-origin closure from
+  the still-pending empirical multi-pool selector freeze;
+- pools.fun now has a prepared full Phase-2 coverage path that reuses the shared
+  V3 Initialize/Swap surface instead of issuing a second chain-wide Swap crawl.
+  The launch registry is joined to every exact Sushi V3 Initialize, the shared
+  V3 Swap shards are filtered by registered pool, each shard is priced with the
+  canonical direct quote allowlist plus sparse WETH/USD and Chainlink sampling,
+  and all **128** point shards are merged into a proposed canonical
+  `pools_fun` coverage report. The workflow requires every registry token to
+  have at least one price point and requires `priced_points == price_points`.
+  It validates the proposed `complete` row against the canonical coverage
+  contract in memory but **does not mutate the coverage ledger**. This is
+  prepared execution logic, not completed historical evidence;
+- Doppler now has a prepared chain-wide Phase-2 path without a second V4 crawl.
+  A **256-shard** Airlock Create backfill records every launch plus exact
+  launch-block ERC-20 supply/decimals, then joins each asset/numeraire to
+  exactly one PoolManager Initialize in the same transaction using the shared
+  V4 Initialize surface. The registry freezes the initial sqrt price/tick and
+  block-end supply seed. A Doppler-specific V4 market-window command then
+  synthesizes that launch Initialize, filters the shared V4 Swap surface by
+  PoolId, replays the complete filtered mint/burn supply history causally, and
+  samples WETH/USD or Chainlink quote/USD only at required event orders. The
+  dispatch-only **128-shard** source-coverage workflow requires exactly one
+  Initialize point per Airlock launch, price history for every token, and
+  `priced_points == price_points`; it validates a proposed `doppler=complete`
+  row in memory and publishes exact promotion metadata without mutating the
+  canonical ledger. This is prepared execution logic, not completed evidence;
+- source coverage promotion now has a generic fail-closed handoff. A
+  dispatch-only workflow accepts only an exact upstream run/artifact plus
+  GitHub artifact digest, exact report SHA-256 and expected source ID. It
+  requires the report to validate as `complete`, preserves every already
+  complete source, and emits a proposed updated ledger plus validation evidence
+  without writing or committing the canonical coverage ledger. The underlying
+  apply helper now also rejects any attempt to drift a frozen
+  `required_start_block` or rewrite an already-complete source. The prepared
+  pools.fun coverage workflow now publishes the exact run ID, artifact digest,
+  report path and report SHA needed to feed that promotion handoff without
+  reconstructing identities by hand;
+- the deterministic Phase-2 exclusion registry is now implemented as a
+  dispatch-only evidence path. It always excludes canonical WETH and USDG by
+  configured address and freezes every Robinhood Chain deployment returned by
+  Robinhood's official RHJ asset registry as a canonical non-memecoin asset.
+  Matching is **exact normalized address only**; symbol/name heuristics and
+  broader asset-class guesses are explicitly forbidden. The workflow preserves
+  the official canonical-asset snapshot, binds its SHA into the exclusion
+  registry, and publishes registry/summary/artifact identities while keeping
+  `phase2_universe_frozen=false` until chain-wide source coverage and the
+  later universe gate are actually complete;
+- the accepted Phase-1 Pons eligible universe is now a versioned Phase-2
+  handoff: **6,972** eligible tokens (**5,161 V1 + 1,811 V2**) at snapshot
+  **54,486,035**, with zero unknowns and immutable artifact/SHA bindings;
+- the first actual Phase-2 source coverage is frozen: **Pons V1 and Pons V2 are
+  complete (2/14 source populations)**. Run **35609734112** re-downloaded the
+  exact accepted lifecycle artifacts and validated **268,688 V1 + 225,951 V2
+  launches** with **63,560,072 + 24,319,652 fully priced points**, zero unknown
+  tokens and zero unpriced points through the frozen snapshot.
+- legacy hood.fun discovery is closed: run **35614752750** sampled
+  **100,000 blocks** across the previous deployment lifetime and decoded
+  **1 TokenCreated + 21 Trade events** with the shared hood.fun event layout.
+  The immutable evidence artifact is **10646067112** with SHA-256
+  `c6129b4156b739934a94e5bb16f54e36e638876263f29365e4e551167f4c8cfc`.
+  `hood_fun_previous` is therefore `adapter_ready`; historical coverage is
+  still not complete and remains fail-closed in the coverage ledger.
+- conservative historical start boundaries are now frozen for all **12
+  non-Pons sources**. Run **35623186049** proved first-code boundaries with
+  archive state reads; artifact **10649564971** has SHA-256
+  `6664a2e450c5bad4bbb2a43424a06d3d21fe7e12996e38a9ea1ce8aef0b3d876`.
+  The canonical coverage ledger now has a concrete `required_start_block` for
+  all **14/14** source populations while preserving only Pons V1/V2 as
+  `complete`.
+- under the re-verified **200-block** keyless filtered-log cap, those 12
+  non-Pons source boundaries imply a **2,932,208-window minimum** for source
+  enumeration alone. This is explicitly a lower bound: downstream pool/trade
+  tapes, retries, quote/USD reconstruction, state calls and any address-filter
+  splitting are excluded.
+- pools.trade Instant now has a prepared chain-wide launch-registry path.
+  A dispatch-only **256-shard** workflow scans all frozen InstantLaunchStrategy
+  contracts continuously from required start **3,338,007** through snapshot
+  **54,486,035**, binds the exact shared launcher TokenCreated/TokenDistributed
+  run, merges the complete TokenLaunched tape, and builds one deterministic
+  Instant V4 registry with unique token/PoolId identities. The registry path
+  now also binds the exact shared V4 Initialize run, verifies each PoolKey,
+  and reads ERC-20 totalSupply/decimals at the exact Initialize block. The
+  original TokenDistributed amount is retained separately while the canonical
+  supply seed becomes Initialize-block-end totalSupply, ready for causal
+  mint/burn replay. A source-specific bounded market-window command now
+  synthesizes each frozen Initialize, filters shared V4 swaps, replays the
+  complete mint/burn tape causally, and samples WETH/USD or Chainlink only at
+  target event orders. A dispatch-only **128-shard** source-coverage workflow
+  is now prepared against exact registry, shared V4 Swap, shared supply-delta
+  and canonical quote runs. It requires one Initialize point per Instant token,
+  full token-summary coverage and `priced_points == price_points`, validates a
+  proposed `pools_trade_instant=complete` row in memory, and publishes exact
+  promotion metadata without mutating the canonical ledger. This remains
+  prepared execution logic, not completed evidence;
+- pools.trade LBP now has a prepared chain-wide registry path. A
+  dispatch-only **256-shard** workflow scans InitializerCreated continuously
+  from required start **6,222,785** through snapshot **54,486,035**, freezes
+  ERC-20 totalSupply/decimals at every exact initializer block, binds the exact
+  shared launcher TokenCreated/TokenDistributed history, and builds one
+  deterministic state-backed LBP registry with unique token/initializer/derived
+  PoolId identities. TokenDistributed amount is retained separately while
+  initializer-block-end totalSupply becomes the supply seed. CCA reconstruction
+  now has a source-specific bounded market-window command: it binds the frozen
+  independent CCA orientation evidence, samples WETH/USD or Chainlink only at
+  observed CCA event orders, and replays complete mint/burn supply deltas
+  causally from the initializer-block seed. Empty shards are explicit and do
+  not open RPC. The handoff remains `source_coverage_complete=false`; the
+  chain-wide CCA acquisition now also has a topic-only bounded command that
+  scans the two frozen CCA topic0 values globally and filters matched
+  initializer addresses against the immutable LBP registry, avoiding giant
+  address-list filters while preserving the complete topic surface. A
+  dispatch-only **128-shard** CCA backfill is now prepared against exact LBP
+  registry, shared supply-delta and canonical quote runs. It validates
+  continuous topic coverage, requires every registry token to have fully priced
+  CCA history, and emits a merged CCA phase report with
+  `cca_phase_coverage_complete=true` while explicitly keeping
+  `source_coverage_complete=false`. Migrated V4 reconstruction is now also
+  implemented: exact derived PoolIds are joined against the complete shared V4
+  Initialize surface, missing Initialize rows are retained semantically as
+  legitimate non-migrations, and every matched PoolId must reproduce the full
+  PoolKey. A dedicated V4 market-window path replays supply causally from the
+  original initializer-block seed through migration and later swaps, with
+  sparse USD pricing and explicit empty-window behavior. A final dispatch-only
+  lifecycle/source-coverage workflow is now prepared from the exact CCA run,
+  complete shared V4 Initialize run and shared V4 Swap run. It treats missing
+  exact derived PoolIds as conclusively non-migrated only because the shared
+  Initialize scan is continuous through the frozen snapshot, requires CCA
+  coverage for every LBP token and V4 coverage for every migrated token, merges
+  both phases into one fully priced lifecycle summary, validates a proposed
+  `pools_trade_lbp=complete` row in memory, and publishes exact promotion
+  metadata without mutating the canonical ledger. This is prepared execution
+  logic, not completed historical evidence;
+- pools.trade LBP migration probing is now fail-closed. Run **35625298189**
+  searched the exact derived PoolId
+  `0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f`
+  continuously across blocks **30,001,146..30,395,704** in **16** shards
+  (**2,061** keyless requests) and found **no V4 Initialize**. Artifact
+  **10652380939** has SHA-256
+  `35b9aab31f5b258540dcb7b018c07181838a4c9a742d9bd996b2786a0b8fd26d`.
+  That sample is therefore not valid migration-price evidence for freezing the
+  CCA Q96 orientation; successful-LBP discovery is being studied separately.
+- pools.trade LBP CCA orientation is closed by successful-auction evidence.
+  Run **35627264268** observed the final CCA checkpoint and exact derived-PoolId
+  V4 Initialize in the **same transaction** at block **30,493,816**. The direct
+  Q96 interpretation (`quote_per_token`) agrees with the V4 raw price to
+  roughly **9.4e-32 relative error**; artifact **10653022924** has SHA-256
+  `b466e75ad7db3f89c3f0d7b548f109979291bd45d798b1e34755bdb7d8576e3b`.
+- the orientation/handoff path is corroborated across a broader LBP population.
+  Run **35626412874** discovered **437** LBP initializers over blocks
+  **30,000,000..31,000,000** and found **149** exact derived-PoolId V4
+  Initializes in a continuous search through block **31,500,000**, using
+  **7,807** keyless requests with no missing ranges. Artifact **10653894082**
+  has SHA-256
+  `d23486f7792d595b18850f07a095e11ae2795f478f23e246356704ea088b798b`.
+  The migration-to-Initialize gap among those successes ranges from **3** to
+  **1,545** blocks (median **57**).
+- launchpad USD conversion no longer requires continuous WETH/USD scans:
+  pools.fun, Flap, trench.today and hood.fun now share sparse causal V3 anchor
+  sampling bounded to the observed keyless **200-block** filtered-log cap.
+  Flap replay is additionally hardened against registry look-ahead: final
+  quote-token configuration is activated only when its recorded TokenQuoteSet
+  order is already before the replay window, while in-window quote changes
+  remain event-driven. trench.today Sync pricing now also fails if a snapshot
+  is not strictly after its recorded launch order. Both Flap and trench.today
+  market-cap CLIs can now consume the canonical quote-feed registry and sample
+  Chainlink/USD only at the causal trade/Sync orders that need non-WETH quotes;
+  sparse quote ownership cannot be mixed with pre-materialized oracle tapes.
+  The shared V3 registry-event filter now enforces lifecycle floors at full
+  block/transaction/log order, not block number alone, so same-block swaps
+  occurring before a launch or handoff cannot leak into launchpad history.
+  Flap's persistent registry now retains the full chronological TokenQuoteSet
+  history rather than only the final quote. Sharded curve replay and sparse
+  Chainlink target selection share one pre-window state helper, so a later
+  quote change cannot erase the earlier quote required by an intermediate
+  historical shard. The persistent registry also freezes each LaunchedToDEX
+  handoff at event time: pool, migrated token/quote amounts, quote asset, DEX preference,
+  LP-fee profile, migrator and token version are retained separately from any
+  later configuration changes. This makes post-curve lifecycle joins
+  deterministic without treating the bonding curve as the full lifecycle.
+  An evidence-only Flap graduation-market join now matches those frozen pool
+  addresses against exact address-based direct-DEX registries, verifies token
+  and quote identity, records Initialize-vs-graduation order, and leaves
+  unmatched pools unresolved. PoolId-only V4 rows are never inferred from the
+  address-valued graduation field. A dispatch-only **256-shard** full-history
+  Flap Portal backfill is now prepared from required start **4,180,724** through
+  snapshot **54,486,035**. It validates continuous shard coverage and builds one
+  global chronological event-sourced registry across the full tape, so quote,
+  curve, DEX-preference and graduation changes cannot be finalized independently
+  inside shards. It emits an immutable aggregate event SHA plus launch/graduation
+  registry evidence but deliberately keeps `source_coverage_complete=false`.
+  A second dispatch-only **256-shard** Flap curve-coverage workflow is now
+  prepared against that exact registry run plus the canonical direct-quote
+  registry. It validates every historical quote asset against the causal feed
+  allowlist, requires every bonding-curve price point to be priced, merges one
+  deterministic curve summary, and emits a SHA-bound next-stage handoff. It
+  remains non-final by construction until every LaunchedToDEX lifecycle is
+  joined and priced after graduation. The Flap lifecycle module now also
+  freezes exact address-based V3 graduation registries, rejects unresolved or
+  not-yet-available markets, reconstructs the pool price causally at the exact
+  LaunchedToDEX order, and merges curve plus post-graduation summaries across
+  the full launch population. Native-ETH curve quotes are explicitly mapped
+  to canonical WETH only for V3 handoff matching, while the original curve
+  quote remains preserved in provenance. A dedicated market-window CLI prices
+  that graduation snapshot plus only later V3 swaps. A final dispatch-only Flap
+  source-coverage workflow is now prepared: it binds the exact accepted curve
+  artifact, requires every LaunchedToDEX pool to resolve to an address-based
+  Uniswap/Sushi V3 market already available at graduation, filters the shared
+  V3 Swap surface at exact lifecycle order, and requires one causal graduation
+  snapshot plus fully priced later swaps. It merges curve and V3 summaries for
+  every launched token and only then validates a proposed canonical
+  `coverage_status=complete` row in memory and publishes promotion metadata;
+  it never mutates the canonical ledger;
+- NOXA now has a prepared chain-wide Phase-2 path that reuses the address-
+  unfiltered shared V3 Initialize/Swap surfaces and the shared ERC-20
+  mint/burn surface. The registry is read from exact launch-block state, every
+  pool must join to one causal V3 Initialize, quote assets must be present in
+  the canonical direct-quote allowlist, and market-cap reconstruction replays
+  total supply from the end-of-launch-block seed instead of assuming NOXA
+  supply is immutable. The full coverage workflow filters the shared supply
+  tape to NOXA tokens once, prices all 128 V3 shards with sparse causal USD
+  anchors, validates a proposed `complete` row in memory, and publishes the
+  exact promotion handoff without mutating the canonical ledger. This is
+  prepared execution logic; NOXA remains incomplete until the backfills run
+  and the resulting evidence is accepted.
+
+- the final Phase-2 universe assembly contract is now implemented but remains
+  intentionally unusable against the current incomplete ledger. It requires
+  `phase2_universe_coverage_complete=true` across **all 14 sources**, an exact
+  source-summary entry for every inventory source (including explicitly empty
+  populations), fully priced canonical per-token series, and valid SHA-256
+  provenance. It de-duplicates tokens by normalized address across source
+  overlaps, applies only the deterministic address exclusion registry, and
+  admits a token only when its verified maximum market-cap proxy is at least
+  **$100,000**. Threshold flags are cross-checked against the numeric maximum;
+  WETH/USDG must be present in the exclusion set. This contract is ready for
+  the later source-eligibility bundle but cannot freeze today's universe while
+  the ledger remains 2/14 complete. A generic dispatch-only launchpad
+  eligibility handoff is now prepared for all **11 launchpad sources**. It
+  accepts exact coverage and full-token-summary artifacts independently,
+  verifies both artifact digests and file SHAs, requires the coverage report to
+  be complete/continuous through the snapshot, normalizes every token to the
+  universe schema, and reconciles token count plus aggregate price/priced-point
+  counts exactly against the coverage report. Each normalized handoff now also
+  carries the exact coverage `provenance_sha256` that must match the later
+  canonical ledger row; the direct eligibility handoff carries the same
+  per-source coverage-provenance map. This prevents a complete eligibility
+  artifact from being paired with a different promoted coverage proof. The
+  output is SHA-bound and `canonical_price_series=true`, but remains
+  `phase2_universe_frozen=false`. Direct DEX sources are deliberately rejected
+  by the launchpad handoff because their three venue histories require the
+  frozen cross-venue selector before becoming canonical. A common source-bundle
+  validator now requires every one of the **14** universe-source handoffs to
+  match the promoted ledger row by source/readiness, snapshot, token count,
+  complete price-point accounting and exact coverage `provenance_sha256`.
+  A final dispatch-only Phase-2 universe freeze workflow is prepared on top of
+  that contract. It accepts a compact manifest for all 11 launchpad handoffs,
+  the exact three-source direct eligibility handoff and the deterministic
+  exclusion registry, verifies every artifact/file SHA, then invokes the
+  canonical universe assembler. It cannot succeed against today's 2/14 ledger;
+  only a genuine 14/14 ledger can produce the address-deduplicated >=$100k
+  eligible universe, rejected/excluded population, summary and immutable freeze
+  handoff with `phase2_universe_frozen=true`;
+
+Current blockers before a chain-wide Phase-2 universe can be frozen:
+
+- **default-branch dispatch surface:** GitHub only accepts
+  `workflow_dispatch` when the workflow file exists on the repository default
+  branch. The repository default branch is still `main` at the original
+  Phase-0 freeze, while the prepared Phase-2 manual workflows live on
+  `phase1/data-acquisition-spike`. Therefore the first-wave archive preflight
+  and quote-registry jobs are not yet manually dispatchable despite being
+  implementation-ready. Draft PR **#3** is clean/mergeable and has been updated
+  to reflect the current Phase-1 PASS plus guarded Phase-2–4 architecture, but
+  remains draft and unmerged. The read-only
+  `phase2-default-branch-dispatch-readiness` workflow now compares the actual
+  default-branch workflow directory against the execution DAG and separately
+  reports first-wave and full-DAG dispatch readiness. It now hashes each
+  required workflow's complete `workflow_dispatch` block, so a stale or
+  incompatible default-branch interface cannot pass on filename alone. Its live
+  result against the current default branch is **0/58 required workflows
+  present**, **0 incompatible present interfaces**,
+  `phase2_first_wave_dispatch_ready=false`, and
+  `phase2_full_coverage_dag_dispatch_ready=false`. A separate narrow draft PR
+  **#25** provides the non-invasive bootstrap option: it is based directly on
+  `main`, contains exactly **58 manual Phase-2 workflow files plus one safety
+  note**, and carries no source code or coverage-ledger mutation. **57/58**
+  bootstrap workflows are byte-for-byte identical to the current compatibility
+  target; the planner copy differs only by removing its automatic branch/PR
+  triggers while preserving the exact manual-dispatch interface. All 58
+  bootstrap workflows are manual-only on that branch
+  (`workflow_dispatch` present; no `push`/`pull_request` triggers). The
+  machine compatibility gate has now passed on the full **58/58** workflow surface with
+  workflow-surface SHA-256
+  `70c15facad012c81aa4edc6f49862d038bbac92e24eb5f80b65c37dd95e80807`;
+  there were zero content or manual-interface mismatches.
+  After that workflow surface is merged, execution can target
+  `phase1/data-acquisition-spike` without merging the full 764-file project
+  PR first. Promoting workflow files to `main` enables execution; it does
+  **not** claim Phase-2 data coverage or any later checkpoint;
+
+- the canonical coverage ledger remains **2/14 complete**. A deterministic
+  execution DAG is now prepared in `phase2_coverage_execution.py` plus the
+  read-only `phase2-coverage-execution-plan` workflow. It expands only the
+  currently incomplete sources, reuses one shared V3/V4 Initialize/Swap,
+  PoolCreated, supply-delta and quote spine across all dependent launchpads and
+  the three direct DEX sources, and identifies exactly which workflow nodes are
+  ready, blocked, archive-secret dependent, awaiting explicit selector
+  approval, or waiting for an explicitly approved canonical-ledger write.
+  Manual planner refreshes no longer trust bare completed-node names: they take
+  a node-to-run-ID map, fetch each exact GitHub Actions run, and grant completion
+  credit only when the run belongs to this repository and branch, matches the
+  DAG node's exact workflow path, was triggered by `workflow_dispatch`, and
+  completed successfully. Historical run receipts are also lineage-checked:
+  the current branch must be identical to or descend from the run head, and the
+  only permitted intervening path change is the canonical
+  `.github/phase2-source-coverage.json` ledger. Any code/workflow drift makes
+  the run stale. Ledger-commit runs are deliberately excluded from that receipt
+  mechanism because a successful canonical write must instead be visible in
+  the source-of-truth coverage ledger after the planner regenerates. Every
+  planner artifact now carries both the exact planner HEAD and canonical
+  coverage-ledger SHA. The planner also emits a machine-readable
+  `phase2-dispatch-input-plan.json`:
+  for every currently dispatchable or approval-gated node it reads the actual
+  target workflow's `workflow_dispatch` schema, fills dependency run-ID inputs
+  only from those verified receipts, and lists every remaining digest/path/
+  approval field explicitly instead of inventing it. On the current 2/14
+  ledger, the live planner emits exactly two first-wave nodes:
+  `preflight:archive_authenticated` and `shared:quote_registry`. A separate
+  manual `phase2-execution-node-dispatch` workflow is now prepared to consume
+  one exact successful planner run/artifact, require the planner HEAD and
+  canonical-ledger SHA to still match the execution branch, re-check the target
+  workflow's default-branch manual interface, and dispatch exactly one
+  `ready_to_dispatch` node through GitHub's workflow-dispatch API. It records
+  the returned target run ID immediately in an immutable dispatch-attempt
+  artifact before later target verification, then SHA-binds the successful
+  final receipt back to that attempt. Before dispatch it scans prior same-HEAD
+  dispatcher artifacts and refuses to launch the same planner/node twice; a
+  deliberate retry therefore requires a fresh planner identity. Planner
+  refreshes and the first-wave launcher require the attempt and final receipt
+  together, recompute the SHA-256 of the exact attempt bytes, and reconcile all
+  shared node/planner/target/input identities before granting target-run credit.
+  It never authorizes selector/manual approval gates or canonical-ledger writes; those
+  remain separate explicit workflows. Subsequent planner refreshes may consume
+  the dispatcher workflow
+  run IDs directly through `node_dispatch_run_ids_json`: the planner downloads
+  each immutable dispatch receipt, reconstructs the node-to-target-run mapping,
+  and independently re-validates the target run and branch lineage. The exact
+  operator cycle and its two explicit approval stops are frozen in
+  `docs/phase2-execution-runbook.md`. A fail-closed
+  `phase2-first-wave-launch` workflow is also prepared for the exact initial
+  2/14 state. With one explicit approval it runs a fresh planner, launches the
+  archive preflight and quote registry only through the planner-authorized node
+  dispatcher, waits for both real target runs, and produces a refreshed planner
+  that must credit both receipts and unlock the expected archive fan-out.
+  It requires the archive secret and compatible default-branch interfaces, and
+  stops before any expensive fan-out, selector approval, coverage promotion or
+  canonical-ledger mutation. A second explicit
+  `phase2-archive-fanout-launch` gate is now prepared for that next step. It
+  accepts only the immutable first-wave run/artifact identity, re-validates the
+  first-wave handoff plus refreshed planner, requires the exact **13-node**
+  zero-input archive fan-out and launches every target only through the
+  duplicate-safe node dispatcher. It waits only for the 13 dispatcher control
+  runs, reconciles each attempt/final receipt pair, records the real target run
+  IDs, and then stops; it does **not** wait for the long-running historical
+  jobs, promote coverage, approve the selector or mutate the canonical ledger.
+  A matching `phase2-archive-fanout-completion` collector is prepared for the
+  other side of that boundary. It accepts only the immutable fan-out launch
+  run/artifact identity, requires every one of the 13 real target workflows to
+  have completed successfully at the same execution HEAD, reloads the original
+  first-wave receipt, and supplies all **15** dispatcher control-run receipts to
+  one fresh planner. That planner must credit exactly the two first-wave nodes
+  plus the 13 archive-fan-out nodes while the canonical source ledger remains
+  2/14. The collector then exposes the next ready-node set and stops without
+  promoting coverage, approving the selector or writing the canonical ledger.
+  That post-fan-out planner boundary is now frozen explicitly: exactly **nine**
+  nodes are eligible for generated-input batch dispatch
+  (`shared:direct_market_registry`, pools.fun coverage, pools.trade Instant
+  registry, pools.trade LBP registry, Doppler registry, Flap curve, trench
+  curve, previous hood.fun coverage and NOXA coverage), while
+  `promote:hood_fun_current` is present but held out because it requires exact
+  coverage artifact/report identities from an operator. A
+  `phase2-post-fanout-wave-launch` workflow consumes only the immutable
+  fan-out-completion run/artifact plus its planner, dispatches those nine nodes
+  through the duplicate-safe dispatcher using planner-generated dependency run
+  IDs, reconciles every attempt/final receipt pair and records the nine target
+  run IDs. It does not launch the hood.fun promotion, wait for target
+  completion, approve the selector or mutate the canonical ledger. The matching
+  completion collector verifies all nine real targets and regenerates the
+  planner from **24** dispatcher receipts. That boundary exposes exactly seven
+  generated-input nodes: Doppler, Flap and pools.trade Instant coverage,
+  pools.trade LBP CCA derivation, trench direct-market evidence, the direct
+  competition cohort and direct-origin attribution. The
+  `phase2-after-post-fanout-wave-launch` / completion pair dispatches and
+  verifies those seven, producing a **31-receipt** planner whose next automatic
+  set is exactly four nodes: direct selector-quality evidence, direct-launch
+  population, pools.trade LBP coverage and trench handoff freeze.
+
+  A separate four-node `phase2-pre-selector-wave-launch` / completion pair
+  carries that planner to the explicit selector boundary. After those four real
+  targets succeed, the planner has **35** duplicate-safe dispatcher receipts,
+  keeps `promote:pools_fun` operator-held, exposes trench.today coverage as a
+  normal generated-input node, and marks only
+  `shared:direct_selector_freeze` as awaiting explicit approval. The
+  read-only `phase2-direct-selector-approval-handoff` validates the exact
+  real-market quality evidence and publishes the immutable selector inputs but
+  deliberately leaves the freeze boolean unset. The separate
+  `phase2-direct-selector-approved-freeze` workflow requires a future human
+  `approve_freeze=true`, binds that approval to the exact review handoff and
+  evidence, verifies the frozen
+  `active-quote-liquidity-causal-v1` descriptor, and refreshes the planner.
+  No selector decision is inferred from research evidence alone.
+
+  After an approved selector freeze, the planner has **36** completed execution
+  nodes and exposes exactly two generated-input nodes:
+  `shared:direct_source_population` and `coverage:trench_today`. The
+  `phase2-post-selector-wave-launch` / completion pair verifies those two real
+  targets, combines **37** dispatcher receipts plus the approved selector run,
+  and exposes exactly the three direct DEX coverage nodes. The final automatic
+  `phase2-direct-coverage-wave-launch` / completion pair verifies those three
+  histories and freezes the **promotion frontier**: **41 completed execution
+  nodes**, **40 dispatcher receipts**, zero remaining automatic acquisition
+  nodes, zero selector approvals, and only `promote:pools_fun` ready. The
+  canonical coverage ledger is still intentionally **2/14** at that boundary;
+  source coverage is not accepted until each serialized promotion and explicit
+  ledger commit advances the canonical ledger.
+
+  Coverage acquisition/derivation can run in parallel; canonical source
+  promotion is deliberately serialized only among coverage reports that are
+  actually ready. `phase2-source-coverage-promotion` remains read-only and now
+  SHA-binds both the base canonical ledger and its proposed replacement. A
+  separate `phase2-source-coverage-ledger-commit` workflow requires the exact
+  promotion run/artifact/handoff/proposed-ledger identities plus an explicit
+  approval boolean, rejects stale base-ledger bytes or any proposal that does
+  not complete exactly the expected one source, and uses the GitHub contents
+  API's current blob SHA for an atomic canonical update. After each successful
+  commit the execution plan must be regenerated from the newly canonical
+  `.github/phase2-source-coverage.json` before the next serialized promotion;
+- the keyless SolidRPC filtered log cap is now **200 blocks** (observed
+  2026-09-21). Chain-wide source execution now fails closed on missing
+  `ROBINHOOD_ARCHIVE_RPC_API_KEY` rather than quietly falling back to
+  `CHUNK=200`. A dedicated `phase2-archive-rpc-preflight` workflow verifies
+  the authenticated SolidRPC route, historical Pons bytecode, frozen-snapshot
+  reachability and a **1,000-block** historical filtered-log request that
+  exceeds the public cap without exposing the key. The execution DAG gates all
+  secret-backed work behind that preflight; with today's 2/14 ledger the first
+  safe wave is therefore the archive preflight plus the canonical direct-quote
+  registry, after which the large shared/source archive batch can fan out;
+- complete pools.trade LBP historical CCA and migrated-V4 backfill;
+- complete historical backfills for both hood.fun generations. The current
+  generation now has a dispatch-only, fail-closed coverage proposal path with
+  source-specific validation, canonical ledger validation and exact promotion
+  handoff metadata. The previous deployment's core TokenCreated/Trade surface
+  is proven compatible with the shared adapter. A bounded dispatch-only legacy
+  semantic-proof workflow is now prepared from the frozen TokenCreated sample
+  through the end of the previous deployment: it requires launch-block ERC-20
+  supply/decimals to match the derived 80/20 registry and sequential decoded
+  virtual reserves to conserve across launch-linked trades. That semantic
+  workflow now publishes exact run/artifact/report identities, and a separate
+  dispatch-only `hood_fun_previous` full-coverage path is prepared that refuses
+  to run without those exact proof identities and binds the proof SHA into the
+  market-cap provenance. Neither the semantic proof nor previous-generation
+  full backfill has been executed/frozen yet;
+- trench.today's Phase-2 path no longer relies on the earlier smoke-test
+  assumption of fixed 1B/18-decimal token economics. A launch-registry command
+  now reads ERC-20 totalSupply/decimals at the exact TokenCreate block, the
+  registry freezes LimitReach order, and curve market-cap math uses raw reserve
+  ratios with canonical quote decimals so token decimals cancel correctly.
+  A dispatch-only **256-shard** trench.today registry backfill is now prepared
+  on top of that hardening. Each shard emits the raw lifecycle tape plus exact
+  launch-block ERC-20 state; the merge streams the entire chain-wide event
+  surface so LimitReach events in later shards are attached to their original
+  launch, then overlays one exact supply/decimals state per token. It emits a
+  continuous event manifest and immutable global registry while keeping
+  `source_coverage_complete=false`. A second dispatch-only trench.today
+  curve-coverage workflow is now prepared on top of that exact registry run
+  plus the canonical direct-quote registry. It rejects Sync snapshots after
+  the recorded LimitReach order, requires canonical quote decimals and causal
+  USD ownership, requires every curve point to be priced, and emits a
+  deterministic sharded point manifest plus global eligibility summary. The
+  segment remains explicitly non-final with
+  `post_limit_dex_lifecycle_unresolved` whenever any token reaches its curve
+  limit. An evidence-only LimitReach-to-market workflow is also prepared: it
+  binds the exact trench registry plus all three direct DEX registries,
+  canonicalizes native ETH to WETH only for DEX quote matching, retains every
+  exact token/quote V3/V4 candidate, and records before/same-block/same-
+  transaction/after timing without choosing a canonical handoff. It emits
+  SHA-bound candidate evidence with `handoff_rule_frozen=false` and
+  `source_coverage_complete=false`. A separate dispatch-only freeze gate is
+  now prepared on top of that exact evidence. It will freeze
+  `trench-limit-same-transaction-after-v1` only if **every** LimitReach token
+  has exactly one direct market Initialize later in the exact same transaction;
+  unmatched or multiply qualifying tokens fail closed. The resulting selected
+  handoff registry remains `source_coverage_complete=false` and is intended to
+  gate the later post-limit market replay. A replay-registry builder is now
+  prepared behind that frozen handoff: it rejoins each selected market to the
+  exact direct V3/V4 registry, preserves trench's launch-block supply seed and
+  LimitReach lifecycle floor, and emits separate replay-ready V3/V4 registries.
+  Generic V4 launchpad replay now supports a launch-order supply seed (matching
+  V3) so later mint/burn deltas can be replayed causally from trench's
+  authoritative launch state. A generic V4 registry-event filter now mirrors
+  the V3 filter's exact block/transaction/log lifecycle floor, so selected V4
+  PoolIds can reuse the shared chain-wide Swap tape without admitting same-block
+  pre-handoff events. Dedicated trench V3/V4 market-window commands now reuse
+  the shared direct replay engine with the frozen handoff flag and
+  `supply_seed_order=launch`; direct-market commands keep their original
+  Initialize-seed/unfrozen defaults. The trench commands remain
+  `source_coverage_complete=false` and require canonical sparse quote feeds.
+  No trench source coverage is claimed until real evidence satisfies the rule
+  and the selected markets are fully replayed and priced. The final trench
+  coverage contract is now also fail-closed on lifecycle completeness: every
+  launch must have at least one genuine curve Sync price point, every
+  LimitReach token must have selected post-limit market history, all points
+  must be priced, and the frozen handoff rule/version must be bound into the
+  final provenance. The frozen handoff report now also carries the originating
+  trench registry run/SHA and direct-registry run/per-source SHAs forward, so
+  final coverage can reject registry substitution after handoff selection.
+  End-of-block tokenInfo is deliberately not used to invent a launch-time price
+  because it could see later same-block state. A dispatch-only full
+  `trench_today` source-coverage workflow is now prepared around this
+  contract. It binds the exact curve and frozen-handoff artifacts, verifies the
+  originating trench/direct registries, reuses shared V3/V4 Initialize/Swap and
+  supply-delta surfaces, filters the full supply tape once to selected trench
+  tokens, supports V3-only/V4-only/mixed handoffs, and validates a proposed
+  canonical `complete` row in memory without mutating the ledger. The setup
+  additionally validates each selected direct-registry handoff against the
+  supplied canonical quote run and exact V3/V4 Initialize run, preventing
+  upstream-generation mixing during replay;
+- empirical freeze of the causal active-quote-liquidity multi-pool selector
+  using real competing V3/V4/Sushi market tapes;
+- complete historical backfills and coverage manifests for every material
+  source population;
+- only after those are complete: empirical first-major-dump research, detector
+  freeze, and continuous comeback outcome labels. That post-14/14 architecture
+  is now wired end to end but remains execution-gated by the genuine frozen
+  universe. Research rehydration starts from exact frozen-universe source
+  handoffs, preserves the 11 launchpad histories separately, collapses the
+  three direct DEX populations exactly once after the frozen multi-pool
+  selector, validates full historical tape bytes before filtering to eligible
+  tokens, and supports simple, composite, and exact Pons replay materializers.
+  The normalized canonical research path is SHA-bound in
+  `phase2_research_paths.py`. `phase2_dump_research.py` then builds streaming
+  price-path-only trailing-peak/drawdown geometry and evaluates only explicitly
+  supplied peak/drawdown/rebound candidates. Candidate research and structural
+  diagnostics remain outcome-blind and cannot select or freeze a detector.
+  Candidate events now preserve exact block/transaction/log positions for peak,
+  threshold crossing, trough and live confirmation so same-block ordering is
+  retained. A separate dispatch-only detector-freeze workflow accepts an
+  explicit candidate ID, verifies the exact candidate-research and diagnostics
+  handoffs, and only then emits `candidate_selected=true`,
+  `dump_threshold_frozen=true` and
+  `phase2_dump_detector_frozen=true`; it contains no outcome labels and has
+  no automatic ranking/winner path. `phase2_outcomes.py` and the
+  `phase2-outcome-labels` workflow are prepared behind that frozen detector:
+  post-dump magnitude is measured from the retrospective trough/base, live
+  timing and adverse excursion are measured from the confirmation event, the
+  continuous maximum post-dump multiple is retained alongside 2x/3x/5x/10x
+  milestone timing and maximum forward market cap, and tokens without a
+  confirmed first dump remain not outcome-eligible rather than being silently
+  labeled failures. These are guarded workflows only; they do not bypass the
+  still-required real 14/14 coverage completion or empirically choose a dump
+  rule before those artifacts exist.
+- guarded Phase-3 entry plumbing is also now prepared, but Phase 2 remains the
+  current phase until those real artifacts are executed. The final Phase-2
+  dataset checkpoint is `hlp-v1-phase2-universe-labels`; the Phase-3 entry
+  workflow consumes only its compact handoff plus the exact frozen universe
+  and frozen detector, never the outcome-label rows or full labeled dataset.
+  Confirmed first-major-dump tokens become feature subjects at the exact
+  confirmation block/transaction/log position with an inclusive cutoff.
+  `phase3_feature_registry.py` now gives every implemented feature a versioned
+  formula, snapshot semantics, data dependency, dtype and missingness policy;
+  registry definitions are SHA-bound and explicitly forbid future state or
+  outcome dependence. The registry now contains **87 causal features across
+  eleven families**: 11 `price_drawdown`, 11 `trade_flow` / participant,
+  9 `trade_size_flow`, 8 `holder_state` / concentration, 8
+  `participant_retention`, 7 `participant_type`, 8
+  `supply_redistribution`, 6 `early_recipient_activity`, 5
+  `chain_regime`, 4 `lifecycle_age`, and 10 `venue_mechanics` features. `price_drawdown`, `chain_regime`,
+  and `venue_mechanics` all
+  use the canonical research price path and enforce the exact confirmation
+  event as an inclusive cutoff. Chain regime replays the full cross-sectional
+  price tape for contemporaneous market-cap and 1000-block activity state;
+  venue mechanics uses only per-event canonical `source_ids` /
+  `component_ids` to measure observed venue identity, overlap and causal
+  identity-set switches through the cutoff. Trade flow, participant retention and participant type all remain behind the
+  same fail-closed canonical wallet-trade tape. Retention measures repeat
+  participation, two-sided wallets and whether the latest participant is
+  returning without consuming trades after the cutoff. Participant type adds
+  historical contract-code participation without creating a permanent
+  contract/EOA label: each distinct canonical initiator is checked with archive
+  `eth_getCode` against state at the **start of the confirmation block**
+  (block `cutoff - 1`), so a deployment later in the same block cannot leak
+  through the exact confirmation event. The seven features measure unique
+  code/no-code accounts, their trade/buy/sell shares and whether the latest
+  initiator had code at that causal boundary. Pons V1/V2, V3/Sushi V3, V4, Flap, hood.fun and trench.today all
+  have source-specific adapters that use transaction initiator identity rather
+  than router/protocol sender identity. `trade_size_flow` uses the canonical
+  per-trade token amount but never compares raw quote amounts across assets;
+  buy/sell sizes and net/gross flow are normalized by the token's accounted
+  ERC-20 supply at the exact feature cutoff, so mixed quote decimals cannot
+  leak into the feature scale. The canonical trade-tape assembler
+  binds exact frozen source membership, requires complete historical event scan
+  + wallet-identity + adapter evidence for all 14 sources, and collapses
+  only economically identical cross-source duplicate swaps. The current
+  trade-source readiness plan is now **14/14 adapter-ready**. The former
+  `pools_trade_lbp` blocker has an evidence-backed CCA path:
+  `BidSubmitted.owner` supplies wallet identity, `BidExited` supplies the
+  first exact finalized token-fill/refund accounting, unresolved bids stay
+  fail-closed, and finalized fills are adapted at the exit event rather than
+  backdated. A sharded full-history CCA bid/exit backfill plus exact
+  frozen-universe LBP source-coverage workflow is prepared and tested. This is
+  adapter/readiness completion only; actual canonical trade coverage remains
+  unclaimed until those workflows and the other source backfills are executed
+  successfully. The canonical Phase-3 trade-tape workflow is now also prepared:
+  it accepts one SHA-bound JSON descriptor covering the exact 14-source
+  inventory, verifies every artifact digest, canonical-trade manifest and
+  source-coverage row, requires all 14 `trade_coverage_complete=true`, then
+  merges/deduplicates them into the immutable
+  `phase3-canonical-trade-tape` artifact and compact handoff consumed by
+  trade-flow, participant-retention, participant-type and trade-size-flow
+  features. No canonical
+  trade tape is claimed yet because those 14 source-coverage artifacts have not
+  all been executed and accepted. Holder, supply-redistribution,
+  early-recipient and lifecycle-age features share a complete guarded
+  transfer-acquisition architecture: every eligible
+  token's first code block is binary-searched and boundary-verified against
+  archive `eth_getCode`, transfer batches begin at or before the earliest
+  verified deployment in the batch, every token must retain continuous scan
+  evidence through the frozen snapshot and positive initial-mint evidence, and
+  replayed balances must reconcile to accounted supply. Redistribution excludes
+  mints, burns, self-transfers and zero-value transfers from movement metrics
+  and measures recipient activations, sender exits, distinct senders/receivers,
+  gross transfer turnover relative to supply and transfer-value concentration
+  only through the exact feature cutoff. Lifecycle age uses the verified first
+  contract-code block plus the exact first positive initial-mint event to
+  measure deployment-to-mint and deployment/mint-to-cutoff age without using
+  price history as a launch proxy. Early-recipient activity freezes the first
+  up to 10 distinct positive-transfer recipients and measures retention,
+  current supply share and causal gross in/out flow while explicitly making no
+  creator or EOA assumption. The deployment/transfer/holder, redistribution,
+  lifecycle and early-recipient contracts/workflows are tested. Full-universe transfer
+  execution intentionally requires `ROBINHOOD_ARCHIVE_RPC_API_KEY`; the
+  verified 200-block keyless filtered-log route is rejected for this job rather
+  than launching an impractical millions-request backfill. The participant-type
+  workflow likewise requires authenticated archive state for its historical
+  `eth_getCode` evidence. The equal-family-coverage and
+  feature-staging workflows now require all eleven implemented families,
+  giving a prepared **87-feature** label-free bundle at
+  exactly matched subject cutoffs. The staging bundle validates every value
+  against registry dtype and missingness policy, preserves per-family
+  data-quality flags, consumes no outcome rows, and explicitly publishes
+  `final_checkpoint_claimed=false`. No
+  `hlp-v1-phase3-feature-store` checkpoint is claimed yet. A separate
+  fail-closed finalizer is now prepared: it rebuilds the exact staging and
+  coverage handoffs, requires every currently registered family and feature,
+  revalidates row types, missingness, data-quality coverage and causal flags,
+  and only an actually executed successful finalizer may emit
+  `final_checkpoint_claimed=true`. The existence of that workflow is not a
+  checkpoint claim. Creator/deployer identity, funding/relationship graph,
+  liquidity/depth and price-impact/absorption families remain deferred until
+  their required historical inputs can be represented without weak proxies or
+  future leakage.
+- the guarded Phase-4 research architecture is now prepared end-to-end behind
+  the final Phase-3 checkpoint; this does **not** advance the current execution
+  phase or claim `hlp-v1-phase4-discovery`. Phase 4 remains the first place
+  outcome labels may meet feature values. `phase4_discovery_entry.py` rebuilds
+  and SHA-checks the exact Phase-2 dataset plus the final Phase-3 feature-store
+  chain before joining them, requires every feature cutoff to equal the exact
+  confirmation block/transaction/log event, and records
+  `labels_joined_after_feature_freeze=true` with
+  `feature_values_mutated=false`. Guarded discovery-only workflows now cover
+  the full research build order: population/base-rate diagnostics; matched
+  winner/failure univariate distributions and missingness; an explicit
+  chronological discovery/validation/final-test split; manual hypothesis
+  freezing before validation; 10x/20x+ magnitude-strata comparisons;
+  deterministic nonlinear numeric bins; pairwise binary interaction tables;
+  transparent L2-logistic and depth-2 tree baselines fit only on discovery and
+  evaluated on validation; deterministic permutation tests with
+  Benjamini-Hochberg FDR control; and repeated-sampling plus chronological-fold
+  stability diagnostics. Validation and final-test artifacts remain physically
+  separated; descriptive discovery workflows cannot download either unseen
+  slice, validation workflows cannot download the final-test slice, and no
+  Phase-4 workflow promotes a production signal or chooses a Phase-5 signal
+  threshold. Sequence analysis is explicitly non-applicable to the current
+  point-in-time feature store because it contains no sequence-valued inputs;
+  optional clustering is recorded as not run because no predefined cluster
+  research question is required by the Phase-4 acceptance criteria.
+- a fail-closed `phase4-discovery-checkpoint` workflow is also prepared. It
+  rebuilds the chronological split, base-rate, univariate, hypothesis-freeze,
+  unseen-validation, magnitude-strata, nonlinear, interaction, simple-model and
+  stability handoffs; requires exact registry, discovery-slice, validation-slice
+  and parent-SHA reconciliation; logs every selected, rejected and unselected
+  hypothesis/feature disposition; and refuses to touch the final-test artifact.
+  Only that fully reconciled workflow may emit
+  `phase4_discovery_checkpoint_claimed=true`. A valid Phase-4 outcome may
+  contain zero surviving hypotheses: "no validated relationship found" is
+  preserved as a legitimate research result rather than forcing a signal.
+  None of these Phase-4 workflows can execute to a real checkpoint yet because
+  the real Phase-2 dataset and final Phase-3 feature-store checkpoints have not
+  been completed and accepted.
+
+
+### Live/current chain access
+- [x] official Robinhood public RPC reports chain ID 4663
+- [x] current block/header access
+- [x] bounded current eth_getLogs
+- [x] current bytecode verified for Pons V1/V2 factories
+- [x] current bytecode verified for Pons V2 meme hook and Uniswap V4 PoolManager
+- [x] official public RPC proven pruned for older historical state
+
+### Protocol decoding
+- [x] Pons V1/V2 launch event decoding
+- [x] Pons V2 CurveBuy/CurveSell decoding
+- [x] Uniswap V3 Swap decoding
+- [x] Uniswap V4 Swap decoding
+- [x] Pons V2 PoolRegistered token/pool bridge
+- [x] ERC-20/state helpers
+- [x] deterministic V3/V4/curve price and market-cap-proxy math
+- [x] immutable JSONL snapshot + SHA-256 provenance manifests
+
+### Historical/archive access
+- [x] SolidRPC keyless Robinhood route reachable from HLP's GitHub runner
+- [x] SolidRPC route successfully read Pons V1 bytecode at block 30,000,000
+- [x] SolidRPC route successfully returned historical Pons launch logs
+- [x] Pons protocol generation set frozen as **V1 + V2**; Uniswap V3/V4 are downstream trading venues, not extra Pons generations
+- [x] legacy V1-ABI factory `0x0c37...77a4`: exact first-code block **8,600,612**, first raw-chain launch **8,621,658**
+- [x] primary V1-ABI factory `0xa5aa...1feb`: exact first-code block **8,991,118**, first raw-chain launch **9,019,252**
+- [x] current V1-ABI factory `0xf4fc...eb75`: exact first-code block **39,010,564**, first raw-chain launch **39,497,847**
+- [x] V2 factory `0x7ed5...ec7e`: exact first-code block **26,841,846**, first raw-chain launch **27,027,321**
+- [x] all four factory deployments verified with direct archive RPC bytecode + raw TokenLaunched decode at audit head **54,478,341**
+- [x] generic adaptive eth_getLogs range splitting
+- [x] request pacing and Retry-After-aware HTTP 429 handling
+- [x] archive API-key support through headers rather than committed URLs
+- [x] Blockscout legacy + V2 APIs tested and rejected as GitHub acquisition routes (HTTP 403)
+- [x] BlockReq public endpoint rejected for archive history
+- [x] NodeFlare public endpoint unsuitable from shared GitHub runner (HTTP 429)
+- [x] hoodexplorer client implemented but provider unreachable from current runner
+
+## Current preferred zero-cost acquisition architecture
+
+**Live/head:** official Robinhood public RPC (plus later WebSocket/Alchemy if needed).
+
+**Historical archive:** SolidRPC Robinhood archive.
+
+Verified provider facts:
+- keyless public Robinhood route works from our runner;
+- the accepted Phase-1 measurements on 2026-09-04 observed a 2,000-block
+  public filtered `eth_getLogs` range;
+- **re-verification on 2026-09-21 found the keyless filtered range reduced to
+  200 blocks**. SolidRPC's RPC error explicitly reports
+  `maxFilteredBlockRange=200` and recommends a free API key for wider
+  ranges. Phase-2 acquisition must use the 200-block cap unless authenticated;
+- authenticated Free plan is $0, no card required;
+- Free allowance is 10,000 RPC method calls per UTC day;
+- Robinhood uses archive nodes on the Free plan;
+- authenticated route removes the public 2,000-block policy cap; practical ranges are still discovered adaptively.
+
+Secrets are never committed. No archive key is currently configured in the GitHub runner, so the verified acquisition path is the keyless public archive route. HLP automatically switches to the authenticated Free endpoint if a key is later provided.
+
+## Measured Pons full-history backfill
+
+Frozen registry snapshot head: **54,486,035**.
+
+The complete same-head Pons registry recovery finished successfully in run
+**33911022718** and is now frozen as the canonical Phase 1 launch registry:
+
+- **494,639 total Pons launches**;
+- **268,688 V1 launches**;
+- **225,951 V2 launches**;
+- V1 factories: 1,895 legacy + 266,221 primary + 572 current;
+- **57 unique pair-token addresses**;
+- registry SHA-256:
+  `c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed`.
+
+The merge proved exact shard block continuity, unique tokens within each
+generation, zero V1/V2 token overlap, exact manifest record counts and exact
+snapshot-head closure. The immutable recovered artifact is
+`phase1-pons-full-registry-recovered`.
+
+Measured V2 registry storage remains small relative to lifecycle tapes. Raw V3,
+V4 and anchor price events are expected to dominate Phase 1 storage.
+
+The canonical full V2 bonding-curve tape is now complete through the same frozen
+snapshot head in recovery run **33936232604**. The manifest-gap merge closed
+every block interval exactly and published `phase1-pons-v2-curve-full` with:
+
+- **9,231,724** total curve events;
+- **4,949,167** buys;
+- **4,277,267** sells;
+- **5,290** buybacks;
+- **182,738** curves with observed activity out of 225,951 registry curves;
+- **112** source files merged with strict event ordering and block continuity;
+- tape SHA-256:
+  `771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b`.
+
+The full V2 transition control tape had already completed successfully in run
+**33912452330** at the same snapshot head. It contains **3,638** graduations
+and **3,638** registrations for the same 3,638 tokens, with zero graduated
+tokens lacking a registration and zero registered tokens lacking a graduation.
+The frozen transition SHA-256 values are
+`492aa1bfd325050395727255b5de93c88935cf8e40bd580256ce69f9b3427f5e`
+for graduations and
+`8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`
+for registrations.
+
+The canonical WETH/USDG anchor tape is now complete through the frozen
+snapshot head in recovered-promotion run **33972109927**. The promotion reused
+only successful artifacts from the original prefix run, the preserved tail
+shard, the manifest-gap recovery and the two exact cancelled-gap repairs. It
+proved exact continuous block coverage from **8,621,658** through
+**54,486,035** with **49** selected source ranges and no unexplained gaps. The
+frozen tape contains **21,794,636** price events and SHA-256
+`1258f2c85e01f3f62587eeed37c28a30aecb537411b103f451090541a5f225a1`.
+Its causal initial WETH/USD value at block **8,621,657** is
+`1781.9239264124660124056136394685358486212055749832181614111330385520256580023364`.
+The final event lands exactly at snapshot head **54,486,035**. The promotion
+made only **8** archive state RPC requests beyond the reused event artifacts.
+
+### Lifecycle boundary completeness
+
+- [x] V1 Uniswap V3 Initialize is retained as a price point rather than starting at first swap
+- [x] V1 smoke proved 166 launches -> 166 exact Initialize events plus 114,042 swaps
+- [x] V2 Uniswap V4 Initialize is retained separately from PoolGraduated and first V4 swap
+- [x] V2 smoke proved 1 registration -> 1 exact Initialize plus 788 swaps
+- [x] curve -> V4 Initialize -> PoolGraduated seed -> first V4 swap ordering is preserved explicitly
+- [x] refreshed 100k-block research cohort still has 5 eligible tokens (4 V1, 1 V2)
+- [x] refreshed cohort preserves continuous upside; all 5 eligible tokens have at least one later 5x point and the largest observed later multiple remains about 159.8x
+
+### Quote-asset completeness
+
+The complete registry contains 57 Pons quote assets. Direct official Chainlink
+coverage plus cbBTC's verified crypto/USD feed does not cover every Robinhood
+Stock Token used by Pons. The official Chainlink Robinhood directory inventory
+contained 54 total feed records at audit time and genuinely omitted 30 Pons
+Stock Token symbols; this is not treated as a parser failure. The frozen quote
+audit proves all 30 missing-feed assets are used by **V2 only**; none appear in
+V1 launches. Therefore V1 eligibility does not depend on the V3/V4 quote
+fallback chain.
+
+A causal Uniswap V3 fallback audit at each quote's first Pons use proved:
+
+- 25 of those 30 feedless Stock Tokens already had direct USDG V3 liquidity;
+- those 25 routes cover **17,312 Pons launches**;
+- route discovery used current immutable V3 factory mappings, then required
+  pool code, initialized state and positive active liquidity at
+  first-Pons-use minus one before accepting a route;
+- all 25 selected V3 routes are direct USDG, so their historical fallback tape
+  does not depend on the separate WETH/USDG anchor.
+
+The five V3 misses were then checked against Sushi V3 and bounded Uniswap V4
+history. Sushi had no candidate pools. Uniswap V4 produced delayed direct-USDG
+routes for TTWO, RIVN and BULL, covering another **3,744 launches**:
+
+- TTWO first positive-liquidity V4 swap: block **36,023,158**;
+- RIVN first positive-liquidity V4 swap: block **36,042,806**;
+- BULL first positive-liquidity V4 swap: block **54,451,385**.
+
+These are delayed routes, not evidence that the quote was priceable at first
+Pons use, so the earlier intervals remain explicitly partial. A non-overlapping
+500,000-block V4 continuation then resolved FIG as well. The measured V4
+fallback now covers **3,870 launches across 4 of the 5 original V3 misses**.
+
+Only **SKHY / 129 launches** remains unresolved in frozen evidence. Its
+bounded V4 search is complete through block **52,863,525**, leaving
+**1,622,510** blocks to the frozen snapshot head. The cumulative probe already
+found one exact SKHY/USDG PoolManager candidate: pool id
+`0x8107f97277321f2899eba8d6721411e34cf368c6e24c9f0abb1658733e548601`,
+initialized at block **52,798,959** with fee **10,000**, tick spacing **200**
+and no hooks. No positive-liquidity swap was observed through the prior search
+end.
+
+A second, still-unexecuted resolution path is now staged from the frozen V3
+audit: SKHY has one exact Uniswap V3 **SKHY/WETH** candidate,
+`0x13f78b235d19141f572986afcaab66ce7744b4ef`, fee **3000**. The bounded
+continuation scans only that pool for its first positive-liquidity swap. The
+reusable primitive now rejects requests above **100k blocks** and has a
+**30-minute** job ceiling. The canonical segmented wrapper uses up to **23
+sequential <=100k-block segments** with early stopping, matching the measured
+DELL timing class. If it resolves, USD
+conversion is deferred until replay and composes each SKHY/WETH swap with the
+event-ordered canonical WETH/USDG anchor, avoiding end-of-block lookahead.
+
+SKHY ownership is now fully fail-closed across both possible venues. If the
+SKHY/WETH continuation resolves, the canonical split is **25 direct-USDG V3 +
+1 delayed SKHY/WETH V3 = 26 V3**, plus **4 V4** routes. If the V3 continuation
+instead proves an exhaustive no-route result through snapshot head, the staged
+known-pool V4 continuation can promote the frozen SKHY/USDG pool and the
+canonical split becomes **25 V3 + 5 V4**. The generic fallback accepts only
+those two disjoint ownership modes, requires exactly **30** feedless assets,
+requires exactly one SKHY owner, and still requires exactly **25 causal initial
+states**. If neither SKHY route resolves, pricing remains incomplete and the
+lifecycle universe freeze stays blocked.
+
+Neither ownership mode adds another full-history venue scan: SKHY is simply an
+additional address/pool in the already-required V3 or V4 quote scan, so the
+frozen **total processed-block geometry** remains unchanged; only response
+volume can change. After the measured keyless DELL oracle 500k-block timeout,
+the execution partition was tightened again before first execution to
+**128 V3 shards** and **128 V4 quote-fallback shards** with max-parallel 2,
+about **144k blocks per shard**. Three-digit suffixes preserve numeric merge
+order above shard 99. This changes only per-job span and retry safety, not the
+canonical full-history block workload.
+
+The V4 continuation path supports fail-closed `known_pool_only` mode. For
+SKHY it skips redundant Initialize discovery and scans only Swap logs for the
+already-frozen candidate pool ID. The primitive is capped at **100k blocks per
+30-minute job**, while the canonical segmented wrapper uses up to **17
+<=100k-block segments**, stops as soon as a segment resolves the frozen route,
+and can now be promoted directly into the alternate 25/5 canonical ownership
+path. Finalization selects the latest completed segment and publishes an
+artifact only if SKHY resolved or the scan reached snapshot head with zero
+unsearched blocks. A separate archive deployment-boundary probe
+proved the SKHY token contract already existed from block **8,691,227**, so
+the missing price history is a liquidity/venue-coverage problem rather than a
+token-deployment gap. The official Chainlink directory inventory also has no
+SKHY/SK hynix near-match, so no feed alias is assumed.
+
+V3 and V4 fallback tapes remain venue-specific for provenance, then merge into
+one disjoint generic quote/USD fallback artifact before both V1 and V2
+lifecycle replay. Chainlink and DEX fallback ownership is also checked for
+overlap and fails closed.
+
+The frozen full-Pons quote audit in run **33923299711** contains **23**
+Chainlink-priced stock quote assets. The earlier successful V2 oracle tape in
+run **33912985322** already covers **22** of those assets and 9,530 oracle
+updates. Artifact-level comparison proves the only missing current full-Pons
+stock feed is **DELL** quote token
+`0x941ae714ec6d8130c7b75d67160ca08f1e7d11dd`, used by **223** Pons launches
+from block **52,263,453**. Its Chainlink feed
+`0x1c6c8cadbe02e19129c39ddb92281ce4c0bf206b` resolves to aggregator
+`0xd6ed4e7d4aba1111eb42a349899b5c72ee1c9fef` and is causally ready at block
+**52,263,452**. The reusable
+`phase1-pons-stock-oracle-promote-v2-delta` workflow therefore promotes the
+22-asset V2 oracle tape and scans only DELL's missing tail. Live run
+**33972806063** proved that all four full **500k-block** DELL shards
+(000-003) hit the **20-minute** GitHub job ceiling before artifact upload,
+with no provider error. Only the final **222,583-block** tail remained small
+enough to continue under the old geometry. The canonical delta ceiling is
+therefore **100k blocks** per job,
+retaining max-parallel 2 and the same fail-closed 23-vs-22 ownership check.
+The promotion accepts an optional prior interrupted delta run, validates its
+successful shard manifests, and plans only exact uncovered subranges before
+emitting the canonical `phase1-pons-stock-oracle-full` artifact.
+
+Resumable promotion run **33974681334** completed successfully on 2026-09-05.
+It reused the 22-feed V2 tape plus preserved delta evidence, filled the DELL
+tail with **23 exact source ranges**, and published the canonical full-Pons
+stock-oracle artifact with:
+
+- **23** stock quote assets total;
+- **22** promoted V2 assets + exactly **1** delta asset (**DELL**);
+- **9,734** oracle updates;
+- initial-state SHA-256
+  `9d49662fcbf052cf6165ce0cb9943bc32ea4efb543cfd3d21cbd0c1956623355`;
+- update-tape SHA-256
+  `1584526e894e3ba343abb906e7ebeac14de548578b44ae7a7eb352bcd31fe944`;
+- exact snapshot head **54,486,035**.
+
+A separate causality fix activates staggered quote-source state only at each
+asset's first Pons use. Future oracle availability is never active from the
+beginning of a historical replay. Lifecycle summaries distinguish
+`eligible`, `ineligible` and `unknown`: a later priced >=$100k point proves
+eligibility even if an earlier interval was unpriced, while a non-crossing
+partial history remains unknown and blocks final universe freeze.
+
+## Backfill execution guardrail
+
+Full-history Pons backfills are manual-only workflows. Code/workflow pushes must
+not auto-launch archive matrices. Dependency run IDs are workflow-dispatch
+inputs rather than reasons to edit workflow YAML. Heavy jobs fail fast when a
+required artifact is unavailable; runner-side polling is forbidden.
+
+Measured recovery behavior on the keyless archive route showed that dense
+716k–864k block shards can hit the 30-minute GitHub job limit even though the
+RPC path is healthy. The full-history definitions were therefore resized
+without increasing concurrent RPC pressure:
+
+- V2 curve: 64 shards, about 432k blocks each, max-parallel 2, 25-minute cap;
+- WETH/USDG anchor: 128 shards, about 358k blocks each, max-parallel 2,
+  25-minute cap;
+- V1 global V3 tape: **240 shards**, about **191k blocks each**,
+  max-parallel 2, **40-minute** cap;
+- V2 global PoolManager V4 tape: **192 shards**, about **144k blocks each**,
+  max-parallel 2, **30-minute** cap.
+
+The V1/V3 and V2/V4 full tapes had not yet been executed when the DELL oracle
+recovery supplied a stronger keyless timing sample: successful 100k-block DELL
+jobs took about **11m40s** end-to-end. The old 358k/432k venue shards were
+therefore resized before first execution. All workflows with more than 99
+shards now use **three-digit shard suffixes** so lexical artifact ordering stays
+identical to numeric block order during stream merges. This changes only
+partitioning and runner headroom; the frozen full-history processed-block floors
+are unchanged.
+
+Two reusable manual-only range recovery workflows split a bounded exact
+failed curve or anchor interval into four smaller subshards and merge only that
+interval. They reject spans above 200k blocks for V2 curves or 600k blocks for
+the anchor, keeping their four subshards within the same 50k/150k retry
+ceilings used by manifest-gap recovery.
+On top of those primitives, manifest-driven gap recovery now reads every
+successful partial-run manifest, derives the exact uncovered block intervals,
+and creates only bounded retry jobs. V2 curve, WETH/USDG anchor, V2 transition
+and V2 PoolManager V4 recovery all have reusable gap-aware workflows. Each can
+reuse successful gap artifacts from one earlier interrupted gap-recovery run,
+so completed retry work survives another cancellation. Recovery planners also
+fail fast above **240 matrix jobs**, below GitHub Actions' matrix ceiling, rather
+than generating an invalid oversized matrix from an excessively small manual
+gap size. A live recovery measurement on 2026-09-05 showed that 200k-block V2
+tail jobs at the first two missing ranges both reached the 20-minute job cap, so
+V2 curve gaps are capped at **50k blocks**. Anchor gap recovery was
+initially tested at 150k, but live gap 018 (52,169,619-52,319,618) hit the
+20-minute runner cap before artifact upload. Future anchor manifest-gap jobs
+are therefore capped at **50k blocks**, and the four-way exact anchor range
+helper now rejects ranges above 200k so each subshard is at most 50k.
+Transition gap recovery remains at the separately bounded **150k** ceiling.
+The unrun full-venue V1/V3, V2/V4 and V3/V4 quote-fallback recoveries instead
+use **100k-block** retry jobs with **30-minute** ceilings, matching the stronger
+DELL timing evidence while retaining max-parallel 2.
+
+The cancelled anchor tail recovery preserved one successful **716,631-block**
+shard (48,752,988-49,469,618) containing **607,932** price events. It completed
+in **1,514.118 seconds** with **1,070** RPC requests. Manifest-gap recovery run
+**33957294304** is now reusing that shard and plans **34** exact missing jobs
+covering **5,016,417** blocks from 49,469,619 through 54,486,035.
+
+The first two measured **150k-block** anchor gaps completed inside the
+20-minute recovery bound: gap 000 produced **168,023** events in **1,103.111
+seconds** with **1,415** RPC requests, while gap 001 produced **163,019** events
+in **1,093.740 seconds** with **1,418** requests. Later gaps **018**
+(52,169,619-52,319,618) and **025** (53,219,619-53,369,618) both timed out
+before artifact upload, proving that 150k is not uniformly safe. The lower 50k
+recovery ceiling is therefore the fail-safe default for future anchor gaps.
+
+Cancelled anchor gaps **018** and **025** were repaired successfully in run
+**33970898635** with the reusable four-way exact range helper. Each 150k hole
+was split into four ~37.5k subshards with internal max-parallel 2, staying below
+the 50k per-worker recovery bound. Recovered-promotion run **33972109927** then
+folded those ranges into the canonical anchor artifact and proved end-to-end
+continuity, so no further anchor rescanning is required for the frozen Phase 1
+snapshot.
+
+The same V2 tail exposed a request-shape inefficiency in adaptive `eth_getLogs`
+scanning: after shrinking a rejected window, the iterator immediately doubled
+again after one success, which can oscillate on dense log ranges. It now waits
+for eight consecutive successful windows before probing larger. The first two
+optimized 50k jobs completed with **466** and **474** RPC requests; the
+neighboring pre-change 50k success needed **804**. This is request-efficiency
+evidence, not a direct wall-clock benchmark, because event density and provider
+latency differ by range.
+
+The final merge proves strict block continuity against the preserved prefix
+before publishing the canonical full tape.
+Successful historical shards are never re-fetched just because a later dense
+range timed out.
+
+The gap recovery workflows and the bounded V4 quote continuation expose both
+`workflow_dispatch` and `workflow_call`, but no push trigger. Temporary
+one-shot wrappers may invoke the tested reusable logic when direct workflow
+dispatch is unavailable; wrappers are sequenced one heavy recovery at a time
+and are removed after use.
+
+This keeps normal development/tests responsive while long archive shards run,
+and prevents accidental backfills from competing for GitHub-hosted runner
+capacity. Secondary network/integration smokes are manual-only; the fast
+unit/compile suite remains automatic on pushes. This prevents a CLI or shared
+source edit from faning out into many unrelated RPC jobs and starving bounded
+research probes.
+
+The complete downstream eligibility paths are now explicitly staged as:
+
+- shared: full Pons registry -> quote audit -> Chainlink/cbBTC oracle +
+  venue-specific V3/V4 quote fallbacks -> one disjoint generic quote/USD tape,
+  plus the WETH/USDG anchor where lifecycle pricing requires it;
+- V1: full registry -> globally scanned/filter-local V3 tape -> Chainlink USD
+  replay -> summary-only lifecycle eligibility -> frozen >=$100k V1 subset;
+- V2: V2 registry -> curve/transition -> V4 tape -> Chainlink + generic
+  fallback USD replay -> summary-only lifecycle eligibility -> frozen >=$100k
+  V2 subset;
+- final: fail closed only while any lifecycle remains eligibility-unknown;
+  proven eligible histories may contain earlier unpriced intervals, then union
+  the known V1 + V2 eligible tokens into the immutable all-Pons >=$100k
+  research universe.
+
+## Query-efficiency design
+
+Do not issue one historical API query per coin unless unavoidable.
+
+Planned high-level scans:
+1. factory launch events -> token/curve/pool registry;
+2. Pons V2 CurveBuy + CurveSell by global topic scans, then filter addresses against known Pons curves;
+3. Uniswap V4 Initialize/Swap events from the single PoolManager through the
+   scalable full-history global topic scan, then filter locally against the
+   frozen 3,638 registered Pons V2 pool IDs. The CLI retains an optional
+   server-side topic1 OR mode for bounded validation, but production
+   full-history/recovery workflows must not adopt that large filter without a
+   provider-safe measured comparison;
+
+The RPC client now counts request-body bytes per real transport attempt in
+addition to request count and response bytes, and the V2/V4 tape report exposes
+that metric. Manual workflow `phase1-pons-v2-v4-filter-comparison` is staged
+to compare the production global scan against the optional registered-pool
+topic1 mode over at most **5,000 blocks** using frozen transition run
+**33912452330**. It compares exact canonical row bytes/data SHA, RPC route,
+request count, request bytes and response bytes, preserves evidence when the
+server-side filter is unsupported, and fails closed if both modes succeed but
+produce different rows. Its preflight refuses to run while any live venue
+rescue is nonterminal, so it has deliberately **not** been launched during
+active V2/V4 generation 2.
+
+4. V3 Initialize/Swap through block-sharded global topic scans followed by frozen Pons V1 pool membership locally; the 268,688-pool V1 registry is too large to push as one RPC address filter;
+5. first-pass price/mcap reconstruction keeps eligibility evidence for the full launch population without doing holder/wallet backfills;
+6. only after the $100k universe is known, fetch complete market/transfer history for eligible tokens to reconstruct wallet and historical holder state.
+
+This sequencing prevents transfer/holder backfills for the overwhelming majority of coins that never become research-eligible.
+
+## Representative Phase 1 validation tooling
+
+The representative-token acceptance path is now staged without changing any
+research threshold or starting another archive crawl:
+
+- a deterministic freeze selects exactly five measured >=5x runners and five
+  lifecycle failures, with both Pons generations represented;
+- an artifact-only market-path freeze stream-filters the already-frozen V1
+  V3, V2 curve, graduation/registration and V4 tapes down to the exact
+  representative cohort, preserving each token's launch-to-market event path
+  without issuing new provider requests;
+- a second artifact-only replay uses those exact 10-token events plus the
+  frozen anchor/oracle/fallback tapes to materialize every causal token/USD
+  price and market-cap point with the same V1/V2 pricing functions used by
+  lifecycle eligibility; final representative validation requires its
+  per-token point counts, priced/unpriced accounting, maximum market cap and
+  maximum block to agree with the lifecycle summaries;
+- a resumable Transfer backfill reconstructs exact holder balances/counts and
+  fails closed unless every sampled token begins with a launch-time mint;
+- GeckoTerminal is used only as independent DEX evidence, never canonical
+  history; the client supports pool identity and bounded OHLCV reads. Every
+  actual HTTP attempt is now rate-paced, transient 429/5xx responses alone are
+  retried, `Retry-After` is honored, permanent HTTP errors fail immediately,
+  and the request counter includes retry attempts rather than only successes.
+  Representative cross-check selection is first/max/last DEX swap per token,
+  so ten tokens can create at most **40 logical GeckoTerminal requests**
+  (10 pool identities + <=30 OHLCV reads). The workflow now fail-closes above
+  that logical budget, caps HTTP attempts at logical requests x the client's
+  three-attempt ceiling (**<=120**), and uses a 30-minute job timeout so correct
+  6.1-second pacing plus transient retries are not killed by the former
+  10-minute ceiling. Canonical block timestamps cover <=30 checkpoint blocks
+  through the Robinhood public RPC route. Rechecked against the live
+  GeckoTerminal API documentation on **2026-09-05**:
+  API version `20230203` remains current, the public limit remains approximately
+  **10 calls/minute**, and Robinhood network pool pages are currently indexed.
+  The client freezes that contract at a 6.1-second minimum request interval;
+- a separate bounded Blockscout cross-check can verify exact transaction
+  identity and mined block for representative launches plus each distinct
+  first/max/last DEX price checkpoint, but it is **supplementary only** while
+  GitHub-hosted runners remain known to receive HTTP 403 from Blockscout APIs.
+  Its workflow is gated behind an explicit access-reverified input, is capped
+  at 40 targets, and reports request/egress counters. Its frozen sample,
+  market-path and priced-path inputs each receive three GitHub artifact
+  download attempts with partial-directory cleanup, and its final explorer
+  artifact receives three upload attempts without repeating the external
+  verification work. The Blockscout client itself counts every HTTP attempt,
+  retries only transient 408/425/429/5xx plus transport/JSON failures, and fails
+  permanent HTTP errors immediately, so request accounting remains truthful if
+  access is reverified. The representative evidence chain now exposes a
+  default-false `explorer_access_reverified` switch. When false, the explorer
+  job is skipped and today's GeckoTerminal-only acceptance path is unchanged;
+  when true, the chain runs the Blockscout cross-check after priced paths and
+  requires that job to succeed before representative validation. Validation
+  downloads the exact explorer artifact with the same three-attempt cleanup
+  contract, verifies sample/market/priced run provenance, passes all ten token
+  summaries into the already fail-closed explorer/DEX reconciliation helper,
+  and refuses completion unless `explorer_verified_tokens == 10`. The normal
+  and recovered evidence chains both pass this switch through, so explicitly
+  supplied explorer evidence is binding all the way into the Phase 1 PASS
+  evidence path. The evidence-ready handoff now also compares the explorer
+  requirement and run ID between the representative summary and manifest,
+  rejects mismatches or impossible optional/required states, and carries the
+  normalized pair forward. The guarded viability route and the independent
+  readiness audit both revalidate that same boolean/run-ID pair before route
+  execution or readiness can advance. Final acceptance independently validates
+  those handoff fields before any acceptance work, then reads
+  `explorer_evidence_required` and `explorer_crosscheck_run_id` again from
+  the representative summary during PASS evaluation; when the flag is true it
+  requires a positive explorer run ID plus complete supplied counts before
+  PASS, and rejects a declared explorer run with no evidence.
+  Complete 10-token coverage and exact agreement with the GeckoTerminal
+  checkpoint set are therefore mandatory whenever explorer evidence is
+  enabled;
+- V1/V2 lifecycle summaries retain separate maxima from actual V3/V4 Swap
+  events so an Initialize-only price cannot masquerade as independent trade
+  evidence;
+- the manual representative DEX cross-check fails on canonical pool/token-pair
+  disagreement and selects deterministic first, maximum-USD and last actual
+  V3/V4 Swap checkpoints from the frozen detailed priced path. Duplicate roles
+  collapse onto one event when a token has fewer than three distinct swaps.
+  Each selected block timestamp is resolved with the canonical public RPC and
+  every checkpoint must independently fall inside GeckoTerminal's hourly
+  OHLCV envelope before the token can be marked matched; the final Phase 1
+  acceptance report also verifies nested checkpoint counts and matches.
+  Tokens with no DEX swap checkpoint or no registered V4 pool stay explicit
+  rather than being silently treated as matched;
+- the shared RPC client now measures successful HTTP response bytes and every
+  RPC CLI summary reports that egress counter; the manual GitHub-Actions
+  accounting workflow aggregates explicit request counters, response bytes,
+  reported block ranges, acquisition elapsed time, GitHub job runtime and
+  artifact storage rather than estimating provider usage. Historical runs
+  created before this instrumentation remain request/storage evidence only;
+  response-byte evidence must come from instrumented future or bounded runs;
+- an artifact-only representative validation join requires all 10 tokens to
+  have consistent lifecycle pricing evidence, detailed launch/trade paths,
+  detailed per-event USD price replay, holder replay, pool identity
+  reconciliation and multi-point independent DEX price evidence before it can
+  publish a complete validation bundle. Blockscout explorer verification is
+  accepted as supplementary evidence when access is reverified, but is not a
+  required GitHub-hosted dependency while the documented HTTP 403 persists;
+- a reusable manual-only `phase1-pons-representative-evidence-chain` now threads
+  one completed eligibility parent run through sample freeze, market-path
+  extraction, priced-path replay, Transfer/holder reconstruction, the bounded
+  GeckoTerminal DEX cross-check and final representative validation. Market-path
+  extraction and Transfer acquisition start in parallel after the sample freeze.
+  The chain calls the reusable Transfer workflow exactly once. If that matrix
+  fails or is cancelled after preserving successful shards, a later
+  representative-chain run resumes only missing ranges by supplying the earlier
+  parent run as `prior_transfer_run_id`; this avoids discarding completed
+  holder work while keeping the reusable-workflow graph fail-closed. Transfer
+  acquisition now defaults to **100k-block** ranges and supports **four
+  serialized <=240-job waves** (up to 960 jobs), each at max-parallel 2 with a
+  30-minute RPC ceiling. The planner and final artifact merge have separate
+  45/90-minute artifact-processing ceilings. This means a dense failed transfer
+  run can be retried at 50k ranges without exceeding the full-history matrix
+  capacity. Inert representative graph run **33995597038** skipped cleanly
+  against the four-wave child workflow, and the staged one-shot remains inert
+  until its explicit launch phrase is committed. Representative validation now also binds
+  the market-path V1/V3 and V2/V4 source run IDs to the lifecycle evidence,
+  verifies the canonical registry, V2 curve, transition, quote-audit, anchor,
+  stock-oracle and quote-fallback run IDs carried by upstream manifests, and
+  persists those source IDs into the final representative validation manifest.
+  Inert graph-validation run **33986987191** confirmed the stricter reusable
+  input contract compiles without launching representative acquisition.
+  Representative validation now also records the exact V1 and V2 lifecycle
+  artifact SHA256 values; final Phase 1 acceptance requires those hashes to
+  match the lifecycle hashes cryptographically bound into the promoted eligible
+  universe, so matching run IDs alone are no longer sufficient. Current V1/V2
+  lifecycle workflows also write their exact upstream venue run IDs
+  (`v1_v3_run_id` / `v4_run_id`) into lifecycle manifest provenance.
+  Eligible-universe promotion republishes those as `v1_v3_run_id` and
+  `v2_v4_run_id`, representative validation requires its detailed market-path
+  venue IDs to agree with the lifecycle manifests, and the Phase 1 PASS function
+  independently requires the universe and representative venue IDs to match.
+  Because the already-running parent is pinned to older code, missing venue
+  fields may be inferred as “venue run = lifecycle parent” **only** when that
+  lifecycle parent is exactly **33982556591**; any later/current-code lifecycle
+  run missing those fields fails closed. Inert graph validation confirmed the
+  strengthened normal representative path (**33994715659**), terminal recovery
+  path (**33994728825**) and current universe promotion (**33994761013**) all
+  compile without launching provider work. The
+  representative sample also binds its five runner tokens exactly to frozen
+  research-smoke run **33920762592** and carries the frozen smoke universe SHA
+  `4861b2af...9c19ab9` plus outcome SHA `6fb40693...1fc6ef2` into the final
+  representative manifest. Phase 1 acceptance freezes that runner-smoke run and
+  both full SHA256 values independently, so the >=5x runner proof cannot drift
+  behind a valid-looking dynamic sample run. A reusable
+  `phase1-pons-post-eligibility-evidence-chain` stages the normal post-crawl
+  handoff: it fail-closes on source parent **33982556591**, runs the current-code
+  eligible-universe promotion and representative evidence chain under one caller
+  run ID, then publishes
+  `phase1-pons-post-eligibility-evidence-ready`. Before that handoff can become
+  ready, both normal and recovered paths now run the shared artifact-only
+  `validate_post_eligibility_evidence_bundle` contract. It requires the exact
+  **494,639-launch** universe, zero unknowns, a positive eligible cohort, the
+  complete **5 runner + 5 failure** representative cohort, identical lifecycle
+  and recovered venue run IDs across universe/representative manifests, exact
+  V1/V2 lifecycle SHA256 agreement, and fallback routing to the same lifecycle
+  evidence run. The ready artifact publishes the universe SHA, representative
+  SHA and both lifecycle SHAs; the viability guard requires that full
+  fingerprint plus snapshot **54,486,035** before any route RPC can start. This
+  moves cheap evidence-consistency failures ahead of the nine measured runs
+  rather than discovering them only at final acceptance. The post-eligibility
+  artifact path is now retry-safe against GitHub artifact-finalization
+  failures: eligible-universe, representative-validation and evidence-ready
+  outputs each receive up to three upload attempts without rerunning their
+  completed computation. Normal/recovered evidence joins, readiness,
+  guarded/direct viability and final acceptance select same-name retries by an
+  exact artifact ID only when GitHub reports equivalent SHA-256 digest, byte
+  size and workflow-run binding; non-equivalent duplicates fail closed.
+  Accounting and viability-projection artifacts use the same retry/exact-ID
+  pattern, and the acceptance-gate plus PASS-closeout outputs also receive
+  three upload attempts. Accounting now uses the shared bounded-retry Actions
+  JSON reader for run/job/artifact pagination in addition to its shared job-log
+  downloader; viability projection uses the same JSON reader when resolving its
+  exact accounting artifact. The job-log downloader retries transient API/blob
+  failures up to three times with a fresh redirect on each attempt while
+  preserving the existing no-token-to-blob guarantee; terminal 404/410
+  historical-log loss remains explicitly classified unavailable. Exact
+  accounting/evidence/projection/acceptance reads
+  now retry up to three times with partial target directories removed between
+  attempts. The final-acceptance join applies the same read retry contract to
+  its evidence handoff plus all ten primary/secondary viability artifacts, so a
+  transient GitHub artifact read cannot invalidate an already-complete nine-run
+  measurement ledger. Closeout opens the exact equivalent acceptance artifact
+  by ID before auditing it. This removes the known single-attempt
+  artifact-finalization/read failure class from the completed evidence ->
+  viability -> acceptance -> closeout chain.
+  Its guarded one-shot watches
+  `.github/phase1-pons-evidence-launch.txt`; inert validation run
+  **33988716778** skipped cleanly while compiling the nested graph.
+
+The final Phase 1 viability path is also staged fail-closed:
+
+- every RPC acquisition summary reports both response-byte egress and a route
+  label; only the canonical Robinhood public RPC and the SolidRPC keyless or
+  authenticated-Free routes are accepted as proven-free acquisition evidence;
+- a manual artifact-only viability projection consumes measured accounting
+  runs and an explicit route plan, then uses the worst observed per-processed-
+  work-block request, egress, artifact-storage and runtime rate for each route.
+  Repeated ranges inside one job are deduplicated, while overlapping ranges in
+  distinct jobs/scans remain separate work units; a global unique-block metric
+  is retained separately for audit;
+- because the frozen route plan forbids reusing one workflow run ID across
+  multiple acquisition routes, the multi-route eligibility parent run is not
+  treated as route-separated accounting evidence. A reusable manual-only
+  `phase1-pons-viability-route-measurement` workflow now runs exactly one of
+  the nine canonical production CLI paths per invocation over an operator-
+  supplied **<=50k-block** range, producing one distinct run ID for that route.
+  The `pons_registry` measurement is the deliberate exception inside one run:
+  it executes V1 and V2 registry scans as two separate jobs over the same
+  bounded range so accounting preserves the frozen overlapping-generation
+  work geometry instead of deduplicating it. Quote-fallback measurements reuse
+  only canonical V3/V4 route files. The post-eligibility evidence-ready artifact
+  now explicitly carries `lifecycle_run_id`, `v1_v3_run_id` and
+  `v2_v4_run_id`: normal evidence points all three at source parent
+  **33982556591**, while recovered evidence names the actual recovered
+  pricing/lifecycle and venue runs. Before any viability RPC, the guarded route
+  downloads that handoff, verifies its source/evidence IDs and recovery mode,
+  validates the lifecycle workflow path/branch plus all three fallback
+  artifacts, and routes quote_v3/quote_v4 measurements through that
+  `lifecycle_run_id`. This prevents a recovered Phase 1 from trying to fetch
+  quote-route artifacts from a failed frozen parent. Inert guarded-route graph
+  run **33995956614** skipped cleanly after this routing change.
+  Current branch orchestration keeps those nine measurements as **nine
+  individually guarded workflow runs**, not one matrix/caller run: a shared
+  `.github/phase1-pons-viability-ready.json` must first name a successful
+  post-eligibility evidence run and
+  `.github/phase1-pons-viability-runs.json` must be armed to that same
+  evidence run. Each route-specific one-shot then calls
+  `phase1-pons-viability-guarded-route` -> the canonical bounded measurement.
+  Any change to either readiness/ledger state file now automatically invokes
+  the artifact-only `phase1-pons-readiness-on-state-change` watcher, so
+  partial route IDs are validated immediately rather than only at final
+  acceptance. For every positive route ID, the readiness audit reopens both
+  state files at that route run's exact `head_sha` and requires readiness plus
+  ledger to have been armed to the **same evidence run**, with the route slot
+  still zero at launch. The finalizer independently repeats that launch-state
+  binding, requires all evidence/route commits to be ancestors of its current
+  branch HEAD, and only then permits the final acceptance chain. This prevents
+  stale route measurements from a prior evidence generation or orphaned branch
+  history from being recycled into a later PASS.
+  The guard refuses RPC work if the ledger is unarmed, names a different
+  evidence run, has a changed route set, or already contains a positive run ID
+  for that route; intentional reruns therefore require explicitly clearing the
+  route slot first. This preserves the frozen distinct-run-ID contract and
+  keeps archive pressure one route at a time. Two no-RPC probes established why more automatic
+  branch-only chaining is not used: run **33988308531** received HTTP 404 when
+  its branch workflow attempted to dispatch another branch-only workflow with
+  `GITHUB_TOKEN`, and successful source probe **33988762949** produced no
+  `workflow_run` watcher run because that watcher is not on the default
+  branch. A same-push shared-concurrency experiment also cancelled excess
+  pending route workflows, so it is not a valid nine-run serializer.
+  Completed route IDs are recorded in
+  `.github/phase1-pons-viability-runs.json`; the guarded
+  `phase1-pons-viability-ledger-finalize-one-shot` independently requires the
+  ledger evidence run to equal the armed readiness evidence run, then verifies
+  all nine successful route workflow **file paths**, branch, distinct run IDs
+  and expected measurement artifacts before passing them to the reusable final
+  acceptance chain. Every route must expose its
+  `phase1-pons-viability-measurement-<route>-primary` artifact, and
+  `pons_registry` must additionally expose its V2 secondary measurement
+  artifact.
+  Workflow paths are used deliberately because GitHub replaces the run
+  `name` field with the custom `run-name` string; inert route run
+  **33988929710** demonstrated that distinction before any acceptance evidence
+  was collected;
+- the frozen heavy-acquisition contract requires exact full-history work-block
+  floors for exactly nine routes, totaling **331,011,903 processed
+  work-blocks**. The Pons registry floor intentionally counts its overlapping
+  V1 and V2 generation scans separately. The frozen routes are Pons registry,
+  V1 V3, V2 curve, V2 transition, V2 V4, WETH/USDG anchor, stock oracle,
+  V3 quote fallback and V4 quote fallback. The final PASS artifact validates
+  and republishes both the exact per-route block map and the total;
+- a final manual artifact-only acceptance gate can return
+  `hlp-v1-phase1-data-viability` PASS only when the complete eligible universe,
+  the 10-token end-to-end validation and all nine instrumented zero-cost route
+  projections agree at snapshot head **54,486,035** and share the same V1/V2
+  lifecycle evidence. The reusable
+  `phase1-pons-final-acceptance-chain` graph has also been validated through
+  an inert caller, so its nine distinct measurement IDs can later flow through
+  accounting -> viability projection -> acceptance without another reusable-
+  workflow contract discovery. The acceptance function independently rechecks
+  that route evidence IDs are positive, match each route's declared evidence
+  count and are never reused across routes, then republishes the exact
+  route-to-evidence-run map in the PASS report. It also freezes the canonical
+  representative registry/curve/transition/quote-audit/anchor/oracle source run
+  IDs and rejects drift before PASS, so those guarantees do not depend only on
+  the orchestration layer.
+
+These are tooling completions, **not Phase 1 acceptance evidence yet**. The
+representative sample freeze still waits on canonical V1/V2 lifecycle
+eligibility artifacts. Actions history contains no completed
+`phase1-pons-v1-v3-full` or `phase1-pons-v2-v4-full` run yet, so those two
+full venue tapes remain upstream acquisition blockers alongside the unfinished
+pricing inputs. A manual-only
+`phase1-pons-full-eligibility-acquisition-chain` now serializes V1 V3 first,
+V2 V4 second, then passes same-run artifacts into the pricing/eligibility chain.
+If either full venue matrix fails after preserving successful shard artifacts,
+the same run invokes its manifest-gap recovery workflow and retries only missing
+intervals before continuing. A systemic failure with no reusable artifacts still
+stops fail-closed. Within pricing, SKHY V3 runs before the optional SKHY V4
+continuation. The
+64-shard V3 quote fallback does not start until V3 has resolved SKHY or an
+exhaustive V3 miss has been followed by a route-ready V4 result. If either V3
+or V4 full quote scan then fails after preserving successful shards, the same
+pricing run invokes its manifest-gap recovery and continues only from a
+recovered canonical artifact. If neither venue resolves SKHY, the chain stops
+before the full fallback scans.
+The guarded one-shot launcher remained pinned to oracle promotion run
+**33974681334** until that run completed successfully and the archive lane was
+clear. It was then fired once at commit
+`c53b3a63156976a5873752c332fa7578011249b0`, creating full eligibility
+acquisition run **33982556591**. Its stock-oracle preflight passed before any
+archive crawl began, proving 23 feeds, the single DELL delta, matching
+summary/manifests/checksums, chain 4663 and snapshot head **54,486,035**.
+The run has now entered the 240-shard V1/V3 stage with max-parallel 2. V2/V4,
+pricing/fallback resolution and lifecycle eligibility remain serialized behind
+that stage and its automatic manifest-gap recovery path. The first two V1/V3
+shards completed successfully in about 26 minutes each. On **2026-09-05**,
+V1/V3 shard **15** (blocks **11,488,181-11,679,282**, 191,102 blocks) hit the
+pinned workflow's **40-minute** job timeout and was cancelled; this was a job
+runtime limit, not a decoded RPC correctness failure. The launch-commit
+`c53b3a6` recovery planner is already wired to run after a failed/cancelled
+V1/V3 matrix and splits missing coverage with
+`max_gap_blocks=100000`, so this observed shard becomes exactly two bounded
+recovery jobs, far below its original 240-job matrix ceiling. No competing
+manual rescue has been launched while the parent matrix is still active. Artifact/log-only
+checkpoint run **33984605170** first accounted those two jobs without issuing
+provider requests. A stronger artifact/log-only checkpoint,
+**33987497436**, later captured the first **7 successful shards**:
+**1,337,711 processed blocks**, **12,360 RPC requests**,
+**3,066,837,229 response bytes (2.8562 GiB)**, **9,969,790 artifact bytes**
+and **10,436.062 seconds** of reported acquisition time, all through
+`solidrpc_keyless_public`. Artifact/log-only checkpoint **33994294187** then
+captured **17 successful shards** after the first timeout:
+**3,248,726 processed blocks**, **29,793 RPC requests**,
+**7,086,383,939 response bytes (6.5997 GiB)**, **211,108,881 artifact bytes
+(0.1966 GiB)**, **24,297.851 reported acquisition seconds** and **27,142 GitHub
+job-runtime seconds**, still entirely through `solidrpc_keyless_public`.
+Using the aggregate 17-shard density only as an operational forecast, full
+V1/V3 was about **420.6k requests**, **93.17 GiB response egress**, **2.78 GiB
+artifact storage**, **95.29 serialized acquisition hours**, or roughly
+**47.64 hours wall time** at max-parallel 2. Artifact/log-only checkpoint
+**33999864199** superseded the earlier sample with **27 successful acquisition
+shards**: **5,159,742 processed blocks**, **47,200 RPC requests**,
+**10,208,439,963 response bytes (9.5074 GiB)**, **380,669,336 artifact bytes
+(0.3545 GiB)**, **37,836.375 reported acquisition seconds** and **40,970
+GitHub job-runtime seconds**, all through `solidrpc_keyless_public`.
+Artifact/log-only checkpoint generation 5 run **34002985523** superseded
+that operational sample with **33 successful acquisition shards**:
+**6,306,351 processed blocks**, **57,723 RPC requests**, **12,787,966,527
+response bytes (11.9097 GiB)**, **560,184,739 artifact bytes (0.5217 GiB)**,
+**46,326.828 reported acquisition seconds** and **49,602 GitHub job-runtime
+seconds**, all through `solidrpc_keyless_public`. Artifact/log-only checkpoint
+generation 6 run **34024880175** now supersedes it with **78 successful
+acquisition shards**: **14,905,922 processed blocks**, **136,419 RPC
+requests**, **35,445,208,201 response bytes (33.0109 GiB)**,
+**2,382,695,713 artifact bytes (2.2191 GiB)**, **106,096.463 reported
+acquisition seconds** and **110,505 GitHub job-runtime seconds**, still entirely
+through `solidrpc_keyless_public`. Scaling the 78-shard aggregate density
+across the exact **45,864,378-block** V1/V3 range gives an operational
+forecast of about **419.8k requests**, **101.57 GiB response egress**,
+**6.83 GiB artifact storage**, **90.68 serialized acquisition hours** (about
+**45.34 hours** at max-parallel 2), and **94.45 projected GitHub job-runtime
+hours** (about **47.22 hours** at max-parallel 2). Request density remains
+remarkably stable, while later shards are materially denser in response and
+artifact bytes; measured checkpoints therefore continue to supersede
+smaller-sample extrapolations. These checkpoints are explicitly non-acceptance
+evidence. The source parent is now terminal but still lacks a canonical full
+V1/V3 artifact, so frozen viability still requires the successful recovery,
+its separate bounded route measurements, and the worst-observed-per-block
+projection. Terminal accounting also exposed stale GitHub Actions log blobs and
+impossible historical job timestamps; current accounting code records those
+as explicit missing-log/invalid-runtime evidence and allows non-acceptance
+checkpoints to publish lower-bound totals, while `require_successful_runs=true`
+continues to fail closed unless the accounting evidence is complete. Terminal
+checkpoint generation 9 run **34209333209** completed successfully and measured
+the terminal parent at a lower bound of **482,548 RPC requests**,
+**131,233,318,298 response bytes (122.2206 GiB)** and **7,576,568,933 artifact
+bytes (7.0562 GiB)**, with **52,744,034 reported processed blocks**,
+**382,317.886 reported acquisition seconds** and **399,763 GitHub job-runtime
+seconds**, all observed through `solidrpc_keyless_public`. GitHub no longer
+served **4 completed job logs** and exposed **2 impossible job runtimes**, so
+`accounting_complete=false`; the request/egress figures are therefore strict
+lower bounds rather than final acceptance evidence. At the reference
+**10,000 free method calls/day**, even the counted requests alone correspond to
+at least **49 quota-days** of calls, while the separate route viability
+measurements still determine the final $0 acquisition verdict.
+
+The current branch also hardens manual rescue beyond the launch commit's
+single-wave recovery implementation. After the live shard-15 timeout proved
+dense ~191k-block jobs can hit a 40-minute ceiling, V1/V3 and V2/V4 recovery
+were expanded to **four serialized <=240-job waves** (up to **960** retry
+jobs), each still capped at max-parallel 2, and current/manual callers now use
+**50k-block** retry gaps. That is enough for even a total V1/V3 loss
+(~918 50k retry intervals) while giving roughly 4x less block work per retry
+than the timed-out production shard. Direct manual dispatch also defaults to
+50k. Inert guarded-rescue graph run **33995293956** and terminal recovered
+completion run **33995308083** both skipped cleanly with the new four-wave
+graphs; future full-eligibility graph run **33995361487** also skipped cleanly.
+These later branch changes do not mutate the already-running acquisition pinned to commit
+`c53b3a63156976a5873752c332fa7578011249b0`; they are the fail-safe manual
+rescue path if that run's original automatic recovery cannot close a large
+failure set. A guarded
+`phase1-pons-live-venue-rescue-one-shot` launcher is staged against parent
+run **33982556591** with separate exact launch phrases for V1/V3 and V2/V4.
+The launcher now has its own GitHub-metadata preflight and refuses to call any
+recovery RPC while that frozen parent is still active or after it succeeds;
+only a terminal unsuccessful parent can reach the reusable rescue workflows.
+Its inert creation run **33984797673** and terminal-gate validation run
+**33995071926** both skipped cleanly. A second,
+**terminal-only** fallback now closes the downstream gap if the pinned parent
+ultimately cannot finish: `phase1-pons-recovered-completion-chain` accepts a
+complete recovered V1/V3 run plus an optional recovered V2/V4 run. It refuses
+to start until source run **33982556591** is completed non-successfully,
+validates the source/venue workflow paths and full venue artifacts, resumes
+V2/V4 itself when no complete V2/V4 run is supplied (with current manifest-gap
+recovery), then runs current pricing/lifecycle, the eligible-universe freeze,
+representative evidence, and publishes the standard
+`phase1-pons-post-eligibility-evidence-ready` artifact under one new evidence
+run ID. Both lifecycle consumers already resolve recovery manifests through
+their `partial_run_id` / `prior_gap_run_id` shard provenance. The guarded
+launcher is backed by
+`.github/phase1-pons-recovered-completion.json`, remains generation **0**
+and therefore unarmed; inert graph-validation run **33994104743** skipped
+cleanly. The recovery config also carries an optional `pricing_run_id`: when
+an earlier terminal source/recovery run already produced both lifecycle
+artifacts and all three quote-fallback artifacts before failing later in
+representative work, a retry can reuse those pricing artifacts, repromote the
+eligible universe on current code, and rerun only representative evidence.
+Reused pricing requires an explicit V2/V4 venue run ID and an approved
+source/recovery workflow path, so the retry cannot guess venue provenance.
+Before any representative RPC is allowed, the repromoted eligible-universe
+artifact must also prove that its validated V1/V3 and V2/V4 run IDs exactly
+match the recovery inputs; mismatched pricing/venue provenance fails
+artifact-only. Inert resume-graph validation runs **33994927060** and
+**33995014488** skipped cleanly. Viability
+readiness and finalization accept evidence only from the normal
+post-eligibility wrapper or this recovered-completion wrapper, on
+`phase1/data-acquisition-spike`.
+ Both lifecycle jobs stream the immutable full-history tapes rather than
+materializing them in memory, and their artifact-only replay ceiling is **60
+minutes** so multi-GB downloads plus causal replay are not killed by the former
+30-minute cap. The canonical V1/V3 and V2/V4 aggregates now remain as virtual
+JSONL manifests over ordered shard artifacts instead of publishing another
+monolithic full-tape copy. Lifecycle and representative consumers resolve
+current, partial and prior-recovery shard files by manifest identity
+(block range, record count and SHA), not basename alone, because successive
+gap-recovery generations may legitimately reuse compact names such as
+`*-gap-000.jsonl`.
+The live eligibility parent is pinned to launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`, so later branch hardening cannot
+change the eligible-universe manifest that parent will eventually emit. Current
+code therefore carries an artifact-only
+`phase1-pons-eligible-universe-promote` workflow plus a guarded one-shot pinned
+to source parent **33982556591**. After the parent completes, promotion
+re-downloads its V1/V2 lifecycle artifacts and re-runs only the universe freeze
+on current code; it does not issue RPC requests. The promoted universe manifest
+cryptographically binds the exact V1 and V2 lifecycle artifact SHA256 values,
+and the final acceptance function requires those hashes to agree with the
+freeze summary before PASS. Inert launcher run **33987410394** skipped cleanly,
+proving the reusable promotion graph compiles without touching the archive
+lane. The normal supported path wraps that promotion together with representative
+reconstruction in the post-eligibility evidence chain described above, so its
+single successful caller run ID contains both
+`phase1-pons-eligible-universe` and
+`phase1-pons-representative-validation`. The standalone promotion and
+representative launchers remain recovery/debug fallbacks.
+
+An artifact/GitHub-metadata-only `phase1-pons-readiness-audit` now provides
+one fail-closed state machine across the remaining Phase 1 handoffs:
+eligibility acquisition -> post-eligibility evidence -> nine viability routes
+-> final acceptance -> PASS. It validates frozen run IDs, required artifact
+sets, exact viability workflow file paths, distinct route-run IDs and the
+presence of the actual `phase1-pons-acceptance-gate` artifact before it can
+report Phase 1 complete. It also reads the source run's job matrix so GitHub's
+top-level reusable-workflow `queued` state cannot be mistaken for a failure.
+Real audit run **33989828191** completed successfully and classified the live
+parent as `eligibility_acquisition` with next action
+`wait_for_full_eligibility_acquisition`, **0 failed jobs**, 2 in-progress
+jobs and no premature evidence/viability readiness claim. After the shard-15
+timeout, audit run **33994147766** again passed and still returned
+`wait_for_full_eligibility_acquisition` while the parent remained active,
+now explicitly reporting **1 cancelled job** alongside the running matrix.
+After the recovery-discovery and finalizer hardening, live audit generation 10
+run **34000990183** also completed successfully and again classified the
+parent as `eligibility_acquisition` with next action
+`wait_for_full_eligibility_acquisition`: **31 successful jobs**, **1
+cancelled**, **2 in progress**, **207 queued**, no evidence run and no premature
+recovery or viability advance. After the evidence/support and direct-rescue
+hardening below, generation 11 run **34002252630** passed the same live state
+machine and reported **33 successful jobs**, **1 cancelled**, **2 in progress**
+and **205 queued**, still with next action
+`wait_for_full_eligibility_acquisition`. After recursive recovery-lineage and
+workflow-heredoc hardening, generation 12 run **34024988902** also passed and
+reported **79 successful jobs**, **1 cancelled**, **2 in progress** and
+**159 queued**, with no evidence run, no recovery plan while the source remained
+active, and the same correct next action. The frozen parent subsequently became
+terminal with top-level conclusion `cancelled`. Full pagination shows the
+terminal parent contains **324 jobs** and **314 artifacts**. Its original V1/V3
+matrix lost four shards to the 40-minute runtime ceiling (**15, 131, 132 and
+231**), while the pinned automatic recovery later acquired replacement gap
+artifacts but failed its final merge because one recovery interval overlapped
+successful original shard 14; the merge assertion observed
+`11321657 -> 11297080`. Terminal readiness generation 13 run **34207357285**
+passed and reported next action `launch_v1_v3_rescue`: the source has no
+complete V1/V3, V2/V4 or downstream pricing/lifecycle artifact. The pinned
+one-target rescue launcher was then armed for V1/V3 only as run **34207459960**;
+its terminal-parent preflight passed and its V2/V4 branch skipped. The current
+50k planner derived **70** serialized V1/V3 repair jobs covering **3,439,829
+blocks**. The first 54 jobs redundantly replace the oldest 14 original shards
+because the launch commit's wildcard artifact download only surfaced the newest
+300 artifacts; the remaining 16 jobs cover the four real timeout regions.
+Current code now paginates every source artifact through the GitHub API for
+future V1/V3 retries, so later recovery generations cannot silently lose those
+oldest source shards. Because that makes the first generation's 54 replacement
+gaps overlap rediscovered original shards, future planning now coalesces
+overlapping source/prior-gap coverage before deriving missing ranges, and final
+merge selects an exact contiguous whole-file cover while dropping redundant
+overlapping candidates. A failed final merge from the running rescue can
+therefore be retried with `prior_gap_run_id` without re-fetching those blocks
+or failing on duplicate coverage. The pinned launcher now discovers the newest
+completed target-matched rescue that still exposes both its bound gap plan and
+at least one successful gap artifact, and passes that run ID into the next
+generation automatically after the global active-rescue guard clears. A
+merge-only failure therefore reuses successful recovery work instead of
+silently reverting to an empty prior lineage. The V2/V4 gap workflow uses the same
+paginated discovery, overlap coalescing and exact-cover merge, preventing both
+the 300-artifact truncation class and the follow-on overlap class when V2
+recovery is eventually armed. Both venue merges now also verify every selected
+shard's manifest filename, record count and exact SHA-256 of the shard bytes
+before composing the aggregate tape, so corrupted or mismatched artifacts fail
+closed rather than being trusted from sidecar metadata alone. Cross-run artifact ZIP reads
+in both venue recovery workflows and recovered completion now use the shared
+safe GitHub Actions downloader: the GitHub API request carries auth, but the
+redirected blob-storage request deliberately does not. Both venue recovery
+families now also use the shared bounded-retry Actions metadata reader for all
+source, lineage, job and artifact pagination calls instead of raw single-attempt
+`urlopen`. V1/V3's four repair waves plus final merge retry the frozen launch
+registry artifact three times with partial-directory cleanup; V2/V4 applies the
+same contract to its frozen V2-transition artifact. Transient GitHub reads
+therefore cannot block or waste otherwise valid venue repair work. Recursive prior-gap
+manifest/plan verification uses the same token-stripping path. The first pinned V1/V3 rescue generation **34207459960** is exact-title
+generation **2** and its child `v1_v3_rescue / plan` job succeeded, so
+generation 2 is a **consumed** V1/V3 recovery generation. Exact-title generation
+**3** run **34228101146** is terminal but unconsumed because its child plan
+failed. The next legitimate V1/V3 launch therefore remains generation 3 and is
+now required to select consumed generation-2 run **34207459960** as its
+immediate prior plan. More generally, every venue rescue generation after the
+first must bind to exactly one consumed immediately preceding generation; a
+plan-only consumed generation with zero reusable repair artifacts remains the
+required parent so recursive lineage cannot silently skip it.
+
+V1/V3 now also uses the same launcher-to-child terminal snapshot binding as
+V2/V4. The launcher passes both the reusable-gap count and a SHA-256 over the
+canonical 11-field terminal binding (run/status/conclusion/head SHA/title/run
+attempt, reusable/missing/non-success gap IDs, and plan/canonical artifact
+presence). Both child recovery workflows now build and hash that binding through
+the shared `hlp.data.github_actions` helper; the launcher deliberately remains
+a pure-stdlib independent implementation because its five-minute preflight has
+no checkout/install dependency. CI freezes the helper's exact field order and
+digest fixture and separately proves both children invoke the helper with all
+11 fields while the launcher emits the same schema. Each child independently
+re-fetches the immediate prior run, jobs and artifacts, verifies the reusable
+count, and must reproduce the launcher digest before it can derive or emit any
+new repair matrix. Manual dispatch may omit both binding inputs together, but
+a one-sided binding is rejected.
+
+Readiness recovery progress is also plan-derived rather than job-list-derived.
+The readiness audit now uses the shared bounded-retry Actions metadata reader
+for both armed-evidence resolution and the full source/recovery/viability state
+scan, and retries the exact evidence-handoff artifact three times with partial
+directory cleanup. A transient GitHub API or artifact read therefore cannot
+misclassify the state machine or suppress the correct next action. It reads and
+structurally validates the bound gap-plan artifact, uses
+`gap_job_count` as the total planned repair count, and tracks currently
+materialized Actions jobs separately. The audit summary reports
+`materialized/planned` alongside successful/planned repairs, so serialized
+later waves cannot disappear from progress accounting merely because GitHub has
+not materialized those matrix jobs yet.
+
+Recovered/normal evidence identity is now rechecked at every critical
+artifact-only transition. Final acceptance independently fetches the evidence
+run and requires the normal evidence workflow to carry `recovery_mode=false`
+with lifecycle/V1-V3/V2-V4 routing all fixed to source run **33982556591**;
+the recovered-completion workflow must carry `recovery_mode=true`. The
+guarded viability-route preflight applies the same workflow-path/mode contract
+before any bounded measurement RPC is allowed to start. These checks do not rely
+solely on the earlier readiness audit, so a malformed or replayed handoff fails
+closed both before viability RPC and again before final acceptance.
+
+The first pinned V1/V3 rescue generation **34207459960**
+completed all 70 repair shards successfully but its final merge failed with
+`NameError: hashlib is not defined`: the launch commit imported `hashlib`
+in the planner heredoc but not in the merge heredoc. Current V1/V3 and V2/V4
+merge scripts now import it explicitly, and CI asserts each workflow contains
+the planner and merge imports separately. Run **34207459960** remains reusable:
+it exposes the bound V1/V3 gap plan plus all **70** successful gap artifacts
+and no canonical full artifact. Generation 3 run **34228101146** correctly
+adopted that run as `prior_gap_run_id` and passed recursive lineage without
+launching any repair matrix, but its plan then failed before RPC because the
+new V1/V3 paginated source selector used raw regex `\\d+` instead of
+`\d+`, so none of the 236 numeric original shard artifact names matched.
+The frozen parent still exposes all **314** non-expired artifacts. Current
+V1/V3 planning and merge now use the correct numeric regex in both source
+lookups; V2/V4 already had the correct pattern. Regression tests pin both
+patterns so this escaping error cannot recur. The frozen parent’s **236**
+surviving numeric V1/V3 artifacts total about **6.28 GiB**, so downloading
+them inside both planning and merge unnecessarily threatens the 45-minute
+planner ceiling. Future V1/V3 and V2/V4 planners now list numeric artifact IDs
+only and derive exact original shard ranges with the same deterministic
+equal-span formula used by the 240-way V1/V3 and 192-way V2/V4 acquisition
+workflows. Planning records `planning_source_bytes_downloaded=0` for those
+originals; full shard bytes are downloaded only once in final merge, where
+content validation actually requires them. Prior recovery gaps are planned
+the same way: each recursive generation contributes only its small bound
+gap-plan ZIP plus the non-expired artifact inventory, and planning intersects
+the plan's exact `gap_jobs` with observed numeric gap artifacts. It records
+`planning_prior_gap_jsonl_bytes_downloaded=0`, so no prior gap JSONL payload
+is downloaded during planning. V1/V3 final merge now mirrors V2/V4's
+multi-generation behavior too: it recursively walks every bound
+`prior_gap_run_id`, paginates exact numeric gap artifacts for each ancestor,
+rejects duplicate or unplanned gap IDs, verifies the current generation's
+observed artifact count against its plan, and materializes ancestors in
+run-scoped directories before exact-cover selection. This closes the latent
+case where recursive planning could reuse an older ancestor but merge only
+downloaded the immediate prior generation. Both venue merge downloaders now
+also bind every extracted gap artifact back to the exact block interval assigned
+to its gap ID in the corresponding plan. Prior/current manifest
+`from_block`/`to_block` must match the plan exactly, and the current generation's
+observed numeric gap-ID set must equal its plan rather than merely matching the
+expected artifact count. Reused and current gap plans are now structurally
+validated before those bindings are trusted: `gap_job_count`, `gap_blocks`,
+`gap_wave_job_counts`, sequential zero-padded IDs, per-job bounds, max-gap size,
+strict ordering/non-overlap and the four-wave 240-job capacity must all agree.
+Each freshly generated recovery plan now runs through that validator before its
+matrix outputs are emitted, so malformed planning fails before any archive RPC
+job can start.
+The live V2 generation-2 plan passes this validator at its full **553-job**
+`240 / 240 / 73 / 0` scale. The same structural validator now runs again when
+readiness considers a recovered venue canonical and when recovered completion
+accepts the venue handoff, including every recursive prior generation. A plan
+that drifts after acquisition therefore cannot be auto-adopted downstream.
+The canonical venue artifact is now bound to that lineage plan as well:
+readiness and recovered completion require its embedded gap-plan JSON to equal
+the standalone plan artifact exactly. They also reconcile the embedded summary
+to the canonical manifest: snapshot **54,486,035**, record count and tape
+SHA-256 must match the manifest, frozen membership must be **268,688** V1 pools
+or **3,638** V2 pool IDs, matched membership must equal that frozen count,
+missing-initialize count must be zero, and at least one source file must have
+contributed. This catches canonical metadata-bundle substitution without
+downloading the sharded event tape.
+Gap manifests are also bound to the acquisition
+provenance that generated them: source `evm_json_rpc`, chain **4663**, the
+venue-specific protocol, the frozen registry/registration input filename and
+the required global-scan filter mode must all match before extraction. A
+correctly named and correctly ranged artifact from the wrong acquisition path
+therefore fails closed before final merge. Recovery planning now fails even
+earlier on frozen upstream drift: V1/V3 requires successful registry run
+**33911022718** at launch SHA `6506e15224b83b12cfd85b607d3fdb55a0d3b026`
+and verifies the **494,639**-row registry manifest SHA
+`c75b93b5b8ace0caad3376b5e79c6dcdb9ba675fce9085f6db7458f3694d30ed`;
+V2/V4 requires successful transition run **33912452330** at launch SHA
+`7ce5eac5c1980e8618173e1a8ff0effb06ecb327` and verifies the **3,638**-row
+registration manifest SHA
+`8cc55b761e10c8643a907389602ca5f7790bd7df99cee2d00fbe120a9cd40e93`.
+Workflow path, branch, chain, snapshot and provenance source are checked in the
+planner before any archive matrix can start. The planner also streams the
+actual registry/registration JSONL from the downloaded upstream artifact ZIP,
+recomputes its SHA-256 and counts nonblank records, and requires both to match
+the frozen manifest. A sidecar with the right metadata cannot therefore mask a
+corrupted or substituted upstream payload. Generation 4 run **34228430753** passed
+recursive lineage to **34207459960**, rediscovered all **236** surviving
+original V1/V3 shards, derived **0 missing blocks / 0 gap jobs**, skipped all
+four repair waves, and completed the corrected final merge successfully. Its
+canonical `phase1-pons-v1-v3-full` artifact contains **63,560,072** records,
+all **268,688** registered V1 pools have V3 Initialize coverage, the aggregate
+tape SHA-256 is
+`169b60a74f5fea9f5c6b198d849387374e968d8233f69abcd4d9b3492dd92fa8`,
+and the embedded gap plan exactly matches the separately uploaded plan with
+zero missing blocks. Readiness therefore advances the recovery plan to
+`launch_v2_v4_rescue`.
+
+V2/V4 generation 1 run **34233813090** was armed only after V1/V3 became
+canonical. Its preflight passed, V1/V3 was skipped, and no repair RPC job
+started; the artifact-only planner failed because it assumed at least one
+original V2/V4 shard artifact. The frozen parent actually has **zero** V2/V4
+artifacts because both `acquire / v2_v4` and
+`acquire / v2_v4_recovery` completed as `skipped`. Current V2 planning now
+accepts empty original coverage only after paginated job discovery proves those
+two exact frozen-parent jobs are terminal/skipped, writes a bound
+`v2-v4-empty-source-proof.json`, and otherwise fails closed. With that proof,
+the first recovery generation is allowed to plan the full
+**26,841,846..54,486,035** V2/V4 range rather than treating intentional source
+absence as corruption. V2/V4 generation 2 run **34234471190** passed that
+proof and planned the full **27,644,190** blocks as **553** bounded 50k-or-less
+repair jobs split **240 / 240 / 73 / 0** across the serialized waves; V1/V3 is
+skipped and archive concurrency remains two jobs. Its launch SHA still has one
+known end-of-run incompatibility: the merge-side original-shard downloader
+rejects the same intentionally empty V2 source before reading recovered gaps.
+The active run is left untouched because every successful repair artifact is
+reusable. Reuse is now job-state-bound as well as plan-bound: the launcher,
+prior-gap planner and recursive merge all paginate the prior run's repair jobs
+and only count a numeric gap artifact as reusable when the matching
+`recover_1`..`recover_4` matrix job concluded `success`. A plan-bound artifact
+from a failed/non-success repair job is ignored for coverage so its block range
+is replanned, while an artifact not named by the bound gap plan still fails
+closed before job-state filtering. This matches readiness reconciliation and
+prevents a failed job that happened to upload an artifact before terminating
+from silently becoming canonical recovery evidence. Current branch merge code
+now independently re-proves the exact
+`acquire / v2_v4` and `acquire / v2_v4_recovery` terminal/skipped states
+and permits zero original files only under that frozen proof. It also replaces
+the wildcard prior/current gap downloads with paginated exact numeric artifact
+discovery, rejects duplicate gap IDs/files, and requires the current run's
+observed gap-artifact count to equal the plan. This avoids the same artifact
+truncation class at V2's **553-artifact** scale. Merge also walks
+`prior_gap_run_id` recursively (cycle-guarded, depth 20), reopens each bound
+gap plan, rejects observed artifacts not named by that plan, and stores each
+generation in a separate directory before recursive exact-cover selection.
+Thus a second or later retry cannot lose successful gaps from an older ancestor
+generation merely because the immediate prior run did not copy them forward.
+A retry after the active generation can therefore reuse completed gaps and
+reach merge without re-fetching them. The pinned rescue launcher now considers
+a prior run reusable only when it exposes the bound plan plus at least one
+**numeric** gap artifact matching the target venue's exact `...-gap-<id>`
+contract; prefix-only lookalikes no longer qualify as prior lineage. Candidate
+terminal rescues are explicitly sorted newest-first by run ID before reuse, so
+a retry cannot silently fall back to an older generation merely because API
+ordering changes.
+
+During active V2/V4 generation 2, repair gap **053** for blocks
+**29,491,846-29,541,845** completed the archive scan successfully and produced
+**1,000** matched Pons V4 events after **455** RPC requests and
+**116,699,009** response bytes, but `actions/upload-artifact@v4` failed while
+finalizing the artifact with an intermediary **HTTP 403**. No
+`phase1-pons-v2-v4-gap-053` artifact was registered, so this is an artifact
+transport failure rather than an unexplained RPC/event-reconstruction gap.
+Current branch recovery jobs now retry expensive gap/shard artifact uploads up
+to three total attempts without repeating the already-completed RPC scan inside
+the job. The same protection is applied across V1/V3 and V2/V4 gap recovery,
+the other Phase 1 gap-recovery families, exact-range repair helpers and every
+archive matrix shard workflow.
+
+Generation 2 itself is pinned to its older launch SHA, so its serialized
+`recover_2` and `recover_3` jobs still require the immediately preceding wave
+to finish successfully. Because wave 1 already contains the gap-053 failure,
+that pinned run will stop after wave 1 and leave its planned **240 / 73** later
+waves unmaterialized. Current branch recovery graphs now allow a later repair
+wave to run after a prior wave concludes `failure` while still refusing the
+final merge unless every wave is `success` or `skipped`. A terminal retry can
+therefore reuse every plan-bound successful generation-2 gap artifact, rescan
+only uncovered ranges (including gap 053 and the never-materialized later
+waves), and continue through all remaining waves without one isolated failure
+blocking unrelated ranges. Readiness reporting now distinguishes a terminal
+failed wave from a genuinely active wave and prefers an actually running later
+wave as `current_wave`. Deterministic range-planning coverage is now pinned for
+this exact generation-2 shape: if gap **053** remains the only failed wave-1
+repair and the other **239** wave-1 repairs succeed, the next retry must derive
+exactly **314** missing 50k-or-less jobs — failed gap 053 plus the **313**
+never-materialized wave-2/wave-3 jobs — split **240 / 74 / 0 / 0**. A
+different count under those same terminal conditions is treated as a planning
+or lineage discrepancy rather than accepted silently. The rescue launcher now
+also publishes a terminal-reuse preflight before any child recovery starts:
+selected prior run ID, count of successful-job gap artifacts that can actually
+be reused, up to 20 successful repair IDs whose artifacts are missing, and up
+to 20 numeric gap artifacts whose repair job did not conclude `success` and
+will therefore be ignored/replanned. These diagnostics use the same
+successful-job/artifact intersection as the recovery planner. If a later retry
+finishes every one of those **313** previously unmaterialized ranges but gap
+053 fails again, recursive lineage planning is pinned to collapse the following
+generation to exactly the single original **29,491,846-29,541,845** gap rather
+than refetching any other block. The guarded launcher now also requires an
+explicit monotonic rescue generation number. For V2/V4, completed numbered
+history is generation 1 then generation 2, so the next valid launch message is
+exactly `launch V2 V4 rescue generation 3`; duplicate or skipped generation
+numbers fail preflight. Generation 3 is additionally pinned to immediate prior
+run **34234471190**, launch SHA
+`0e146b6f46491caab81f00a241fd29611a252c4c`, and title
+`launch V2 V4 rescue generation 2`. If that run is not the selected reusable
+lineage after terminal reconciliation, generation 3 fails closed instead of
+falling back to generation 1 or empty lineage. The launcher passes its measured
+reusable-gap count into the V2/V4 child planner; the child independently
+re-discovers successful-job artifacts and must observe the same count. It then
+requires the immediate prior generation's reusable ranges plus newly planned
+retry ranges to exactly reconstruct that prior plan's range union before any
+`recover_1` matrix can materialize. Under unchanged `max_gap_blocks=50000`,
+reusable-count plus retry-job count must also equal the prior plan's declared
+job count. The artifact-only plan step publishes a summary with prior plan size,
+reusable count, retry count/waves and exact-reconstruction result before archive
+work starts. Immediately before child handoff, the launcher now takes a second
+fresh snapshot of the selected prior rescue. That snapshot must still report
+`status=completed`, and every paginated repair job must itself be terminal;
+queued/in-progress/waiting/pending repair jobs block the launch even if the run
+record has already flipped to completed. Duplicate numeric repair gap IDs are
+also rejected rather than collapsed, matching readiness reconciliation. The
+fresh run identity (conclusion, head SHA and display title) and the complete
+reusable/missing/non-success gap-ID sets must match the earlier candidate
+selection. The bound plan artifact must still be present on the second artifact
+read. Finally, if the fresh prior run is successful and the canonical full
+artifact is now present, the rescue stops as unnecessary rather than handing off
+stale preflight state. The terminal snapshot records repair-job state counts,
+duplicate-ID diagnostics, artifact-presence flags, run attempt and update time
+alongside the reusable-gap count. Generation 3 now also pins the complete
+generation-2 plan fingerprint derived from its successful plan-job output: no
+prior gap lineage, no successful source shards, `max_gap_blocks=50000`, exactly
+**553** deterministic `split_range(26841846, 54486035, 50000)` rows,
+**27,644,190** planned blocks, wave counts **240 / 240 / 73 / 0**, and gap
+**053 = 29,491,846-29,541,845**. The child planner compares the downloaded
+generation-2 plan row-for-row against that deterministic split before it can
+materialize recovery jobs. When the immediate prior run is specifically
+**34234471190**, the child now also requires the launcher's reusable-gap count
+to be explicitly present and greater than zero; an omitted/zero count fails
+before planning rather than falling back to manual-style prior reuse. The count
+is parsed once, must be non-negative, and must equal the child planner's own
+successful-job/artifact intersection. The handoff is also cryptographically
+bound: the launcher hashes a canonical sorted-JSON terminal binding containing
+the prior run ID/status/conclusion/head SHA/title/run attempt, the **full**
+reusable/missing/non-success gap-ID sets, and plan/canonical artifact-presence
+flags. It passes that SHA-256 into the child. The child independently re-fetches
+the same run/jobs/artifacts, rebuilds the same 11-field binding and must produce
+the identical digest before it accepts prior coverage. The binding schema and
+canonical JSON/SHA-256 construction are pinned by CI on both workflow sides, so
+a one-sided field change cannot silently weaken the launch contract.
+
+The actual V2/V4 generation-3 launch is intentionally reduced to a one-line
+wrapper mutation. The current launcher marker is
+`LAUNCH_VALIDATION_GENERATION: '10'`; generation 3 is now the active consumed generation
+because V2/V4 enforces `validation_generation = rescue_generation + 7`.
+The launch commit message must be exactly the single line
+`launch V2 V4 rescue generation 3`. Preflight reopens the launch commit through
+the GitHub commit API and requires it to be a direct single-parent child of the
+previous branch tip, to modify exactly one file — the live venue-rescue
+wrapper — and to contain exactly the marker diff `9 -> 10` with no other
+changed lines. The marker must increment by exactly one and the new value must
+equal the workflow-observed validation generation. Launch titles with suffixes
+or commit-message bodies are rejected. Because that marker bump is deliberately
+one-shot, every GitHub JSON API read inside launcher preflight now gets up to
+**three** attempts for transient HTTP 403/408/409/425/429/5xx responses and
+`URLError`/timeout failures. Retries happen inside the same launcher run with no
+sleep/poll loop and do not relax any semantic guard; an exhausted retry still
+fails closed. Generation numbering now distinguishes a terminal launcher from
+a consumed recovery generation: a numbered generation advances history only
+after the target child `plan` job concludes `success`. A preflight-only or
+plan-only failure therefore does **not** force the next generation number; the
+same launcher run should be rerun at the same generation. This matters for the
+observed V2/V4 history: generation 1 (`34233813090`) reached a failed child
+`plan` with **0** repair jobs, while generation 2 (`34234471190`) has a
+successful child plan and is therefore the generation that legitimately
+advances the next launch to generation 3. Preflight reports both consumed
+generation numbers and terminal-but-unconsumed generation runs so this state is
+auditable. Once a child plan succeeds, that generation is consumed even if a
+later repair/upload/merge stage fails, because archive recovery work may already
+have materialized. Consumed-generation history is also one-to-one: if two
+distinct launcher run IDs ever contain successful target `plan` jobs for the
+same generation number, preflight treats the history as ambiguous and fails
+closed instead of choosing one. Historical reuse now applies the same exact
+`launch <venue> rescue generation N` title grammar as generation accounting;
+completed runs that merely start with the launch prefix are ignored instead of
+being eligible as prior plan/gap sources. Readiness recovery discovery uses the
+same exact generation grammar for active, terminal and successful candidates,
+so a prefix-only launcher title cannot be auto-adopted downstream either. The
+preflight summary records the exact generation-to-run-ID mapping alongside
+terminal-but-unconsumed generations.
+
+This reduces the chance that a single platform/network blip consumes the
+generation-3 marker commit before child handoff.
+
+Observed generation-2 terminal state is now **312** reusable successful V2/V4
+gap artifacts out of the deterministic **553**-gap plan, with gap **053** failed
+and the contiguous prior-plan gaps **240–479** never materialized. GitHub also
+exposed three live artifacts with the exact name
+`phase1-pons-v2-v4-gap-060`, all carrying the same GitHub artifact SHA-256,
+size and workflow binding. The first generation-3 launch
+(`34330433107`, SHA `29168d893bd0510626eda8f0efd90e4593bf8bff`)
+therefore failed in its artifact-only child plan before any repair RPC because
+the child still rejected duplicate artifact names. That plan failure did not
+consume generation 3. Recovery now collapses same-name upload-retry artifacts
+only when their GitHub SHA-256 digest, byte size and workflow run binding are
+identical; non-equivalent duplicates still fail closed, and final merge still
+validates the selected ZIP's embedded manifest/range/content digest. After the
+marker was reset and the same generation relaunched, run **34331335575** at
+launch SHA `c568f9dc2c3bdda18c2f1b6415affe4c6eaec904` passed preflight and
+plan. Its plan reuses exactly **312** prior gaps and retries exactly **241**
+missing ranges totaling **12,050,000** blocks in waves **240 / 1 / 0 / 0**.
+The first retry range is **29,491,846–29,541,845** (the former gap 053), followed
+by the previously unmaterialized **38,841,846–50,841,845** middle coverage.
+Because the child plan succeeded, generation 3 is now consumed and its repair
+jobs are live.
+
+The launcher workflow is now serialized by branch with
+`cancel-in-progress: false`, so two rescue launchers cannot execute preflight
+concurrently. In addition to the initial sibling scan, preflight performs a
+second paginated active-sibling scan immediately before handoff and fails if
+another nonterminal venue-rescue launcher has appeared.
+
+Generation-3 artifact finalization is now protected at every recovery stage.
+The artifact-only gap plan upload, each archive gap artifact upload, and the
+final canonical `phase1-pons-v2-v4-full` upload each get up to **three total
+attempts**. Retry attempts reuse the already-generated local files with
+`overwrite: true`; they do not repeat the range scan, the merge, or any other
+archive RPC work. This specifically closes the failure mode observed on
+generation-2 gap 053, where the scan completed successfully but GitHub artifact
+finalization returned an intermediary HTTP 403. A transient artifact-service
+failure can therefore no longer turn a successful generation-3 plan, shard, or
+canonical merge into an avoidable new rescue generation after only one upload
+attempt. Artifact **downloads** used by lineage/planning are hardened too:
+`fetch_github_actions_artifact_zip` now makes up to three attempts for transient
+GitHub API or redirected blob failures (including 403/408/409/425/429 and
+5xx), obtains a fresh signed redirect on each retry, and still never forwards
+the GitHub bearer token to blob storage. This protects the generation-2 plan
+and preserved-gap reads without weakening identity or digest validation.
+Same-name retry artifacts are now reconciled consistently beyond individual
+gap outputs. V2/V4 prior/current **gap-plan** artifacts, final merge inputs and
+recovered-completion canonical venue/lineage artifacts collapse to one
+deterministic artifact only when GitHub reports the same artifact name,
+SHA-256 digest, byte size and workflow-run binding; otherwise they still fail
+closed. Future V2/V4 cleanup generations are also chained to the immediately
+preceding **consumed** generation's successful plan rather than merely the
+newest older run that happens to expose reusable gaps. A consumed prior
+generation with zero successful repair artifacts remains the required parent
+plan, allowing recursive lineage to recover older reusable artifacts without
+silently skipping that generation.
+
+V1/V3 now uses the same canonical-manifest artifact discipline.
+The V1 lifecycle replay no longer wildcard-downloads current, partial and one
+immediate-prior `phase1-pons-v1-v3-*` artifacts. It resolves the canonical
+`phase1-pons-v1-v3-full` artifact, validates the aggregate shard geometry,
+maps each selected original/recovered shard back to its exact source run and
+artifact name, collapses only equivalent GitHub retry duplicates, validates the
+embedded chain/protocol/frozen-registry/filter/range/record/SHA identity and
+materializes shards under source-run-specific directories. Readiness and
+recovered completion independently require every shard named by a recovered
+V1/V3 canonical manifest to remain backed by a non-expired equivalent artifact
+before adopting or executing the venue handoff.
+
+V1/V3 gap recovery is retry-hardened symmetrically with V2/V4 as well. Gap-plan
+and final canonical uploads receive up to three attempts using the already
+generated local files, prior/current plan reads reconcile same-name artifacts
+only when GitHub digest/size/run binding is equivalent, and same-name gap retry
+artifacts are collapsed under that same fail-closed rule. Both venue merges now
+carry the already-verified current plan bytes directly into the final canonical
+artifact instead of performing a second name-based `download-artifact` lookup.
+
+The downstream pricing handoff is now hardened before the live V2/V4 rescue
+reaches it. The standalone V4 quote-continuation path now retries its frozen
+prior probe artifact and final continuation artifact up to three times as well.
+Both bounded SKHY continuation primitives and their segmented final artifacts
+retry GitHub artifact finalization up to three total attempts without repeating
+the completed archive scan. Their frozen-input and accumulated-segment
+artifact downloads now also get three attempts, deleting any partial download
+directory between tries so a transient artifact read cannot force completed
+100k-block segments to be repeated. The 128-shard V3 and V4 quote-fallback
+workflows apply the same upload retry pattern independently to route-selection,
+per-shard and final merged artifacts. Their shard workers and final merges now
+also retry route/shard artifact reads three times, clearing partial `routes/`
+or `downloads/` directories between attempts so artifact-service failures do
+not masquerade as missing chain coverage or trigger unnecessary archive
+rescans. During this audit a stray empty `actions/upload-artifact@v4` step was
+found immediately before the real V3 quote-route upload; it has been removed.
+CI now pins the retry contracts across all six downstream pricing workflows and
+also structurally checks every critical `upload-artifact` step for its own
+`with:` and `path:` configuration, so an adjacent valid upload cannot mask a
+future malformed empty step.
+
+The two 60-minute lifecycle replay workflows are now protected by the same
+artifact-service discipline. Their canonical V1/V3 and V2/V4 shard resolvers
+use the shared bounded-retry Actions JSON reader for run/artifact pagination in
+addition to the safe token-stripping ZIP downloader. V1 retries registry,
+quote-audit, anchor and stock oracle downloads before replay; V2 retries
+registry, curve, transition, anchor, stock oracle and merged quote-fallback
+downloads. Partial target directories are
+removed between attempts. Both final lifecycle eligibility artifacts also get
+three upload attempts using the already-computed local output, so a transient
+GitHub artifact failure does not force a multi-GB replay to start over. The
+eligible-universe freeze now retries both completed lifecycle artifacts with the
+same partial-directory cleanup before computing the first unchecked Phase 1
+gate. The
+generic V3+V4 quote-fallback join now applies the same three-attempt contract to
+both venue inputs and its merged output, preventing a late artifact-service
+failure from discarding two already-completed 128-shard fallback scans. Both
+V3 and V4 manifest-gap recovery workflows now retry their gap-plan and final
+canonical uploads too; their per-gap RPC artifacts were already retry-safe.
+All remaining artifact reads in both recovery workflows are now retry-safe:
+planner inputs retry the partial tape, frozen routes and optional prior gaps;
+each gap worker retries its frozen route artifact before RPC; and final merge
+retries the partial tape, optional prior gaps, current gaps, frozen routes and
+gap plan. Partial target directories are removed between attempts. CI compiles
+both recovery heredoc sets, checks their upload-step structure and pins the full
+artifact-read retry contract. A recovered fallback generation therefore does
+not need another generation solely because GitHub artifact finalization or a
+transient artifact read failed before or after completed gap RPC work.
+
+The V2 lifecycle replay no longer wildcard-downloads
+`phase1-pons-v2-v4-*` from only the current, partial and one immediate-prior
+run. It first resolves an equivalent canonical
+`phase1-pons-v2-v4-full` artifact, reads that aggregate manifest's exact
+ordered `shards` list, maps every selected
+`v4-events-shard-NNN.jsonl` or `v4-events-gap-NNN.jsonl` back to its exact
+source run/artifact, and downloads only those artifacts. This supports original
+full runs, current recovery gaps, the frozen partial source and arbitrarily
+deep numeric prior-gap sources recorded by the canonical merge. Each selected
+ZIP is checked against the aggregate shard SHA/record/range identity plus its
+embedded chain **4663**, protocol, registration input and filter-mode
+provenance before being materialized under a source-run-specific directory.
+Equivalent upload-retry duplicates are collapsed through the same GitHub
+metadata contract, while non-equivalent duplicates fail closed. Four bounded
+download workers provide concurrency without reintroducing wildcard artifact
+identity. The sharded-tape reader then independently revalidates every selected
+file and the aggregate record/SHA before lifecycle replay.
+
+The readiness state machine only switches to recovery after the frozen parent
+is terminal; a terminal failed parent may advance only through a successful
+approved recovered-completion evidence run. A terminal parent that reports
+success but is missing any required Phase 1 artifact is also treated as
+incomplete rather than crashing the audit or being mistaken for PASS. The
+venue-rescue and recovered-completion guards allow that narrow incomplete-
+success case while still rejecting unnecessary recovery when the requested
+source artifacts are already complete. Recovery planning is now cost-aware:
+missing V1/V3 requires the pinned V1/V3 gap rescue first, and missing V2/V4
+requires the pinned V2/V4 gap rescue before recovered completion can start, so
+successful source shards are not replaced by an unnecessary full venue rerun.
+The readiness audit discovers successful venue artifacts only from the pinned
+`phase1-pons-live-venue-rescue-one-shot` launcher and then publishes those
+exact run IDs in its recovery plan; direct/debug gap workflows are never
+auto-adopted. Recovery discovery paginates the launcher workflow history rather
+than assuming the valid rescue remains among the newest 20 runs, so later inert
+validation pushes cannot hide an older completed canonical rescue. The
+readiness report now also records per-venue recovery discovery diagnostics:
+the selected canonical run ID, number of completed-success candidates inspected,
+aggregate rejection counts, and up to 20 rejected candidate run IDs with
+reasons such as missing canonical artifact, invalid manifest, invalid lineage
+or workflow-path mismatch. When a canonical rescue is still nonterminal, the
+same diagnostics capture its run ID, status and paginated job-state counts, plus
+per-wave `recover_1` through `recover_4` state counts when matrix jobs are
+materialized. Active and terminal diagnostics now also reopen the bound gap
+plan and reconcile those matrix jobs against its expected wave counts, exposing
+planned/materialized/successful/failed/remaining repairs, current wave,
+percentage progress and any over-materialized or unexpected-wave drift.
+Non-matrix skipped placeholders are excluded from wave accounting. Long
+serialized V2/V4 rescues can therefore report progress against the exact
+**553-job** denominator instead of relying on whichever jobs GitHub has
+materialized so far, without any archive RPC or runner-side polling.
+The latest terminal target-matched rescue is also recorded with conclusion,
+paginated job-state counts and up to 20 failed/cancelled/timed-out problem job
+IDs and names. Discovery uses the same launch-prefix contract, so an active
+V1/V3 rescue is not misreported as V2/V4 merely because both venues share the
+same launcher workflow, and incidental commit-message mentions are ignored.
+The readiness artifact can therefore distinguish "still recovering",
+"terminal but failed" and "completed but invalid" without launching any
+additional archive work. Its state-machine next action is now activity-aware:
+when a required V1/V3 or V2/V4 rescue is already nonterminal it reports
+`wait_for_v1_v3_rescue` or `wait_for_v2_v4_rescue` instead of misleadingly
+recommending another launch; if the other venue is unexpectedly active it
+reports `wait_for_active_venue_rescue`. The same global wait applies before
+recovered completion even when an older valid venue artifact is already
+available. An already-valid recovered evidence handoff also cannot advance the
+state machine into viability while any venue rescue remains nonterminal, so
+downstream RPC never overlaps active recovery merely because evidence already
+exists. Readiness now also opens the canonical recovered venue manifest
+before adopting a run and verifies its envelope as well as provenance: the
+manifest must name the expected canonical JSONL, expose a nonnegative record
+count and carry a lowercase 64-hex SHA-256 before recovery source type, chain
+**4663**, snapshot head **54,486,035**, `partial_run_id=33982556591` and the
+frozen registry/transition upstream run are considered. Recovered completion
+independently enforces the same path/record/SHA envelope before accepting a
+venue handoff. A malformed successful V1 rescue therefore
+cannot trigger V2 archive work merely because its artifact name exists.
+Readiness now requires every recovered venue, including a first-generation
+recovery with an empty `prior_gap_run_id`, to expose its bound V1/V3 or V2/V4
+gap plan and match the frozen partial source, snapshot head and venue start
+range before adoption. For later generations it also replays the non-empty
+`prior_gap_run_id` through prior gap-plan artifacts, enforcing allowed
+workflow family, branch, cycle guard and a 20-generation depth bound. Malformed
+recovery ZIP/JSON or non-numeric provenance is treated as an invalid discovery
+candidate instead of aborting the readiness audit. Recovered completion
+independently requires the same current-plan contract, then replays any
+recursive prior-gap lineage before accepting a non-source venue artifact. Its
+chain now uses the shared bounded-retry Actions metadata reader for support,
+venue and evidence artifact inventories, retries a reused eligible-universe
+download, and retries the exact eligible/representative evidence artifacts with
+partial-directory cleanup before publishing the recovered evidence handoff. It
+also refuses to rerun V2/V4 or pricing when the source already contains reusable
+complete artifacts, and refuses a fresh V2/V4 run when reusable source V2/V4
+shard artifacts exist.
+The pinned rescue launcher now requires exactly one venue target per launch,
+accepts rescue arming only from an exact one-line
+`launch <venue> rescue generation N` commit title, runs only on the
+Phase 1 branch, pins frozen parent **33982556591** to launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`, and enumerates its own
+workflow runs before starting any child RPC. Recovered completion and the
+readiness state machine independently enforce the same frozen source workflow,
+branch and launch-commit identity. The recovered-completion one-shot is now
+generation-bound too: its future arming commit must be exactly
+`launch recovered Phase 1 completion generation N`, be a direct
+single-parent commit that modifies only the guarded recovery config, preserve
+the exact seven-key config schema and validation marker **7**, and advance the
+config generation by exactly one. Its pure-stdlib five-minute preflight now
+retries transient GitHub commit/content metadata reads up to three times
+without sleeps, so a temporary API failure cannot consume or strand the guarded
+completion launch. The staged config remains unarmed at generation **0**. Any
+other nonterminal pinned rescue run blocks the new launch,
+so V1/V3 and V2/V4 recovery cannot overlap archive concurrency even across
+separate manual pushes.
+The low-level V1/V3 and V2/V4 gap workflows independently refuse
+`partial_run_id=33982556591` while that frozen parent is active, closing the
+manual-dispatch bypass around the launcher guard while preserving inline
+recovery generations that legitimately use the current run ID. Multi-generation
+venue recovery is now lineage-bound as well: every current V1/V3 or V2/V4 gap
+plan records its exact `partial_run_id` and `prior_gap_run_id`, and any
+non-empty prior run is recursively verified for allowed workflow family,
+Phase 1 branch, frozen range, same partial source, cycles and bounded depth.
+Recovered completion independently replays that plan chain before accepting a
+non-source final venue artifact, so older direct recovery artifacts that claim
+an unverifiable prior generation fail closed. CI now also compiles the embedded
+Python heredocs in the critical recovery, evidence, viability, readiness and
+acceptance workflows, catching syntax errors that ordinary package compilation
+would miss.
+The audit's
+finalizer lookup is intentionally bounded and skipped until an evidence run
+and all nine route IDs exist, avoiding branch histories with >1,000 workflow
+runs. Readiness now also resolves each candidate finalizer's launch-commit
+readiness and ledger files and requires the frozen source run, evidence run,
+ledger generation and exact nine route run IDs to match the current ledger
+before accepting its `phase1-pons-acceptance-gate` artifact. A stale PASS
+artifact from an older evidence or route ledger therefore cannot close Phase 1.
+
+Generation **12** of recovered completion reached the representative
+market-path freeze and failed before any full market-tape scan. Job
+**104581414926** exited on the V2 curve registry-identity guard because canonical
+curve run **33936232604** was produced by the gap-recovery merger with
+**9,231,724** rows and tape SHA256
+`771c9147ef1a84bd673532842972e16e0ee12cae1513a41b402f53b5c444c50b`, but
+that legacy recovery manifest omitted the top-level `registry_sha256`. The
+producer lineage is still exact: preserved run **33912593934**, partial recovery
+**33925648297**, and prior-gap run **33935705953** all use V2 registry run
+**33912235341**, whose frozen registry SHA256 is
+`06dc7d373f79dd43aa3bb4070187b5a8ee426f0690f3f4f7f8d5cfce3cd3d48f`;
+canonical transition run **33912452330** records the same registry identity.
+Representative validation therefore recognizes the missing legacy field only
+for that exact immutable tape hash, record count, run ID, source and recovery
+lineage; any other missing or changed identity still fails closed. Future V2
+curve gap-recovery merges download the configured frozen V2 registry and persist
+its run ID plus SHA256 in the final manifest. No acceptance threshold, timeout,
+gate, representative cohort, or acquisition scope was changed, and no expensive
+acquisition was restarted for this repair.
+
+The Generation 12 frozen sample's actual market-event condition has also now
+been reproduced from the preserved lifecycle summaries before changing the
+market-path extractor. All eight V1 representatives have V3 swap-derived
+pricing points and a populated `v3_swap_max_market_cap_block` (between **976**
+and **4,939** points per token). The two V2 representatives have **83** and
+**266** curve-phase price points respectively; because each V2 curve summary
+contains exactly one synthetic `curve_initialized` point before observable
+curve deltas, both have many real curve market events. Both V2 representatives
+also graduate and have V4 price points. Those summaries are lineage-bound to
+V1/V3 run **34228430753**, V2 curve run **33936232604**, transition run
+**33912452330**, and V2/V4 run **34471480180**. Market-event absence is
+therefore not the next representative-freeze blocker.
+
+The deterministic tape path had two concrete execution defects behind that
+preflight. First, it JSON-decoded every row of the full tapes before discarding
+non-representative pools/curves. The reader now retains full record-count,
+per-shard SHA256, aggregate SHA256, and monolithic-file SHA256 validation while
+decoding only rows whose canonical string field can match a representative
+`token`, `pool`, `curve`, or `pool_id`. Second, canonical V2/V4 run
+**34471480180** contains **553** shards: **312** are sourced from nested
+predecessor run **34234471190** and **241** from run **34331335575**. The
+representative workflow previously downloaded only the latter predecessor.
+It now derives any single nested legacy source run from the immutable aggregate
+manifest and downloads it into a separate source directory, allowing
+`iter_sharded_jsonl` identity resolution to distinguish reused gap filenames.
+No tape bytes are skipped for integrity validation, and no acceptance threshold,
+timeout, gate, cohort, or acquisition scope is changed.
+
+Generation **13** of recovered completion, run **35518892463**, passed the
+representative preflight and exact ten-token sample freeze, then reached the
+patched market-path reader. Job **106099822236** failed on the first canonical
+V1/V3 shard with
+`sharded tape file 'v1-v3-events-shard-000.jsonl' is missing under
+v1v3-shards`. The shard is not absent from immutable source run
+**33982556591**: artifact `phase1-pons-v1-v3-0` is still present. That source
+run has **314** artifacts, while the wildcard `actions/download-artifact`
+read surfaced only the newest **300**, omitting the oldest 14 V1/V3 artifacts
+(shards 0-13). The same deterministic ceiling also affects nested V2/V4 source
+run **34234471190**, which has **315** artifacts and supplies 312 canonical
+V2/V4 shards. Representative market-path setup now treats wildcard downloads
+as a fast path only: it walks the immutable aggregate manifests, identifies
+only manifest-required shards still absent locally, paginates the source run's
+artifact API by exact artifact name, downloads those missing ZIPs, and verifies
+their sidecar range, record count and SHA256 plus the actual JSONL record count
+and SHA256 before the existing full-tape reader runs. This repairs artifact
+transport only; it issues no chain RPC and changes no research threshold,
+timeout, acceptance gate, cohort, tape identity, or acquisition scope.
+
+Evidence handoffs are now guarded before any representative RPC at three
+layers. The reusable representative-evidence preflight now retries transient
+GitHub metadata reads up to three times without sleeps and retries both
+lifecycle provenance artifacts with partial-directory cleanup before it can
+launch sample/market/Transfer work. The normal post-eligibility chain requires
+source run **33982556591**,
+the exact full-eligibility workflow path, branch
+`phase1/data-acquisition-spike` and launch commit
+`c53b3a63156976a5873752c332fa7578011249b0`. Both the normal and recovered
+chains pin the frozen oracle, runner-smoke, V1 registry, V2 curve, V2
+transition, quote-audit and WETH/USDG anchor run IDs, and verify each support
+run is successful, comes from its exact workflow path on the Phase 1 branch,
+and still exposes its required non-expired canonical artifact. The reusable
+representative chain repeats that immutable support preflight before its sample
+job and now independently checks the eligibility run, V1/V3 and V2/V4 artifact
+presence, exact lifecycle-manifest venue provenance, and the absence of any
+active exact-title venue rescue. Direct/manual entry therefore cannot bypass
+the one-shot launcher and reach Transfer RPC with mixed venue lineage or while
+archive rescue work is active. The
+first real standalone representative run is now staged behind
+`.github/phase1-pons-representative-evidence.json` and remains unarmed at
+generation **0**. A future launch must be the exact one-line commit
+`launch representative evidence generation N`, modify only that guarded
+config, advance its generation by exactly one, name successful canonical
+eligibility plus V1/V3 and V2/V4 runs with all required artifacts still
+present, and observe zero active exact-title venue-rescue generations before
+the representative chain can start. The launcher also opens the eligible
+universe before any representative RPC and proves its exact **494,639** launch
+geometry, zero unknown tokens, universe SHA, lifecycle run identity, and
+embedded V1/V3 plus V2/V4 provenance against the configured venue runs. Its
+launch-contract GitHub metadata reads now use the shared bounded-retry Actions
+JSON helper, and the exact eligible-universe artifact gets three download
+attempts with partial-directory cleanup before that provenance check. This
+prevents the Transfer backfill from competing with a live venue rescue or
+starting from a mixed/stale eligibility bundle while allowing a clean
+post-recovery end-to-end retry path. Resumed representative Transfer shards are
+now bound to the exact frozen sample as well: the sample freeze publishes the
+SHA256 of the exact ten-token JSONL plus a canonical SHA256 of the sorted
+token-address set, and records the validated V1/V3 and V2/V4 venue run lineage
+from its lifecycle manifests. Market-path extraction checks that venue lineage
+before building paths, and final representative validation rechecks it at the
+join. Every downstream representative stage also revalidates the sample
+identity digests. Transfer planning/reuse,
+artifact-only market-path extraction, causal priced-path replay, the independent
+DEX cross-check and final representative validation all carry the same two
+digests in their provenance and fail closed on any mismatch. Every Transfer
+shard manifest records both identities too, and both the gap planner and final
+merge reject prior shards whose sample or token-set identity does not match the
+current sample. Older prior runs without those bindings fail closed instead of
+being reused by artifact name alone. The Transfer backfill
+can span up to four 240-job waves, so prior-run planning and final merge no
+longer use wildcard artifact downloads either: they paginate exact numeric
+`phase1-pons-representative-transfer-<id>` artifacts through the API, and
+merge independently paginates the current caller run as well. Those ZIP reads
+also use the token-stripping safe downloader. The planner and final merge now
+use the shared bounded-retry GitHub Actions JSON reader for paginated artifact
+inventory, so transient 403/408/409/425/429/5xx or URL/timeout failures are
+retried consistently with the rest of Phase 1 and no runner-side sleep/poll
+loop is introduced. Same-name numeric Transfer retry artifacts are
+collapsed only when GitHub reports identical digest, byte size and workflow-run
+binding; non-equivalent duplicates still fail closed before reuse or merge.
+Transfer acquisition is now artifact-finalization resilient too: the plan, each of the four 240-job shard waves and the final
+holder bundle retry uploads up to three total attempts
+without repeating completed RPC/replay work, while sample/plan downloads clear
+partial directories and retry before failing. A failed earlier acquisition wave
+no longer prevents later planned waves from materializing, so unrelated
+successful ranges remain reusable by the next recovery generation; final merge
+still requires every wave to be success or skipped and therefore remains
+fail-closed on incomplete coverage. The representative sample freeze,
+artifact-only market-path extraction, causal priced-path replay and bounded DEX
+cross-check now also retry their final artifact uploads up to three total
+attempts using already-computed local evidence. Sample freeze also retries both
+lifecycle inputs plus the frozen runner-smoke artifact before fixing the exact
+ten-token cohort. Artifact-only market-path extraction now retries all twelve
+sample/registry/venue and current/partial/prior shard inputs; priced-path replay
+retries all six sample/market/quote/anchor/oracle/fallback inputs; final
+representative validation retries all seven required sample/lifecycle/transfer/path/DEX
+inputs before joining evidence, plus the optional explorer artifact when that
+path is explicitly enabled. The DEX cross-check also retries
+all six frozen input artifacts before any external pool/price reconciliation,
+clearing partial directories between attempts so transient GitHub reads cannot
+waste the bounded independent check. This closes the remaining single-attempt
+finalization points before the already retry-hardened representative validation
+join. The representative chain's frozen-support metadata preflight now uses
+the shared bounded-retry GitHub Actions JSON reader rather than an inline
+runner loop, preserving the global fail-fast/no-polling workflow contract while
+still tolerating transient API failures. Readiness metadata parsing also fails
+closed on malformed numeric evidence, route-launch or finalizer provenance
+instead of crashing the audit.
+
+The shared bounded viability measurement workflow now also carries its own
+evidence preflight in addition to the guarded route launcher. That preflight
+uses the same shared bounded-retry GitHub Actions JSON reader, with no
+runner-side polling or sleeps, and the exact evidence handoff plus every
+route-specific frozen registry/transition/quote
+input receive three download attempts with partial-directory cleanup before any
+RPC can start. Each bounded route measurement then retries its primary artifact
+upload up to three total attempts without repeating the completed RPC scan; the
+Pons-registry route applies the same protection to its separate V2 secondary
+artifact. The post-
+eligibility handoff itself carries the representative sample SHA, canonical
+token-set SHA, source-coverage SHA and frozen runner-smoke run/universe/outcome
+identity in addition to the eligible-universe, validation and lifecycle
+digests. The guarded route validates all of those fields before invoking the
+measurement workflow, and direct/manual measurement dispatch independently
+downloads and validates the same handoff before any RPC. Manual/debug dispatch
+therefore cannot issue route RPC unless the evidence run ID is positive,
+completed successfully, comes from an approved post-eligibility or
+recovered-completion workflow on `phase1/data-acquisition-spike`, still
+contains the ready handoff, eligible-universe and representative-validation
+artifacts, and preserves the full representative evidence identity. Both the
+primary route job and the V2 registry companion job depend on that preflight,
+while the existing global viability concurrency group keeps all route
+measurements serialized.
+
+The guarded viability route now also uses the shared bounded-retry Actions
+metadata reader for both evidence-run validation and lifecycle-routing
+resolution, and retries the exact evidence-handoff artifact three times with
+partial-directory cleanup before any route RPC. The ledger finalizer uses the
+same shared metadata reader for evidence/route runs, frozen config-at-ref reads
+and ancestry comparisons, so transient GitHub API failures cannot invalidate an
+otherwise complete nine-route ledger.
+
+The post-eligibility evidence chain now uses the shared bounded-retry Actions
+metadata reader for both source/support preflight and exact current-run evidence
+artifact resolution, and retries both eligible-universe and representative
+artifacts three times with partial-directory cleanup. Final acceptance,
+acceptance-gate and PASS-closeout metadata reads use the same shared helper; all
+three therefore retain their exact artifact-ID retry semantics without a raw
+single-attempt GitHub metadata dependency.
+
+The reusable final-acceptance chain now repeats the ledger finalizer's core
+provenance checks before any accounting or acceptance work: eligibility and
+representative artifacts must come from the same approved evidence handoff,
+and that handoff is downloaded and revalidated for the exact representative
+sample SHA, token-set SHA, source-coverage SHA, lifecycle/venue routing and
+frozen runner-smoke identity before acceptance can proceed. All nine route runs
+must be distinct, successful, on their exact guarded workflow paths and Phase 1
+branch, expose their required measurement artifacts, and prove at launch that
+they were bound to source **33982556591**, the same evidence run and an empty
+own ledger slot. It also downloads and opens all nine primary measurement
+artifacts plus the Pons-registry V2 secondary artifact. Every `phase1-route-measurement.json` must name the expected route,
+exact **54,436,036–54,486,035** 50k-block measurement window, current evidence
+run, frozen source parent, measurement run ID, launch SHA/sequence identity and
+snapshot head; registry primary/secondary must additionally identify V1/V2
+respectively. A mislabeled or malformed measurement artifact therefore fails
+before accounting even if its artifact name and workflow path look valid. The
+acceptance gate itself is also bound to the current final-acceptance caller run:
+its viability projection must come from that same GitHub run, its caller
+workflow must be the guarded finalizer or reusable final-acceptance chain, and
+its evidence run must remain an approved ancestor with the full evidence
+artifact bundle. Eligible-universe, representative-validation and
+viability-projection inputs are opened by exact metadata-reconciled artifact
+IDs, so same-name retry artifacts cannot make PASS evaluation ambiguous.
+Direct manual acceptance-gate dispatch therefore cannot create a misleading
+standalone PASS artifact.
+
+A final artifact-only `phase1-pons-pass-closeout-one-shot` is staged but
+unarmed. After the ledger finalizer produces a real PASS artifact and that run
+is recorded in `docs/project-state.md`, closeout verifies the exact
+`phase1-pons-acceptance-gate` report, frozen snapshot/route/work-block
+contract, successful ledger-finalizer workflow path, git ancestry, and PR #3
+identity (`phase1/data-acquisition-spike` -> `main`). It fails if code changed
+after the PASS-producing commit; only the project-state PASS record and the
+closeout config are allowed post-PASS changes. It also requires every Phase 1
+gate checkbox to be complete and PR #3 to remain open/draft at audit time.
+Only a successful closeout artifact can declare it safe to mark the PR ready
+and merge after required checks. Inert graph-validation run **33991433159**
+skipped cleanly, so no closeout or merge action has been taken.
+
+The egress projection additionally needs instrumented measured runs;
+older completed runs cannot retroactively provide response-byte counters. No
+representative validation, viability projection or acceptance artifact should
+be counted as complete until those upstream frozen inputs and measurements
+exist.
+
+## Phase 1 remaining gates
+
+- [x] verify every relevant Pons generation/factory from raw chain
+- [x] prove the canonical WETH/USDG V3 USD anchor predates Pons (anchor first-code block **1,506,281**)
+- [x] build and freeze the complete historical Pons launch registry through one immutable snapshot head
+- [ ] build the complete historical Pons $100k+ eligible universe across V1/V2 full lifecycles
+- [x] resolve authenticated-Free benchmarking for the current environment: no Free API key is configured, so authenticated-wide-range benchmarking is not applicable to this Phase 1 run; keyless sharding remains the required fallback and the live crawl/accounting evidence uses that route
+- [ ] reconstruct >=10 representative Pons tokens end-to-end
+- [ ] cross-check reconstructed launch/trade/price paths against independent DEX/explorer evidence
+- [ ] quantify full-history request and storage requirements
+- [ ] prove the complete Pons + required downstream DEX acquisition plan remains within $0
+- [ ] record Phase 1 PASS
+
+After the PASS artifact is recorded and the fail-closed closeout audit succeeds,
+mark PR #3 ready and merge it into `main`. Phase 2 stays locked until both
+Phase 1 PASS and that merge are complete.
 
 ## Deferred decisions
 
 - exact first-major-dump algorithm;
-- exact USD pricing route;
-- exact chronological split dates;
-- exact feature list;
+- exact chronological research split dates;
+- exact discovered feature set;
 - exact model family;
-- exact signal threshold;
-- exact live UI/notification surface;
-- any future execution/trading integration.
+- exact production signal threshold;
+- exact notification/dashboard surface;
+- any future automated execution.
+
+The guarded artifact-only representative market-path replay generation **1**,
+run **35522831005**, passed against the exact Generation 13 frozen sample. The
+pagination repair filled **69** manifest-required shards omitted by the wildcard
+artifact downloads: the oldest **14** V1/V3 shards from run **33982556591**,
+**14** V2/V4 shards from nested run **34234471190**, and **41** same-basename
+V2/V4 shards from run **34331335575**. Every repaired shard matched its aggregate
+manifest range, record count and SHA256, after which the existing full-tape
+reader validated all bytes and completed the representative freeze. The output
+contains **30,744** path rows for all **10** tokens: **25,958** V1/V3 events,
+**347** V2 curve events, **2** graduations, **2** V4 registrations and **4,425**
+V2/V4 events. Market-path SHA256 is
+`be9b78c9c25a8b293ff76a341104fb6fd069e617115409879202539a851126a9`;
+summary SHA256 is
+`c29dd49771ac959c32d8e78dc63677735efe0ddb38c97a1c1bb4ca6f79e0ec75`.
+The successful replay issued no chain RPC and changes no acquisition or
+acceptance semantics.
+
+Representative priced-path replay generation **1**, run **35523404472**, also
+passed against that same sample and successful market-path replay. All
+**30,734** price points were priced, all **10** tokens were pricing-complete,
+and there were **0** unpriced points. The priced-path SHA256 is
+`ba815b137615cad3224d40d98991979bc2ef8197c804ecd66c2efa5e23c40496`
+and the summary SHA256 is
+`c136b9bf0424d8b3c9f75cc2e75c3c11da41e2217cfe5f2ab645a368e6d3bcc5`.
+The replay reused quote audit **33923299711**, WETH/USDG anchor **33972109927**,
+stock oracle **34765335793**, and repaired quote fallback from run
+**35518892463**; it issued no chain acquisition RPC.
+
+Bounded DEX replay generation **1**, run **35526064556**, passed its guarded
+artifact preflight and reached the existing independent DEX reconciliation, but
+failed on transport before any pool/price mismatch could be adjudicated:
+GeckoTerminal returned HTTP **429 Too Many Requests** from an OHLCV request
+after the client exhausted its three transient attempts. The normal client was
+already pacing at **6.1 seconds** per request, counting every attempt and
+honoring `Retry-After`. GeckoTerminal's current public documentation describes
+the limit as approximately **10 calls/minute** and notes that it can fluctuate
+with network traffic, so shared-runner throttling can still occur even when the
+local caller obeys the nominal pace. The retry path now keeps the same normal
+6.1-second pace and the same three-attempt bound, but when a 429 has no usable
+`Retry-After` it waits one full public-rate-limit window (**61 seconds**) before
+the next attempt. No DEX tolerance, checkpoint selection, logical-request cap,
+workflow timeout, acceptance gate, or acquisition scope changes; the archive
+RPC credential remains absent from this cross-check path.
+
+Bounded DEX replay generation **2**, run **35526305662**, cleared the
+GeckoTerminal transport problem and completed all bounded external requests.
+Canonical pool identity reconciliation did not fail. The existing exact
+zero-tolerance historical swap-price cross-check then failed for **6** of the
+representative tokens. This is now a substantive evidence mismatch rather than
+an acquisition or transport failure. Before changing any tolerance, checkpoint
+selection, or acceptance rule, the DEX workflow now emits fail-closed diagnostic
+rows for every failed checkpoint: canonical block/timestamp and USD price,
+independent candle timestamp/low/high, outside-candle basis points, canonical and
+external token sides, pool identifier, phase/event, and checkpoint role. The
+workflow still exits failure on the same condition; no acceptance semantics,
+request budget, workflow timeout, acquisition scope, or archive-RPC behavior
+changes.
+Bounded DEX replay generation **3**, run **35527135305**, again failed on
+GeckoTerminal HTTP **429** before reaching the newly added checkpoint-level
+price diagnostics. This exposed the remaining transport branch: a 429 carrying
+a short `Retry-After` could still retry inside the shared public-rate window.
+All HTTP 429 retries now wait for the maximum of the server `Retry-After`, the
+normal request interval, and the frozen **61-second** public-rate-limit
+cooldown. Non-429 retry semantics are unchanged. The client still uses exactly
+three attempts, the DEX workflow retains the same logical request budget and
+**30-minute** timeout, and no price tolerance, checkpoint selection, acceptance
+gate, acquisition scope, or archive-RPC behavior changes.
+
+Bounded DEX replay generation **4**, run **35527327945**, completed the
+strengthened transport path and reproduced the substantive result: canonical
+pool identity matched, but **9** hourly USD-price checkpoints across **6** tokens
+fell outside GeckoTerminal's zero-tolerance USD candles. The detailed failures
+range from about **4 bps** to **25,435 bps**. They are not token-side inversion:
+in every failed row the representative token is GeckoTerminal's external base
+token and the exact block timestamp lies inside the selected hour. Decomposing
+the immutable priced-path rows shows that several large USD misses imply
+implausible/stale third-party quote-USD states (for example roughly **$539**
+implied WETH versus the causal **$1,909** WETH/USDG anchor; one stock-token
+quote implies roughly **$65-$220** versus the causal **$411** fallback, while a
+later checkpoint for that same quote agrees within about **4 bps**). This is
+consistent with the frozen data-source audit: GeckoTerminal is independent
+cross-check/current-discovery evidence, not canonical history, while on-chain
+facts are canonical.
+
+Before changing the representative DEX acceptance workflow, a separate guarded
+diagnostic is staged at generation **0**. It freezes priced-path run
+**35523404472** and failed DEX replay **35527327945**, verifies the exact nine
+failed checkpoint identities, and requests only those nine GeckoTerminal hourly
+candles with `currency=token`. It compares the canonical on-chain
+quote-per-token price to the independent quote-space candle at **0 bps**
+tolerance, with at most **27** HTTP attempts and the same GeckoTerminal pacing.
+This diagnostic cannot invoke Transfer acquisition or the archive RPC and does
+not alter the existing DEX gate.
+
+DEX quote-space diagnostic generation **1**, run **35528655862**, completed
+successfully and froze the independent hourly quote-token envelopes for the same
+nine failed checkpoints. **0/9** post-swap canonical quote-per-token spot prices
+fell inside those GeckoTerminal quote-space candles, with **0** missing candles.
+The misses range from about **0.73 bps** to **27,396 bps**. This rules out stale
+third-party USD conversion as the sole explanation, while still leaving a
+semantic mismatch between two different price notions: HLP's representative
+checkpoint uses each Uniswap Swap event's post-swap `sqrtPriceX96` spot price,
+whereas trade-derived OHLCV can reflect the swap's execution price from
+`amount0/amount1`.
+
+A new guarded execution-price diagnostic is staged at generation **0** to test
+that distinction without any new external calls. It freezes market-path run
+**35522831005**, priced-path run **35523404472**, successful quote diagnostic
+**35528655862**, and quote registry **33923299711**. It derives the exact
+human quote/token execution ratio from the immutable signed Swap event amounts
+and token decimals, then compares that ratio and the existing post-swap spot
+price against the already-frozen GeckoTerminal candle envelopes at **0 bps**.
+The diagnostic is artifact-only, performs **0 external requests**, cannot invoke
+Transfer acquisition or archive RPC, and changes no DEX acceptance rule.
+
+DEX execution-price diagnostic generation **1**, run **35529024864**, then
+compared the exact signed Swap-event amount ratio against those same frozen
+quote-token candles with **0 external requests**. The post-swap spot price
+matched **0/9** hourly envelopes, while the execution price matched **2/9**
+strictly. Four additional execution prices missed a candle boundary by only
+roughly **10^-11 to 10^-13 bps**, which is consistent with the finite decimal
+precision in the independent candle payload rather than an economic mismatch.
+Three checkpoints remain materially outside even under execution-price
+semantics: one V3 swap by about **1,850 bps**, and two V4 swaps by about
+**8,933 bps** and **27,301 bps**. The event amount ratios and post-swap spot
+prices are mutually close for those three, so the remaining disagreement is
+specific to GeckoTerminal's historical candle evidence rather than token
+ordering or the Uniswap sqrt-price transform.
+
+A bounded minute-candle diagnostic is staged at generation **0** using execution
+diagnostic run **35529024864**. It queries only the same nine pool/token/time
+checkpoints with GeckoTerminal 1-minute quote-token OHLCV at **0 bps**, capped
+at **27** HTTP attempts under the existing pacing. Its purpose is to distinguish
+hourly aggregation loss from absent/incomplete third-party historical trades.
+It cannot invoke Transfer acquisition or archive RPC and does not change the DEX
+acceptance gate.
+
+DEX minute-candle diagnostic generation **1**, run **35529222682**, completed
+successfully. At the same nine frozen checkpoints, GeckoTerminal 1-minute
+quote-token OHLCV produced **2** exact execution-price matches, **5** outside
+candles and **2** missing candles. Four of the five outside results differ only
+by roughly **10^-11 to 10^-13 bps**, matching the finite decimal precision of
+the third-party payload. The remaining V3 checkpoint is still materially
+outside by about **1,850 bps**. The two V4 checkpoints that were outside the
+hourly candle by about **8,933 bps** and **27,301 bps** have no GeckoTerminal
+minute candle at the exact event minute. This rules out hourly aggregation as a
+general explanation and demonstrates incomplete/disagreeing third-party
+historical trade evidence at specific checkpoints.
+
+The representative DEX cross-check is therefore aligned with the repository's
+pre-existing source precedence rather than weakening canonical evidence.
+Independent pool/token identity remains a hard failure. Historical OHLCV now
+compares the signed Swap-event **execution quote-per-token** ratio, not the
+post-swap `sqrtPriceX96` spot price, and uses GeckoTerminal quote-token space
+to avoid third-party USD conversion. Individual historical price disagreements
+are preserved as diagnostics instead of vetoing reconstructable chain facts;
+the cross-check still fails if there are no canonical DEX swap checkpoints or
+if every independent historical price observation is absent. Request budgets,
+0-bps comparison, chain provenance, cohort, acquisition scope and archive-RPC
+behavior are unchanged. This implements DEC-006 and new DEC-012 and matches the
+data-source audit's existing rule that GeckoTerminal is cross-check evidence,
+not canonical historical truth.
+
+Representative DEX replay generation **5**, run **35530252709**, passed the
+guarded replay preflight and all frozen sample/lifecycle/priced-path downloads,
+then failed before external reconciliation with
+`KeyError: 'quote_decimals'`. This is an implementation/provenance wiring
+error, not new DEX evidence: the Pons launch registry intentionally does not
+carry quote-token decimals. Those decimals are already frozen in the canonical
+57-row quote registry from quote-audit run **33923299711**.
+
+The DEX workflow now takes that quote-audit run explicitly, downloads
+`phase1-pons-full-quote-audit-current`, and requires the exact quote-registry
+record count (**57**) and SHA256
+`c822fe8d66f6b24ee496ccd20203cc81023e113ba0f66fa4188a5be49dd346dc`
+on chain **4663** before deriving execution prices. The guarded replay, full
+representative evidence chain, DEX artifact provenance, and final validation are
+all bound to the same quote-audit run. No quote decimals are inferred or
+hard-coded, and no acquisition, DEX evidence semantics, request budget,
+tolerance, cohort, or archive-RPC behavior changes.
+
+Representative DEX replay generation **6**, run **35530539734**, completed
+successfully under the corrected canonical-source semantics. Independent pool
+identity matched **10/10** representative DEX pools with **0** pool mismatches.
+All **30** selected canonical Swap checkpoints had independent historical price
+observations; **19/30** matched the exact 0-bps third-party candle envelope and
+the remaining disagreements were retained diagnostically. The resulting DEX
+cross-check SHA256 is
+`3c26cfff4ca6cad6177c90ae7a2791b5fab388bc5a805cb2af28e89715a282d4`.
+The run used **40** logical GeckoTerminal requests, **46** HTTP attempts within
+the existing **120**-attempt cap, and **4** bounded public Robinhood block-time
+requests. Quote-token decimals were bound to quote-audit run **33923299711**.
+
+A guarded artifact-only final representative-validation replay is now staged at
+generation **0**. It freezes Gen13 sample/lifecycle/transfer run
+**35518892463**, market-path replay **35522831005**, priced-path replay
+**35523404472**, successful DEX replay **35530539734**, V1/V3
+**34228430753**, V2/V4 **34471480180**, registry **33911022718**, V2 curve
+**33936232604**, transition **33912452330**, quote audit **33923299711**,
+anchor **33972109927**, oracle **34765335793**, and fallback parent
+**35518892463**. The launcher is deliberately blocked until
+`phase1-pons-representative-transfers-full` exists on Gen13. Once it exists,
+the replay calls only the existing fail-closed representative validation
+workflow; it carries no RPC or external-API client and avoids waiting for the
+stale queued Generation 14 workflow snapshot.
+
+Gen13's promoted eligible-universe artifact is already available and verified:
+**6,972** eligible Pons tokens (**5,161 V1**, **1,811 V2**), **0** unknown
+tokens, exact V1/V3 run **34228430753**, exact V2/V4 run **34471480180**, and
+universe SHA256
+`d5eb4ff0551eb2a0e12834b4d823dec4299d59b88eb73cefc4aa33ad2d8b2e8d`.
+Artifact ID **10607458167** is non-expired on Gen13.
+
+A second guarded artifact-only replay is staged for the final post-eligibility
+"ready" handoff. Its generation **0** freezes eligible run **35518892463**,
+source eligibility run **33982556591**, V1/V3 **34228430753**, V2/V4
+**34471480180**, and the exact eligible-universe SHA above. On launch it refuses
+to proceed unless it can discover a **successful**
+`phase1-pons-representative-validation-replay-one-shot` run that actually
+published `phase1-pons-representative-validation`. It then re-runs the same
+`validate_post_eligibility_evidence_bundle` contract, additionally requiring
+the representative manifest to carry the exact sample, transfer, market-path,
+priced-path, DEX, registry, curve, transition, quote-audit, anchor, oracle and
+fallback run IDs already frozen by the validation replay. It publishes the same
+`phase1-pons-post-eligibility-evidence-ready` handoff artifact without RPC,
+external APIs, or acquisition.
+
+Final representative validation had one remaining semantic drift that would
+have rejected the now-canonical DEX evidence even after Generation 6 succeeded.
+`build_representative_validation_rows` still required every independent
+historical candle checkpoint to match exactly. That contradicted DEC-012 and the
+DEX workflow's accepted source precedence.
+
+The final join now keeps **pool/token identity fail-closed**, still requires the
+exact first/max/last canonical Swap checkpoint roles, requires the canonical
+price semantics to be `swap_execution_quote_per_token`, and validates each
+checkpoint as exactly one of `matched`, `outside_candle`, or
+`missing_candle` with internally consistent boolean/null state. Historical
+price disagreements and individual missing candles are preserved as diagnostic
+counts in the final summary instead of making a token incomplete. The cohort
+still fails closed if **all** canonical Swap checkpoints lack independent
+historical price observations. No acquisition, tolerance, request budget,
+cohort, pool-identity, pricing, holder, or source-coverage gate changed.
+
+The recovered evidence replay is now being normalized into the repository's
+pre-existing canonical Phase-1 acceptance path instead of adding a parallel PASS
+gate. The briefly staged
+`phase1-pons-data-viability-acceptance-one-shot` wrapper was removed before
+ever being armed because it did not include the already-frozen requirement for
+**nine distinct instrumented zero-cost acquisition-route measurements**.
+
+On success, `phase1-pons-post-eligibility-ready-replay-one-shot` now names its
+own GitHub run as `evidence_run_id` and republishes byte-equivalent
+`phase1-pons-eligible-universe` and
+`phase1-pons-representative-validation` artifacts alongside
+`phase1-pons-post-eligibility-evidence-ready`, with bounded artifact-upload
+retries. That gives recovered evidence the same single-run three-artifact
+handoff shape required by the canonical viability readiness ledger. The
+existing nine-route guarded measurement -> viability projection -> final
+acceptance chain remains the **only** path allowed to publish
+`hlp-v1-phase1-data-viability` PASS. Phase 2 is now unlocked by the canonical Phase 1 PASS.
+
+The canonical viability/acceptance workflows now explicitly allow the normalized
+recovered evidence workflow path
+`phase1-pons-post-eligibility-ready-replay-one-shot.yml` as an **evidence
+handoff only**. The allowlist was updated in the guarded route preflight, route
+ledger finalizer, final acceptance chain and acceptance gate. It was
+intentionally **not** added to the lifecycle/pricing source allowlist: recovered
+quote-fallback measurements must still trace `lifecycle_run_id` to the actual
+recovered-completion run that owns the frozen lifecycle/fallback artifacts.
+Normal evidence keeps its existing non-recovery routing rules; both recovered
+handoff paths must still carry `recovery_mode=true`, a valid source run, exact
+hashes, branch ancestry and all three required handoff artifacts. The existing
+nine distinct route-run requirement and **331,011,903** processed-work-block
+floor remain unchanged.
+
+The canonical `build_phase1_acceptance_report` gate is now aligned with the
+same recovered evidence semantics before any nine-route viability measurement
+is launched. It no longer requires every third-party historical DEX price
+checkpoint to match: it requires exact DEX pool identity, valid targeted-token
+accounting, non-negative diagnostic counts, exact
+`observed = matched + disagreed` and
+`targeted = observed + missing` checkpoint accounting, and at least one
+independent observed historical price checkpoint whenever swap-price evidence is
+targeted. The PASS report republishes targeted/observed/matched/disagreed/missing
+counts plus disagreement/missing-candle token counts.
+
+The acceptance gate's frozen representative oracle source was also corrected
+from the superseded oracle run **33974681334** to recovered canonical stock
+oracle run **34765335793**, matching the successful priced-path replay and the
+staged final representative-validation replay. No viability route, required
+work-block floor, zero-cost criterion, pool-identity gate or research threshold
+changed.
+
+The shared readiness helper is now aligned with the workflow-level recovered
+evidence allowlists as well. `EVIDENCE_ALLOWED_WORKFLOW_PATHS` includes the
+normalized ready replay, and both recovered evidence paths require
+`recovery_mode=true`; the normal evidence path still requires
+`recovery_mode=false` plus source-run routing. Tests cover acceptance of the
+normalized recovered handoff and rejection if that same workflow attempts to
+masquerade as normal evidence.
+
+After viability generation 1 was armed to normalized evidence run
+**35576917452**, a final pre-RPC integration check found that the reusable
+`phase1-pons-viability-route-measurement` preflight still admitted only the
+original evidence and recovered-completion workflow paths. The outer guarded
+route already admitted the normalized ready replay, so the first route would
+have failed between guard and measurement without issuing RPC.
+
+The inner measurement preflight now admits
+`phase1-pons-post-eligibility-ready-replay-one-shot.yml` and independently
+enforces the same recovery-mode boundary: normal evidence must be
+`recovery_mode=false` with lifecycle/V1-V3/V2-V4 all routed to source run
+**33982556591**; either recovered path must be `recovery_mode=true`.
+This is a provenance-only repair before any viability route measurement; route
+geometry, request scope, concurrency, work-block floors and acceptance criteria
+are unchanged.
+
+Viability readiness audit run **35577074500** exposed a GitHub
+`actions/download-artifact@v4` extraction-layout mismatch before any route
+RPC: exact `artifact-ids` downloads were extracted beneath
+`<path>/<artifact-name>/...`, while the readiness/acceptance code reads the
+selected artifact directly beneath the requested path. The evidence ZIP itself
+was correct and contained
+`phase1-post-eligibility-evidence-ready.json` at its root; the audit therefore
+reported only `evidence handoff payload is missing`.
+
+All exact-ID downloads in the canonical remaining acceptance graph now set
+`merge-multiple: true` so a single selected artifact is flattened into the
+requested directory. This covers readiness, the guarded route, the reusable
+route measurement, final-acceptance evidence handoff, acceptance-gate
+eligible/representative/viability inputs, and accounting-to-viability
+projection. Exact artifact-ID selection, retry cleanup and duplicate-equivalence
+checks are unchanged; only extraction layout changed.
+
+First guarded viability route run **35577869981** passed the outer recovered
+evidence guard, then failed in the inner artifact-only measurement preflight
+before RPC with `NameError: observed_path is not defined`. The first heredoc
+had validated the evidence workflow path, but the second heredoc reused that
+local variable without carrying it across step scope. The measurement workflow
+now publishes the validated path as a step output, passes it through
+`EVIDENCE_WORKFLOW_PATH`, and revalidates the allowed normal/recovered path
+set before applying recovery-mode routing rules. No route measurement RPC was
+issued by the failed run and the `pons_registry` ledger slot remains zero.
+
+Second guarded `pons_registry` run **35578141192** passed both recovered
+evidence preflight layers. Its primary measurement job then failed before RPC in
+`Validate bounded measurement contract` with
+`FileExistsError: [Errno 17] File exists: 'artifacts'`: the contract heredoc
+used non-idempotent `Path("artifacts").mkdir()`, while runner setup had already
+materialized that directory. The V2 secondary registry lane had independently
+passed its bounded-range contract and entered its measurement.
+
+The primary contract now uses
+`Path("artifacts").mkdir(parents=True, exist_ok=True)`, matching the existing
+idempotent shell setup used by the secondary lane. This changes no measurement
+geometry, route inputs, evidence binding, RPC scope or acceptance threshold.
+

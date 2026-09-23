@@ -1,0 +1,358 @@
+name: phase1-pons-pass-closeout-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-pass-closeout.json
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: phase1-pons-pass-closeout-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  closeout:
+    if: ${{ contains(github.event.head_commit.message, 'launch Phase 1 PASS closeout') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: config
+        name: Read frozen PASS run and exact acceptance artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          config = json.loads(
+              Path(".github/phase1-pons-pass-closeout.json").read_text()
+          )
+          generation = int(config.get("generation", 0))
+          run_id = int(config.get("final_acceptance_run_id", 0))
+          if generation <= 0:
+              raise SystemExit("Phase 1 PASS closeout is not armed")
+          if run_id <= 0:
+              raise SystemExit("final acceptance run ID must be positive")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          matches = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  f"?per_page=100&page={page}"
+              )
+              rows = list(payload.get("artifacts") or [])
+              matches.extend(
+                  row
+                  for row in rows
+                  if not row.get("expired")
+                  and str(row.get("name") or "")
+                  == "phase1-pons-acceptance-gate"
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "Phase 1 closeout acceptance artifact pagination "
+                      "exceeded 1000"
+                  )
+
+          if not matches:
+              raise SystemExit(
+                  "Phase 1 closeout acceptance artifact is missing"
+              )
+          if len(matches) > 1:
+              digests = {
+                  str(row.get("digest") or "").lower()
+                  for row in matches
+              }
+              sizes = {
+                  int(row.get("size_in_bytes", -1))
+                  for row in matches
+              }
+              bindings = {
+                  (
+                      int((row.get("workflow_run") or {}).get("id", 0)),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_sha")
+                          or ""
+                      ),
+                      str(
+                          (row.get("workflow_run") or {}).get("head_branch")
+                          or ""
+                      ),
+                  )
+                  for row in matches
+              }
+              if (
+                  len(digests) != 1
+                  or not next(iter(digests)).startswith("sha256:")
+                  or len(next(iter(digests))) != 71
+                  or len(sizes) != 1
+                  or next(iter(sizes)) < 0
+                  or len(bindings) != 1
+              ):
+                  raise SystemExit(
+                      "Phase 1 closeout acceptance retry artifacts "
+                      "are not equivalent"
+                  )
+
+          artifact_id = max(
+              int(row.get("id", 0))
+              for row in matches
+          )
+          if artifact_id <= 0:
+              raise SystemExit(
+                  "Phase 1 closeout acceptance artifact ID is invalid"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"final_acceptance_run_id={run_id}\n")
+              output.write(f"acceptance_artifact_id={artifact_id}\n")
+          print(json.dumps({
+              "generation": generation,
+              "final_acceptance_run_id": run_id,
+              "acceptance_artifact_id": artifact_id,
+          }, sort_keys=True))
+          PY
+      - id: download_acceptance
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
+          path: acceptance
+          run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial Phase 1 acceptance download before retry
+        if: ${{ steps.download_acceptance.outcome == 'failure' }}
+        run: rm -rf acceptance
+      - id: retry_download_acceptance
+        name: Retry Phase 1 acceptance artifact download
+        if: ${{ steps.download_acceptance.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
+          path: acceptance
+          run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Clean partial Phase 1 acceptance download before final retry
+        if: ${{ steps.retry_download_acceptance.outcome == 'failure' }}
+        run: rm -rf acceptance
+      - name: Final Phase 1 acceptance artifact download retry
+        if: ${{ steps.retry_download_acceptance.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.config.outputs.acceptance_artifact_id }}
+          path: acceptance
+          run-id: ${{ steps.config.outputs.final_acceptance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify PASS artifact, branch closeout and PR 3 identity
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FINAL_ACCEPTANCE_RUN_ID: ${{ steps.config.outputs.final_acceptance_run_id }}
+          PYTHONPATH: src
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import fetch_github_actions_json
+
+          run_id = int(os.environ["FINAL_ACCEPTANCE_RUN_ID"])
+          report = json.loads(
+              Path("acceptance/phase1-acceptance-report.json").read_text()
+          )
+          if report.get("phase1_acceptance_status") != "pass":
+              raise SystemExit("Phase 1 closeout acceptance status is not pass")
+          if report.get("phase1_checkpoint") != "hlp-v1-phase1-data-viability":
+              raise SystemExit("Phase 1 closeout checkpoint changed")
+          if int(report.get("snapshot_head_block", -1)) != 54_486_035:
+              raise SystemExit("Phase 1 closeout snapshot head changed")
+          if int(report.get("all_pons_launches", -1)) != 494_639:
+              raise SystemExit("Phase 1 closeout Pons launch count changed")
+          if int(report.get("required_work_blocks", -1)) != 331_011_903:
+              raise SystemExit("Phase 1 closeout work-block floor changed")
+          expected_routes = [
+              "pons_registry",
+              "pons_v1_v3",
+              "pons_v2_curve",
+              "pons_v2_transition",
+              "pons_v2_v4",
+              "weth_usdg_anchor",
+              "stock_oracle",
+              "quote_v3_fallback",
+              "quote_v4_fallback",
+          ]
+          if report.get("required_acquisition_routes") != expected_routes:
+              raise SystemExit("Phase 1 closeout route contract changed")
+          if int(report.get("viability_projection_run_id", -1)) != run_id:
+              raise SystemExit(
+                  "Phase 1 closeout viability projection run mismatch"
+              )
+          eligible_run_id = int(report.get("eligible_universe_run_id", 0))
+          representative_run_id = int(
+              report.get("representative_validation_run_id", 0)
+          )
+          if eligible_run_id <= 0 or eligible_run_id != representative_run_id:
+              raise SystemExit(
+                  "Phase 1 closeout evidence parent run mismatch"
+              )
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          run = get(f"/repos/{repo}/actions/runs/{run_id}")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit(
+                  "Phase 1 final acceptance parent is not successful"
+              )
+          observed_path = str(run.get("path") or "").split("@", 1)[0]
+          expected_path = (
+              ".github/workflows/"
+              "phase1-pons-viability-ledger-finalize-one-shot.yml"
+          )
+          if observed_path != expected_path:
+              raise SystemExit(
+                  "Phase 1 final acceptance workflow path changed: "
+                  f"{observed_path}"
+              )
+          if run.get("head_branch") != "phase1/data-acquisition-spike":
+              raise SystemExit("Phase 1 final acceptance branch changed")
+          acceptance_sha = str(run.get("head_sha") or "")
+          if len(acceptance_sha) != 40:
+              raise SystemExit("Phase 1 final acceptance head SHA is invalid")
+
+          subprocess.run(
+              ["git", "merge-base", "--is-ancestor", acceptance_sha, "HEAD"],
+              check=True,
+          )
+          changed = {
+              line.strip()
+              for line in subprocess.check_output(
+                  ["git", "diff", "--name-only", acceptance_sha, "HEAD"],
+                  text=True,
+              ).splitlines()
+              if line.strip()
+          }
+          allowed_changes = {
+              ".github/phase1-pons-pass-closeout.json",
+              "docs/project-state.md",
+          }
+          unexpected_changes = sorted(changed - allowed_changes)
+          if unexpected_changes:
+              raise SystemExit(
+                  "code changed after Phase 1 PASS evidence: "
+                  f"{unexpected_changes}"
+              )
+
+          state = Path("docs/project-state.md").read_text()
+          start = state.index("## Phase 1 remaining gates")
+          end = state.index("## Deferred decisions", start)
+          gate_section = state[start:end]
+          if "- [ ]" in gate_section:
+              raise SystemExit(
+                  "Phase 1 closeout still has unchecked project-state gates"
+              )
+          if "Phase 1 PASS" not in gate_section or str(run_id) not in gate_section:
+              raise SystemExit(
+                  "Phase 1 PASS run is not recorded in project-state"
+              )
+
+          pr = get(f"/repos/{repo}/pulls/3")
+          if pr.get("state") != "open" or pr.get("draft") is not True:
+              raise SystemExit("PR 3 must remain open and draft during closeout")
+          if (pr.get("head") or {}).get("ref") != "phase1/data-acquisition-spike":
+              raise SystemExit("PR 3 head branch changed")
+          if (pr.get("base") or {}).get("ref") != "main":
+              raise SystemExit("PR 3 base branch changed")
+          if ((pr.get("head") or {}).get("repo") or {}).get("full_name") != repo:
+              raise SystemExit("PR 3 head repository changed")
+          if ((pr.get("base") or {}).get("repo") or {}).get("full_name") != repo:
+              raise SystemExit("PR 3 base repository changed")
+          if (pr.get("head") or {}).get("sha") != os.environ["GITHUB_SHA"]:
+              raise SystemExit(
+                  "PR 3 head moved while Phase 1 closeout was running"
+              )
+
+          closeout = {
+              "status": "pass",
+              "safe_to_mark_pr_ready": True,
+              "safe_to_merge_after_required_checks": True,
+              "final_acceptance_run_id": run_id,
+              "final_acceptance_head_sha": acceptance_sha,
+              "closeout_head_sha": os.environ["GITHUB_SHA"],
+              "eligible_universe_run_id": eligible_run_id,
+              "representative_validation_run_id": representative_run_id,
+              "pr_number": 3,
+              "pr_head": "phase1/data-acquisition-spike",
+              "pr_base": "main",
+              "post_acceptance_changes": sorted(changed),
+          }
+          Path("artifacts/phase1-pass-closeout.json").write_text(
+              json.dumps(closeout, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(closeout, sort_keys=True))
+          PY
+      - id: upload_closeout
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-pass-closeout
+          path: artifacts/
+          if-no-files-found: error
+      - id: retry_upload_closeout
+        name: Retry Phase 1 closeout artifact upload
+        if: ${{ steps.upload_closeout.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-pass-closeout
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Final Phase 1 closeout artifact upload retry
+        if: ${{ steps.retry_upload_closeout.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-pass-closeout
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true

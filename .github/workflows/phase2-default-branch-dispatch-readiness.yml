@@ -1,0 +1,254 @@
+name: phase2-default-branch-dispatch-readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-default-branch-dispatch-readiness.yml'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-*.yml'
+      - 'src/hlp/data/phase2_dispatch_readiness.py'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'tests/test_phase2_dispatch_readiness.py'
+  pull_request:
+    paths:
+      - '.github/workflows/phase2-default-branch-dispatch-readiness.yml'
+      - '.github/workflows/phase2-coverage-execution-plan.yml'
+      - '.github/workflows/phase2-*.yml'
+      - 'src/hlp/data/phase2_dispatch_readiness.py'
+      - 'src/hlp/data/phase2_coverage_execution.py'
+      - 'tests/test_phase2_dispatch_readiness.py'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-default-branch-dispatch-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: readiness
+        name: Inspect default-branch manual workflow surface
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_dispatch_readiness import (
+              evaluate_phase2_default_branch_readiness,
+              required_phase2_manual_workflows,
+              workflow_dispatch_interface_sha256,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          metadata = json.loads(
+              subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  f"/repos/{repo}",
+              ])
+          )
+          default_branch = str(metadata.get("default_branch") or "")
+          if not default_branch:
+              raise SystemExit("repository default branch is unavailable")
+
+          result = subprocess.run(
+              [
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{repo}/contents/.github/workflows"
+                      f"?ref={default_branch}"
+                  ),
+              ],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+          )
+          if result.returncode == 0:
+              payload = json.loads(result.stdout)
+              if not isinstance(payload, list):
+                  raise SystemExit(
+                      "default-branch workflows response is not a list"
+                  )
+              available = [
+                  str(row.get("name") or "")
+                  for row in payload
+                  if isinstance(row, dict)
+              ]
+          else:
+              error = result.stderr.decode(errors="replace")
+              if "HTTP 404" not in error:
+                  raise SystemExit(
+                      "failed to inspect default-branch workflows: "
+                      + error.strip()
+                  )
+              available = []
+
+          required = required_phase2_manual_workflows()
+          expected_interface_sha256 = {
+              name: workflow_dispatch_interface_sha256(
+                  Path(".github/workflows", name).read_text()
+              )
+              for name in required
+          }
+          available_set = set(available)
+          default_interface_sha256 = {}
+          for name in required:
+              if name not in available_set:
+                  continue
+              workflow_payload = json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/contents/.github/workflows/"
+                          f"{name}?ref={default_branch}"
+                      ),
+                  ])
+              )
+              encoding = str(
+                  workflow_payload.get("encoding") or ""
+              )
+              if encoding != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding changed: {name}"
+                  )
+              raw = base64.b64decode(
+                  str(workflow_payload.get("content") or "").replace(
+                      "\n",
+                      "",
+                  )
+              ).decode("utf-8")
+              default_interface_sha256[name] = (
+                  workflow_dispatch_interface_sha256(raw)
+              )
+
+          report = evaluate_phase2_default_branch_readiness(
+              available,
+              default_branch=default_branch,
+              expected_dispatch_interface_sha256_by_name=(
+                  expected_interface_sha256
+              ),
+              available_dispatch_interface_sha256_by_name=(
+                  default_interface_sha256
+              ),
+          )
+          path = Path(
+              "artifacts/phase2-default-branch-dispatch-readiness.json"
+          )
+          path.write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"default_branch={report['default_branch']}\n"
+              )
+              handle.write(
+                  "first_wave_ready="
+                  + str(
+                      report["phase2_first_wave_dispatch_ready"]
+                  ).lower()
+                  + "\n"
+              )
+              handle.write(
+                  "full_dag_ready="
+                  + str(
+                      report[
+                          "phase2_full_coverage_dag_dispatch_ready"
+                      ]
+                  ).lower()
+                  + "\n"
+              )
+              handle.write(
+                  f"missing={report['missing_required_workflows']}\n"
+              )
+              handle.write(
+                  "incompatible="
+                  f"{report['incompatible_required_workflows']}\n"
+              )
+
+          print(json.dumps({
+              "default_branch": report["default_branch"],
+              "required_manual_workflows": (
+                  report["required_manual_workflows"]
+              ),
+              "present_required_workflows": (
+                  report["present_required_workflows"]
+              ),
+              "missing_required_workflows": (
+                  report["missing_required_workflows"]
+              ),
+              "incompatible_required_workflows": (
+                  report["incompatible_required_workflows"]
+              ),
+              "dispatch_interface_compatibility_checked": True,
+              "phase2_first_wave_dispatch_ready": (
+                  report["phase2_first_wave_dispatch_ready"]
+              ),
+              "phase2_full_coverage_dag_dispatch_ready": (
+                  report["phase2_full_coverage_dag_dispatch_ready"]
+              ),
+              "first_wave_missing_workflow_names": (
+                  report["first_wave_missing_workflow_names"]
+              ),
+              "first_wave_incompatible_workflow_names": (
+                  report["first_wave_incompatible_workflow_names"]
+              ),
+              "phase2_coverage_state_mutated": False,
+          }, sort_keys=True))
+
+      - name: Upload default-branch readiness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-default-branch-dispatch-readiness
+          path: artifacts/phase2-default-branch-dispatch-readiness.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish default-branch readiness summary
+        env:
+          DEFAULT_BRANCH: ${{ steps.readiness.outputs.default_branch }}
+          FIRST_WAVE_READY: ${{ steps.readiness.outputs.first_wave_ready }}
+          FULL_DAG_READY: ${{ steps.readiness.outputs.full_dag_ready }}
+          MISSING: ${{ steps.readiness.outputs.missing }}
+          INCOMPATIBLE: ${{ steps.readiness.outputs.incompatible }}
+        run: |
+          {
+            echo "## Phase-2 default-branch dispatch readiness"
+            echo
+            echo "- default_branch: ${DEFAULT_BRANCH}"
+            echo "- first_wave_dispatch_ready: ${FIRST_WAVE_READY}"
+            echo "- full_coverage_dag_dispatch_ready: ${FULL_DAG_READY}"
+            echo "- missing_required_workflows: ${MISSING}"
+            echo "- incompatible_dispatch_interfaces: ${INCOMPATIBLE}"
+            echo "- dispatch_interface_compatibility_checked: true"
+            echo "- coverage_state_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

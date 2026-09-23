@@ -1,0 +1,27 @@
+{
+  "version": "phase2-pools-trade-lbp-success-summary-v1",
+  "evidence_run_id": 35626412874,
+  "artifact_id": 10653894082,
+  "artifact_name": "phase2-pools-trade-lbp-success-sample",
+  "artifact_digest": "sha256:d23486f7792d595b18850f07a095e11ae2795f478f23e246356704ea088b798b",
+  "candidate_artifact_id": 10652709527,
+  "candidate_artifact_name": "phase2-lbp-success-candidates",
+  "candidate_artifact_digest": "sha256:0ebe9a8ce8f0c441d8bbb7f0600a40aadb44ad81476c1f3e935f8a87b23001b2",
+  "chain_id": 4663,
+  "discovery_from_block": 30000000,
+  "discovery_to_block": 31000000,
+  "search_from_block": 30000000,
+  "search_to_block": 31500000,
+  "continuous_search": true,
+  "missing_ranges": [],
+  "candidates": 437,
+  "successful_candidates": 149,
+  "search_rpc_requests": 7807,
+  "migration_initialize_gap_blocks": {
+    "minimum": 3,
+    "median": 57,
+    "maximum": 1545
+  },
+  "successful_native_quote_candidates": 147,
+  "successful_zero_hook_candidates": 143
+}

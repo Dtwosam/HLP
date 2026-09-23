@@ -1,0 +1,42 @@
+{
+  "version": "phase2-hoodfun-legacy-compatibility-v1",
+  "evidence_run_id": 35614752750,
+  "evidence_head_sha": "6f11c6ae82778363bbc5e129c63028a815f5831e",
+  "artifact_id": 10646067112,
+  "artifact_name": "phase2-hoodfun-legacy-compatibility",
+  "artifact_digest": "sha256:c6129b4156b739934a94e5bb16f54e36e638876263f29365e4e551167f4c8cfc",
+  "chain_id": 4663,
+  "generation": "previous",
+  "contract": "0x6a63d96ef77ae569fcb85934cf1bd1ec7fe9b33d",
+  "first_code_block": 1676992,
+  "probe_limit_block": 5611264,
+  "probe_blocks_scanned": 100000,
+  "chunks_scanned": 422,
+  "requests_made": 476,
+  "current_surface_compatible": true,
+  "stopped_on_compatibility": true,
+  "event_counts": {
+    "token_created": 1,
+    "trade": 21
+  },
+  "known_topics": {
+    "token_created": "0x91de26bc430b3a4f1d6cfb11d72f2e5ca75d7622d37b2a88a8998ec28e747a11",
+    "trade": "0x2c76e7a47fd53e2854856ac3f0a5f3ee40d15cfaa82266357ea9779c486ab9c3"
+  },
+  "first_samples": {
+    "token_created": {
+      "block_number": 5595551,
+      "transaction_hash": "0x29dae7b09b0b27f320906850c88e22795ea4bd1ab9f8e76243b512446492a65a",
+      "transaction_index": 8,
+      "log_index": 43,
+      "token": "0x6a005d5c2b1846774114930d2021e08c1f42600d"
+    },
+    "trade": {
+      "block_number": 4627715,
+      "transaction_hash": "0x9498d6fe295f396d5029cb84a4677debdd73abf3a7e3e5ee9217b771e685e405",
+      "transaction_index": 15,
+      "log_index": 40,
+      "token": "0x55fc28dc8deeb8b53b1bb60823ca552254c1600d"
+    }
+  }
+}

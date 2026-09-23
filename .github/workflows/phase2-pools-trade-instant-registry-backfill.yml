@@ -1,0 +1,474 @@
+name: phase2-pools-trade-instant-registry-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      launcher_run_id:
+        description: Successful phase2-pools-trade-launcher-backfill run ID
+        required: true
+        type: string
+      v4_initialize_run_id:
+        description: Successful phase2-direct-v4-initialize-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-pools-trade-instant-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '3338007'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute InstantLaunchStrategy shard bounds
+        run: |
+          python - <<'PY'
+          import os
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty pools.trade instant shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          PY
+      - name: Acquire pools.trade Instant TokenLaunched events
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
+          fi
+          CHUNK=50000
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pools-trade-instant-launch-tape \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/pools-trade-instant-launched-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-instant-launch-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LAUNCHER_RUN_ID: ${{ inputs.launcher_run_id }}
+      V4_INITIALIZE_RUN_ID: ${{ inputs.v4_initialize_run_id }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-trade-instant-launch-*
+          path: inputs/instant
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-pools-trade-launcher-merged
+          path: inputs/launcher
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.launcher_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-v4-initialize-merged
+          path: inputs/v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.v4_initialize_run_id }}
+
+      - name: Validate and merge Instant launch population
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import POOLS_TRADE_INSTANT_STRATEGIES
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs/instant")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+          files = sorted(
+              root.glob("pools-trade-instant-launched-*.jsonl")
+          )
+          if len(files) != count:
+              raise SystemExit(
+                  "pools.trade Instant shard count changed: "
+                  f"{len(files)} != {count}"
+              )
+
+          aggregate = hashlib.sha256()
+          total = 0
+          shards = []
+          expected_strategies = sorted(
+              address.lower()
+              for address in POOLS_TRADE_INSTANT_STRATEGIES
+          )
+          for path in files:
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              prov = manifest.get("provenance") or {}
+              if prov.get("source") != (
+                  "pools_trade_instant_strategy_events"
+              ):
+                  raise SystemExit(
+                      f"{path.name}: Instant event source drift"
+                  )
+              if sorted(prov.get("strategies") or []) != (
+                  expected_strategies
+              ):
+                  raise SystemExit(
+                      f"{path.name}: Instant strategy set drift"
+                  )
+              blob = path.read_bytes()
+              digest = hashlib.sha256(blob).hexdigest()
+              if digest != manifest["sha256"]:
+                  raise SystemExit(
+                      f"{path.name}: Instant shard SHA drift"
+                  )
+              records = sum(
+                  1 for line in blob.splitlines() if line.strip()
+              )
+              if records != int(manifest["records"]):
+                  raise SystemExit(
+                      f"{path.name}: Instant record count drift"
+                  )
+              lo = int(prov["from_block"])
+              hi = int(prov["to_block"])
+              aggregate.update(blob)
+              total += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": digest,
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual_path = Path(
+              "artifacts/"
+              "pools-trade-instant-launched-sharded.manifest.json"
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=virtual_path,
+              path_name="pools-trade-instant-launched.jsonl",
+              records=total,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_pools_trade_instant_launched",
+                  "chain_id": 4663,
+                  "from_block": start,
+                  "to_block": head,
+                  "strategies": expected_strategies,
+                  "shards": shards,
+              },
+          )
+          launched = list(iter_sharded_jsonl(root, virtual_path))
+          merged = write_jsonl_snapshot(
+              launched,
+              output=Path(
+                  "artifacts/pools-trade-instant-launched.jsonl"
+              ),
+              provenance={
+                  "source": "merged_pools_trade_instant_launch_shards",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "sharded_sha256": virtual["sha256"],
+              },
+          )
+          if merged["sha256"] != virtual["sha256"]:
+              raise SystemExit(
+                  "pools.trade Instant merged bytes changed"
+              )
+
+          launcher_summary = json.loads(
+              Path(
+                  "inputs/launcher/pools-trade-launcher-summary.json"
+              ).read_text()
+          )
+          if launcher_summary["version"] != (
+              "phase2-pools-trade-launcher-backfill-v1"
+          ):
+              raise SystemExit("pools.trade launcher version drift")
+          if int(launcher_summary["required_start_block"]) != start:
+              raise SystemExit("pools.trade launcher start drift")
+          if int(launcher_summary["snapshot_head_block"]) != head:
+              raise SystemExit("pools.trade launcher snapshot drift")
+          if launcher_summary["continuous"] is not True:
+              raise SystemExit("pools.trade launcher is not continuous")
+          if launcher_summary["missing_ranges"]:
+              raise SystemExit("pools.trade launcher has missing ranges")
+
+          created = Path(
+              "inputs/launcher/pools-trade-created.jsonl"
+          )
+          distributed = Path(
+              "inputs/launcher/pools-trade-distributed.jsonl"
+          )
+          if hashlib.sha256(created.read_bytes()).hexdigest() != (
+              launcher_summary["created_sha256"]
+          ):
+              raise SystemExit("pools.trade created SHA drift")
+          if hashlib.sha256(distributed.read_bytes()).hexdigest() != (
+              launcher_summary["distributed_sha256"]
+          ):
+              raise SystemExit("pools.trade distributed SHA drift")
+          PY
+
+          hlp pools-trade-instant-registry \
+            --created inputs/launcher/pools-trade-created.jsonl \
+            --distributed inputs/launcher/pools-trade-distributed.jsonl \
+            --launched artifacts/pools-trade-instant-launched.jsonl \
+            --out artifacts/pools-trade-instant-registry.jsonl
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          registry_path = Path(
+              "artifacts/pools-trade-instant-registry.jsonl"
+          )
+          registry_manifest = json.loads(
+              registry_path.with_suffix(
+                  registry_path.suffix + ".manifest.json"
+              ).read_text()
+          )
+          launched_manifest = json.loads(
+              Path(
+                  "artifacts/"
+                  "pools-trade-instant-launched.jsonl.manifest.json"
+              ).read_text()
+          )
+          launcher_summary = json.loads(
+              Path(
+                  "inputs/launcher/pools-trade-launcher-summary.json"
+              ).read_text()
+          )
+          registry = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          tokens = [row["token"].lower() for row in registry]
+          pools = [row["pool_id"].lower() for row in registry]
+          if len(tokens) != len(set(tokens)):
+              raise SystemExit(
+                  "pools.trade Instant registry repeats token"
+              )
+          if len(pools) != len(set(pools)):
+              raise SystemExit(
+                  "pools.trade Instant registry repeats PoolId"
+              )
+          if len(registry) != int(launched_manifest["records"]):
+              raise SystemExit(
+                  "pools.trade Instant registry/launch population drift"
+              )
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          if any(
+              int(row["created_block"]) < start
+              or int(row["launch_block"]) > head
+              or int(row["launch_block"]) < int(row["created_block"])
+              for row in registry
+          ):
+              raise SystemExit(
+                  "pools.trade Instant registry lifecycle range drift"
+              )
+
+          summary = {
+              "version": "phase2-pools-trade-instant-registry-v1",
+              "source_id": "pools_trade_instant",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_launcher_scan": True,
+              "continuous_instant_launch_scan": True,
+              "missing_ranges": [],
+              "launcher_run_id": int(os.environ["LAUNCHER_RUN_ID"]),
+              "created_sha256": launcher_summary["created_sha256"],
+              "distributed_sha256": launcher_summary[
+                  "distributed_sha256"
+              ],
+              "launched_sha256": launched_manifest["sha256"],
+              "registry_sha256": registry_manifest["sha256"],
+              "tokens_discovered": len(registry),
+              "pool_ids": len(set(pools)),
+              "quote_tokens": sorted({
+                  row["quote_token"].lower() for row in registry
+              }),
+              "strategies": sorted({
+                  row["strategy"].lower() for row in registry
+              }),
+              "source_coverage_complete": False,
+          }
+          Path(
+              "artifacts/pools-trade-instant-registry-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Validate shared V4 Initialize identity
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("inputs/v4/direct-v4-initialize.jsonl")
+          summary = json.loads(
+              Path(
+                  "inputs/v4/direct-v4-initialize-summary.json"
+              ).read_text()
+          )
+          if summary["version"] != (
+              "phase2-direct-v4-initialize-discovery-v1"
+          ):
+              raise SystemExit("shared V4 Initialize version drift")
+          if int(summary["snapshot_head_block"]) != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("shared V4 Initialize snapshot drift")
+          if summary["continuous_event_scan"] is not True:
+              raise SystemExit(
+                  "shared V4 Initialize scan is not continuous"
+              )
+          if summary["missing_ranges"]:
+              raise SystemExit(
+                  "shared V4 Initialize scan has missing ranges"
+              )
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != summary["initialize_sha256"]:
+              raise SystemExit("shared V4 Initialize SHA drift")
+          PY
+      - name: Attach exact V4 Initialize and initialize-block supply
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            phase2-pools-trade-instant-initialized-registry \
+            --registry artifacts/pools-trade-instant-registry.jsonl \
+            --initializes inputs/v4/direct-v4-initialize.jsonl \
+            --out artifacts/pools-trade-instant-initialized-registry.jsonl \
+            --summary-out artifacts/pools-trade-instant-initialized-registry-summary.json
+      - name: Bind initialized registry to chain-wide population
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          base = json.loads(
+              Path(
+                  "artifacts/pools-trade-instant-registry-summary.json"
+              ).read_text()
+          )
+          initialized = json.loads(
+              Path(
+                  "artifacts/"
+                  "pools-trade-instant-initialized-registry-summary.json"
+              ).read_text()
+          )
+          if initialized["tokens_discovered"] != base["tokens_discovered"]:
+              raise SystemExit(
+                  "pools.trade initialized registry population drift"
+              )
+          if initialized["pools"] != base["pool_ids"]:
+              raise SystemExit(
+                  "pools.trade initialized PoolId population drift"
+              )
+          if initialized["all_pools_initialized"] is not True:
+              raise SystemExit(
+                  "pools.trade Instant registry has uninitialized pools"
+              )
+          initialized["required_start_block"] = int(
+              os.environ["REQUIRED_START_BLOCK"]
+          )
+          initialized["snapshot_head_block"] = int(
+              os.environ["SNAPSHOT_HEAD"]
+          )
+          initialized["v4_initialize_run_id"] = int(
+              os.environ["V4_INITIALIZE_RUN_ID"]
+          )
+          Path(
+              "artifacts/"
+              "pools-trade-instant-initialized-registry-summary.json"
+          ).write_text(
+              json.dumps(initialized, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(initialized, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-instant-registry
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

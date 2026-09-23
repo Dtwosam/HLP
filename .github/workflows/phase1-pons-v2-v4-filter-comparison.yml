@@ -1,0 +1,346 @@
+name: phase1-pons-v2-v4-filter-comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_block:
+        description: "Inclusive comparison start block"
+        required: true
+        default: "29491846"
+        type: string
+      to_block:
+        description: "Inclusive comparison end block"
+        required: true
+        default: "29496845"
+        type: string
+      confirm_comparison:
+        description: "Confirm one bounded global + server-side V2/V4 comparison"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-v2-v4-filter-comparison-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TRANSITION_RUN_ID: '33912452330'
+  GENERATION_START: '26841846'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      FROM_BLOCK: ${{ inputs.from_block }}
+      TO_BLOCK: ${{ inputs.to_block }}
+      CONFIRM_COMPARISON: ${{ inputs.confirm_comparison }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Validate bounded comparison and active-rescue guard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          if os.environ["CONFIRM_COMPARISON"].lower() != "true":
+              raise SystemExit("V2/V4 filter comparison requires explicit confirmation")
+
+          start = int(os.environ["FROM_BLOCK"])
+          end = int(os.environ["TO_BLOCK"])
+          generation_start = int(os.environ["GENERATION_START"])
+          snapshot_head = int(os.environ["SNAPSHOT_HEAD"])
+          if start < generation_start or end > snapshot_head or end < start:
+              raise SystemExit("V2/V4 comparison bounds are outside the frozen range")
+          span = end - start + 1
+          if span > 5_000:
+              raise SystemExit("V2/V4 filter comparison exceeds 5000-block ceiling")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          branch = os.environ["BRANCH"]
+          encoded_branch = urllib.parse.quote(branch, safe="")
+          workflow = "phase1-pons-live-venue-rescue-one-shot.yml"
+
+          def get(path):
+              req = urllib.request.Request(
+                  api + path,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          active = []
+          page = 1
+          while True:
+              payload = get(
+                  f"/repos/{repo}/actions/workflows/{workflow}/runs"
+                  f"?branch={encoded_branch}&per_page=100&page={page}"
+              )
+              rows = list(payload.get("workflow_runs") or [])
+              active.extend(
+                  {
+                      "id": int(row["id"]),
+                      "status": row.get("status"),
+                      "display_title": row.get("display_title"),
+                  }
+                  for row in rows
+                  if row.get("status") != "completed"
+                  and row.get("head_branch") == branch
+              )
+              if len(rows) < 100:
+                  break
+              page += 1
+              if page > 10:
+                  raise SystemExit(
+                      "V2/V4 comparison rescue pagination exceeded 1000"
+                  )
+
+          if active:
+              raise SystemExit(
+                  "V2/V4 filter comparison is blocked while a live venue "
+                  f"rescue is active: {active[:10]}"
+              )
+          print(json.dumps({"from_block": start, "to_block": end, "span": span}))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-v2-transition-full
+          path: transition
+          run-id: ${{ env.TRANSITION_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Acquire bounded global PoolManager sample
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --global-pool-scan \
+            --out artifacts/global-v4.jsonl \
+            | tee artifacts/global-report.json
+      - id: server_side
+        name: Acquire same sample with registered-pool topic1 filter
+        run: |
+          set +e
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-v2-v4-tape \
+            --registrations transition/pons-v2-registrations-full.jsonl \
+            --from-block "$FROM_BLOCK" --to-block "$TO_BLOCK" \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/server-v4.jsonl \
+            > artifacts/server-report.json \
+            2> artifacts/server-error.txt
+          status=$?
+          set -e
+          printf '%s\n' "$status" > artifacts/server-exit-code.txt
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+      - id: compare
+        name: Compare canonical rows and measured source usage
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          artifacts = Path("artifacts")
+
+          def last_json(path):
+              rows = [
+                  line
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+              if not rows:
+                  return None
+              return json.loads(rows[-1])
+
+          def digest(path):
+              sha = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      sha.update(chunk)
+              return sha.hexdigest()
+
+          global_data = artifacts / "global-v4.jsonl"
+          global_manifest = json.loads(
+              (artifacts / "global-v4.jsonl.manifest.json").read_text()
+          )
+          global_report = last_json(artifacts / "global-report.json")
+          if global_report is None:
+              raise SystemExit("global V2/V4 comparison report is missing")
+
+          server_exit = int(
+              (artifacts / "server-exit-code.txt").read_text().strip()
+          )
+          server_data = artifacts / "server-v4.jsonl"
+          server_manifest_path = artifacts / "server-v4.jsonl.manifest.json"
+          server_report = None
+          try:
+              server_report = last_json(artifacts / "server-report.json")
+          except (json.JSONDecodeError, OSError):
+              server_report = None
+
+          exact_match = False
+          server_supported = (
+              server_exit == 0
+              and server_data.exists()
+              and server_manifest_path.exists()
+              and server_report is not None
+          )
+          server_manifest = None
+          if server_supported:
+              server_manifest = json.loads(server_manifest_path.read_text())
+              exact_match = (
+                  int(global_manifest["records"])
+                  == int(server_manifest["records"])
+                  and str(global_manifest["sha256"])
+                  == str(server_manifest["sha256"])
+                  and digest(global_data) == digest(server_data)
+              )
+
+          if not server_supported:
+              result = "server_side_unsupported"
+          elif exact_match:
+              result = "equivalent"
+          else:
+              result = "mismatch"
+
+          summary = {
+              "schema_version": 1,
+              "chain_id": 4663,
+              "transition_run_id": int(os.environ["TRANSITION_RUN_ID"]),
+              "from_block": int(os.environ["FROM_BLOCK"]),
+              "to_block": int(os.environ["TO_BLOCK"]),
+              "span": int(os.environ["TO_BLOCK"])
+              - int(os.environ["FROM_BLOCK"])
+              + 1,
+              "global": {
+                  "records": int(global_manifest["records"]),
+                  "sha256": str(global_manifest["sha256"]),
+                  "file_sha256": digest(global_data),
+                  "requests_made": int(global_report["requests_made"]),
+                  "request_bytes_sent": int(
+                      global_report["request_bytes_sent"]
+                  ),
+                  "response_bytes_received": int(
+                      global_report["response_bytes_received"]
+                  ),
+                  "rpc_route": global_report["rpc_route"],
+                  "poolmanager_price_events_scanned": int(
+                      global_report["poolmanager_price_events_scanned"]
+                  ),
+                  "unmatched_pool_ids": int(
+                      global_report["unmatched_pool_ids"]
+                  ),
+              },
+              "server_side": {
+                  "exit_code": server_exit,
+                  "supported": server_supported,
+                  "records": (
+                      int(server_manifest["records"])
+                      if server_manifest is not None
+                      else None
+                  ),
+                  "sha256": (
+                      str(server_manifest["sha256"])
+                      if server_manifest is not None
+                      else None
+                  ),
+                  "file_sha256": (
+                      digest(server_data) if server_data.exists() else None
+                  ),
+                  "requests_made": (
+                      int(server_report["requests_made"])
+                      if server_report is not None
+                      else None
+                  ),
+                  "request_bytes_sent": (
+                      int(server_report["request_bytes_sent"])
+                      if server_report is not None
+                      else None
+                  ),
+                  "response_bytes_received": (
+                      int(server_report["response_bytes_received"])
+                      if server_report is not None
+                      else None
+                  ),
+                  "rpc_route": (
+                      server_report.get("rpc_route")
+                      if server_report is not None
+                      else None
+                  ),
+              },
+              "exact_data_match": exact_match,
+              "result": result,
+          }
+          if server_supported and (
+              summary["global"]["rpc_route"]
+              != summary["server_side"]["rpc_route"]
+          ):
+              summary["result"] = "mismatch"
+              summary["route_mismatch"] = True
+
+          (artifacts / "v2-v4-filter-comparison.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"result={summary['result']}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write(
+                  "### V2/V4 filter comparison\n\n"
+                  f"- result: `{summary['result']}`\n"
+                  f"- range: {summary['from_block']}..{summary['to_block']} "
+                  f"({summary['span']} blocks)\n"
+                  f"- exact data match: {summary['exact_data_match']}\n"
+                  f"- global requests: {summary['global']['requests_made']}\n"
+                  f"- global request bytes: "
+                  f"{summary['global']['request_bytes_sent']}\n"
+                  f"- global response bytes: "
+                  f"{summary['global']['response_bytes_received']}\n"
+              )
+              if server_report is not None:
+                  output.write(
+                      f"- server requests: "
+                      f"{summary['server_side']['requests_made']}\n"
+                      f"- server request bytes: "
+                      f"{summary['server_side']['request_bytes_sent']}\n"
+                      f"- server response bytes: "
+                      f"{summary['server_side']['response_bytes_received']}\n"
+                  )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: phase1-pons-v2-v4-filter-comparison
+          path: artifacts/
+          if-no-files-found: error
+      - name: Fail closed on canonical mismatch
+        if: ${{ steps.compare.outputs.result == 'mismatch' }}
+        run: |
+          echo "V2/V4 global and server-side filters produced different rows" >&2
+          exit 1

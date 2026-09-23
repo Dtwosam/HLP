@@ -1,0 +1,208 @@
+name: phase1-pools-trade-history-smoke
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pools-trade-history-smoke.yml'
+      - 'src/hlp/protocols/pools_trade.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pools-trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Reconcile pools.trade launch identity, supply and V4 pools
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          from hlp.config import (
+              POOLS_TRADE_INSTANT_STRATEGIES,
+              POOLS_TRADE_LAUNCHER_CURRENT,
+              POOLS_TRADE_LAUNCHER_ORIGINAL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.pools_trade import (
+              TOKEN_CREATED_TOPIC,
+              TOKEN_DISTRIBUTED_TOPIC,
+              TOKEN_LAUNCHED_TOPIC,
+              decode_pools_trade_token_created,
+              decode_pools_trade_token_distributed,
+              decode_pools_trade_token_launched,
+          )
+          from hlp.protocols.uniswap import (
+              V4_INITIALIZE_TOPIC,
+              decode_v4_pool_initialized,
+          )
+
+          start = 30_000_000
+          end = 30_099_999
+          rpc = RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL", SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key": os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+                  else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          launchers = [
+              POOLS_TRADE_LAUNCHER_CURRENT,
+              POOLS_TRADE_LAUNCHER_ORIGINAL,
+          ]
+          launcher_logs = list(
+              rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=launchers,
+                  topics=[[TOKEN_CREATED_TOPIC, TOKEN_DISTRIBUTED_TOPIC]],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          creates = [
+              decode_pools_trade_token_created(row)
+              for row in launcher_logs
+              if row.topics[0] == TOKEN_CREATED_TOPIC
+          ]
+          distributions = [
+              decode_pools_trade_token_distributed(row)
+              for row in launcher_logs
+              if row.topics[0] == TOKEN_DISTRIBUTED_TOPIC
+          ]
+
+          strategy_logs = list(
+              rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=list(POOLS_TRADE_INSTANT_STRATEGIES),
+                  topics=[TOKEN_LAUNCHED_TOPIC],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          launches = [
+              decode_pools_trade_token_launched(row)
+              for row in strategy_logs
+          ]
+
+          created_tokens = {row.token for row in creates}
+          launch_by_token = {row.token: row for row in launches}
+          assert len(launch_by_token) == len(launches), "duplicate TokenLaunched token"
+
+          created_and_launched = created_tokens & set(launch_by_token)
+          missing_launch = sorted(created_tokens - set(launch_by_token))
+
+          distributed_by_token = {}
+          for row in distributions:
+              if row.token not in created_tokens:
+                  continue
+              # The token distribution into the strategy is the launch supply
+              # candidate. If more than one exists, preserve ambiguity and fail.
+              if row.token in distributed_by_token:
+                  raise AssertionError(f"multiple token distributions for {row.token}")
+              distributed_by_token[row.token] = row
+
+          v4_logs = list(
+              rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=UNISWAP_V4_POOL_MANAGER,
+                  topics=[V4_INITIALIZE_TOPIC],
+                  chunk_size=2000,
+                  min_chunk_size=25,
+              )
+          )
+          v4 = {
+              row.pool_id: row
+              for row in map(decode_v4_pool_initialized, v4_logs)
+          }
+          missing_v4 = sorted({
+              row.pool_id for row in launches
+              if row.pool_id not in v4
+          })
+          assert not missing_v4, missing_v4[:10]
+
+          pool_key_mismatches = []
+          for row in launches:
+              init = v4[row.pool_id]
+              if (
+                  init.currency0 != row.currency0
+                  or init.currency1 != row.currency1
+                  or init.tick_spacing != row.tick_spacing
+                  or init.hooks != row.hooks
+              ):
+                  pool_key_mismatches.append(row.token)
+          assert not pool_key_mismatches, pool_key_mismatches[:10]
+
+          supply_checks = []
+          for token in sorted(created_and_launched)[:20]:
+              static = read_erc20_static(rpc, token, block=launch_by_token[token].block_number)
+              distributed = distributed_by_token.get(token)
+              supply_checks.append({
+                  "token": token,
+                  "decimals": static.decimals,
+                  "total_supply": static.total_supply,
+                  "distributed_amount": None if distributed is None else distributed.amount_raw,
+                  "distribution_matches_total_supply": (
+                      False if distributed is None
+                      else distributed.amount_raw == static.total_supply
+                  ),
+              })
+              assert distributed is not None, token
+              assert distributed.amount_raw == static.total_supply, (
+                  token,
+                  distributed.amount_raw,
+                  static.total_supply,
+              )
+
+          strategy_counts = {}
+          for row in launches:
+              strategy_counts[row.strategy] = strategy_counts.get(row.strategy, 0) + 1
+          launcher_counts = {}
+          for row in creates:
+              launcher_counts[row.launcher] = launcher_counts.get(row.launcher, 0) + 1
+
+          print(json.dumps({
+              "from_block": start,
+              "to_block": end,
+              "token_created": len(creates),
+              "token_distributed_events": len(distributions),
+              "token_launched": len(launches),
+              "created_and_launched": len(created_and_launched),
+              "created_missing_token_launched": len(missing_launch),
+              "created_missing_examples": missing_launch[:10],
+              "launchers": launcher_counts,
+              "strategies": strategy_counts,
+              "v4_initializes": len(v4),
+              "pools_trade_v4_pools": len({r.pool_id for r in launches}),
+              "missing_v4_initializes": len(missing_v4),
+              "supply_checks": supply_checks,
+              "quote_tokens": sorted({
+                  r.currency1 if r.currency0 == r.token else r.currency0
+                  for r in launches
+                  if r.token in {r.currency0, r.currency1}
+              }),
+              "requests_made": rpc.requests_made,
+          }, sort_keys=True))
+          PY

@@ -1,0 +1,150 @@
+name: phase1-pools-trade-strategy-census
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pools-trade-strategy-census.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Classify non-instant pools.trade creations by strategy
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          from hlp.config import (
+              POOLS_TRADE_INSTANT_STRATEGIES,
+              POOLS_TRADE_LAUNCHER_CURRENT,
+              POOLS_TRADE_LAUNCHER_ORIGINAL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.evm import event_topic, topic_address
+          from hlp.protocols.pools_trade import (
+              TOKEN_CREATED_TOPIC,
+              TOKEN_DISTRIBUTED_TOPIC,
+              TOKEN_LAUNCHED_TOPIC,
+              decode_pools_trade_token_created,
+              decode_pools_trade_token_distributed,
+              decode_pools_trade_token_launched,
+          )
+
+          start=30_000_000
+          end=30_099_999
+          LBP="0x05d552391067389ee44fec3924157ed33f976000"
+          UNIVERSAL="0x1242c9439d589cae85e121b1f79f2af51e91dcee"
+          TOKEN_SPLITTER="0x4f5e3fbb9745358a92da5674305fab8d2b8a73ce"
+          DIST_INIT=event_topic("DistributionInitialized(address,address,uint256)")
+
+          rpc=RpcClient(
+              os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL",SOLIDRPC_PUBLIC_RPC_URL),
+              timeout=30,attempts=5,min_interval_seconds=0.6,
+              extra_headers=(
+                  {"X-API-Key":os.environ["ROBINHOOD_ARCHIVE_RPC_API_KEY"]}
+                  if os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY") else None
+              ),
+          )
+          rpc.assert_robinhood()
+
+          launcher_logs=list(rpc.iter_logs_chunked(
+              start,end,
+              address=[POOLS_TRADE_LAUNCHER_CURRENT,POOLS_TRADE_LAUNCHER_ORIGINAL],
+              topics=[[TOKEN_CREATED_TOPIC,TOKEN_DISTRIBUTED_TOPIC]],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          creates=[
+              decode_pools_trade_token_created(x) for x in launcher_logs
+              if x.topics[0]==TOKEN_CREATED_TOPIC
+          ]
+          distributions=[
+              decode_pools_trade_token_distributed(x) for x in launcher_logs
+              if x.topics[0]==TOKEN_DISTRIBUTED_TOPIC
+          ]
+          created={x.token for x in creates}
+
+          strategy_logs=list(rpc.iter_logs_chunked(
+              start,end,address=list(POOLS_TRADE_INSTANT_STRATEGIES),
+              topics=[TOKEN_LAUNCHED_TOPIC],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          instant=[
+              decode_pools_trade_token_launched(x) for x in strategy_logs
+          ]
+          instant_tokens={x.token for x in instant}
+          non_instant=created-instant_tokens
+
+          token_distributions={}
+          for row in distributions:
+              if row.token not in created:
+                  continue
+              token_distributions.setdefault(row.token,[]).append(row)
+
+          strategy_counts=Counter()
+          ambiguity={}
+          for token in sorted(non_instant):
+              rows=token_distributions.get(token,[])
+              strategies=sorted({row.strategy for row in rows})
+              if len(strategies)==1:
+                  strategy_counts[strategies[0]]+=1
+              else:
+                  ambiguity[token]=strategies
+
+          lbp_logs=list(rpc.iter_logs_chunked(
+              start,end,address=LBP,topics=[DIST_INIT],
+              chunk_size=2000,min_chunk_size=25,
+          ))
+          lbp_tokens=[]
+          lbp_rows=[]
+          for log in lbp_logs:
+              assert len(log.topics)==3
+              words=[
+                  int(log.data.removeprefix("0x")[i:i+64],16)
+                  for i in range(0,len(log.data.removeprefix("0x")),64)
+              ]
+              assert len(words)==1
+              initializer=topic_address(log.topics[1])
+              token=topic_address(log.topics[2])
+              lbp_tokens.append(token)
+              lbp_rows.append({
+                  "token":token,
+                  "initializer":initializer,
+                  "total_supply":words[0],
+                  "block":log.block_number,
+                  "tx":log.transaction_hash,
+              })
+
+          print(json.dumps({
+              "created":len(created),
+              "instant":len(instant_tokens),
+              "non_instant":len(non_instant),
+              "distribution_strategy_counts_non_instant":dict(strategy_counts),
+              "ambiguous_or_missing":ambiguity,
+              "official_addresses":{
+                  "lbp":LBP,
+                  "universal_router_strategy":UNIVERSAL,
+                  "token_splitter":TOKEN_SPLITTER,
+              },
+              "lbp_distribution_initialized":len(lbp_rows),
+              "lbp_tokens_in_non_instant":len(set(lbp_tokens)&non_instant),
+              "lbp_tokens_outside_created":sorted(set(lbp_tokens)-created),
+              "lbp_rows":lbp_rows,
+              "requests_made":rpc.requests_made,
+          },sort_keys=True))
+          PY

@@ -1,0 +1,158 @@
+name: phase2-pools-trade-lbp-poolkey-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-lbp-poolkey-audit.yml'
+      - 'src/hlp/protocols/pools_trade_lbp.py'
+      - 'src/hlp/protocols/uniswap.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-lbp-poolkey-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INITIALIZER: '0xc5137968f7e6802736ba40e59acd164071ba73cf'
+  TOKEN: '0x89e71858d3c13c0ea1d135edc9fccb32740c9dbc'
+  CREATED_BLOCK: '30001146'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Recover immutable LBP PoolKey and PoolId
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.pools_trade_lbp import (
+              INITIALIZER_CREATED_TOPIC,
+              POOLS_TRADE_LBP_STRATEGY,
+              decode_pools_trade_lbp_initializer_created,
+          )
+          from hlp.protocols.uniswap import v4_pool_id
+
+          initializer = os.environ["INITIALIZER"].lower()
+          token = os.environ["TOKEN"].lower()
+          created = int(os.environ["CREATED_BLOCK"])
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+
+          topic_initializer = (
+              "0x"
+              + initializer.removeprefix("0x").rjust(64, "0")
+          )
+          rows = []
+          for raw in rpc.get_logs(
+              created - 10,
+              created + 10,
+              address=POOLS_TRADE_LBP_STRATEGY,
+              topics=[
+                  INITIALIZER_CREATED_TOPIC,
+                  topic_initializer,
+              ],
+          ):
+              row = decode_pools_trade_lbp_initializer_created(raw)
+              if row.initializer.lower() == initializer:
+                  rows.append(row)
+
+          if len(rows) != 1:
+              raise SystemExit(
+                  "expected exactly one matching InitializerCreated, "
+                  f"found {len(rows)}"
+              )
+          row = rows[0]
+          if row.token.lower() != token:
+              raise SystemExit("LBP sample token changed")
+
+          pool_id = v4_pool_id(
+              currency0=(
+                  row.currency
+                  if int(row.currency, 16) < int(row.token, 16)
+                  else row.token
+              ),
+              currency1=(
+                  row.token
+                  if int(row.currency, 16) < int(row.token, 16)
+                  else row.currency
+              ),
+              fee=row.pool_fee,
+              tick_spacing=row.pool_tick_spacing,
+              hooks=row.pool_hook,
+          )
+          report = {
+              "chain_id": 4663,
+              "strategy": row.strategy,
+              "initializer": row.initializer,
+              "token": row.token,
+              "currency": row.currency,
+              "migration_block": row.migration_block,
+              "reserved_token_amount_for_lp": (
+                  row.reserved_token_amount_for_lp
+              ),
+              "recipient": row.recipient,
+              "position_recipient": row.position_recipient,
+              "pool_fee": row.pool_fee,
+              "pool_tick_spacing": row.pool_tick_spacing,
+              "pool_hook": row.pool_hook,
+              "initializer_created_block": row.block_number,
+              "initializer_created_transaction_hash": (
+                  row.transaction_hash
+              ),
+              "initializer_created_transaction_index": (
+                  row.transaction_index
+              ),
+              "initializer_created_log_index": row.log_index,
+              "derived_pool_id": pool_id,
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          Path(
+              "artifacts/pools-trade-lbp-poolkey-audit.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-poolkey-audit
+          path: artifacts/
+          if-no-files-found: error

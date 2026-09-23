@@ -1,0 +1,340 @@
+"""Helpers for canonical JSONL tapes stored as ordered shard artifacts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, Iterable, Iterator
+
+
+def canonical_jsonl_bytes(row: dict) -> bytes:
+    """Return the canonical JSONL encoding used by snapshot writers."""
+    return (
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+
+
+def write_virtual_jsonl_manifest(
+    *,
+    manifest_path: Path,
+    path_name: str,
+    records: int,
+    sha256: str,
+    provenance: dict,
+) -> dict:
+    """Write a manifest for a logical JSONL tape whose bytes remain sharded."""
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": 1,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "path": path_name,
+        "records": int(records),
+        "sha256": sha256,
+        "provenance": provenance,
+    }
+    temp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+    temp.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temp.replace(manifest_path)
+    return manifest
+
+
+def _find_shard(
+    root: Path,
+    shard: dict,
+) -> tuple[Path, dict]:
+    """Resolve a shard by manifest identity, not filename alone.
+
+    Gap-recovery generations intentionally reuse compact names such as
+    events-gap-000.jsonl. Consumers may therefore download different shards
+    with the same basename into separate source-run directories.
+    """
+    name = str(shard["file"])
+    lo = int(shard["from_block"])
+    hi = int(shard["to_block"])
+    expected_sha = str(shard["sha256"])
+    expected_records = int(shard["records"])
+
+    candidates = sorted(path for path in root.rglob(name) if path.is_file())
+    if not candidates:
+        raise ValueError(
+            f"sharded tape file {name!r} is missing under {root}"
+        )
+
+    matches: list[tuple[Path, dict]] = []
+    for path in candidates:
+        sidecar = path.with_suffix(path.suffix + ".manifest.json")
+        if not sidecar.exists():
+            continue
+        manifest = json.loads(sidecar.read_text())
+        shard_prov = manifest.get("provenance") or {}
+        if (
+            manifest.get("sha256") == expected_sha
+            and int(manifest.get("records", -1)) == expected_records
+            and int(shard_prov.get("from_block", -1)) == lo
+            and int(shard_prov.get("to_block", -1)) == hi
+        ):
+            matches.append((path, manifest))
+
+    if not matches:
+        raise ValueError(
+            f"sharded tape manifest identity changed: {name}; "
+            f"checked {len(candidates)} candidate file(s)"
+        )
+    return matches[0]
+
+
+def _field_value_matcher(
+    field: str,
+    values: Iterable[str],
+) -> Callable[[bytes], bool]:
+    """Match canonical JSONL string fields without decoding unrelated rows."""
+    expected = {str(value).encode("utf-8") for value in values}
+    prefix = (json.dumps(str(field)) + ':"').encode("utf-8")
+
+    def matches(raw: bytes) -> bool:
+        start = raw.find(prefix)
+        if start < 0:
+            return False
+        start += len(prefix)
+        end = raw.find(b'"', start)
+        return end >= 0 and raw[start:end] in expected
+
+    return matches
+
+
+def validate_jsonl_snapshot(
+    path: Path,
+    manifest_path: Path,
+) -> dict:
+    """Validate complete JSONL bytes/count without decoding individual rows."""
+    manifest = json.loads(manifest_path.read_text())
+    records = 0
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if raw.strip():
+                records += 1
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+    return manifest
+
+
+def iter_validated_jsonl(
+    path: Path,
+    manifest_path: Path,
+) -> Iterator[dict]:
+    """Stream every row while validating the complete canonical JSONL tape."""
+    manifest = json.loads(manifest_path.read_text())
+    records = 0
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if not raw.strip():
+                continue
+            records += 1
+            yield json.loads(raw)
+
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+
+
+def iter_validated_jsonl_matching_field_values(
+    path: Path,
+    manifest_path: Path,
+    *,
+    field: str,
+    values: Iterable[str],
+) -> Iterator[dict]:
+    """Stream matching rows while validating every byte of one JSONL snapshot.
+
+    Canonical snapshots serialize string fields without spaces. This lets small
+    representative cohorts avoid JSON-decoding millions of unrelated rows while
+    retaining the original full-file record-count and SHA256 checks.
+    """
+    manifest = json.loads(manifest_path.read_text())
+    matches = _field_value_matcher(field, values)
+    records = 0
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        for raw in handle:
+            digest.update(raw)
+            if not raw.strip():
+                continue
+            records += 1
+            if matches(raw):
+                yield json.loads(raw)
+
+    if records != int(manifest.get("records", -1)):
+        raise ValueError(
+            f"JSONL record count changed for {path.name}: "
+            f"{records} != {manifest.get('records')}"
+        )
+    if digest.hexdigest() != manifest.get("sha256"):
+        raise ValueError(f"JSONL SHA changed for {path.name}")
+
+
+def _iter_sharded_jsonl(
+    root: Path,
+    aggregate_manifest_path: Path,
+    *,
+    raw_matcher: Callable[[bytes], bool] | None,
+) -> Iterator[dict]:
+    aggregate = json.loads(aggregate_manifest_path.read_text())
+    provenance = aggregate.get("provenance") or {}
+    if provenance.get("storage_mode") != "sharded_artifacts":
+        raise ValueError("aggregate manifest is not a sharded-artifact tape")
+    shards = provenance.get("shards") or []
+    if not shards:
+        raise ValueError("aggregate sharded tape manifest contains no shards")
+
+    total_records = 0
+    aggregate_digest = hashlib.sha256()
+    previous_hi = None
+    for shard in shards:
+        name = str(shard["file"])
+        lo = int(shard["from_block"])
+        hi = int(shard["to_block"])
+        if previous_hi is not None and lo != previous_hi + 1:
+            raise ValueError(
+                "sharded tape block coverage is discontinuous: "
+                f"{previous_hi} -> {lo}"
+            )
+        previous_hi = hi
+
+        path, manifest = _find_shard(root, shard)
+
+        local_records = 0
+        local_digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for raw in handle:
+                local_digest.update(raw)
+                aggregate_digest.update(raw)
+                if not raw.strip():
+                    continue
+                local_records += 1
+                total_records += 1
+                if raw_matcher is None or raw_matcher(raw):
+                    yield json.loads(raw)
+
+        if local_records != int(shard["records"]):
+            raise ValueError(
+                f"sharded tape record count changed for {name}: "
+                f"{local_records} != {shard['records']}"
+            )
+        if local_digest.hexdigest() != shard["sha256"]:
+            raise ValueError(f"sharded tape SHA changed for {name}")
+
+    if total_records != int(aggregate.get("records", -1)):
+        raise ValueError(
+            "aggregate sharded tape record count changed: "
+            f"{total_records} != {aggregate.get('records')}"
+        )
+    if aggregate_digest.hexdigest() != aggregate.get("sha256"):
+        raise ValueError("aggregate sharded tape SHA changed")
+
+
+def iter_sharded_jsonl(
+    root: Path,
+    aggregate_manifest_path: Path,
+) -> Iterator[dict]:
+    """Stream and validate a logical JSONL tape from its ordered shard list."""
+    yield from _iter_sharded_jsonl(
+        root,
+        aggregate_manifest_path,
+        raw_matcher=None,
+    )
+
+
+def iter_sharded_jsonl_matching_field_values(
+    root: Path,
+    aggregate_manifest_path: Path,
+    *,
+    field: str,
+    values: Iterable[str],
+) -> Iterator[dict]:
+    """Validate a full sharded tape but decode only matching string-field rows."""
+    yield from _iter_sharded_jsonl(
+        root,
+        aggregate_manifest_path,
+        raw_matcher=_field_value_matcher(field, values),
+    )
+
+
+
+def validate_shard_block_coverage(
+    shards: Iterable[dict],
+    *,
+    start_block: int,
+    end_block: int,
+) -> list[dict]:
+    """Validate exact, gapless, non-overlapping block coverage.
+
+    Rows may contain arbitrary extra metadata but must provide from_block and
+    to_block. The returned rows are sorted by block range.
+    """
+    start = int(start_block)
+    end = int(end_block)
+    if start < 0 or end < start:
+        raise ValueError(
+            f"invalid required shard range: {start}..{end}"
+        )
+
+    ordered = sorted(
+        (dict(row) for row in shards),
+        key=lambda row: (
+            int(row["from_block"]),
+            int(row["to_block"]),
+        ),
+    )
+    if not ordered:
+        raise ValueError("shard coverage is empty")
+
+    cursor = start
+    for row in ordered:
+        lo = int(row["from_block"])
+        hi = int(row["to_block"])
+        if lo < 0 or hi < lo:
+            raise ValueError(f"invalid shard range: {lo}..{hi}")
+        if lo != cursor:
+            if lo < cursor:
+                raise ValueError(
+                    "shard coverage overlaps or repeats: "
+                    f"expected {cursor}, got {lo}"
+                )
+            raise ValueError(
+                f"shard coverage gap: {cursor}..{lo - 1}"
+            )
+        cursor = hi + 1
+
+    if ordered[0]["from_block"] != start:
+        raise ValueError(
+            "shard coverage does not start at required block"
+        )
+    if cursor != end + 1:
+        if cursor <= end:
+            raise ValueError(
+                f"shard coverage ends early: {cursor - 1} < {end}"
+            )
+        raise ValueError(
+            f"shard coverage exceeds required end: {cursor - 1} > {end}"
+        )
+    return ordered

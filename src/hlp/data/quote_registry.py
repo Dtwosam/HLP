@@ -1,0 +1,231 @@
+"""Classify every Pons quote asset and resolve official USD sources."""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Iterable
+
+from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+from hlp.data.chainlink_directory import (
+    ChainlinkDirectoryClient,
+    ChainlinkDirectoryError,
+)
+from hlp.data.robinhood_assets import RobinhoodAssetsClient
+
+
+ZERO_ADDRESS = "0x" + "00" * 20
+
+# Non-Stock-Token Pons quote assets proven against raw chain + the official
+# Chainlink Robinhood directory. cbBTC was verified by
+# phase1-pons-crypto-quote-verify run 33920123310 at its first Pons use.
+PONS_CBBTC = "0xcec185eb182c47d1ba1efc84e6959e18cd620be4"
+PONS_CHAINLINK_CRYPTO_QUOTES = {
+    PONS_CBBTC: {
+        "symbol": "CBBTC",
+        "quote_decimals": 8,
+    },
+}
+CHAINLINK_PRICED_STATUSES = frozenset({
+    "priced_chainlink_stock_token",
+    "priced_chainlink_crypto_token",
+})
+
+
+def build_pons_quote_registry(
+    registry_rows: Iterable[dict],
+    *,
+    assets_client: RobinhoodAssetsClient,
+    directory_client: ChainlinkDirectoryClient,
+) -> list[dict]:
+    """Return one explicit pricing-source row per Pons pair token."""
+    stats: dict[str, dict] = {}
+    for launch in registry_rows:
+        token = launch["pair_token"].lower()
+        current = stats.get(token)
+        raw_block = launch.get("block_number")
+        block = None if raw_block is None else int(raw_block)
+        raw_version = launch.get("version")
+        version = None if raw_version is None else str(raw_version)
+        raw_decimals = launch.get("quote_decimals")
+        decimals = None if raw_decimals is None else int(raw_decimals)
+        if current is None:
+            current = {
+                "quote_token": token,
+                "launches": 0,
+                "first_launch_block": block,
+                "last_launch_block": block,
+                "versions": Counter(),
+                "observed_decimals": set(),
+            }
+            stats[token] = current
+        current["launches"] += 1
+        if block is not None:
+            first = current["first_launch_block"]
+            last = current["last_launch_block"]
+            current["first_launch_block"] = (
+                block if first is None else min(first, block)
+            )
+            current["last_launch_block"] = (
+                block if last is None else max(last, block)
+            )
+        if version is not None:
+            current["versions"][version] += 1
+        if decimals is not None:
+            current["observed_decimals"].add(decimals)
+
+    for token, current in stats.items():
+        if len(current["observed_decimals"]) > 1:
+            raise ValueError(
+                f"inconsistent Pons quote decimals for {token}: "
+                f"{sorted(current['observed_decimals'])}"
+            )
+
+    assets = assets_client.address_map()
+    stock_symbols = []
+    asset_by_token = {}
+    for token in stats:
+        if token in {
+            ZERO_ADDRESS,
+            ROBINHOOD_WETH.lower(),
+            ROBINHOOD_USDG.lower(),
+        }:
+            continue
+        asset = assets.get(token)
+        if asset is None:
+            continue
+        asset_by_token[token] = asset
+        stock_symbols.append(asset["token_symbol"].upper())
+
+    feeds = {}
+    crypto_feeds = {}
+    if stock_symbols or any(
+        token in PONS_CHAINLINK_CRYPTO_QUOTES for token in stats
+    ):
+        page = directory_client.fetch_text()
+        for symbol in sorted(set(stock_symbols)):
+            try:
+                feed = directory_client.parse_robinhood_feed(page, symbol)
+            except ChainlinkDirectoryError:
+                continue
+            feeds[feed.symbol] = feed
+        for token, spec in PONS_CHAINLINK_CRYPTO_QUOTES.items():
+            if token not in stats:
+                continue
+            symbol = spec["symbol"]
+            try:
+                feed = directory_client.parse_robinhood_crypto_usd_feed(
+                    page, symbol
+                )
+            except ChainlinkDirectoryError:
+                continue
+            crypto_feeds[token] = feed
+
+    output = []
+    for token in sorted(stats):
+        current = stats[token]
+        observed = sorted(current["observed_decimals"])
+        base = {
+            "quote_token": token,
+            "launches": int(current["launches"]),
+            "first_launch_block": (
+                None
+                if current["first_launch_block"] is None
+                else int(current["first_launch_block"])
+            ),
+            "last_launch_block": (
+                None
+                if current["last_launch_block"] is None
+                else int(current["last_launch_block"])
+            ),
+            "versions": dict(sorted(current["versions"].items())),
+            "observed_quote_decimals": observed[0] if observed else None,
+            "pricing_status": None,
+            "symbol": None,
+            "quote_decimals": None,
+            "asset_id": None,
+            "asset_status": None,
+            "feed": None,
+            "secondary_feed": None,
+            "heartbeat_seconds": None,
+            "directory_name": None,
+            "directory_path": None,
+        }
+
+        if token == ZERO_ADDRESS:
+            base.update({
+                "pricing_status": "priced_weth_usdg",
+                "symbol": "ETH",
+                "quote_decimals": 18,
+            })
+        elif token == ROBINHOOD_WETH.lower():
+            base.update({
+                "pricing_status": "priced_weth_usdg",
+                "symbol": "WETH",
+                "quote_decimals": 18,
+            })
+        elif token == ROBINHOOD_USDG.lower():
+            base.update({
+                "pricing_status": "priced_usdg_nominal",
+                "symbol": "USDG",
+                "quote_decimals": 6,
+            })
+        else:
+            crypto = PONS_CHAINLINK_CRYPTO_QUOTES.get(token)
+            if crypto is not None:
+                crypto_decimals = int(crypto["quote_decimals"])
+                if observed and observed[0] != crypto_decimals:
+                    raise ValueError(
+                        f"quote decimals disagree for {crypto['symbol']} "
+                        f"{token}: Pons={observed[0]}, expected={crypto_decimals}"
+                    )
+                feed = crypto_feeds.get(token)
+                base.update({
+                    "symbol": crypto["symbol"],
+                    "quote_decimals": crypto_decimals,
+                })
+                if feed is None:
+                    base["pricing_status"] = "missing_chainlink_feed"
+                else:
+                    base.update({
+                        "pricing_status": "priced_chainlink_crypto_token",
+                        "feed": feed.proxy_address,
+                        "secondary_feed": feed.secondary_proxy_address,
+                        "heartbeat_seconds": feed.heartbeat_seconds,
+                        "directory_name": feed.name,
+                        "directory_path": feed.path,
+                    })
+                output.append(base)
+                continue
+
+            asset = asset_by_token.get(token)
+            if asset is None:
+                base["pricing_status"] = "unsupported_quote"
+            else:
+                asset_decimals = int(asset["token_decimals"])
+                if observed and observed[0] != asset_decimals:
+                    raise ValueError(
+                        f"quote decimals disagree for {asset['token_symbol']} "
+                        f"{token}: Pons={observed[0]}, RHJ={asset_decimals}"
+                    )
+                symbol = asset["token_symbol"].upper()
+                feed = feeds.get(symbol)
+                base.update({
+                    "symbol": symbol,
+                    "quote_decimals": asset_decimals,
+                    "asset_id": asset["asset_id"],
+                    "asset_status": asset["status"],
+                })
+                if feed is None:
+                    base["pricing_status"] = "missing_chainlink_feed"
+                else:
+                    base.update({
+                        "pricing_status": "priced_chainlink_stock_token",
+                        "feed": feed.proxy_address,
+                        "secondary_feed": feed.secondary_proxy_address,
+                        "heartbeat_seconds": feed.heartbeat_seconds,
+                        "directory_name": feed.name,
+                        "directory_path": feed.path,
+                    })
+        output.append(base)
+
+    return output

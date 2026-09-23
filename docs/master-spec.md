@@ -238,9 +238,9 @@ Canonical V1 must be operable at $0.
 
 The architecture may use free tiers, but not in a way that silently turns into paid overage.
 
-The unresolved Phase 0/1 risk is full-history bulk acquisition: Alchemy Free restricts Robinhood eth_getLogs queries to 10 blocks, while The Graph Market Free currently includes 7M processed blocks and 5 GiB egress. Phase 1 must measure whether protocol-specific/cached Substreams data can reconstruct the required history within the free allowance.
+The unresolved Phase 1 risk is full-history bulk acquisition. Alchemy Free restricts Robinhood eth_getLogs queries to 10 blocks. The Graph Market Free has finite processed-block/egress allowances. A second promising path, hoodexplorer, documents keyless indexed event logs plus an archive-node proxy, but GitHub-hosted runners could not route to it during the first network spike.
 
-Until that spike passes, full historical acquisition is a viability question, not an assumed solved problem.
+Phase 1 must measure a complete-enough historical path from a reachable runtime. Until that passes, full historical acquisition is a viability question, not an assumed solved problem.
 
 ## 16. Explicit non-goals for V1
 

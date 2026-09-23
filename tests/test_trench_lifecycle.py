@@ -1,0 +1,270 @@
+import pytest
+
+from hlp.data.trench_lifecycle import (
+    TRENCH_HANDOFF_RULE_VERSION,
+    build_trench_handoff_market_registries,
+    build_trench_limit_market_candidates,
+    freeze_trench_limit_market_handoffs,
+    summarize_trench_limit_market_candidates,
+)
+
+
+TOKEN = "0x" + "11" * 20
+ZERO = "0x" + "00" * 20
+WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+
+
+def launch():
+    return {
+        "token": TOKEN,
+        "quote_token": ZERO,
+        "limit_reach_block": 100,
+        "limit_reach_transaction_hash": "0x" + "aa" * 32,
+        "limit_reach_transaction_index": 4,
+        "limit_reach_log_index": 8,
+    }
+
+
+def market(
+    *,
+    source_id="direct_uniswap_v3",
+    pool="0x" + "22" * 20,
+    block=100,
+    tx_hash="0x" + "aa" * 32,
+    tx_index=4,
+    log_index=9,
+):
+    return {
+        "source_id": source_id,
+        "venue": "uniswap_v3",
+        "source_kind": "direct_dex",
+        "token": TOKEN,
+        "quote_token": WETH,
+        "pool": pool,
+        "initialize_block": block,
+        "initialize_transaction_hash": tx_hash,
+        "initialize_transaction_index": tx_index,
+        "initialize_log_index": log_index,
+    }
+
+
+def test_trench_limit_candidates_map_native_quote_to_weth():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [market()],
+    )
+    assert len(rows) == 1
+    assert rows[0]["candidate_status"] == "matching_direct_market"
+    assert rows[0]["dex_quote_token"] == WETH
+    assert rows[0]["same_transaction"] is True
+    assert rows[0]["same_block"] is True
+    assert rows[0]["initialize_order_relation"] == "after_limit"
+
+
+def test_trench_limit_candidates_preserve_multiple_markets():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(),
+            market(
+                source_id="direct_sushiswap_v3",
+                pool="0x" + "33" * 20,
+                block=101,
+                tx_hash="0x" + "bb" * 32,
+                tx_index=1,
+                log_index=2,
+            ),
+        ],
+    )
+    assert len(rows) == 2
+    assert {row["candidate_count_for_token"] for row in rows} == {2}
+    summary = summarize_trench_limit_market_candidates(rows)
+    assert summary["multi_candidate_tokens"] == 1
+    assert summary["handoff_rule_frozen"] is False
+
+
+def test_trench_limit_candidates_keep_unmatched_token_explicit():
+    rows = build_trench_limit_market_candidates([launch()], [])
+    assert len(rows) == 1
+    assert rows[0]["candidate_status"] == "no_matching_direct_market"
+    summary = summarize_trench_limit_market_candidates(rows)
+    assert summary["tokens_without_candidates"] == 1
+    assert summary["source_coverage_complete"] is False
+
+
+def test_trench_limit_candidates_reject_non_direct_market():
+    bad = {
+        **market(),
+        "source_kind": "launchpad",
+    }
+    with pytest.raises(ValueError, match="not direct_dex"):
+        build_trench_limit_market_candidates([launch()], [bad])
+
+
+def test_freeze_trench_handoff_selects_unique_same_transaction_market():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                source_id="direct_uniswap_v3",
+                pool="0x" + "22" * 20,
+                block=99,
+                tx_hash="0x" + "cc" * 32,
+                tx_index=1,
+                log_index=2,
+            ),
+            market(
+                source_id="direct_sushiswap_v3",
+                pool="0x" + "33" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=9,
+            ),
+        ],
+    )
+
+    selected, summary = freeze_trench_limit_market_handoffs(rows)
+
+    assert len(selected) == 1
+    assert selected[0]["market_source_id"] == "direct_sushiswap_v3"
+    assert selected[0]["market_id"] == "0x" + "33" * 20
+    assert (
+        selected[0]["handoff_rule_version"]
+        == TRENCH_HANDOFF_RULE_VERSION
+    )
+    assert selected[0]["handoff_rule_frozen"] is True
+    assert selected[0]["source_coverage_complete"] is False
+    assert summary["all_limit_reach_tokens_resolved"] is True
+    assert summary["selected_handoffs"] == 1
+    assert summary["handoff_rule_frozen"] is True
+    assert summary["source_coverage_complete"] is False
+
+
+def test_freeze_trench_handoff_rejects_missing_same_transaction_market():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                block=101,
+                tx_hash="0x" + "bb" * 32,
+                tx_index=1,
+                log_index=2,
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not uniquely same-transaction"):
+        freeze_trench_limit_market_handoffs(rows)
+
+
+def test_freeze_trench_handoff_rejects_ambiguous_same_transaction_markets():
+    rows = build_trench_limit_market_candidates(
+        [launch()],
+        [
+            market(
+                source_id="direct_uniswap_v3",
+                pool="0x" + "22" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=9,
+            ),
+            market(
+                source_id="direct_sushiswap_v3",
+                pool="0x" + "33" * 20,
+                block=100,
+                tx_hash="0x" + "aa" * 32,
+                tx_index=4,
+                log_index=10,
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not uniquely same-transaction"):
+        freeze_trench_limit_market_handoffs(rows)
+
+
+def test_build_trench_handoff_market_registry_keeps_launch_supply_seed():
+    candidates = build_trench_limit_market_candidates(
+        [launch()],
+        [market()],
+    )
+    handoffs, _ = freeze_trench_limit_market_handoffs(candidates)
+    trench_registry = [{
+        **launch(),
+        "launch_block": 90,
+        "launch_transaction_hash": "0x" + "dd" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 2,
+        "supply_raw": 10**18,
+        "token_decimals": 18,
+    }]
+    direct_registry = [{
+        **market(),
+        "quote_decimals": 18,
+        "token_decimals": 18,
+        "supply_raw": 10**18,
+        "source_kind": "direct_dex",
+        "factory": "0x" + "44" * 20,
+        "token0": TOKEN,
+        "token1": WETH,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "initial_sqrt_price_x96": 2**96,
+        "initial_tick": 0,
+    }]
+
+    registries = build_trench_handoff_market_registries(
+        trench_registry,
+        handoffs,
+        direct_registry,
+    )
+
+    assert len(registries["v3"]) == 1
+    assert registries["v4"] == []
+    row = registries["v3"][0]
+    assert row["supply_raw"] == 10**18
+    assert row["supply_seed_semantics"] == "launch_block_end_total_supply"
+    assert row["launch_block"] == 90
+    assert row["lifecycle_block"] == 100
+    assert row["initialize_block"] == 100
+    assert row["handoff_rule_version"] == TRENCH_HANDOFF_RULE_VERSION
+
+
+def test_build_trench_handoff_market_registry_rejects_unfrozen_handoff():
+    candidates = build_trench_limit_market_candidates(
+        [launch()],
+        [market()],
+    )
+    trench_registry = [{
+        **launch(),
+        "launch_block": 90,
+        "launch_transaction_hash": "0x" + "dd" * 32,
+        "launch_transaction_index": 1,
+        "launch_log_index": 2,
+        "supply_raw": 10**18,
+        "token_decimals": 18,
+    }]
+    direct_registry = [{
+        **market(),
+        "quote_decimals": 18,
+        "token_decimals": 18,
+        "supply_raw": 10**18,
+        "source_kind": "direct_dex",
+        "factory": "0x" + "44" * 20,
+        "token0": TOKEN,
+        "token1": WETH,
+        "fee": 3000,
+        "tick_spacing": 60,
+        "initial_sqrt_price_x96": 2**96,
+        "initial_tick": 0,
+    }]
+
+    with pytest.raises(ValueError, match="not frozen"):
+        build_trench_handoff_market_registries(
+            trench_registry,
+            candidates,
+            direct_registry,
+        )
+

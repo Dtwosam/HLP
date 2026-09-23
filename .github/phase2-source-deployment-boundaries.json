@@ -1,0 +1,200 @@
+{
+  "version": "phase2-source-deployment-boundaries-v1",
+  "chain_id": 4663,
+  "snapshot_head_block": 54486035,
+  "source_count": 12,
+  "rpc_requests": 397,
+  "rpc_route": "solidrpc_keyless_public",
+  "evidence_run_id": 35623186049,
+  "artifact_id": 10649564971,
+  "artifact_name": "phase2-source-deployment-boundaries",
+  "artifact_digest": "sha256:6664a2e450c5bad4bbb2a43424a06d3d21fe7e12996e38a9ea1ce8aef0b3d876",
+  "sources": [
+    {
+      "source_id": "direct_sushiswap_v3",
+      "source_kind": "direct_dex",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "trading_contract_deployment",
+      "required_start_block": 6292626,
+      "contracts": [
+        {
+          "address": "0xe51960f1b45f1c9fb6d166e6a884f866fc70433b",
+          "first_code_block": 6292626,
+          "code_bytes": 24535,
+          "code_sha256": "2808569661a82eb28bec35edeea4db9212399288ff962b6452afefb0e133f606"
+        }
+      ]
+    },
+    {
+      "source_id": "direct_uniswap_v3",
+      "source_kind": "direct_dex",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "trading_contract_deployment",
+      "required_start_block": 8930,
+      "contracts": [
+        {
+          "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+          "first_code_block": 8930,
+          "code_bytes": 24535,
+          "code_sha256": "6c41051606215dd79309b298d5395b8e4e4acb155516920b52051c230ee125cf"
+        }
+      ]
+    },
+    {
+      "source_id": "direct_uniswap_v4",
+      "source_kind": "direct_dex",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "trading_contract_deployment",
+      "required_start_block": 9070,
+      "contracts": [
+        {
+          "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "first_code_block": 9070,
+          "code_bytes": 24009,
+          "code_sha256": "6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b"
+        }
+      ]
+    },
+    {
+      "source_id": "doppler",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 646829,
+      "contracts": [
+        {
+          "address": "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862",
+          "first_code_block": 646829,
+          "code_bytes": 5695,
+          "code_sha256": "25e4734d5056b8e00aace17e99d0e1da17c5411a6704c2cd3876e6326679e58f"
+        }
+      ]
+    },
+    {
+      "source_id": "flap",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 4180724,
+      "contracts": [
+        {
+          "address": "0x26605f322f7ff986f381bb9a6e3f5dab0beaeb09",
+          "first_code_block": 4180724,
+          "code_bytes": 2840,
+          "code_sha256": "299af1a8e46dd7732ac1ac6c205f01e7215361d43af7263da28aa24de08dc6db"
+        }
+      ]
+    },
+    {
+      "source_id": "hood_fun_current",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 5611265,
+      "contracts": [
+        {
+          "address": "0x5fcc1df0dc020cf454e742e9a8ae2554c37a452c",
+          "first_code_block": 5611265,
+          "code_bytes": 20518,
+          "code_sha256": "be00244ed6f9c39ad25cc42cd05983c63f64ea97f93a7237200a5854d9060141"
+        }
+      ]
+    },
+    {
+      "source_id": "hood_fun_previous",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 1676992,
+      "contracts": [
+        {
+          "address": "0x6a63d96ef77ae569fcb85934cf1bd1ec7fe9b33d",
+          "first_code_block": 1676992,
+          "code_bytes": 19734,
+          "code_sha256": "f33f2b11578c71dcae609ae5ea74e9199e4d913d600316421d8a14660ac5b91c"
+        }
+      ]
+    },
+    {
+      "source_id": "noxa",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 61688,
+      "contracts": [
+        {
+          "address": "0xd9ec2db5f3d1b236843925949fe5bd8a3836fccb",
+          "first_code_block": 61688,
+          "code_bytes": 22811,
+          "code_sha256": "d8c9cdd4e3925554edf09b1d3c06360066cd5e2dc7057eba1159cb0836572f3d"
+        }
+      ]
+    },
+    {
+      "source_id": "pools_fun",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 33570152,
+      "contracts": [
+        {
+          "address": "0x626c3d09b65bf5d1d40e0d5f25e19fa49783b3d4",
+          "first_code_block": 33570152,
+          "code_bytes": 15657,
+          "code_sha256": "c936c03e27fa946e7c1232f2e51baf1ac4306fa1c9678a55619bca0d75a1e50c"
+        }
+      ]
+    },
+    {
+      "source_id": "pools_trade_instant",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 3338007,
+      "contracts": [
+        {
+          "address": "0x00004c4ccc709ef590f7c81102c0689f0263d4e9",
+          "first_code_block": 3338007,
+          "code_bytes": 3747,
+          "code_sha256": "48555064cec00891ac713ca46bc98635a7cf8e1ffa914ad9d9a4d506393e7962"
+        },
+        {
+          "address": "0x0000ffffbe8efe702c8703ae3477ff5de3d319c0",
+          "first_code_block": 28519835,
+          "code_bytes": 4127,
+          "code_sha256": "845a88f3a3207bab40f54df56966ed05a0f28bd2bc7f71cac57ac10c30f38cfa"
+        }
+      ]
+    },
+    {
+      "source_id": "pools_trade_lbp",
+      "source_kind": "launchpad",
+      "source_readiness": "decoder_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 6222785,
+      "contracts": [
+        {
+          "address": "0x05d552391067389ee44fec3924157ed33f976000",
+          "first_code_block": 6222785,
+          "code_bytes": 20624,
+          "code_sha256": "b9b208d11fbe89a62331570b70de2479d9f8130d4990f823634eab083cea8a19"
+        }
+      ]
+    },
+    {
+      "source_id": "trench_today",
+      "source_kind": "launchpad",
+      "source_readiness": "adapter_ready",
+      "boundary_basis": "launch_contract_deployment",
+      "required_start_block": 5773155,
+      "contracts": [
+        {
+          "address": "0x77dc6f6361b7b99456fc3761ce5b7dda80d83f9d",
+          "first_code_block": 5773155,
+          "code_bytes": 758,
+          "code_sha256": "a3e4bf4f09e76554a7f038936024de982be409d8109c48bc9702eb0ba840363f"
+        }
+      ]
+    }
+  ]
+}

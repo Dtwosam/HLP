@@ -1,0 +1,471 @@
+name: phase2-pools-fun-promotion-review
+
+on:
+  workflow_dispatch:
+    inputs:
+      promotion_frontier_run_id:
+        description: Exact successful phase2-direct-coverage-wave-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_frontier_artifact_digest:
+        description: Exact promotion-frontier artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_prepare_review:
+        description: Explicitly prepare exact pools.fun promotion inputs without dispatching promotion
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-pools-fun-promotion-review-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROMOTION_FRONTIER_RUN_ID: ${{ inputs.promotion_frontier_run_id }}
+  EXPECTED_FRONTIER_ARTIFACT_DIGEST: ${{ inputs.expected_frontier_artifact_digest }}
+  CONFIRM_PREPARE_REVIEW: ${{ inputs.confirm_prepare_review }}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit read-only review preparation
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_PREPARE_REVIEW}" != "true" ]; then
+            echo "pools.fun promotion review requires confirm_prepare_review=true" >&2
+            exit 1
+          fi
+
+      - id: review
+        name: Verify promotion frontier and prepare exact pools.fun inputs
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_promotion import (
+              POOLS_FUN_COVERAGE_ARTIFACT,
+              POOLS_FUN_COVERAGE_REPORT_PATH,
+              POOLS_FUN_COVERAGE_WORKFLOW,
+              SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+              build_phase2_pools_fun_promotion_review_handoff,
+          )
+          from hlp.data.phase2_post_fanout import (
+              validate_phase2_direct_coverage_completion,
+              validate_phase2_direct_coverage_wave_completion_receipt,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args):
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ])
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([
+                  f"/repos/{repo}/actions/runs/{run_id}",
+              ])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+              if run.get("status") != "completed":
+                  raise SystemExit(
+                      f"run {run_id} is not completed"
+                  )
+              if run.get("conclusion") != "success":
+                  raise SystemExit(
+                      f"run {run_id} did not succeed"
+                  )
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(path),
+              ])
+              return path
+
+          try:
+              frontier_run_id = int(
+                  os.environ["PROMOTION_FRONTIER_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "promotion_frontier_run_id is invalid"
+              ) from exc
+          if frontier_run_id <= 0:
+              raise SystemExit(
+                  "promotion_frontier_run_id must be positive"
+              )
+          expected_frontier_digest = str(
+              os.environ["EXPECTED_FRONTIER_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_frontier_digest.startswith("sha256:")
+              or len(expected_frontier_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_frontier_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+          try:
+              int(expected_frontier_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_frontier_artifact_digest is not hexadecimal"
+              ) from exc
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_bytes = ledger_path.read_bytes()
+          ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+          ledger = json.loads(ledger_bytes)
+
+          frontier_workflow = (
+              "phase2-direct-coverage-wave-completion.yml"
+          )
+          frontier_run = get_run(frontier_run_id)
+          assert_run_identity(
+              frontier_run,
+              workflow=frontier_workflow,
+              run_id=frontier_run_id,
+          )
+          frontier_artifact_name = (
+              "phase2-direct-coverage-wave-completion"
+          )
+          frontier_artifact = artifact_row(
+              frontier_run_id,
+              frontier_artifact_name,
+          )
+          actual_frontier_digest = str(
+              frontier_artifact.get("digest") or ""
+          ).lower()
+          if actual_frontier_digest != expected_frontier_digest:
+              raise SystemExit(
+                  "promotion frontier artifact digest drift"
+              )
+          frontier_dir = download_artifact(
+              frontier_run_id,
+              frontier_artifact_name,
+              "upstream/promotion-frontier",
+          )
+          frontier_path = (
+              frontier_dir
+              / "phase2-direct-coverage-wave-completion-receipt.json"
+          )
+          if not frontier_path.is_file():
+              raise SystemExit(
+                  "promotion frontier artifact lacks completion receipt"
+              )
+          try:
+              frontier_receipt = (
+                  validate_phase2_direct_coverage_wave_completion_receipt(
+                      json.loads(frontier_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if frontier_receipt[
+              "direct_coverage_completion_control_run_id"
+          ] != frontier_run_id:
+              raise SystemExit(
+                  "promotion frontier receipt/control run identity drift"
+              )
+          if frontier_receipt["execution_branch"] != branch:
+              raise SystemExit(
+                  "promotion frontier receipt branch drift"
+              )
+          if frontier_receipt["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "promotion frontier receipt HEAD drift"
+              )
+          if frontier_receipt[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "promotion frontier receipt canonical-ledger SHA drift"
+              )
+
+          planner_run_id = int(frontier_receipt["planner_run_id"])
+          planner_digest = str(
+              frontier_receipt["planner_artifact_digest"]
+          )
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          planner_run = get_run(planner_run_id)
+          assert_run_identity(
+              planner_run,
+              workflow=planner_workflow,
+              run_id=planner_run_id,
+          )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          if str(
+              planner_artifact.get("digest") or ""
+          ).lower() != planner_digest:
+              raise SystemExit(
+                  "promotion-frontier planner artifact digest drift"
+              )
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/promotion-frontier-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit(
+                  "promotion-frontier planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "promotion-frontier planner canonical-ledger SHA drift"
+              )
+          try:
+              frontier = validate_phase2_direct_coverage_completion(
+                  execution_plan,
+                  verified_receipts,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          run_inputs = dict(frontier["promotion_run_inputs"])
+          if set(run_inputs) != {"coverage_run_id"}:
+              raise SystemExit(
+                  "pools.fun promotion coverage-run input drift"
+              )
+          try:
+              coverage_run_id = int(run_inputs["coverage_run_id"])
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "pools.fun coverage_run_id is invalid"
+              ) from exc
+          if coverage_run_id <= 0:
+              raise SystemExit(
+                  "pools.fun coverage_run_id must be positive"
+              )
+
+          coverage_run = get_run(coverage_run_id)
+          assert_run_identity(
+              coverage_run,
+              workflow=POOLS_FUN_COVERAGE_WORKFLOW,
+              run_id=coverage_run_id,
+          )
+          coverage_artifact = artifact_row(
+              coverage_run_id,
+              POOLS_FUN_COVERAGE_ARTIFACT,
+          )
+          coverage_artifact_digest = str(
+              coverage_artifact.get("digest") or ""
+          ).lower()
+          if (
+              not coverage_artifact_digest.startswith("sha256:")
+              or len(coverage_artifact_digest) != 71
+          ):
+              raise SystemExit(
+                  "pools.fun coverage artifact digest is invalid"
+              )
+          coverage_dir = download_artifact(
+              coverage_run_id,
+              POOLS_FUN_COVERAGE_ARTIFACT,
+              "upstream/pools-fun-coverage",
+          )
+          report_path = coverage_dir / POOLS_FUN_COVERAGE_REPORT_PATH
+          if not report_path.is_file():
+              raise SystemExit(
+                  "pools.fun coverage artifact lacks final report"
+              )
+          report_bytes = report_path.read_bytes()
+          report_sha = hashlib.sha256(report_bytes).hexdigest()
+          report = json.loads(report_bytes)
+
+          try:
+              review = build_phase2_pools_fun_promotion_review_handoff(
+                  ledger,
+                  report,
+                  build_phase2_source_inventory(),
+                  coverage_run_id=coverage_run_id,
+                  coverage_artifact_digest=coverage_artifact_digest,
+                  coverage_report_sha256=report_sha,
+                  planner_run_id=planner_run_id,
+                  planner_artifact_digest=planner_digest,
+                  canonical_ledger_sha256=ledger_sha,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if review["promotion_workflow"] != (
+              SOURCE_COVERAGE_PROMOTION_WORKFLOW
+          ):
+              raise SystemExit(
+                  "pools.fun promotion workflow identity drift"
+              )
+
+          output = {
+              **review,
+              "promotion_review_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "promotion_frontier_run_id": frontier_run_id,
+              "promotion_frontier_artifact_digest": (
+                  actual_frontier_digest
+              ),
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+          }
+          Path(
+              "artifacts/phase2-pools-fun-promotion-review.json"
+          ).write_text(
+              json.dumps(output, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"coverage_run_id={coverage_run_id}\n"
+              )
+              handle.write(
+                  f"coverage_artifact_digest="
+                  f"{coverage_artifact_digest}\n"
+              )
+              handle.write(
+                  f"coverage_report_sha256={report_sha}\n"
+              )
+          print(json.dumps(output, sort_keys=True))
+          PY
+
+      - name: Upload pools.fun promotion review handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-promotion-review
+          path: artifacts/phase2-pools-fun-promotion-review.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish exact proposal inputs for human review
+        env:
+          REVIEW_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          COVERAGE_RUN_ID: ${{ steps.review.outputs.coverage_run_id }}
+          COVERAGE_ARTIFACT_DIGEST: ${{ steps.review.outputs.coverage_artifact_digest }}
+          COVERAGE_REPORT_SHA256: ${{ steps.review.outputs.coverage_report_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 pools.fun promotion review"
+            echo
+            echo "- promotion_review_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- promotion_review_artifact_digest: ${REVIEW_ARTIFACT_DIGEST}"
+            echo "- promotion_workflow: phase2-source-coverage-promotion.yml"
+            echo "- coverage_run_id: ${COVERAGE_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-pools-fun-source-coverage"
+            echo "- expected_artifact_digest: ${COVERAGE_ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: pools-fun-source-coverage-report.json"
+            echo "- expected_report_sha256: ${COVERAGE_REPORT_SHA256}"
+            echo "- expected_source_id: pools_fun"
+            echo "- promotion_review_required: true"
+            echo "- promotion_dispatched: false"
+            echo "- proposal_created: false"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

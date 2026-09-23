@@ -1,0 +1,561 @@
+name: phase1-pons-representative-dex-execution-diagnostic-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - .github/phase1-pons-representative-dex-execution-diagnostic.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-representative-dex-execution-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: ${{ startsWith(github.event.head_commit.message, 'launch representative DEX execution diagnostic generation ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      market_path_run_id: ${{ steps.validate.outputs.market_path_run_id }}
+      priced_path_run_id: ${{ steps.validate.outputs.priced_path_run_id }}
+      quote_diagnostic_run_id: ${{ steps.validate.outputs.quote_diagnostic_run_id }}
+      quote_audit_run_id: ${{ steps.validate.outputs.quote_audit_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: validate
+        name: Validate execution-price diagnostic launch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LAUNCH_MESSAGE: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_json,
+              find_github_actions_run_artifact,
+          )
+
+          config_path = (
+              ".github/"
+              "phase1-pons-representative-dex-execution-diagnostic.json"
+          )
+          config = json.loads(Path(config_path).read_text())
+          expected_keys = {
+              "generation",
+              "market_path_run_id",
+              "priced_path_run_id",
+              "quote_diagnostic_run_id",
+              "quote_audit_run_id",
+          }
+          if set(config) != expected_keys:
+              raise SystemExit(
+                  "DEX execution diagnostic config schema changed: "
+                  f"{sorted(config)}"
+              )
+          if os.environ["BRANCH"] != "phase1/data-acquisition-spike":
+              raise SystemExit("DEX execution diagnostic branch changed")
+
+          raw_message = str(os.environ["LAUNCH_MESSAGE"])
+          message = raw_message.splitlines()[0]
+          if raw_message != message:
+              raise SystemExit(
+                  "DEX execution diagnostic message must be one line"
+              )
+          launch = re.fullmatch(
+              r"launch representative DEX execution diagnostic generation (\d+)",
+              message,
+          )
+          if launch is None:
+              raise SystemExit(
+                  "DEX execution diagnostic requires exact generation"
+              )
+          requested_generation = int(launch.group(1))
+
+          before_sha = str(os.environ["BEFORE_SHA"] or "")
+          current_sha = str(os.environ["CURRENT_SHA"] or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+              raise SystemExit("DEX execution diagnostic before SHA is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_sha):
+              raise SystemExit("DEX execution diagnostic current SHA is invalid")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          def get(path):
+              return fetch_github_actions_json(
+                  api + path,
+                  token,
+                  timeout=30,
+              )
+
+          commit = get(f"/repos/{repo}/commits/{current_sha}")
+          parents = list(commit.get("parents") or [])
+          if (
+              len(parents) != 1
+              or str(parents[0].get("sha") or "") != before_sha
+          ):
+              raise SystemExit(
+                  "DEX execution diagnostic launch must be direct single-parent"
+              )
+          files = list(commit.get("files") or [])
+          if (
+              len(files) != 1
+              or str(files[0].get("filename") or "") != config_path
+              or str(files[0].get("status") or "") != "modified"
+          ):
+              raise SystemExit(
+                  "DEX execution diagnostic launch must modify exactly its config"
+              )
+
+          encoded_path = urllib.parse.quote(config_path, safe="/")
+          encoded_ref = urllib.parse.quote(before_sha, safe="")
+          prior_payload = get(
+              f"/repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+          )
+          if prior_payload.get("encoding") != "base64":
+              raise SystemExit(
+                  "DEX execution diagnostic prior config encoding changed"
+              )
+          prior = json.loads(
+              base64.b64decode(prior_payload.get("content") or "")
+          )
+          if set(prior) != expected_keys:
+              raise SystemExit(
+                  "DEX execution diagnostic prior config schema changed"
+              )
+
+          generation = int(config["generation"])
+          prior_generation = int(prior["generation"])
+          if generation <= 0:
+              raise SystemExit("DEX execution diagnostic config is not armed")
+          if requested_generation != generation:
+              raise SystemExit(
+                  "DEX execution diagnostic launch/config generation mismatch"
+              )
+          if generation != prior_generation + 1:
+              raise SystemExit(
+                  "DEX execution diagnostic generation must increment by one"
+              )
+
+          frozen_keys = expected_keys - {"generation"}
+          changed = sorted(
+              key
+              for key in frozen_keys
+              if config[key] != prior[key]
+          )
+          if changed:
+              raise SystemExit(
+                  "DEX execution diagnostic frozen inputs changed at launch: "
+                  + ", ".join(changed)
+              )
+
+          expected = {
+              "market_path_run_id": 35_522_831_005,
+              "priced_path_run_id": 35_523_404_472,
+              "quote_diagnostic_run_id": 35_528_655_862,
+              "quote_audit_run_id": 33_923_299_711,
+          }
+          if config != {"generation": generation, **expected}:
+              raise SystemExit(
+                  "DEX execution diagnostic frozen inputs changed"
+              )
+
+          quote_run = get(
+              f"/repos/{repo}/actions/runs/"
+              f"{expected['quote_diagnostic_run_id']}"
+          )
+          if (
+              str(quote_run.get("status") or "") != "completed"
+              or str(quote_run.get("conclusion") or "") != "success"
+              or str(quote_run.get("head_sha") or "")
+              != "bbfb98a46bb146d148bd5a306c0075b8c417e2e6"
+          ):
+              raise SystemExit(
+                  "DEX execution diagnostic quote diagnostic identity changed"
+              )
+
+          required_artifacts = [
+              (
+                  expected["market_path_run_id"],
+                  "phase1-pons-representative-market-paths",
+              ),
+              (
+                  expected["priced_path_run_id"],
+                  "phase1-pons-representative-priced-paths",
+              ),
+              (
+                  expected["quote_diagnostic_run_id"],
+                  "phase1-pons-representative-dex-quote-diagnostic",
+              ),
+              (
+                  expected["quote_audit_run_id"],
+                  "phase1-pons-full-quote-audit-current",
+              ),
+          ]
+          artifacts = []
+          for run_id, artifact_name in required_artifacts:
+              artifact = find_github_actions_run_artifact(
+                  (
+                      f"{api}/repos/{repo}/actions/runs/"
+                      f"{run_id}/artifacts"
+                  ),
+                  token,
+                  artifact_name=artifact_name,
+              )
+              artifacts.append({
+                  "run_id": run_id,
+                  "name": artifact_name,
+                  "artifact_id": int(artifact["id"]),
+              })
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key, value in expected.items():
+                  output.write(f"{key}={value}\n")
+
+          print(json.dumps({
+              "generation": generation,
+              "diagnostic": "swap_execution_price_vs_frozen_quote_candles",
+              "artifacts": artifacts,
+              **expected,
+          }, sort_keys=True))
+          PY
+
+  diagnose:
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-market-paths
+          path: market-paths
+          run-id: ${{ needs.preflight.outputs.market_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-priced-paths
+          path: priced-paths
+          run-id: ${{ needs.preflight.outputs.priced_path_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-quote-diagnostic
+          path: quote-diagnostic
+          run-id: ${{ needs.preflight.outputs.quote_diagnostic_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ needs.preflight.outputs.quote_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Compare swap execution prices with frozen quote candles
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.price import human_amount
+
+          def read_jsonl(path):
+              return [
+                  json.loads(line)
+                  for line in Path(path).read_text().splitlines()
+                  if line.strip()
+              ]
+
+          quote_manifest = json.loads(
+              Path(
+                  "quote-diagnostic/"
+                  "pons-representative-dex-quote-diagnostic.jsonl.manifest.json"
+              ).read_text()
+          )
+          quote_provenance = quote_manifest.get("provenance") or {}
+          if (
+              int(quote_manifest.get("records", -1)) != 9
+              or str(quote_manifest.get("sha256") or "")
+              != "533aaf3ef39d492cf567d9623d0421bc0d7b32421478cd240b32bcbcc0b707ee"
+              or int(quote_provenance.get("priced_path_run_id", -1))
+              != 35_523_404_472
+              or int(quote_provenance.get("failure_replay_run_id", -1))
+              != 35_527_327_945
+              or str(quote_provenance.get("currency") or "") != "token"
+              or str(quote_provenance.get("tolerance_bps") or "") != "0"
+          ):
+              raise SystemExit(
+                  "DEX execution diagnostic quote artifact identity changed"
+              )
+          quote_rows = read_jsonl(
+              "quote-diagnostic/"
+              "pons-representative-dex-quote-diagnostic.jsonl"
+          )
+          if (
+              len(quote_rows) != 9
+              or any(row.get("quote_match") is not False for row in quote_rows)
+              or any(
+                  row.get("independent_quote_low") is None
+                  or row.get("independent_quote_high") is None
+                  for row in quote_rows
+              )
+          ):
+              raise SystemExit(
+                  "DEX execution diagnostic quote failure set changed"
+              )
+
+          market_rows = read_jsonl(
+              "market-paths/pons-representative-market-paths.jsonl"
+          )
+          launches = {}
+          for row in market_rows:
+              if row.get("path_stage") != "launch":
+                  continue
+              token = str(row["token"]).lower()
+              if token in launches:
+                  raise SystemExit(
+                      f"DEX execution diagnostic duplicate launch: {token}"
+                  )
+              launches[token] = row
+          if len(launches) != 10:
+              raise SystemExit(
+                  "DEX execution diagnostic representative launch count changed"
+              )
+
+          quote_decimals = {}
+          for row in read_jsonl("quotes/pons-quote-registry.jsonl"):
+              token = str(row["quote_token"]).lower()
+              value = row.get("quote_decimals")
+              if value is not None:
+                  quote_decimals[token] = int(value)
+
+          wanted = {
+              (
+                  str(row["token"]).lower(),
+                  int(row["block"]),
+                  int(row["transaction_index"]),
+                  int(row["log_index"]),
+              ): row
+              for row in quote_rows
+          }
+          priced = {}
+          with Path(
+              "priced-paths/pons-representative-priced-paths.jsonl"
+          ).open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  key = (
+                      str(row["token"]).lower(),
+                      int(row["block_number"]),
+                      -1
+                      if row.get("transaction_index") is None
+                      else int(row["transaction_index"]),
+                      int(row["log_index"]),
+                  )
+                  if key in wanted:
+                      priced[key] = row
+          if set(priced) != set(wanted):
+              raise SystemExit(
+                  "DEX execution diagnostic priced checkpoint identity changed"
+              )
+
+          def compare(value, low, high):
+              value = Decimal(str(value))
+              low = Decimal(str(low))
+              high = Decimal(str(high))
+              if value <= 0 or low <= 0 or high <= 0 or high < low:
+                  raise SystemExit(
+                      "DEX execution diagnostic invalid price envelope"
+                  )
+              if low <= value <= high:
+                  outside = Decimal(0)
+              elif value < low:
+                  outside = (low - value) / low * Decimal(10_000)
+              else:
+                  outside = (value - high) / high * Decimal(10_000)
+              return outside == 0, outside
+
+          rows = []
+          for key, diagnostic in wanted.items():
+              source = priced[key]
+              token = key[0]
+              launch = launches.get(token)
+              if launch is None:
+                  raise SystemExit(
+                      f"DEX execution diagnostic launch missing: {token}"
+                  )
+              quote = str(launch["pair_token"]).lower()
+              if str(source["quote_token"]).lower() != quote:
+                  raise SystemExit(
+                      f"DEX execution diagnostic quote token changed: {token}"
+                  )
+              token_decimals = int(launch["token_decimals"])
+              q_decimals = quote_decimals.get(quote)
+              if q_decimals is None:
+                  raise SystemExit(
+                      f"DEX execution diagnostic quote decimals missing: {quote}"
+                  )
+
+              amount0 = int(source["amount0"])
+              amount1 = int(source["amount1"])
+              if amount0 == 0 or amount1 == 0 or amount0 * amount1 >= 0:
+                  raise SystemExit(
+                      "DEX execution diagnostic swap delta semantics changed: "
+                      f"{token} {amount0} {amount1}"
+                  )
+              token_is_token0 = int(token, 16) < int(quote, 16)
+              token_raw = abs(amount0 if token_is_token0 else amount1)
+              quote_raw = abs(amount1 if token_is_token0 else amount0)
+              token_amount = human_amount(token_raw, token_decimals)
+              quote_amount = human_amount(quote_raw, q_decimals)
+              if token_amount <= 0 or quote_amount <= 0:
+                  raise SystemExit(
+                      "DEX execution diagnostic non-positive swap amount"
+                  )
+              execution_quote_per_token = quote_amount / token_amount
+              spot_quote_per_token = Decimal(
+                  str(source["quote_per_token"])
+              )
+              low = Decimal(str(diagnostic["independent_quote_low"]))
+              high = Decimal(str(diagnostic["independent_quote_high"]))
+              execution_match, execution_outside = compare(
+                  execution_quote_per_token,
+                  low,
+                  high,
+              )
+              spot_match, spot_outside = compare(
+                  spot_quote_per_token,
+                  low,
+                  high,
+              )
+              spot_execution_bps = (
+                  abs(spot_quote_per_token - execution_quote_per_token)
+                  / execution_quote_per_token
+                  * Decimal(10_000)
+              )
+              rows.append({
+                  "token": token,
+                  "pons_version": source["pons_version"],
+                  "pool": diagnostic["pool"],
+                  "block": key[1],
+                  "transaction_index": key[2],
+                  "log_index": key[3],
+                  "timestamp": int(diagnostic["timestamp"]),
+                  "event_type": source["event_type"],
+                  "quote_token": quote,
+                  "token_is_token0": token_is_token0,
+                  "amount0_raw": str(amount0),
+                  "amount1_raw": str(amount1),
+                  "token_amount": str(token_amount),
+                  "quote_amount": str(quote_amount),
+                  "execution_quote_per_token": str(
+                      execution_quote_per_token
+                  ),
+                  "post_swap_spot_quote_per_token": str(
+                      spot_quote_per_token
+                  ),
+                  "independent_quote_low": str(low),
+                  "independent_quote_high": str(high),
+                  "execution_match": execution_match,
+                  "execution_outside_quote_bps": str(execution_outside),
+                  "spot_match": spot_match,
+                  "spot_outside_quote_bps": str(spot_outside),
+                  "spot_vs_execution_bps": str(spot_execution_bps),
+              })
+
+          rows.sort(
+              key=lambda row: (
+                  row["block"],
+                  row["transaction_index"],
+                  row["log_index"],
+                  row["token"],
+              )
+          )
+          snapshot = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/"
+                  "pons-representative-dex-execution-diagnostic.jsonl"
+              ),
+              provenance={
+                  "source": (
+                      "frozen_onchain_swap_amounts_vs_frozen_"
+                      "geckoterminal_quote_candles"
+                  ),
+                  "purpose": (
+                      "separate trade execution price from post-swap spot "
+                      "price without changing representative acceptance"
+                  ),
+                  "market_path_run_id": int(
+                      "${{ needs.preflight.outputs.market_path_run_id }}"
+                  ),
+                  "priced_path_run_id": int(
+                      "${{ needs.preflight.outputs.priced_path_run_id }}"
+                  ),
+                  "quote_diagnostic_run_id": int(
+                      "${{ needs.preflight.outputs.quote_diagnostic_run_id }}"
+                  ),
+                  "quote_audit_run_id": int(
+                      "${{ needs.preflight.outputs.quote_audit_run_id }}"
+                  ),
+                  "tolerance_bps": "0",
+                  "external_requests": 0,
+              },
+          )
+          summary = {
+              "checkpoints": len(rows),
+              "execution_matches": sum(
+                  row["execution_match"] is True for row in rows
+              ),
+              "execution_outside": sum(
+                  row["execution_match"] is False for row in rows
+              ),
+              "spot_matches": sum(
+                  row["spot_match"] is True for row in rows
+              ),
+              "spot_outside": sum(
+                  row["spot_match"] is False for row in rows
+              ),
+              "external_requests": 0,
+              "diagnostic_sha256": snapshot["sha256"],
+          }
+          Path(
+              "artifacts/"
+              "pons-representative-dex-execution-diagnostic-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          print(json.dumps({"rows": rows}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-representative-dex-execution-diagnostic
+          path: artifacts/
+          if-no-files-found: error

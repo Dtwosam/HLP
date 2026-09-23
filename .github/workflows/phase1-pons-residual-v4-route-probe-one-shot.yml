@@ -1,0 +1,109 @@
+name: phase1-pons-residual-v4-route-probe-one-shot
+
+on:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase1-pons-residual-v4-route-probe-one-shot.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase1-pons-residual-v4-route-probe-one-shot
+  cancel-in-progress: true
+
+env:
+  QUOTE_AUDIT_RUN_ID: '33923299711'
+  PRIMARY_V3_AUDIT_RUN_ID: '33921477647'
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-full-quote-audit-current
+          path: quotes
+          run-id: ${{ env.QUOTE_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase1-pons-unpriced-v3-route-audit
+          path: primary
+          run-id: ${{ env.PRIMARY_V3_AUDIT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Freeze exact five-asset residual registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          primary = [
+              json.loads(line)
+              for line in Path(
+                  "primary/pons-unpriced-v3-route-audit.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          unresolved = {
+              row["quote_token"].lower()
+              for row in primary
+              if not bool(row["v3_causal_ready"])
+          }
+          assert len(unresolved) == 5, sorted(unresolved)
+
+          quotes = [
+              json.loads(line)
+              for line in Path(
+                  "quotes/pons-quote-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          residual = [
+              row for row in quotes
+              if row["quote_token"].lower() in unresolved
+          ]
+          assert {row["quote_token"].lower() for row in residual} == unresolved
+          residual.sort(
+              key=lambda row: (
+                  int(row["first_launch_block"]),
+                  row["quote_token"],
+              )
+          )
+          with Path("artifacts/residual-quotes.jsonl").open("w") as handle:
+              for row in residual:
+                  handle.write(json.dumps(row, sort_keys=True) + "\n")
+          print(json.dumps({
+              "residual_assets": len(residual),
+              "residual_launches": sum(int(row["launches"]) for row in residual),
+              "symbols": [row["symbol"] for row in residual],
+          }, sort_keys=True))
+          PY
+      - name: Probe bounded V4 USDG routes
+        run: |
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pons-unpriced-quote-v4-routes \
+            --quote-registry artifacts/residual-quotes.jsonl \
+            --snapshot-head "$SNAPSHOT_HEAD" \
+            --lookaround-blocks 100000 \
+            --chunk-size 2000 --min-chunk-size 25 \
+            --out artifacts/pons-residual-v4-route-probe.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-pons-residual-v4-route-probe
+          path: artifacts/
+          if-no-files-found: error

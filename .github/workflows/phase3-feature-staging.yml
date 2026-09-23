@@ -1,0 +1,1456 @@
+name: phase3-feature-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      coverage_run_id:
+        description: Exact phase3-feature-coverage run ID
+        required: true
+        type: string
+      expected_coverage_artifact_digest:
+        description: Exact phase3-feature-coverage artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_coverage_handoff_sha256:
+        description: Exact SHA-256 of phase3-feature-coverage-handoff.json
+        required: true
+        type: string
+      early_recipient_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-early-recipient-features
+        required: true
+        type: string
+      participant_type_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-participant-type-features
+        required: true
+        type: string
+      chain_regime_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-chain-regime-features
+        required: true
+        type: string
+      venue_feature_run_id:
+        description: Exact phase3-venue-mechanics-features run ID
+        required: true
+        type: string
+      expected_venue_feature_artifact_digest:
+        description: Exact phase3-venue-mechanics-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_venue_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-venue-mechanics-features-handoff.json
+        required: true
+        type: string
+      holder_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-holder-features
+        required: true
+        type: string
+      lifecycle_feature_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-lifecycle-features
+        required: true
+        type: string
+      redistribution_feature_run_id:
+        description: Exact phase3-redistribution-features run ID
+        required: true
+        type: string
+      expected_redistribution_feature_artifact_digest:
+        description: Exact phase3-redistribution-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_redistribution_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-redistribution-features-handoff.json
+        required: true
+        type: string
+      retention_feature_run_id:
+        description: Exact phase3-retention-features run ID
+        required: true
+        type: string
+      expected_retention_feature_artifact_digest:
+        description: Exact phase3-retention-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_retention_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-retention-features-handoff.json
+        required: true
+        type: string
+      price_feature_run_id:
+        description: Exact phase3-price-features run ID
+        required: true
+        type: string
+      expected_price_feature_artifact_digest:
+        description: Exact phase3-price-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_price_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-price-features-handoff.json
+        required: true
+        type: string
+      trade_feature_run_id:
+        description: Exact phase3-trade-features run ID
+        required: true
+        type: string
+      expected_trade_feature_artifact_digest:
+        description: Exact phase3-trade-features artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_trade_feature_handoff_sha256:
+        description: Exact SHA-256 of phase3-trade-features-handoff.json
+        required: true
+        type: string
+      trade_size_flow_handoff_json:
+        description: JSON with run_id, artifact_digest, handoff_sha256 for phase3-trade-size-flow-features
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-feature-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COVERAGE_RUN_ID: ${{ inputs.coverage_run_id }}
+  EXPECTED_COVERAGE_ARTIFACT_DIGEST: ${{ inputs.expected_coverage_artifact_digest }}
+  EXPECTED_COVERAGE_HANDOFF_SHA256: ${{ inputs.expected_coverage_handoff_sha256 }}
+  EARLY_RECIPIENT_FEATURE_HANDOFF_JSON: ${{ inputs.early_recipient_feature_handoff_json }}
+  PARTICIPANT_TYPE_FEATURE_HANDOFF_JSON: ${{ inputs.participant_type_feature_handoff_json }}
+  CHAIN_REGIME_HANDOFF_JSON: ${{ inputs.chain_regime_handoff_json }}
+  VENUE_FEATURE_RUN_ID: ${{ inputs.venue_feature_run_id }}
+  EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_venue_feature_artifact_digest }}
+  EXPECTED_VENUE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_venue_feature_handoff_sha256 }}
+  HOLDER_FEATURE_HANDOFF_JSON: ${{ inputs.holder_feature_handoff_json }}
+  LIFECYCLE_FEATURE_HANDOFF_JSON: ${{ inputs.lifecycle_feature_handoff_json }}
+  REDISTRIBUTION_FEATURE_RUN_ID: ${{ inputs.redistribution_feature_run_id }}
+  EXPECTED_REDISTRIBUTION_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_redistribution_feature_artifact_digest }}
+  EXPECTED_REDISTRIBUTION_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_redistribution_feature_handoff_sha256 }}
+  RETENTION_FEATURE_RUN_ID: ${{ inputs.retention_feature_run_id }}
+  EXPECTED_RETENTION_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_retention_feature_artifact_digest }}
+  EXPECTED_RETENTION_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_retention_feature_handoff_sha256 }}
+  PRICE_FEATURE_RUN_ID: ${{ inputs.price_feature_run_id }}
+  EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_price_feature_artifact_digest }}
+  EXPECTED_PRICE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_price_feature_handoff_sha256 }}
+  TRADE_FEATURE_RUN_ID: ${{ inputs.trade_feature_run_id }}
+  EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST: ${{ inputs.expected_trade_feature_artifact_digest }}
+  EXPECTED_TRADE_FEATURE_HANDOFF_SHA256: ${{ inputs.expected_trade_feature_handoff_sha256 }}
+  TRADE_SIZE_FLOW_HANDOFF_JSON: ${{ inputs.trade_size_flow_handoff_json }}
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: staging
+        name: Build label-free Phase-3 feature staging bundle
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_early_recipient_features import (
+              build_phase3_early_recipient_feature_handoff,
+          )
+          from hlp.data.phase3_participant_type_features import (
+              build_phase3_participant_type_feature_handoff,
+          )
+          from hlp.data.phase3_chain_regime import (
+              build_phase3_chain_regime_handoff,
+          )
+          from hlp.data.phase3_feature_coverage import (
+              build_phase3_feature_coverage_handoff,
+          )
+          from hlp.data.phase3_feature_registry import (
+              build_phase3_feature_registry,
+              validate_phase3_feature_registry,
+          )
+          from hlp.data.phase3_feature_staging import (
+              build_phase3_feature_staging_handoff,
+              materialize_phase3_feature_staging,
+          )
+          from hlp.data.phase3_holder_features import (
+              build_phase3_holder_feature_handoff,
+          )
+          from hlp.data.phase3_lifecycle_features import (
+              build_phase3_lifecycle_feature_handoff,
+          )
+          from hlp.data.phase3_price_features import (
+              build_phase3_price_feature_handoff,
+          )
+          from hlp.data.phase3_redistribution_features import (
+              build_phase3_redistribution_feature_handoff,
+          )
+          from hlp.data.phase3_retention_features import (
+              build_phase3_retention_feature_handoff,
+          )
+          from hlp.data.phase3_trade_features import (
+              build_phase3_trade_feature_handoff,
+          )
+          from hlp.data.phase3_trade_size_flow_features import (
+              build_phase3_trade_size_flow_handoff,
+          )
+          from hlp.data.phase3_venue_features import (
+              build_phase3_venue_feature_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          coverage_root = Path("inputs/coverage")
+          early_root = Path("inputs/early-recipient")
+          participant_type_root = Path("inputs/participant-type")
+          chain_root = Path("inputs/chain-regime")
+          venue_root = Path("inputs/venue")
+          holder_root = Path("inputs/holder")
+          lifecycle_root = Path("inputs/lifecycle")
+          redistribution_root = Path("inputs/redistribution")
+          retention_root = Path("inputs/retention")
+          price_root = Path("inputs/price")
+          trade_root = Path("inputs/trade")
+          trade_size_root = Path("inputs/trade-size-flow")
+          def parse_feature_descriptor(env_name, label):
+              try:
+                  descriptor = json.loads(os.environ[env_name])
+              except (json.JSONDecodeError, KeyError) as exc:
+                  raise SystemExit(
+                      f"{label} descriptor is invalid JSON"
+                  ) from exc
+              if not isinstance(descriptor, dict):
+                  raise SystemExit(
+                      f"{label} descriptor must be an object"
+                  )
+              try:
+                  run_id = int(descriptor["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"{label} run_id is invalid"
+                  ) from exc
+              artifact_digest = str(
+                  descriptor.get("artifact_digest") or ""
+              ).lower()
+              handoff_sha = str(
+                  descriptor.get("handoff_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if (
+                  not artifact_digest.startswith("sha256:")
+                  or len(artifact_digest) != 71
+              ):
+                  raise SystemExit(
+                      f"{label} artifact_digest is invalid"
+                  )
+              if len(handoff_sha) != 64:
+                  raise SystemExit(
+                      f"{label} handoff_sha256 is invalid"
+                  )
+              try:
+                  int(artifact_digest.split(":", 1)[1], 16)
+                  int(handoff_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{label} SHA/digest is not hexadecimal"
+                  ) from exc
+              return run_id, artifact_digest, handoff_sha
+
+          (
+              early_run_id,
+              early_artifact_digest,
+              early_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "EARLY_RECIPIENT_FEATURE_HANDOFF_JSON",
+              "early-recipient-feature",
+          )
+          (
+              participant_type_run_id,
+              participant_type_artifact_digest,
+              participant_type_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "PARTICIPANT_TYPE_FEATURE_HANDOFF_JSON",
+              "participant-type-feature",
+          )
+          (
+              chain_run_id,
+              chain_artifact_digest,
+              chain_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "CHAIN_REGIME_HANDOFF_JSON",
+              "chain-regime-feature",
+          )
+          (
+              holder_run_id,
+              holder_artifact_digest,
+              holder_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "HOLDER_FEATURE_HANDOFF_JSON",
+              "holder-feature",
+          )
+          (
+              lifecycle_run_id,
+              lifecycle_artifact_digest,
+              lifecycle_expected_handoff_sha,
+          ) = parse_feature_descriptor(
+              "LIFECYCLE_FEATURE_HANDOFF_JSON",
+              "lifecycle-feature",
+          )
+          try:
+              trade_size_descriptor = json.loads(
+                  os.environ["TRADE_SIZE_FLOW_HANDOFF_JSON"]
+              )
+          except (json.JSONDecodeError, KeyError) as exc:
+              raise SystemExit(
+                  "trade_size_flow_handoff_json is invalid JSON"
+              ) from exc
+          if not isinstance(trade_size_descriptor, dict):
+              raise SystemExit(
+                  "trade_size_flow_handoff_json must be an object"
+              )
+          try:
+              trade_size_run_id = int(
+                  trade_size_descriptor["run_id"]
+              )
+          except (KeyError, TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "trade-size-flow run_id is invalid"
+              ) from exc
+          trade_size_artifact_digest = str(
+              trade_size_descriptor.get("artifact_digest") or ""
+          ).lower()
+          trade_size_expected_handoff_sha = str(
+              trade_size_descriptor.get("handoff_sha256") or ""
+          ).lower().removeprefix("sha256:")
+          if (
+              not trade_size_artifact_digest.startswith("sha256:")
+              or len(trade_size_artifact_digest) != 71
+          ):
+              raise SystemExit(
+                  "trade-size-flow artifact_digest is invalid"
+              )
+          if len(trade_size_expected_handoff_sha) != 64:
+              raise SystemExit(
+                  "trade-size-flow handoff_sha256 is invalid"
+              )
+          try:
+              int(trade_size_artifact_digest.split(":", 1)[1], 16)
+              int(trade_size_expected_handoff_sha, 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "trade-size-flow SHA/digest is not hexadecimal"
+              ) from exc
+          download_named(
+              int(os.environ["COVERAGE_RUN_ID"]),
+              "phase3-feature-coverage",
+              coverage_root,
+              "Phase-3 feature coverage",
+              os.environ["EXPECTED_COVERAGE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              early_run_id,
+              "phase3-early-recipient-features",
+              early_root,
+              "Phase-3 early-recipient features",
+              early_artifact_digest,
+          )
+          download_named(
+              participant_type_run_id,
+              "phase3-participant-type-features",
+              participant_type_root,
+              "Phase-3 participant-type features",
+              participant_type_artifact_digest,
+          )
+          download_named(
+              chain_run_id,
+              "phase3-chain-regime-features",
+              chain_root,
+              "Phase-3 chain-regime features",
+              chain_artifact_digest,
+          )
+          download_named(
+              int(os.environ["VENUE_FEATURE_RUN_ID"]),
+              "phase3-venue-mechanics-features",
+              venue_root,
+              "Phase-3 venue-mechanics features",
+              os.environ["EXPECTED_VENUE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              holder_run_id,
+              "phase3-holder-features",
+              holder_root,
+              "Phase-3 holder features",
+              holder_artifact_digest,
+          )
+          download_named(
+              lifecycle_run_id,
+              "phase3-lifecycle-features",
+              lifecycle_root,
+              "Phase-3 lifecycle features",
+              lifecycle_artifact_digest,
+          )
+          download_named(
+              int(os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]),
+              "phase3-redistribution-features",
+              redistribution_root,
+              "Phase-3 redistribution features",
+              os.environ["EXPECTED_REDISTRIBUTION_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["RETENTION_FEATURE_RUN_ID"]),
+              "phase3-retention-features",
+              retention_root,
+              "Phase-3 retention features",
+              os.environ[
+                  "EXPECTED_RETENTION_FEATURE_ARTIFACT_DIGEST"
+              ],
+          )
+          download_named(
+              int(os.environ["PRICE_FEATURE_RUN_ID"]),
+              "phase3-price-features",
+              price_root,
+              "Phase-3 price features",
+              os.environ["EXPECTED_PRICE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["TRADE_FEATURE_RUN_ID"]),
+              "phase3-trade-features",
+              trade_root,
+              "Phase-3 trade features",
+              os.environ["EXPECTED_TRADE_FEATURE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              trade_size_run_id,
+              "phase3-trade-size-flow-features",
+              trade_size_root,
+              "Phase-3 trade-size-flow features",
+              trade_size_artifact_digest,
+          )
+
+          coverage_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage.jsonl",
+          )
+          coverage_manifest_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage.jsonl.manifest.json",
+          )
+          coverage_manifest = json.loads(
+              coverage_manifest_path.read_text()
+          )
+          coverage_summary_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-summary.json",
+          )
+          coverage_summary = json.loads(
+              coverage_summary_path.read_text()
+          )
+          coverage_summary_sha = sha256_path(
+              coverage_summary_path
+          )
+          coverage_handoff_path = find_unique(
+              coverage_root,
+              "phase3-feature-coverage-handoff.json",
+          )
+          coverage_handoff_sha = sha256_path(
+              coverage_handoff_path
+          )
+          if coverage_handoff_sha != os.environ[
+              "EXPECTED_COVERAGE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 feature-coverage handoff SHA drift")
+          coverage_handoff = json.loads(
+              coverage_handoff_path.read_text()
+          )
+          rebuilt_coverage = build_phase3_feature_coverage_handoff(
+              coverage_summary,
+              coverage_summary_sha256=coverage_summary_sha,
+              feature_entry_handoff_sha256=coverage_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt_coverage != coverage_handoff:
+              raise SystemExit(
+                  "Phase-3 feature-coverage handoff content drift"
+              )
+          if coverage_manifest.get("sha256") != coverage_handoff[
+              "coverage_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 feature-coverage manifest SHA drift"
+              )
+          if int(coverage_manifest.get("records", -1)) != int(
+              coverage_handoff["feature_subjects"]
+          ):
+              raise SystemExit(
+                  "Phase-3 feature-coverage subject count drift"
+              )
+
+          early_rows_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features.jsonl",
+          )
+          early_manifest_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features.jsonl.manifest.json",
+          )
+          early_manifest = json.loads(
+              early_manifest_path.read_text()
+          )
+          early_summary_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features-summary.json",
+          )
+          early_summary = json.loads(early_summary_path.read_text())
+          early_summary_sha = sha256_path(early_summary_path)
+          early_handoff_path = find_unique(
+              early_root,
+              "phase3-early-recipient-features-handoff.json",
+          )
+          early_handoff_sha = sha256_path(early_handoff_path)
+          if early_handoff_sha != early_expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 early-recipient handoff SHA drift"
+              )
+          early_handoff = json.loads(early_handoff_path.read_text())
+          rebuilt_early = build_phase3_early_recipient_feature_handoff(
+              early_summary,
+              feature_summary_sha256=early_summary_sha,
+              feature_entry_handoff_sha256=early_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=early_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_early != early_handoff:
+              raise SystemExit(
+                  "Phase-3 early-recipient handoff content drift"
+              )
+          if early_manifest.get("sha256") != early_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 early-recipient manifest SHA drift"
+              )
+          if early_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 early-recipient/coverage entry linkage drift"
+              )
+
+          participant_type_rows_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features.jsonl",
+          )
+          participant_type_manifest_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features.jsonl.manifest.json",
+          )
+          participant_type_manifest = json.loads(
+              participant_type_manifest_path.read_text()
+          )
+          participant_type_code_manifest_path = find_unique(
+              participant_type_root,
+              "phase3-participant-code-state.jsonl.manifest.json",
+          )
+          participant_type_code_manifest = json.loads(
+              participant_type_code_manifest_path.read_text()
+          )
+          participant_type_summary_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features-summary.json",
+          )
+          participant_type_summary = json.loads(
+              participant_type_summary_path.read_text()
+          )
+          participant_type_summary_sha = sha256_path(
+              participant_type_summary_path
+          )
+          participant_type_handoff_path = find_unique(
+              participant_type_root,
+              "phase3-participant-type-features-handoff.json",
+          )
+          participant_type_handoff_sha = sha256_path(
+              participant_type_handoff_path
+          )
+          if participant_type_handoff_sha != (
+              participant_type_expected_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 participant-type handoff SHA drift"
+              )
+          participant_type_handoff = json.loads(
+              participant_type_handoff_path.read_text()
+          )
+          rebuilt_participant_type = (
+              build_phase3_participant_type_feature_handoff(
+                  participant_type_summary,
+                  feature_summary_sha256=participant_type_summary_sha,
+                  feature_entry_handoff_sha256=participant_type_summary[
+                      "feature_entry_handoff_sha256"
+                  ],
+                  canonical_trade_handoff_sha256=participant_type_summary[
+                      "canonical_trade_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_participant_type != participant_type_handoff:
+              raise SystemExit(
+                  "Phase-3 participant-type handoff content drift"
+              )
+          if participant_type_manifest.get("sha256") != (
+              participant_type_handoff["feature_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 participant-type manifest SHA drift"
+              )
+          if participant_type_code_manifest.get("sha256") != (
+              participant_type_handoff["participant_code_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 participant code-state manifest SHA drift"
+              )
+          if participant_type_handoff[
+              "feature_entry_handoff_sha256"
+          ] != coverage_summary["feature_entry_handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-3 participant-type/coverage entry linkage drift"
+              )
+
+          chain_rows_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features.jsonl",
+          )
+          chain_manifest_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features.jsonl.manifest.json",
+          )
+          chain_manifest = json.loads(
+              chain_manifest_path.read_text()
+          )
+          chain_summary_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features-summary.json",
+          )
+          chain_summary = json.loads(chain_summary_path.read_text())
+          chain_summary_sha = sha256_path(chain_summary_path)
+          chain_handoff_path = find_unique(
+              chain_root,
+              "phase3-chain-regime-features-handoff.json",
+          )
+          chain_handoff_sha = sha256_path(chain_handoff_path)
+          if chain_handoff_sha != chain_expected_handoff_sha:
+              raise SystemExit("Phase-3 chain-regime handoff SHA drift")
+          chain_handoff = json.loads(chain_handoff_path.read_text())
+          rebuilt_chain = build_phase3_chain_regime_handoff(
+              chain_summary,
+              feature_summary_sha256=chain_summary_sha,
+              feature_entry_handoff_sha256=chain_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              price_path_handoff_sha256=chain_summary[
+                  "price_path_handoff_sha256"
+              ],
+          )
+          if rebuilt_chain != chain_handoff:
+              raise SystemExit(
+                  "Phase-3 chain-regime handoff content drift"
+              )
+          if chain_manifest.get("sha256") != chain_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 chain-regime manifest SHA drift"
+              )
+          if chain_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 chain-regime/coverage entry linkage drift"
+              )
+
+          venue_rows_path = find_unique(
+              venue_root,
+              "phase3-venue-mechanics-features.jsonl",
+          )
+          venue_manifest_path = find_unique(
+              venue_root,
+              "phase3-venue-mechanics-features.jsonl.manifest.json",
+          )
+          venue_manifest = json.loads(
+              venue_manifest_path.read_text()
+          )
+          venue_summary_path = find_unique(
+              venue_root,
+              "phase3-venue-mechanics-features-summary.json",
+          )
+          venue_summary = json.loads(venue_summary_path.read_text())
+          venue_summary_sha = sha256_path(venue_summary_path)
+          venue_handoff_path = find_unique(
+              venue_root,
+              "phase3-venue-mechanics-features-handoff.json",
+          )
+          venue_handoff_sha = sha256_path(venue_handoff_path)
+          if venue_handoff_sha != os.environ[
+              "EXPECTED_VENUE_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 venue-feature handoff SHA drift")
+          venue_handoff = json.loads(venue_handoff_path.read_text())
+          rebuilt_venue = build_phase3_venue_feature_handoff(
+              venue_summary,
+              feature_summary_sha256=venue_summary_sha,
+              feature_entry_handoff_sha256=venue_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              price_path_handoff_sha256=venue_summary[
+                  "price_path_handoff_sha256"
+              ],
+          )
+          if rebuilt_venue != venue_handoff:
+              raise SystemExit(
+                  "Phase-3 venue-feature handoff content drift"
+              )
+          if venue_manifest.get("sha256") != venue_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 venue-feature manifest SHA drift")
+          if venue_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 venue-feature/coverage entry linkage drift"
+              )
+
+          holder_rows_path = find_unique(
+              holder_root,
+              "phase3-holder-features.jsonl",
+          )
+          holder_manifest_path = find_unique(
+              holder_root,
+              "phase3-holder-features.jsonl.manifest.json",
+          )
+          holder_manifest = json.loads(
+              holder_manifest_path.read_text()
+          )
+          holder_summary_path = find_unique(
+              holder_root,
+              "phase3-holder-features-summary.json",
+          )
+          holder_summary = json.loads(holder_summary_path.read_text())
+          holder_summary_sha = sha256_path(holder_summary_path)
+          holder_handoff_path = find_unique(
+              holder_root,
+              "phase3-holder-features-handoff.json",
+          )
+          holder_handoff_sha = sha256_path(holder_handoff_path)
+          if holder_handoff_sha != holder_expected_handoff_sha:
+              raise SystemExit("Phase-3 holder-feature handoff SHA drift")
+          holder_handoff = json.loads(holder_handoff_path.read_text())
+          rebuilt_holder = build_phase3_holder_feature_handoff(
+              holder_summary,
+              feature_summary_sha256=holder_summary_sha,
+              feature_entry_handoff_sha256=holder_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=holder_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_holder != holder_handoff:
+              raise SystemExit(
+                  "Phase-3 holder-feature handoff content drift"
+              )
+          if holder_manifest.get("sha256") != holder_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 holder-feature manifest SHA drift")
+          if holder_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 holder-feature/coverage entry linkage drift"
+              )
+
+          lifecycle_rows_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features.jsonl",
+          )
+          lifecycle_manifest_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features.jsonl.manifest.json",
+          )
+          lifecycle_manifest = json.loads(
+              lifecycle_manifest_path.read_text()
+          )
+          lifecycle_summary_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features-summary.json",
+          )
+          lifecycle_summary = json.loads(
+              lifecycle_summary_path.read_text()
+          )
+          lifecycle_summary_sha = sha256_path(
+              lifecycle_summary_path
+          )
+          lifecycle_handoff_path = find_unique(
+              lifecycle_root,
+              "phase3-lifecycle-features-handoff.json",
+          )
+          lifecycle_handoff_sha = sha256_path(
+              lifecycle_handoff_path
+          )
+          if lifecycle_handoff_sha != lifecycle_expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature handoff SHA drift"
+              )
+          lifecycle_handoff = json.loads(
+              lifecycle_handoff_path.read_text()
+          )
+          rebuilt_lifecycle = build_phase3_lifecycle_feature_handoff(
+              lifecycle_summary,
+              feature_summary_sha256=lifecycle_summary_sha,
+              feature_entry_handoff_sha256=lifecycle_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=lifecycle_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_lifecycle != lifecycle_handoff:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature handoff content drift"
+              )
+          if lifecycle_manifest.get("sha256") != lifecycle_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature manifest SHA drift"
+              )
+          if lifecycle_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 lifecycle-feature/coverage entry linkage drift"
+              )
+
+          redistribution_rows_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features.jsonl",
+          )
+          redistribution_manifest_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features.jsonl.manifest.json",
+          )
+          redistribution_manifest = json.loads(
+              redistribution_manifest_path.read_text()
+          )
+          redistribution_summary_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features-summary.json",
+          )
+          redistribution_summary = json.loads(
+              redistribution_summary_path.read_text()
+          )
+          redistribution_summary_sha = sha256_path(
+              redistribution_summary_path
+          )
+          redistribution_handoff_path = find_unique(
+              redistribution_root,
+              "phase3-redistribution-features-handoff.json",
+          )
+          redistribution_handoff_sha = sha256_path(
+              redistribution_handoff_path
+          )
+          if redistribution_handoff_sha != os.environ[
+              "EXPECTED_REDISTRIBUTION_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "Phase-3 redistribution-feature handoff SHA drift"
+              )
+          redistribution_handoff = json.loads(
+              redistribution_handoff_path.read_text()
+          )
+          rebuilt_redistribution = (
+              build_phase3_redistribution_feature_handoff(
+                  redistribution_summary,
+                  feature_summary_sha256=redistribution_summary_sha,
+                  feature_entry_handoff_sha256=redistribution_summary[
+                      "feature_entry_handoff_sha256"
+                  ],
+                  canonical_transfer_handoff_sha256=redistribution_summary[
+                      "canonical_transfer_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_redistribution != redistribution_handoff:
+              raise SystemExit(
+                  "Phase-3 redistribution-feature handoff content drift"
+              )
+          if redistribution_manifest.get("sha256") != (
+              redistribution_handoff["feature_rows_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 redistribution-feature manifest SHA drift"
+              )
+          if redistribution_handoff[
+              "feature_entry_handoff_sha256"
+          ] != coverage_summary["feature_entry_handoff_sha256"]:
+              raise SystemExit(
+                  "Phase-3 redistribution-feature/coverage entry linkage drift"
+              )
+
+          retention_rows_path = find_unique(
+              retention_root,
+              "phase3-retention-features.jsonl",
+          )
+          retention_manifest_path = find_unique(
+              retention_root,
+              "phase3-retention-features.jsonl.manifest.json",
+          )
+          retention_manifest = json.loads(
+              retention_manifest_path.read_text()
+          )
+          retention_summary_path = find_unique(
+              retention_root,
+              "phase3-retention-features-summary.json",
+          )
+          retention_summary = json.loads(
+              retention_summary_path.read_text()
+          )
+          retention_summary_sha = sha256_path(
+              retention_summary_path
+          )
+          retention_handoff_path = find_unique(
+              retention_root,
+              "phase3-retention-features-handoff.json",
+          )
+          retention_handoff_sha = sha256_path(
+              retention_handoff_path
+          )
+          if retention_handoff_sha != os.environ[
+              "EXPECTED_RETENTION_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "Phase-3 retention-feature handoff SHA drift"
+              )
+          retention_handoff = json.loads(
+              retention_handoff_path.read_text()
+          )
+          rebuilt_retention = build_phase3_retention_feature_handoff(
+              retention_summary,
+              feature_summary_sha256=retention_summary_sha,
+              feature_entry_handoff_sha256=retention_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_trade_handoff_sha256=retention_summary[
+                  "canonical_trade_handoff_sha256"
+              ],
+          )
+          if rebuilt_retention != retention_handoff:
+              raise SystemExit(
+                  "Phase-3 retention-feature handoff content drift"
+              )
+          if retention_manifest.get("sha256") != retention_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 retention-feature manifest SHA drift"
+              )
+          if retention_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 retention-feature/coverage entry linkage drift"
+              )
+
+          price_path = find_unique(
+              price_root,
+              "phase3-price-features.jsonl",
+          )
+          price_manifest_path = find_unique(
+              price_root,
+              "phase3-price-features.jsonl.manifest.json",
+          )
+          price_manifest = json.loads(
+              price_manifest_path.read_text()
+          )
+          price_summary_path = find_unique(
+              price_root,
+              "phase3-price-features-summary.json",
+          )
+          price_summary = json.loads(price_summary_path.read_text())
+          price_summary_sha = sha256_path(price_summary_path)
+          price_handoff_path = find_unique(
+              price_root,
+              "phase3-price-features-handoff.json",
+          )
+          price_handoff_sha = sha256_path(price_handoff_path)
+          if price_handoff_sha != os.environ[
+              "EXPECTED_PRICE_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 price-feature handoff SHA drift")
+          price_handoff = json.loads(price_handoff_path.read_text())
+          rebuilt_price = build_phase3_price_feature_handoff(
+              price_summary,
+              feature_summary_sha256=price_summary_sha,
+              feature_entry_handoff_sha256=price_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              price_path_handoff_sha256=price_summary[
+                  "price_path_handoff_sha256"
+              ],
+          )
+          if rebuilt_price != price_handoff:
+              raise SystemExit(
+                  "Phase-3 price-feature handoff content drift"
+              )
+          if price_manifest.get("sha256") != price_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 price-feature manifest SHA drift")
+
+          trade_path = find_unique(
+              trade_root,
+              "phase3-trade-features.jsonl",
+          )
+          trade_manifest_path = find_unique(
+              trade_root,
+              "phase3-trade-features.jsonl.manifest.json",
+          )
+          trade_manifest = json.loads(
+              trade_manifest_path.read_text()
+          )
+          trade_summary_path = find_unique(
+              trade_root,
+              "phase3-trade-features-summary.json",
+          )
+          trade_summary = json.loads(trade_summary_path.read_text())
+          trade_summary_sha = sha256_path(trade_summary_path)
+          trade_handoff_path = find_unique(
+              trade_root,
+              "phase3-trade-features-handoff.json",
+          )
+          trade_handoff_sha = sha256_path(trade_handoff_path)
+          if trade_handoff_sha != os.environ[
+              "EXPECTED_TRADE_FEATURE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 trade-feature handoff SHA drift")
+          trade_handoff = json.loads(trade_handoff_path.read_text())
+          rebuilt_trade = build_phase3_trade_feature_handoff(
+              trade_summary,
+              feature_summary_sha256=trade_summary_sha,
+              feature_entry_handoff_sha256=trade_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_trade_handoff_sha256=trade_summary[
+                  "canonical_trade_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade != trade_handoff:
+              raise SystemExit(
+                  "Phase-3 trade-feature handoff content drift"
+              )
+          if trade_manifest.get("sha256") != trade_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 trade-feature manifest SHA drift")
+
+          trade_size_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features.jsonl",
+          )
+          trade_size_manifest_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features.jsonl.manifest.json",
+          )
+          trade_size_manifest = json.loads(
+              trade_size_manifest_path.read_text()
+          )
+          trade_size_summary_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features-summary.json",
+          )
+          trade_size_summary = json.loads(
+              trade_size_summary_path.read_text()
+          )
+          trade_size_summary_sha = sha256_path(
+              trade_size_summary_path
+          )
+          trade_size_handoff_path = find_unique(
+              trade_size_root,
+              "phase3-trade-size-flow-features-handoff.json",
+          )
+          trade_size_handoff_sha = sha256_path(
+              trade_size_handoff_path
+          )
+          if trade_size_handoff_sha != trade_size_expected_handoff_sha:
+              raise SystemExit(
+                  "Phase-3 trade-size-flow handoff SHA drift"
+              )
+          trade_size_handoff = json.loads(
+              trade_size_handoff_path.read_text()
+          )
+          rebuilt_trade_size = build_phase3_trade_size_flow_handoff(
+              trade_size_summary,
+              feature_summary_sha256=trade_size_summary_sha,
+              feature_entry_handoff_sha256=trade_size_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+              canonical_trade_handoff_sha256=trade_size_summary[
+                  "canonical_trade_handoff_sha256"
+              ],
+              canonical_transfer_handoff_sha256=trade_size_summary[
+                  "canonical_transfer_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade_size != trade_size_handoff:
+              raise SystemExit(
+                  "Phase-3 trade-size-flow handoff content drift"
+              )
+          if trade_size_manifest.get("sha256") != trade_size_handoff[
+              "feature_rows_sha256"
+          ]:
+              raise SystemExit(
+                  "Phase-3 trade-size-flow manifest SHA drift"
+              )
+          if trade_size_handoff["feature_entry_handoff_sha256"] != (
+              coverage_summary["feature_entry_handoff_sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 trade-size-flow/coverage entry linkage drift"
+              )
+
+          registry = build_phase3_feature_registry()
+          registry_report = validate_phase3_feature_registry(registry)
+          registry_sha = registry_report["registry_sha256"]
+          if coverage_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 coverage registry SHA drift")
+          if early_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit(
+                  "Phase-3 early-recipient registry SHA drift"
+              )
+          if participant_type_handoff[
+              "feature_registry_sha256"
+          ] != registry_sha:
+              raise SystemExit(
+                  "Phase-3 participant-type registry SHA drift"
+              )
+          if chain_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 chain-regime registry SHA drift")
+          if venue_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 venue registry SHA drift")
+          if holder_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 holder registry SHA drift")
+          if lifecycle_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 lifecycle registry SHA drift")
+          if redistribution_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 redistribution registry SHA drift")
+          if retention_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 retention registry SHA drift")
+          if price_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 price registry SHA drift")
+          if trade_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 trade registry SHA drift")
+          if trade_size_handoff["feature_registry_sha256"] != registry_sha:
+              raise SystemExit("Phase-3 trade-size-flow registry SHA drift")
+
+          output = Path(
+              "artifacts/phase3-feature-staging.jsonl"
+          )
+          manifest, summary = materialize_phase3_feature_staging(
+              iter_validated_jsonl(
+                  coverage_path,
+                  coverage_manifest_path,
+              ),
+              {
+                  "early_recipient_activity": iter_validated_jsonl(
+                      early_rows_path,
+                      early_manifest_path,
+                  ),
+                  "chain_regime": iter_validated_jsonl(
+                      chain_rows_path,
+                      chain_manifest_path,
+                  ),
+                  "venue_mechanics": iter_validated_jsonl(
+                      venue_rows_path,
+                      venue_manifest_path,
+                  ),
+                  "holder_state": iter_validated_jsonl(
+                      holder_rows_path,
+                      holder_manifest_path,
+                  ),
+                  "lifecycle_age": iter_validated_jsonl(
+                      lifecycle_rows_path,
+                      lifecycle_manifest_path,
+                  ),
+                  "supply_redistribution": iter_validated_jsonl(
+                      redistribution_rows_path,
+                      redistribution_manifest_path,
+                  ),
+                  "participant_retention": iter_validated_jsonl(
+                      retention_rows_path,
+                      retention_manifest_path,
+                  ),
+                  "participant_type": iter_validated_jsonl(
+                      participant_type_rows_path,
+                      participant_type_manifest_path,
+                  ),
+                  "price_drawdown": iter_validated_jsonl(
+                      price_path,
+                      price_manifest_path,
+                  ),
+                  "trade_flow": iter_validated_jsonl(
+                      trade_path,
+                      trade_manifest_path,
+                  ),
+                  "trade_size_flow": iter_validated_jsonl(
+                      trade_size_path,
+                      trade_size_manifest_path,
+                  ),
+              },
+              coverage_handoff=coverage_handoff,
+              feature_registry=registry,
+              output=output,
+          )
+          summary.update({
+              "coverage_run_id": int(
+                  os.environ["COVERAGE_RUN_ID"]
+              ),
+              "feature_coverage_handoff_sha256": (
+                  coverage_handoff_sha
+              ),
+              "early_recipient_feature_run_id": early_run_id,
+              "early_recipient_feature_handoff_sha256": early_handoff_sha,
+              "participant_type_feature_run_id": participant_type_run_id,
+              "participant_type_feature_handoff_sha256": (
+                  participant_type_handoff_sha
+              ),
+              "chain_regime_run_id": chain_run_id,
+              "chain_regime_handoff_sha256": chain_handoff_sha,
+              "venue_feature_run_id": int(
+                  os.environ["VENUE_FEATURE_RUN_ID"]
+              ),
+              "venue_feature_handoff_sha256": venue_handoff_sha,
+              "holder_feature_run_id": holder_run_id,
+              "holder_feature_handoff_sha256": holder_handoff_sha,
+              "lifecycle_feature_run_id": lifecycle_run_id,
+              "lifecycle_feature_handoff_sha256": lifecycle_handoff_sha,
+              "redistribution_feature_run_id": int(
+                  os.environ["REDISTRIBUTION_FEATURE_RUN_ID"]
+              ),
+              "redistribution_feature_handoff_sha256": (
+                  redistribution_handoff_sha
+              ),
+              "retention_feature_run_id": int(
+                  os.environ["RETENTION_FEATURE_RUN_ID"]
+              ),
+              "retention_feature_handoff_sha256": retention_handoff_sha,
+              "price_feature_run_id": int(
+                  os.environ["PRICE_FEATURE_RUN_ID"]
+              ),
+              "price_feature_handoff_sha256": price_handoff_sha,
+              "trade_feature_run_id": int(
+                  os.environ["TRADE_FEATURE_RUN_ID"]
+              ),
+              "trade_feature_handoff_sha256": trade_handoff_sha,
+              "trade_size_flow_run_id": trade_size_run_id,
+              "trade_size_flow_handoff_sha256": (
+                  trade_size_handoff_sha
+              ),
+          })
+          summary_path = Path(
+              "artifacts/phase3-feature-staging-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase3_feature_staging_handoff(
+              summary,
+              staging_summary_sha256=summary_sha,
+              feature_coverage_handoff_sha256=coverage_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-feature-staging-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"feature_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"feature_subjects={summary['feature_subjects']}\n"
+              )
+              handle.write(
+                  f"features_per_subject={summary['features_per_subject']}\n"
+              )
+          print(json.dumps({
+              "feature_rows_sha256": manifest["sha256"],
+              "staging_summary_sha256": summary_sha,
+              "staging_handoff_sha256": handoff_sha,
+              "feature_subjects": summary["feature_subjects"],
+              "features_per_subject": summary["features_per_subject"],
+              "outcome_rows_consumed": False,
+              "outcome_fields_exposed": False,
+              "future_state_allowed": False,
+              "staging_bundle_ready": True,
+              "final_checkpoint_claimed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-3 feature staging bundle
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-feature-staging
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact feature-staging handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-feature-staging-handoff
+          path: |
+            artifacts/phase3-feature-staging.jsonl.manifest.json
+            artifacts/phase3-feature-staging-summary.json
+            artifacts/phase3-feature-staging-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish feature-staging identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          FEATURE_ROWS_SHA256: ${{ steps.staging.outputs.feature_rows_sha256 }}
+          SUMMARY_SHA256: ${{ steps.staging.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.staging.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.staging.outputs.feature_subjects }}
+          FEATURES: ${{ steps.staging.outputs.features_per_subject }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-3 feature staging bundle"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-feature-staging"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase3-feature-staging-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- feature_rows_sha256: ${FEATURE_ROWS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- feature_subjects: ${SUBJECTS}"
+            echo "- features_per_subject: ${FEATURES}"
+            echo "- included_families: chain_regime,early_recipient_activity,holder_state,lifecycle_age,participant_retention,participant_type,price_drawdown,supply_redistribution,trade_flow,trade_size_flow,venue_mechanics"
+            echo "- outcome_rows_consumed: false"
+            echo "- outcome_fields_exposed: false"
+            echo "- future_state_allowed: false"
+            echo "- staging_bundle_ready: true"
+            echo "- final_checkpoint_name: hlp-v1-phase3-feature-store"
+            echo "- final_checkpoint_claimed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,142 @@
+name: phase2-hoodfun-deployment-discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-hoodfun-deployment-discovery.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-hoodfun-deployment-discovery-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Discover exact hood.fun deployment blocks
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              HOOD_FUN_CURRENT,
+              HOOD_FUN_PREVIOUS,
+              SOLIDRPC_AUTH_RPC_URL,
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.rpc import RpcClient
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = SOLIDRPC_AUTH_RPC_URL if key else SOLIDRPC_PUBLIC_RPC_URL
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          head = int(os.environ["SNAPSHOT_HEAD"])
+
+          rows = {}
+          for generation, address in (
+              ("current", HOOD_FUN_CURRENT),
+              ("previous", HOOD_FUN_PREVIOUS),
+          ):
+              first = rpc.find_first_code_block(
+                  address,
+                  low=0,
+                  high=head,
+              )
+              code = rpc.get_code(address, first)
+              if code in {"0x", "0x0", ""}:
+                  raise SystemExit(
+                      f"{generation} hood.fun has no code at {first}"
+                  )
+              before = (
+                  "0x"
+                  if first == 0
+                  else rpc.get_code(address, first - 1)
+              )
+              if first > 0 and before not in {"0x", "0x0", ""}:
+                  raise SystemExit(
+                      f"{generation} hood.fun code exists before {first}"
+                  )
+              rows[generation] = {
+                  "address": address.lower(),
+                  "first_code_block": first,
+                  "code_bytes": len(code.removeprefix("0x")) // 2,
+                  "code_sha256": hashlib.sha256(
+                      bytes.fromhex(code.removeprefix("0x"))
+                  ).hexdigest(),
+              }
+
+          anchor_first = rpc.find_first_code_block(
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              low=0,
+              high=head,
+          )
+          anchor_code = rpc.get_code(
+              UNISWAP_V3_WETH_USDG_ANCHOR_POOL,
+              anchor_first,
+          )
+          if anchor_code in {"0x", "0x0", ""}:
+              raise SystemExit(
+                  "canonical WETH/USDG anchor has no deployment code"
+              )
+
+          output = {
+              "chain_id": 4663,
+              "snapshot_head_block": head,
+              "contracts": rows,
+              "pricing_anchor": {
+                  "address": (
+                      UNISWAP_V3_WETH_USDG_ANCHOR_POOL.lower()
+                  ),
+                  "first_code_block": anchor_first,
+                  "code_bytes": (
+                      len(anchor_code.removeprefix("0x")) // 2
+                  ),
+                  "code_sha256": hashlib.sha256(
+                      bytes.fromhex(anchor_code.removeprefix("0x"))
+                  ).hexdigest(),
+              },
+              "requests_made": rpc.requests_made,
+          }
+          Path(
+              "artifacts/hoodfun-deployment-discovery.json"
+          ).write_text(
+              json.dumps(output, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(output, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-hoodfun-deployment-discovery
+          path: artifacts/
+          if-no-files-found: error

@@ -1,0 +1,274 @@
+name: phase2-pools-trade-lbp-pool-init-sharded
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/workflows/phase2-pools-trade-lbp-pool-init-sharded.yml'
+      - '.github/phase2-pools-trade-lbp-poolkey.json'
+      - 'src/hlp/protocols/uniswap.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-lbp-pool-init-sharded-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOKEN: '0x89e71858d3c13c0ea1d135edc9fccb32740c9dbc'
+  POOL_ID: '0x4513c2961cc5872078823f0183a94afadc169d66d507b5778e91f8a7bbef1c4f'
+  SEARCH_FROM_BLOCK: '30001146'
+  SEARCH_TO_BLOCK: '30395704'
+  SHARD_COUNT: '16'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - name: Search exact V4 PoolId shard
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+              UNISWAP_V4_POOL_MANAGER,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.protocols.uniswap import (
+              V4_INITIALIZE_TOPIC,
+              decode_v4_pool_initialized,
+              v4_pool_id,
+          )
+
+          start = int(os.environ["SEARCH_FROM_BLOCK"])
+          end = int(os.environ["SEARCH_TO_BLOCK"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + (span * index) // count
+          hi = start + (span * (index + 1)) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty pool-init shard {index}: {lo}..{hi}"
+              )
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = (
+                  SOLIDRPC_AUTH_RPC_URL
+                  if key else SOLIDRPC_PUBLIC_RPC_URL
+              )
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+          )
+          rpc.assert_robinhood()
+          chunk = (
+              50_000
+              if key
+              else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          )
+          pool_id = os.environ["POOL_ID"].lower()
+          token = os.environ["TOKEN"].lower()
+
+          found = []
+          chunks_scanned = 0
+          for part_lo in range(lo, hi + 1, chunk):
+              part_hi = min(hi, part_lo + chunk - 1)
+              chunks_scanned += 1
+              rows = rpc.get_logs(
+                  part_lo,
+                  part_hi,
+                  address=UNISWAP_V4_POOL_MANAGER,
+                  topics=[V4_INITIALIZE_TOPIC, pool_id],
+              )
+              for raw in rows:
+                  row = decode_v4_pool_initialized(raw)
+                  derived = v4_pool_id(
+                      currency0=row.currency0,
+                      currency1=row.currency1,
+                      fee=row.fee,
+                      tick_spacing=row.tick_spacing,
+                      hooks=row.hooks,
+                  )
+                  if row.pool_id.lower() != pool_id or derived != pool_id:
+                      raise SystemExit("V4 PoolId derivation drift")
+                  if token not in {
+                      row.currency0.lower(),
+                      row.currency1.lower(),
+                  }:
+                      raise SystemExit(
+                          "LBP target pool does not contain sample token"
+                      )
+                  found.append({
+                      "pool_id": row.pool_id,
+                      "currency0": row.currency0,
+                      "currency1": row.currency1,
+                      "fee": row.fee,
+                      "tick_spacing": row.tick_spacing,
+                      "hooks": row.hooks,
+                      "sqrt_price_x96": row.sqrt_price_x96,
+                      "tick": row.tick,
+                      "block_number": row.block_number,
+                      "transaction_hash": row.transaction_hash,
+                      "transaction_index": row.transaction_index,
+                      "log_index": row.log_index,
+                  })
+          if len(found) > 1:
+              raise SystemExit(
+                  f"multiple exact PoolId Initialize rows in shard: {len(found)}"
+              )
+
+          report = {
+              "version": "phase2-pools-trade-lbp-pool-init-shard-v1",
+              "chain_id": 4663,
+              "shard_index": index,
+              "shard_count": count,
+              "token": token,
+              "pool_id": pool_id,
+              "from_block": lo,
+              "to_block": hi,
+              "chunks_scanned": chunks_scanned,
+              "initialize_found": bool(found),
+              "initialize": found[0] if found else None,
+              "rpc_requests": rpc.requests_made,
+              "rpc_route": (
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          }
+          path = Path(
+              f"artifacts/lbp-pool-init-shard-{index:02d}.json"
+          )
+          path.write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-pool-init-shard-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-trade-lbp-pool-init-shard-*
+          path: inputs
+          merge-multiple: true
+      - name: Prove complete exact-PoolId search coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          start = int(os.environ["SEARCH_FROM_BLOCK"])
+          end = int(os.environ["SEARCH_TO_BLOCK"])
+          count = int(os.environ["SHARD_COUNT"])
+          pool_id = os.environ["POOL_ID"].lower()
+          token = os.environ["TOKEN"].lower()
+
+          rows = [
+              json.loads(path.read_text())
+              for path in sorted(
+                  Path("inputs").glob(
+                      "lbp-pool-init-shard-*.json"
+                  )
+              )
+          ]
+          if len(rows) != count:
+              raise SystemExit(
+                  f"expected {count} shard reports, found {len(rows)}"
+              )
+          rows.sort(key=lambda row: row["shard_index"])
+          cursor = start
+          total_requests = 0
+          found = []
+          routes = set()
+          for expected_index, row in enumerate(rows):
+              if row["shard_index"] != expected_index:
+                  raise SystemExit("pool-init shard index drift")
+              if row["pool_id"].lower() != pool_id:
+                  raise SystemExit("pool-init shard PoolId drift")
+              if row["token"].lower() != token:
+                  raise SystemExit("pool-init shard token drift")
+              if row["from_block"] != cursor:
+                  raise SystemExit(
+                      f"pool-init shard gap before {row['from_block']}"
+                  )
+              cursor = int(row["to_block"]) + 1
+              total_requests += int(row["rpc_requests"])
+              routes.add(row["rpc_route"])
+              if row["initialize_found"]:
+                  found.append(row["initialize"])
+          if cursor != end + 1:
+              raise SystemExit(
+                  f"pool-init shards end at {cursor - 1}, expected {end}"
+              )
+          if len(found) > 1:
+              raise SystemExit(
+                  f"multiple Initialize rows for exact PoolId: {len(found)}"
+              )
+
+          report = {
+              "version": "phase2-pools-trade-lbp-pool-init-search-v1",
+              "chain_id": 4663,
+              "token": token,
+              "pool_id": pool_id,
+              "search_from_block": start,
+              "search_to_block": end,
+              "continuous": True,
+              "missing_ranges": [],
+              "shards": count,
+              "initialize_found": bool(found),
+              "initialize": found[0] if found else None,
+              "rpc_requests": total_requests,
+              "rpc_routes": sorted(routes),
+          }
+          Path(
+              "artifacts/pools-trade-lbp-pool-init-search.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-lbp-pool-init-search-sharded
+          path: artifacts/
+          if-no-files-found: error
