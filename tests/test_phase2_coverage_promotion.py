@@ -40,6 +40,7 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_trench_today_promotion_review_receipt,
     validate_phase2_trench_today_promotion_proposal_receipt,
     validate_phase2_trench_today_ledger_commit_receipt,
+    validate_phase2_trench_today_ledger_approved_receipt,
     validate_phase2_trench_today_post_commit_frontier,
     validate_phase2_pools_trade_instant_post_commit_frontier,
 )
@@ -2112,3 +2113,56 @@ def test_trench_today_post_commit_frontier_unlocks_hood_current_only():
     assert report["active_completed_execution_nodes"] == 35
     assert report["node_dispatch_control_runs_consumed"] == 46
     assert report["next_promotion_node_id"] == "promote:hood_fun_current"
+
+
+
+def trench_today_ledger_approved_receipt():
+    return {
+        "version": "phase2-trench-today-ledger-approved-receipt-v1",
+        "ledger_approval_control_run_id": 2501,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "approval_execution_head_sha": "11" * 20,
+        "promotion_proposal_run_id": 2502,
+        "promotion_proposal_artifact_digest": "sha256:" + "22" * 32,
+        "ledger_commit_run_id": 2503,
+        "ledger_commit_artifact_digest": "sha256:" + "33" * 32,
+        "canonical_ledger_commit_sha": "44" * 20,
+        "base_ledger_sha256": "55" * 32,
+        "canonical_coverage_ledger_sha256": "66" * 32,
+        "node_dispatch_control_run_ids_consumed": list(range(2600, 2646)),
+        "selector_run_id": 2504,
+        "planner_run_id": 2505,
+        "planner_artifact_digest": "sha256:" + "77" * 32,
+        "canonical_complete_source_ids": [
+            "doppler",
+            "flap",
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+            "pools_trade_lbp",
+            "trench_today",
+        ],
+        "next_promotion_node_id": "promote:hood_fun_current",
+        "human_approval_input": "apply_trench_today_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+def test_trench_today_approved_receipt_validates_8_of_14_handoff():
+    report = validate_phase2_trench_today_ledger_approved_receipt(
+        trench_today_ledger_approved_receipt()
+    )
+    assert report["canonical_ledger_commit_sha"] == "44" * 20
+    assert report["next_promotion_node_id"] == "promote:hood_fun_current"
+    assert len(report["node_dispatch_control_run_ids_consumed"]) == 46
+
+
+def test_trench_today_approved_receipt_rejects_wrong_next_source():
+    row = trench_today_ledger_approved_receipt()
+    row["next_promotion_node_id"] = "promote:hood_fun_previous"
+    with pytest.raises(ValueError, match="next promotion drift"):
+        validate_phase2_trench_today_ledger_approved_receipt(row)
