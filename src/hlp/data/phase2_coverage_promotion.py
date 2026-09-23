@@ -1132,3 +1132,145 @@ def validate_phase2_pools_fun_ledger_approved_receipt(
         "automatic_acquisition_complete": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+
+PHASE2_POOLS_TRADE_INSTANT_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-pools-trade-instant-promotion-proposal-v1"
+)
+
+
+def validate_phase2_pools_trade_instant_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate pools.trade Instant proposal before ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_POOLS_TRADE_INSTANT_PROMOTION_PROPOSAL_VERSION
+    ):
+        raise ValueError(
+            "pools.trade Instant promotion proposal receipt version changed"
+        )
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="pools.trade Instant proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="pools.trade Instant review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="pools.trade Instant promotion dispatcher run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="pools.trade Instant promotion run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "pools.trade Instant proposal execution branch is empty"
+        )
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="pools.trade Instant proposal execution head",
+    )
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="pools.trade Instant review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="pools.trade Instant promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="pools.trade Instant promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="pools.trade Instant proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="pools.trade Instant proposal base ledger",
+    )
+
+    if row.get("source_id") != "pools_trade_instant":
+        raise ValueError("pools.trade Instant proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("pools.trade Instant proposal workflow identity drift")
+    if row.get("complete_source_ids_before") != [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+    ]:
+        raise ValueError("pools.trade Instant proposal before-set drift")
+    if row.get("complete_source_ids_after") != [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+    ]:
+        raise ValueError("pools.trade Instant proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError(
+            "pools.trade Instant proposal unexpectedly closes Phase 2"
+        )
+    if row.get("proposal_created") is not True:
+        raise ValueError("pools.trade Instant proposal lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("pools.trade Instant proposal lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError(
+            "pools.trade Instant proposal unexpectedly mutates ledger"
+        )
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError(
+            "pools.trade Instant proposal unexpectedly authorizes ledger commit"
+        )
+    if row.get("ledger_commit_approval_input") != "apply_proposed_ledger":
+        raise ValueError(
+            "pools.trade Instant proposal ledger approval input drift"
+        )
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError(
+            "pools.trade Instant proposal already supplies ledger approval"
+        )
+
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "pools_trade_instant",
+    }
+    if row.get("ledger_commit_generated_inputs") != expected_generated:
+        raise ValueError(
+            "pools.trade Instant proposal ledger-commit input drift"
+        )
+
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "pools_trade_instant",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
