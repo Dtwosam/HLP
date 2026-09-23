@@ -7,11 +7,13 @@ from hlp.data.phase2_coverage import (
 )
 from hlp.data.phase2_coverage_promotion import (
     build_phase2_pools_fun_promotion_review_handoff,
+    build_phase2_pools_trade_instant_promotion_review_handoff,
     validate_phase2_coverage_ledger_commit,
     validate_phase2_pools_fun_promotion_review_receipt,
     validate_phase2_pools_fun_promotion_proposal_receipt,
     validate_phase2_pools_fun_ledger_commit_receipt,
     validate_phase2_pools_fun_post_commit_frontier,
+    validate_phase2_pools_trade_instant_promotion_review_receipt,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.phase2_first_wave import (
@@ -519,3 +521,84 @@ def test_pools_fun_proposal_receipt_rejects_head_drift():
     row["execution_head_sha"] = "bad"
     with pytest.raises(ValueError, match="execution head"):
         validate_phase2_pools_fun_promotion_proposal_receipt(row)
+
+
+
+def pools_trade_instant_report():
+    return {
+        "source_id": "pools_trade_instant",
+        "source_readiness": "adapter_ready",
+        "coverage_status": "complete",
+        "required_start_block": 0,
+        "first_block": 0,
+        "last_block": SNAPSHOT,
+        "continuous": True,
+        "missing_ranges": [],
+        "tokens_discovered": 2,
+        "price_points": 3,
+        "priced_points": 3,
+        "observed_volume_usd": None,
+        "provenance_sha256": "ef" * 32,
+        "blocking_reason": None,
+        "snapshot_head_block": SNAPSHOT,
+    }
+
+
+def test_pools_trade_instant_review_prepares_exact_4_of_14_advance():
+    report = build_phase2_pools_trade_instant_promotion_review_handoff(
+        ledger({"pons_v1", "pons_v2", "pools_fun"}),
+        pools_trade_instant_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=501,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=502,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+    assert report["complete_source_ids_before"] == [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+    ]
+    assert report["complete_source_ids_after_if_promoted"] == [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+    ]
+    assert report["promotion_dispatched"] is False
+
+
+def pools_trade_instant_review_receipt():
+    row = build_phase2_pools_trade_instant_promotion_review_handoff(
+        ledger({"pons_v1", "pons_v2", "pools_fun"}),
+        pools_trade_instant_report(),
+        build_phase2_source_inventory(),
+        coverage_run_id=501,
+        coverage_artifact_digest="sha256:" + "11" * 32,
+        coverage_report_sha256="22" * 32,
+        planner_run_id=502,
+        planner_artifact_digest="sha256:" + "33" * 32,
+        canonical_ledger_sha256="44" * 32,
+    )
+    row.update({
+        "promotion_review_control_run_id": 503,
+        "pools_fun_ledger_approval_run_id": 504,
+        "pools_fun_ledger_approval_artifact_digest": "sha256:" + "55" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "66" * 20,
+    })
+    return row
+
+
+def test_pools_trade_instant_review_receipt_is_read_only():
+    report = validate_phase2_pools_trade_instant_promotion_review_receipt(
+        pools_trade_instant_review_receipt()
+    )
+    assert report["promotion_review_control_run_id"] == 503
+    assert report["coverage_run_id"] == 501
+    assert report["promotion_generated_inputs"]["expected_source_id"] == (
+        "pools_trade_instant"
+    )
+    assert report["canonical_coverage_ledger_mutated"] is False

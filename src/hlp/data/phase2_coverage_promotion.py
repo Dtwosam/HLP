@@ -752,3 +752,257 @@ def validate_phase2_pools_fun_post_commit_frontier(
         "canonical_ledger_advanced": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+
+PHASE2_POOLS_TRADE_INSTANT_PROMOTION_REVIEW_VERSION = (
+    "phase2-pools-trade-instant-promotion-review-v1"
+)
+POOLS_TRADE_INSTANT_COVERAGE_WORKFLOW = (
+    "phase2-pools-trade-instant-source-coverage.yml"
+)
+POOLS_TRADE_INSTANT_COVERAGE_ARTIFACT = (
+    "phase2-pools-trade-instant-source-coverage"
+)
+POOLS_TRADE_INSTANT_COVERAGE_REPORT_PATH = (
+    "pools-trade-instant-source-coverage-report.json"
+)
+
+
+def build_phase2_pools_trade_instant_promotion_review_handoff(
+    current_ledger: Mapping[str, object],
+    coverage_report: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    *,
+    coverage_run_id: int,
+    coverage_artifact_digest: str,
+    coverage_report_sha256: str,
+    planner_run_id: int,
+    planner_artifact_digest: str,
+    canonical_ledger_sha256: str,
+) -> dict:
+    """Prepare exact pools.trade Instant promotion inputs at 3/14."""
+
+    inventory = [dict(row) for row in source_inventory]
+    before = validate_phase2_coverage_ledger(
+        dict(current_ledger),
+        inventory,
+    )
+    if before["complete_source_ids"] != [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+    ]:
+        raise ValueError(
+            "pools.trade Instant review requires exact 3/14 pools.fun ledger"
+        )
+    report = dict(coverage_report)
+    if report.get("source_id") != "pools_trade_instant":
+        raise ValueError("pools.trade Instant review source identity drift")
+    if report.get("coverage_status") != "complete":
+        raise ValueError(
+            "pools.trade Instant review requires complete coverage report"
+        )
+
+    _, after = apply_phase2_source_coverage_report(
+        dict(current_ledger),
+        inventory,
+        report,
+    )
+    expected_after = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+    ]
+    if after["complete_source_ids"] != expected_after:
+        raise ValueError(
+            "pools.trade Instant review does not complete exactly next source"
+        )
+    if after["phase2_universe_coverage_complete"]:
+        raise ValueError(
+            "pools.trade Instant review unexpectedly closes Phase 2"
+        )
+
+    run_id = _positive_run_id(
+        coverage_run_id,
+        label="pools.trade Instant coverage run ID",
+    )
+    artifact_digest = _artifact_digest(
+        coverage_artifact_digest,
+        label="pools.trade Instant coverage artifact digest",
+    )
+    report_sha = _sha256(
+        coverage_report_sha256,
+        label="pools.trade Instant coverage report",
+    )
+    planner_id = _positive_run_id(
+        planner_run_id,
+        label="pools.trade Instant promotion planner run ID",
+    )
+    planner_digest = _artifact_digest(
+        planner_artifact_digest,
+        label="pools.trade Instant planner artifact digest",
+    )
+    ledger_sha = _sha256(
+        canonical_ledger_sha256,
+        label="pools.trade Instant canonical ledger",
+    )
+
+    generated_inputs = {
+        "coverage_run_id": str(run_id),
+        "coverage_artifact_name": POOLS_TRADE_INSTANT_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": artifact_digest,
+        "coverage_report_path": POOLS_TRADE_INSTANT_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "pools_trade_instant",
+    }
+    return {
+        "version": PHASE2_POOLS_TRADE_INSTANT_PROMOTION_REVIEW_VERSION,
+        "source_id": "pools_trade_instant",
+        "coverage_workflow": POOLS_TRADE_INSTANT_COVERAGE_WORKFLOW,
+        "coverage_run_id": run_id,
+        "coverage_artifact_name": POOLS_TRADE_INSTANT_COVERAGE_ARTIFACT,
+        "coverage_artifact_digest": artifact_digest,
+        "coverage_report_path": POOLS_TRADE_INSTANT_COVERAGE_REPORT_PATH,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "complete_source_ids_before": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+        ],
+        "complete_source_ids_after_if_promoted": expected_after,
+        "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+        "promotion_generated_inputs": generated_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_pools_trade_instant_promotion_review_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable 3/14 pools.trade Instant review handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_POOLS_TRADE_INSTANT_PROMOTION_REVIEW_VERSION
+    ):
+        raise ValueError(
+            "pools.trade Instant promotion review version changed"
+        )
+    control_run_id = _positive_run_id(
+        row.get("promotion_review_control_run_id"),
+        label="pools.trade Instant review control run ID",
+    )
+    prior_run_id = _positive_run_id(
+        row.get("pools_fun_ledger_approval_run_id"),
+        label="pools.fun ledger approval run ID",
+    )
+    coverage_run_id = _positive_run_id(
+        row.get("coverage_run_id"),
+        label="pools.trade Instant coverage run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="pools.trade Instant planner run ID",
+    )
+    prior_digest = _artifact_digest(
+        row.get("pools_fun_ledger_approval_artifact_digest"),
+        label="pools.fun ledger approval artifact digest",
+    )
+    coverage_digest = _artifact_digest(
+        row.get("coverage_artifact_digest"),
+        label="pools.trade Instant coverage artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="pools.trade Instant planner artifact digest",
+    )
+    report_sha = _sha256(
+        row.get("coverage_report_sha256"),
+        label="pools.trade Instant coverage report",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="pools.trade Instant canonical ledger",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError(
+            "pools.trade Instant review execution branch is empty"
+        )
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="pools.trade Instant review execution head",
+    )
+
+    if row.get("source_id") != "pools_trade_instant":
+        raise ValueError("pools.trade Instant review source drift")
+    if row.get("coverage_workflow") != POOLS_TRADE_INSTANT_COVERAGE_WORKFLOW:
+        raise ValueError("pools.trade Instant coverage workflow drift")
+    if row.get("coverage_artifact_name") != (
+        POOLS_TRADE_INSTANT_COVERAGE_ARTIFACT
+    ):
+        raise ValueError("pools.trade Instant artifact-name drift")
+    if row.get("coverage_report_path") != (
+        POOLS_TRADE_INSTANT_COVERAGE_REPORT_PATH
+    ):
+        raise ValueError("pools.trade Instant report-path drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("pools.trade Instant promotion workflow drift")
+
+    expected_inputs = {
+        "coverage_run_id": str(coverage_run_id),
+        "coverage_artifact_name": POOLS_TRADE_INSTANT_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": coverage_digest,
+        "coverage_report_path": POOLS_TRADE_INSTANT_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "pools_trade_instant",
+    }
+    if row.get("promotion_generated_inputs") != expected_inputs:
+        raise ValueError(
+            "pools.trade Instant promotion generated-input drift"
+        )
+    if row.get("promotion_review_required") is not True:
+        raise ValueError(
+            "pools.trade Instant promotion lost review requirement"
+        )
+    for field in (
+        "promotion_dispatched",
+        "proposal_created",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                "pools.trade Instant review violates read-only field "
+                f"{field}"
+            )
+
+    return {
+        **row,
+        "promotion_review_control_run_id": control_run_id,
+        "pools_fun_ledger_approval_run_id": prior_run_id,
+        "pools_fun_ledger_approval_artifact_digest": prior_digest,
+        "coverage_run_id": coverage_run_id,
+        "coverage_artifact_digest": coverage_digest,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_generated_inputs": expected_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
