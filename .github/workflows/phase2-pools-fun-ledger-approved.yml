@@ -1,0 +1,753 @@
+name: phase2-pools-fun-ledger-approved
+
+on:
+  workflow_dispatch:
+    inputs:
+      promotion_proposal_run_id:
+        description: Exact successful phase2-pools-fun-promotion-propose workflow_dispatch run ID
+        required: true
+        type: string
+      expected_proposal_artifact_digest:
+        description: Exact validated proposal receipt artifact digest (sha256:...)
+        required: true
+        type: string
+      apply_pools_fun_ledger:
+        description: Explicitly approve applying the reviewed pools.fun canonical-ledger proposal
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-pools-fun-ledger-approved-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROMOTION_PROPOSAL_RUN_ID: ${{ inputs.promotion_proposal_run_id }}
+  EXPECTED_PROPOSAL_ARTIFACT_DIGEST: ${{ inputs.expected_proposal_artifact_digest }}
+  APPLY_POOLS_FUN_LEDGER: ${{ inputs.apply_pools_fun_ledger }}
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit pools.fun canonical-ledger approval
+        run: |
+          set -euo pipefail
+          if [ "${APPLY_POOLS_FUN_LEDGER}" != "true" ]; then
+            echo "pools.fun canonical-ledger write requires apply_pools_fun_ledger=true" >&2
+            exit 1
+          fi
+
+      - id: approve
+        name: Verify reviewed proposal, apply exact ledger, and refresh planner
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import (
+              validate_phase2_coverage_ledger,
+          )
+          from hlp.data.phase2_coverage_promotion import (
+              validate_phase2_pools_fun_ledger_commit_receipt,
+              validate_phase2_pools_fun_post_commit_frontier,
+              validate_phase2_pools_fun_promotion_proposal_receipt,
+              validate_phase2_pools_fun_promotion_review_receipt,
+          )
+          from hlp.data.phase2_dispatch_readiness import (
+              workflow_dispatch_interface_sha256,
+          )
+          from hlp.data.phase2_post_fanout import (
+              validate_phase2_direct_coverage_wave_completion_receipt,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          approval_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh", "api",
+                  "-H", "Accept: application/vnd.github+json",
+                  "-H", f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_identity(
+              run,
+              *,
+              workflow,
+              run_id,
+              expected_head,
+          ):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(f"run {run_id} workflow identity drift")
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(f"run {run_id} is not workflow_dispatch")
+              if run.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} branch identity drift")
+              if str(run.get("head_sha") or "").lower() != expected_head:
+                  raise SystemExit(f"run {run_id} HEAD identity drift")
+
+          def wait_run(
+              run_id,
+              *,
+              workflow,
+              expected_head,
+              timeout_seconds=900,
+          ):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                      expected_head=expected_head,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(path),
+              ])
+              return path
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method", "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input", "-",
+                  ],
+                  payload={"ref": branch, "inputs": inputs},
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          def default_workflow_text(workflow):
+              metadata = gh_json([f"/repos/{repo}"])
+              default_branch = str(metadata.get("default_branch") or "")
+              if not default_branch:
+                  raise SystemExit(
+                      "repository default branch is unavailable"
+                  )
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/contents/.github/workflows/"
+                      f"{workflow}?ref={default_branch}"
+                  ),
+              ])
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding drift: {workflow}"
+                  )
+              return base64.b64decode(
+                  str(payload.get("content") or "").replace("\n", "")
+              ).decode("utf-8")
+
+          try:
+              proposal_run_id = int(
+                  os.environ["PROMOTION_PROPOSAL_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "promotion_proposal_run_id is invalid"
+              ) from exc
+          if proposal_run_id <= 0:
+              raise SystemExit(
+                  "promotion_proposal_run_id must be positive"
+              )
+          expected_proposal_digest = str(
+              os.environ["EXPECTED_PROPOSAL_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_proposal_digest.startswith("sha256:")
+              or len(expected_proposal_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_proposal_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+          try:
+              int(expected_proposal_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_proposal_artifact_digest is not hexadecimal"
+              ) from exc
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          base_ledger_bytes = ledger_path.read_bytes()
+          base_ledger_sha = hashlib.sha256(
+              base_ledger_bytes
+          ).hexdigest()
+
+          proposal_workflow = "phase2-pools-fun-promotion-propose.yml"
+          proposal_run = get_run(proposal_run_id)
+          assert_run_identity(
+              proposal_run,
+              workflow=proposal_workflow,
+              run_id=proposal_run_id,
+              expected_head=approval_head,
+          )
+          if proposal_run.get("status") != "completed":
+              raise SystemExit(
+                  "pools.fun proposal run is not completed"
+              )
+          if proposal_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "pools.fun proposal run did not succeed"
+              )
+          proposal_artifact_name = "phase2-pools-fun-promotion-proposal"
+          proposal_artifact = artifact_row(
+              proposal_run_id,
+              proposal_artifact_name,
+          )
+          actual_proposal_digest = str(
+              proposal_artifact.get("digest") or ""
+          ).lower()
+          if actual_proposal_digest != expected_proposal_digest:
+              raise SystemExit(
+                  "pools.fun proposal artifact digest drift"
+              )
+          proposal_dir = download_artifact(
+              proposal_run_id,
+              proposal_artifact_name,
+              "upstream/pools-fun-proposal",
+          )
+          proposal_path = (
+              proposal_dir / "phase2-pools-fun-promotion-proposal.json"
+          )
+          if not proposal_path.is_file():
+              raise SystemExit(
+                  "pools.fun proposal artifact lacks proposal receipt"
+              )
+          try:
+              proposal = (
+                  validate_phase2_pools_fun_promotion_proposal_receipt(
+                      json.loads(proposal_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if proposal["promotion_proposal_control_run_id"] != proposal_run_id:
+              raise SystemExit(
+                  "pools.fun proposal receipt/control identity drift"
+              )
+          if proposal["execution_branch"] != branch:
+              raise SystemExit(
+                  "pools.fun proposal receipt branch drift"
+              )
+          if proposal["execution_head_sha"] != approval_head:
+              raise SystemExit(
+                  "pools.fun proposal receipt HEAD drift"
+              )
+          if proposal["base_ledger_sha256"] != base_ledger_sha:
+              raise SystemExit(
+                  "pools.fun proposal base-ledger SHA drift"
+              )
+
+          review_run_id = int(proposal["promotion_review_run_id"])
+          review_run = get_run(review_run_id)
+          assert_run_identity(
+              review_run,
+              workflow="phase2-pools-fun-promotion-review.yml",
+              run_id=review_run_id,
+              expected_head=approval_head,
+          )
+          if review_run.get("status") != "completed":
+              raise SystemExit(
+                  "pools.fun promotion review run is not completed"
+              )
+          if review_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "pools.fun promotion review run did not succeed"
+              )
+          review_artifact = artifact_row(
+              review_run_id,
+              "phase2-pools-fun-promotion-review",
+          )
+          if str(
+              review_artifact.get("digest") or ""
+          ).lower() != proposal["promotion_review_artifact_digest"]:
+              raise SystemExit(
+                  "pools.fun promotion review artifact digest drift"
+              )
+          review_dir = download_artifact(
+              review_run_id,
+              "phase2-pools-fun-promotion-review",
+              "upstream/pools-fun-review",
+          )
+          review_path = (
+              review_dir / "phase2-pools-fun-promotion-review.json"
+          )
+          try:
+              review = validate_phase2_pools_fun_promotion_review_receipt(
+                  json.loads(review_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if review["promotion_review_control_run_id"] != review_run_id:
+              raise SystemExit(
+                  "pools.fun review receipt/control identity drift"
+              )
+          if review["execution_branch"] != branch:
+              raise SystemExit(
+                  "pools.fun review receipt branch drift"
+              )
+          if review["execution_head_sha"] != approval_head:
+              raise SystemExit(
+                  "pools.fun review receipt HEAD drift"
+              )
+
+          frontier_run_id = int(review["promotion_frontier_run_id"])
+          frontier_run = get_run(frontier_run_id)
+          assert_run_identity(
+              frontier_run,
+              workflow="phase2-direct-coverage-wave-completion.yml",
+              run_id=frontier_run_id,
+              expected_head=approval_head,
+          )
+          if frontier_run.get("status") != "completed":
+              raise SystemExit(
+                  "promotion frontier run is not completed"
+              )
+          if frontier_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "promotion frontier run did not succeed"
+              )
+          frontier_artifact = artifact_row(
+              frontier_run_id,
+              "phase2-direct-coverage-wave-completion",
+          )
+          if str(
+              frontier_artifact.get("digest") or ""
+          ).lower() != review["promotion_frontier_artifact_digest"]:
+              raise SystemExit(
+                  "promotion frontier artifact digest drift"
+              )
+          frontier_dir = download_artifact(
+              frontier_run_id,
+              "phase2-direct-coverage-wave-completion",
+              "upstream/promotion-frontier",
+          )
+          frontier_path = (
+              frontier_dir
+              / "phase2-direct-coverage-wave-completion-receipt.json"
+          )
+          try:
+              frontier = (
+                  validate_phase2_direct_coverage_wave_completion_receipt(
+                      json.loads(frontier_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if frontier[
+              "direct_coverage_completion_control_run_id"
+          ] != frontier_run_id:
+              raise SystemExit(
+                  "promotion frontier receipt/control identity drift"
+              )
+          if frontier["execution_branch"] != branch:
+              raise SystemExit(
+                  "promotion frontier receipt branch drift"
+              )
+          if frontier["execution_head_sha"] != approval_head:
+              raise SystemExit(
+                  "promotion frontier receipt HEAD drift"
+              )
+          if frontier["planner_run_id"] != review["planner_run_id"]:
+              raise SystemExit(
+                  "pools.fun review/frontier planner-run linkage drift"
+              )
+          if frontier["planner_artifact_digest"] != review[
+              "planner_artifact_digest"
+          ]:
+              raise SystemExit(
+                  "pools.fun review/frontier planner-digest linkage drift"
+              )
+
+          prior_control_ids = list(
+              frontier["node_dispatch_control_run_ids_consumed"]
+          )
+          promotion_control_id = int(
+              proposal["node_dispatch_control_run_id"]
+          )
+          all_control_ids = sorted(
+              prior_control_ids + [promotion_control_id]
+          )
+          if (
+              len(all_control_ids) != 41
+              or len(set(all_control_ids)) != 41
+          ):
+              raise SystemExit(
+                  "pools.fun ledger approval requires exactly 41 unique "
+                  "dispatcher control runs"
+              )
+
+          ledger_workflow = "phase2-source-coverage-ledger-commit.yml"
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          for workflow in (ledger_workflow, planner_workflow):
+              expected_interface = workflow_dispatch_interface_sha256(
+                  Path(".github/workflows", workflow).read_text()
+              )
+              actual_interface = workflow_dispatch_interface_sha256(
+                  default_workflow_text(workflow)
+              )
+              if actual_interface != expected_interface:
+                  raise SystemExit(
+                      "default-branch dispatch interface drift: "
+                      f"{workflow}"
+                  )
+
+          commit_inputs = dict(
+              proposal["ledger_commit_generated_inputs"]
+          )
+          ledger_run_id = dispatch(
+              ledger_workflow,
+              {
+                  **commit_inputs,
+                  "apply_proposed_ledger": True,
+              },
+          )
+          wait_run(
+              ledger_run_id,
+              workflow=ledger_workflow,
+              expected_head=approval_head,
+          )
+
+          ledger_artifact_name = (
+              "phase2-source-coverage-ledger-commit-pools_fun"
+          )
+          ledger_artifact = artifact_row(
+              ledger_run_id,
+              ledger_artifact_name,
+          )
+          ledger_artifact_digest = str(
+              ledger_artifact.get("digest") or ""
+          ).lower()
+          ledger_dir = download_artifact(
+              ledger_run_id,
+              ledger_artifact_name,
+              "upstream/pools-fun-ledger-commit",
+          )
+          ledger_receipt_path = (
+              ledger_dir
+              / "phase2-source-coverage-ledger-commit.json"
+          )
+          if not ledger_receipt_path.is_file():
+              raise SystemExit(
+                  "pools.fun ledger commit artifact lacks receipt"
+              )
+          try:
+              ledger_receipt = validate_phase2_pools_fun_ledger_commit_receipt(
+                  json.loads(ledger_receipt_path.read_text()),
+                  expected_promotion_run_id=int(
+                      proposal["promotion_run_id"]
+                  ),
+                  expected_promotion_artifact_digest=str(
+                      proposal["promotion_artifact_digest"]
+                  ),
+                  expected_promotion_handoff_sha256=str(
+                      proposal["promotion_handoff_sha256"]
+                  ),
+                  expected_proposed_ledger_sha256=str(
+                      proposal["proposed_ledger_sha256"]
+                  ),
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          commit_sha = ledger_receipt["canonical_ledger_commit_sha"]
+          ref_payload = gh_json([
+              f"/repos/{repo}/git/ref/heads/{branch}",
+          ])
+          branch_head = str(
+              ((ref_payload or {}).get("object") or {}).get("sha") or ""
+          ).lower()
+          if branch_head != commit_sha:
+              raise SystemExit(
+                  "pools.fun canonical commit is not current branch HEAD"
+              )
+
+          ledger_metadata = gh_json([
+              (
+                  f"/repos/{repo}/contents/"
+                  f".github/phase2-source-coverage.json?ref={branch}"
+              ),
+          ])
+          if ledger_metadata.get("encoding") != "base64":
+              raise SystemExit(
+                  "canonical coverage ledger encoding drift"
+              )
+          canonical_bytes = base64.b64decode(
+              str(ledger_metadata.get("content") or "").replace("\n", "")
+          )
+          canonical_sha = hashlib.sha256(canonical_bytes).hexdigest()
+          if canonical_sha != proposal["proposed_ledger_sha256"]:
+              raise SystemExit(
+                  "pools.fun committed canonical ledger SHA drift"
+              )
+          validation = validate_phase2_coverage_ledger(
+              json.loads(canonical_bytes),
+              build_phase2_source_inventory(),
+          )
+          if validation["complete_source_ids"] != [
+              "pons_v1",
+              "pons_v2",
+              "pools_fun",
+          ]:
+              raise SystemExit(
+                  "pools.fun committed canonical source set drift"
+              )
+
+          planner_run_id = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": json.dumps(
+                      {
+                          "shared:direct_selector_freeze": int(
+                              frontier["selector_run_id"]
+                          )
+                      },
+                      separators=(",", ":"),
+                  ),
+                  "node_dispatch_run_ids_json": json.dumps(
+                      all_control_ids,
+                      separators=(",", ":"),
+                  ),
+              },
+          )
+          wait_run(
+              planner_run_id,
+              workflow=planner_workflow,
+              expected_head=commit_sha,
+          )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/pools-fun-post-commit-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != commit_sha:
+              raise SystemExit(
+                  "pools.fun post-commit planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != canonical_sha:
+              raise SystemExit(
+                  "pools.fun post-commit planner ledger SHA drift"
+              )
+          try:
+              post_commit = validate_phase2_pools_fun_post_commit_frontier(
+                  execution_plan,
+                  verified_receipts,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          receipt = {
+              "version": "phase2-pools-fun-ledger-approved-receipt-v1",
+              "ledger_approval_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "execution_branch": branch,
+              "approval_execution_head_sha": approval_head,
+              "promotion_proposal_run_id": proposal_run_id,
+              "promotion_proposal_artifact_digest": actual_proposal_digest,
+              "ledger_commit_run_id": ledger_run_id,
+              "ledger_commit_artifact_digest": ledger_artifact_digest,
+              "canonical_ledger_commit_sha": commit_sha,
+              "base_ledger_sha256": base_ledger_sha,
+              "canonical_coverage_ledger_sha256": canonical_sha,
+              "node_dispatch_control_run_ids_consumed": all_control_ids,
+              "selector_run_id": frontier["selector_run_id"],
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": planner_digest,
+              "canonical_complete_source_ids": post_commit[
+                  "canonical_complete_source_ids"
+              ],
+              "next_promotion_node_id": post_commit[
+                  "next_promotion_node_id"
+              ],
+              "human_approval_input": "apply_pools_fun_ledger",
+              "human_approval_value": True,
+              "canonical_ledger_mutated": True,
+              "automatic_acquisition_complete": True,
+              "phase2_universe_coverage_complete": False,
+          }
+          Path(
+              "artifacts/phase2-pools-fun-ledger-approved-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"ledger_commit_run_id={ledger_run_id}\n")
+              handle.write(f"canonical_commit_sha={commit_sha}\n")
+              handle.write(f"planner_run_id={planner_run_id}\n")
+              handle.write(f"planner_digest={planner_digest}\n")
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload approved pools.fun ledger handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-ledger-approved
+          path: artifacts/phase2-pools-fun-ledger-approved-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish pools.fun canonical advancement
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          LEDGER_COMMIT_RUN_ID: ${{ steps.approve.outputs.ledger_commit_run_id }}
+          CANONICAL_COMMIT_SHA: ${{ steps.approve.outputs.canonical_commit_sha }}
+          PLANNER_RUN_ID: ${{ steps.approve.outputs.planner_run_id }}
+          PLANNER_DIGEST: ${{ steps.approve.outputs.planner_digest }}
+        run: |
+          {
+            echo "## Phase-2 pools.fun canonical advancement"
+            echo
+            echo "- ledger_approval_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- approval_receipt_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- human_approval_input: apply_pools_fun_ledger"
+            echo "- human_approval_value: true"
+            echo "- ledger_commit_run_id: ${LEDGER_COMMIT_RUN_ID}"
+            echo "- canonical_ledger_commit_sha: ${CANONICAL_COMMIT_SHA}"
+            echo "- canonical_complete_sources: 3/14"
+            echo "- planner_run_id: ${PLANNER_RUN_ID}"
+            echo "- planner_artifact_digest: ${PLANNER_DIGEST}"
+            echo "- next_promotion_node_id: promote:pools_trade_instant"
+            echo "- automatic_acquisition_complete: true"
+            echo "- canonical_ledger_mutated: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
