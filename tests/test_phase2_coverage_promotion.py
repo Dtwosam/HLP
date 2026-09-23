@@ -12,6 +12,7 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_pools_fun_promotion_review_receipt,
     validate_phase2_pools_fun_promotion_proposal_receipt,
     validate_phase2_pools_fun_ledger_commit_receipt,
+    validate_phase2_pools_fun_ledger_approved_receipt,
     validate_phase2_pools_fun_post_commit_frontier,
     validate_phase2_pools_trade_instant_promotion_review_receipt,
 )
@@ -602,3 +603,51 @@ def test_pools_trade_instant_review_receipt_is_read_only():
         "pools_trade_instant"
     )
     assert report["canonical_coverage_ledger_mutated"] is False
+
+
+
+def pools_fun_ledger_approved_receipt():
+    return {
+        "version": "phase2-pools-fun-ledger-approved-receipt-v1",
+        "ledger_approval_control_run_id": 601,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "approval_execution_head_sha": "11" * 20,
+        "promotion_proposal_run_id": 602,
+        "promotion_proposal_artifact_digest": "sha256:" + "22" * 32,
+        "ledger_commit_run_id": 603,
+        "ledger_commit_artifact_digest": "sha256:" + "33" * 32,
+        "canonical_ledger_commit_sha": "44" * 20,
+        "base_ledger_sha256": "55" * 32,
+        "canonical_coverage_ledger_sha256": "66" * 32,
+        "node_dispatch_control_run_ids_consumed": list(range(700, 741)),
+        "selector_run_id": 604,
+        "planner_run_id": 605,
+        "planner_artifact_digest": "sha256:" + "77" * 32,
+        "canonical_complete_source_ids": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+        ],
+        "next_promotion_node_id": "promote:pools_trade_instant",
+        "human_approval_input": "apply_pools_fun_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+def test_pools_fun_ledger_approved_receipt_validates_3_of_14_handoff():
+    report = validate_phase2_pools_fun_ledger_approved_receipt(
+        pools_fun_ledger_approved_receipt()
+    )
+    assert report["canonical_ledger_commit_sha"] == "44" * 20
+    assert report["next_promotion_node_id"] == "promote:pools_trade_instant"
+    assert len(report["node_dispatch_control_run_ids_consumed"]) == 41
+
+
+def test_pools_fun_ledger_approved_receipt_rejects_false_approval():
+    row = pools_fun_ledger_approved_receipt()
+    row["human_approval_value"] = False
+    with pytest.raises(ValueError, match="affirmative approval"):
+        validate_phase2_pools_fun_ledger_approved_receipt(row)
