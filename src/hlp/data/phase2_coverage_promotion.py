@@ -2435,3 +2435,562 @@ def validate_phase2_pools_trade_lbp_ledger_approved_receipt(
         "automatic_acquisition_complete": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+
+PHASE2_DOPPLER_PROMOTION_REVIEW_VERSION = (
+    "phase2-doppler-promotion-review-v1"
+)
+DOPPLER_COVERAGE_WORKFLOW = "phase2-doppler-source-coverage.yml"
+DOPPLER_COVERAGE_ARTIFACT = "phase2-doppler-source-coverage"
+DOPPLER_COVERAGE_REPORT_PATH = "doppler-source-coverage-report.json"
+PHASE2_DOPPLER_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-doppler-promotion-proposal-v1"
+)
+
+
+def build_phase2_doppler_promotion_review_handoff(
+    current_ledger: Mapping[str, object],
+    coverage_report: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    *,
+    coverage_run_id: int,
+    coverage_artifact_digest: str,
+    coverage_report_sha256: str,
+    planner_run_id: int,
+    planner_artifact_digest: str,
+    canonical_ledger_sha256: str,
+) -> dict:
+    """Prepare exact Doppler promotion inputs at 5/14."""
+
+    inventory = [dict(row) for row in source_inventory]
+    before = validate_phase2_coverage_ledger(
+        dict(current_ledger),
+        inventory,
+    )
+    expected_before = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    if before["complete_source_ids"] != expected_before:
+        raise ValueError(
+            "Doppler review requires exact 5/14 pools.trade LBP ledger"
+        )
+
+    report = dict(coverage_report)
+    if report.get("source_id") != "doppler":
+        raise ValueError("Doppler review source identity drift")
+    if report.get("coverage_status") != "complete":
+        raise ValueError(
+            "Doppler review requires complete coverage report"
+        )
+
+    _, after = apply_phase2_source_coverage_report(
+        dict(current_ledger),
+        inventory,
+        report,
+    )
+    expected_after = expected_before + ["doppler"]
+    if after["complete_source_ids"] != expected_after:
+        raise ValueError(
+            "Doppler review does not complete exactly next source"
+        )
+    if after["phase2_universe_coverage_complete"]:
+        raise ValueError("Doppler review unexpectedly closes Phase 2")
+
+    run_id = _positive_run_id(
+        coverage_run_id,
+        label="Doppler coverage run ID",
+    )
+    artifact_digest = _artifact_digest(
+        coverage_artifact_digest,
+        label="Doppler coverage artifact digest",
+    )
+    report_sha = _sha256(
+        coverage_report_sha256,
+        label="Doppler coverage report",
+    )
+    planner_id = _positive_run_id(
+        planner_run_id,
+        label="Doppler promotion planner run ID",
+    )
+    planner_digest = _artifact_digest(
+        planner_artifact_digest,
+        label="Doppler planner artifact digest",
+    )
+    ledger_sha = _sha256(
+        canonical_ledger_sha256,
+        label="Doppler canonical ledger",
+    )
+
+    generated_inputs = {
+        "coverage_run_id": str(run_id),
+        "coverage_artifact_name": DOPPLER_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": artifact_digest,
+        "coverage_report_path": DOPPLER_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "doppler",
+    }
+    return {
+        "version": PHASE2_DOPPLER_PROMOTION_REVIEW_VERSION,
+        "source_id": "doppler",
+        "coverage_workflow": DOPPLER_COVERAGE_WORKFLOW,
+        "coverage_run_id": run_id,
+        "coverage_artifact_name": DOPPLER_COVERAGE_ARTIFACT,
+        "coverage_artifact_digest": artifact_digest,
+        "coverage_report_path": DOPPLER_COVERAGE_REPORT_PATH,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "complete_source_ids_before": expected_before,
+        "complete_source_ids_after_if_promoted": expected_after,
+        "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+        "promotion_generated_inputs": generated_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_doppler_promotion_review_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 5/14 Doppler review handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != PHASE2_DOPPLER_PROMOTION_REVIEW_VERSION:
+        raise ValueError("Doppler promotion review version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_review_control_run_id"),
+        label="Doppler review control run ID",
+    )
+    prior_run_id = _positive_run_id(
+        row.get("pools_trade_lbp_ledger_approval_run_id"),
+        label="pools.trade LBP ledger approval run ID",
+    )
+    coverage_run_id = _positive_run_id(
+        row.get("coverage_run_id"),
+        label="Doppler coverage run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="Doppler planner run ID",
+    )
+    prior_digest = _artifact_digest(
+        row.get("pools_trade_lbp_ledger_approval_artifact_digest"),
+        label="pools.trade LBP ledger approval artifact digest",
+    )
+    coverage_digest = _artifact_digest(
+        row.get("coverage_artifact_digest"),
+        label="Doppler coverage artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="Doppler planner artifact digest",
+    )
+    report_sha = _sha256(
+        row.get("coverage_report_sha256"),
+        label="Doppler coverage report",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="Doppler canonical ledger",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("Doppler review execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="Doppler review execution head",
+    )
+
+    if row.get("source_id") != "doppler":
+        raise ValueError("Doppler review source drift")
+    if row.get("coverage_workflow") != DOPPLER_COVERAGE_WORKFLOW:
+        raise ValueError("Doppler coverage workflow drift")
+    if row.get("coverage_artifact_name") != DOPPLER_COVERAGE_ARTIFACT:
+        raise ValueError("Doppler artifact-name drift")
+    if row.get("coverage_report_path") != DOPPLER_COVERAGE_REPORT_PATH:
+        raise ValueError("Doppler report-path drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("Doppler promotion workflow drift")
+
+    expected_inputs = {
+        "coverage_run_id": str(coverage_run_id),
+        "coverage_artifact_name": DOPPLER_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": coverage_digest,
+        "coverage_report_path": DOPPLER_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "doppler",
+    }
+    if row.get("promotion_generated_inputs") != expected_inputs:
+        raise ValueError("Doppler promotion generated-input drift")
+    if row.get("promotion_review_required") is not True:
+        raise ValueError("Doppler promotion lost review requirement")
+    for field in (
+        "promotion_dispatched",
+        "proposal_created",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"Doppler review violates read-only field {field}"
+            )
+
+    return {
+        **row,
+        "promotion_review_control_run_id": control_run_id,
+        "pools_trade_lbp_ledger_approval_run_id": prior_run_id,
+        "pools_trade_lbp_ledger_approval_artifact_digest": prior_digest,
+        "coverage_run_id": coverage_run_id,
+        "coverage_artifact_digest": coverage_digest,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_generated_inputs": expected_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_doppler_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate Doppler proposal before ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != PHASE2_DOPPLER_PROMOTION_PROPOSAL_VERSION:
+        raise ValueError("Doppler promotion proposal receipt version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="Doppler proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="Doppler review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="Doppler promotion dispatcher run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="Doppler promotion run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("Doppler proposal execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="Doppler proposal execution head",
+    )
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="Doppler review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="Doppler promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="Doppler promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="Doppler proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="Doppler proposal base ledger",
+    )
+    expected_before = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    expected_after = expected_before + ["doppler"]
+
+    if row.get("source_id") != "doppler":
+        raise ValueError("Doppler proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("Doppler proposal workflow identity drift")
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("Doppler proposal before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("Doppler proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("Doppler proposal unexpectedly closes Phase 2")
+    if row.get("proposal_created") is not True:
+        raise ValueError("Doppler proposal lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("Doppler proposal lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("Doppler proposal unexpectedly mutates ledger")
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError("Doppler proposal unexpectedly authorizes ledger commit")
+    if row.get("ledger_commit_approval_input") != "apply_proposed_ledger":
+        raise ValueError("Doppler proposal ledger approval input drift")
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError("Doppler proposal already supplies ledger approval")
+
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "doppler",
+    }
+    if row.get("ledger_commit_generated_inputs") != expected_generated:
+        raise ValueError("Doppler proposal ledger-commit input drift")
+
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "doppler",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def validate_phase2_doppler_ledger_commit_receipt(
+    receipt: Mapping[str, object],
+    *,
+    expected_promotion_run_id: int,
+    expected_promotion_artifact_digest: str,
+    expected_promotion_handoff_sha256: str,
+    expected_proposed_ledger_sha256: str,
+) -> dict:
+    """Validate approved Doppler canonical-ledger write."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-source-coverage-ledger-commit-v1"
+    ):
+        raise ValueError("Doppler ledger commit receipt version changed")
+    if row.get("source_id") != "doppler":
+        raise ValueError("Doppler ledger commit source identity drift")
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="Doppler ledger promotion run ID",
+    )
+    if promotion_run_id != int(expected_promotion_run_id):
+        raise ValueError("Doppler ledger commit promotion run drift")
+    if row.get("promotion_artifact_name") != (
+        "phase2-source-coverage-promotion-doppler"
+    ):
+        raise ValueError("Doppler ledger commit artifact-name drift")
+    artifact_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="Doppler promotion artifact digest",
+    )
+    if artifact_digest != _artifact_digest(
+        expected_promotion_artifact_digest,
+        label="expected Doppler promotion artifact digest",
+    ):
+        raise ValueError("Doppler ledger commit promotion artifact drift")
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="Doppler promotion handoff",
+    )
+    if handoff_sha != _sha256(
+        expected_promotion_handoff_sha256,
+        label="expected Doppler promotion handoff",
+    ):
+        raise ValueError("Doppler ledger commit promotion handoff drift")
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="Doppler proposed ledger",
+    )
+    if proposed_sha != _sha256(
+        expected_proposed_ledger_sha256,
+        label="expected Doppler proposed ledger",
+    ):
+        raise ValueError("Doppler ledger commit proposed-ledger drift")
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="Doppler base ledger",
+    )
+    expected_before = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    expected_after = expected_before + ["doppler"]
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("Doppler ledger commit before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("Doppler ledger commit after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("Doppler ledger commit unexpectedly closes Phase 2")
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="Doppler canonical ledger commit",
+    )
+    if row.get("explicit_approval") is not True:
+        raise ValueError("Doppler ledger commit lacks explicit approval")
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("Doppler ledger commit lacks mutation proof")
+    return {
+        **row,
+        "promotion_run_id": promotion_run_id,
+        "promotion_artifact_digest": artifact_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "base_ledger_sha256": base_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "canonical_ledger_commit_sha": commit_sha,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def validate_phase2_doppler_post_commit_frontier(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze exact 6/14 frontier after Doppler is canonical."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+    expected_complete = [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "doppler",
+    ]
+    if execution.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("Doppler post-commit canonical source set drift")
+    if int(execution.get("complete_sources", -1)) != 6:
+        raise ValueError("Doppler post-commit source count drift")
+    if int(execution.get("incomplete_sources", -1)) != 8:
+        raise ValueError("Doppler post-commit incomplete count drift")
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("Doppler post-commit unexpectedly closes Phase 2")
+
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    canonical_coverages = {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+        "coverage:pools_trade_lbp",
+        "coverage:doppler",
+    }
+    removed = canonical_coverages | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+    }
+    expected_active = pre_frontier - canonical_coverages
+    if set(execution.get("completed_node_ids") or []) != expected_active:
+        raise ValueError("Doppler post-commit active completion drift")
+    if set(execution.get("ignored_completed_node_ids") or []) != removed:
+        raise ValueError("Doppler post-commit ignored-completion drift")
+    if execution.get("ready_to_dispatch_node_ids") != ["promote:flap"]:
+        raise ValueError("Doppler post-commit next promotion drift")
+    if execution.get("awaiting_explicit_approval_node_ids") != []:
+        raise ValueError("Doppler post-commit unexpected approvals")
+    if execution.get("ledger_commit_approval_node_ids") != []:
+        raise ValueError("Doppler post-commit unexpected ledger approval")
+
+    expected_verified = pre_frontier | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+    }
+    if set(verified.get("completed_node_ids") or []) != expected_verified:
+        raise ValueError("Doppler post-commit verified completion drift")
+    controls = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(controls, list)
+        or len(controls) != 44
+        or len(set(int(value) for value in controls)) != 44
+    ):
+        raise ValueError(
+            "Doppler post-commit requires exactly 44 dispatcher receipts"
+        )
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError("Doppler post-commit lacks lineage proof")
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise ValueError("Doppler post-commit dispatch row count drift")
+    row = dict(rows[0])
+    if row.get("node_id") != "promote:flap":
+        raise ValueError("Doppler post-commit dispatch node drift")
+    if row.get("workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("Doppler post-commit promotion workflow drift")
+    if set(dict(row.get("run_id_inputs") or {})) != {"coverage_run_id"}:
+        raise ValueError("Flap promotion coverage-run binding drift")
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value) for value in row.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError("Flap promotion manual-input drift")
+
+    return {
+        "version": "phase2-doppler-post-commit-frontier-v1",
+        "canonical_complete_source_ids": expected_complete,
+        "complete_sources": 6,
+        "incomplete_sources": 8,
+        "active_completed_execution_nodes": len(expected_active),
+        "ignored_completed_node_ids": sorted(removed),
+        "node_dispatch_control_runs_consumed": len(controls),
+        "next_promotion_node_id": "promote:flap",
+        "next_promotion_manual_inputs": actual_manual,
+        "automatic_acquisition_complete": True,
+        "canonical_ledger_advanced": True,
+        "phase2_universe_coverage_complete": False,
+    }
