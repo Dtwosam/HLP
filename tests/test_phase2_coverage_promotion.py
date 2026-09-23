@@ -20,6 +20,7 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_pools_trade_instant_ledger_commit_receipt,
     validate_phase2_pools_trade_instant_ledger_approved_receipt,
     validate_phase2_pools_trade_lbp_promotion_review_receipt,
+    validate_phase2_pools_trade_lbp_promotion_proposal_receipt,
     validate_phase2_pools_trade_instant_post_commit_frontier,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
@@ -966,3 +967,68 @@ def test_pools_trade_lbp_review_receipt_is_read_only():
         "pools_trade_lbp"
     )
     assert report["canonical_coverage_ledger_mutated"] is False
+
+
+
+def pools_trade_lbp_proposal_receipt():
+    return {
+        "version": "phase2-pools-trade-lbp-promotion-proposal-v1",
+        "promotion_proposal_control_run_id": 1201,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "11" * 20,
+        "promotion_review_run_id": 1202,
+        "promotion_review_artifact_digest": "sha256:" + "22" * 32,
+        "node_dispatch_control_run_id": 1203,
+        "promotion_run_id": 1204,
+        "promotion_workflow": "phase2-source-coverage-promotion.yml",
+        "promotion_artifact_digest": "sha256:" + "33" * 32,
+        "promotion_handoff_sha256": "44" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "proposed_ledger_sha256": "66" * 32,
+        "source_id": "pools_trade_lbp",
+        "complete_source_ids_before": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+        ],
+        "complete_source_ids_after": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+            "pools_trade_lbp",
+        ],
+        "phase2_universe_coverage_complete": False,
+        "ledger_commit_generated_inputs": {
+            "promotion_run_id": "1204",
+            "expected_artifact_digest": "sha256:" + "33" * 32,
+            "expected_handoff_sha256": "44" * 32,
+            "expected_proposed_ledger_sha256": "66" * 32,
+            "expected_source_id": "pools_trade_lbp",
+        },
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def test_pools_trade_lbp_proposal_receipt_is_approval_free():
+    report = validate_phase2_pools_trade_lbp_promotion_proposal_receipt(
+        pools_trade_lbp_proposal_receipt()
+    )
+    assert report["promotion_run_id"] == 1204
+    assert report["ledger_commit_generated_inputs"]["expected_source_id"] == (
+        "pools_trade_lbp"
+    )
+    assert report["ledger_commit_approval_value_supplied"] is False
+
+
+def test_pools_trade_lbp_proposal_receipt_rejects_authorization():
+    row = pools_trade_lbp_proposal_receipt()
+    row["ledger_commit_authorized"] = True
+    with pytest.raises(ValueError, match="authorizes"):
+        validate_phase2_pools_trade_lbp_promotion_proposal_receipt(row)
