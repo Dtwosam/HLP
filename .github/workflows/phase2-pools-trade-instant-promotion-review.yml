@@ -301,6 +301,12 @@ jobs:
                   "pools.trade Instant promotion coverage run is invalid"
               ) from exc
 
+          if POOLS_TRADE_INSTANT_COVERAGE_WORKFLOW != (
+              "phase2-pools-trade-instant-source-coverage.yml"
+          ):
+              raise SystemExit(
+                  "pools.trade Instant coverage workflow identity drift"
+              )
           coverage_run = get_run(coverage_run_id)
           assert_run_base(
               coverage_run,
