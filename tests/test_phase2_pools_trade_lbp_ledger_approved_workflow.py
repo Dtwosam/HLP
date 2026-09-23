@@ -37,3 +37,23 @@ def test_lbp_ledger_approval_verifies_exact_writer_and_5_of_14_frontier():
     assert "validate_phase2_pools_trade_lbp_post_commit_frontier" in text
     assert "canonical_complete_sources: 5/14" in text
     assert "next_promotion_node_id: promote:doppler" in text
+
+
+
+def test_lbp_ledger_approval_uses_lbp_proposal_artifact_identity():
+    text = WORKFLOW.read_text()
+    assert '"phase2-pools-trade-lbp-promotion-proposal"' in text
+    assert '"phase2-pools-trade-lbp-promotion-proposal.json"' in text
+    assert '"phase2-pools-trade-instant-promotion-proposal"' not in text
+
+
+def test_lbp_ledger_approval_requires_full_5_of_14_source_set():
+    text = WORKFLOW.read_text()
+    expected = '''if validation["complete_source_ids"] != [
+              "pons_v1",
+              "pons_v2",
+              "pools_fun",
+              "pools_trade_instant",
+              "pools_trade_lbp",
+          ]'''
+    assert expected in text

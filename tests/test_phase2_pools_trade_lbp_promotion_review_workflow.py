@@ -42,3 +42,10 @@ def test_pools_trade_lbp_review_never_dispatches_or_mutates():
     assert "proposal_created: false" in text
     assert "canonical_coverage_ledger_mutated: false" in text
     assert "/dispatches" not in text
+
+
+
+def test_pools_trade_lbp_review_binds_prior_approval_digest_field():
+    text = WORKFLOW.read_text()
+    assert '"pools_trade_instant_ledger_approval_artifact_digest": actual_digest' in text
+    assert '"pools_fun_ledger_approval_artifact_digest": actual_digest' not in text

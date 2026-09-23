@@ -290,7 +290,7 @@ jobs:
           )
           proposal_artifact = artifact_row(
               proposal_run_id,
-              "phase2-pools-trade-instant-promotion-proposal",
+              "phase2-pools-trade-lbp-promotion-proposal",
           )
           actual_proposal_digest = str(
               proposal_artifact.get("digest") or ""
@@ -301,12 +301,12 @@ jobs:
               )
           proposal_dir = download_artifact(
               proposal_run_id,
-              "phase2-pools-trade-instant-promotion-proposal",
-              "upstream/instant-proposal",
+              "phase2-pools-trade-lbp-promotion-proposal",
+              "upstream/lbp-proposal",
           )
           proposal_path = (
               proposal_dir
-              / "phase2-pools-trade-instant-promotion-proposal.json"
+              / "phase2-pools-trade-lbp-promotion-proposal.json"
           )
           try:
               proposal = (
@@ -531,6 +531,7 @@ jobs:
               "pons_v1",
               "pons_v2",
               "pools_fun",
+              "pools_trade_instant",
               "pools_trade_lbp",
           ]:
               raise SystemExit(
