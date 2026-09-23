@@ -432,6 +432,13 @@ def validate_phase2_pools_fun_promotion_proposal_receipt(
         row.get("promotion_run_id"),
         label="pools.fun promotion run ID",
     )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("pools.fun proposal execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="pools.fun proposal execution head",
+    )
 
     review_digest = _artifact_digest(
         row.get("promotion_review_artifact_digest"),
@@ -503,6 +510,8 @@ def validate_phase2_pools_fun_promotion_proposal_receipt(
         "promotion_review_run_id": review_run_id,
         "node_dispatch_control_run_id": dispatcher_run_id,
         "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
         "promotion_review_artifact_digest": review_digest,
         "promotion_artifact_digest": promotion_digest,
         "promotion_handoff_sha256": handoff_sha,

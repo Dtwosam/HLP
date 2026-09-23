@@ -317,6 +317,8 @@ def promotion_proposal_receipt():
         "promotion_review_artifact_digest": "sha256:" + "11" * 32,
         "node_dispatch_control_run_id": 403,
         "promotion_run_id": 404,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "aa" * 20,
         "promotion_artifact_digest": "sha256:" + "22" * 32,
         "promotion_handoff_sha256": "33" * 32,
         "proposed_ledger_sha256": "44" * 32,
@@ -509,3 +511,11 @@ def test_pools_fun_post_commit_frontier_rejects_hidden_auto_work():
             verified,
             dispatch,
         )
+
+
+
+def test_pools_fun_proposal_receipt_rejects_head_drift():
+    row = promotion_proposal_receipt()
+    row["execution_head_sha"] = "bad"
+    with pytest.raises(ValueError, match="execution head"):
+        validate_phase2_pools_fun_promotion_proposal_receipt(row)
