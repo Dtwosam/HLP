@@ -2210,7 +2210,7 @@ def test_hood_fun_current_review_prepares_exact_9_of_14_advance():
         planner_artifact_digest="sha256:" + "33" * 32,
         canonical_ledger_sha256="44" * 32,
     )
-    assert report["complete_source_ids_after_if_promoted"] == ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today","hood_fun_current"]
+    assert report["complete_source_ids_after_if_promoted"] == ["doppler","flap","hood_fun_current","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today"]
 
 
 def hood_fun_current_review_receipt():
@@ -2356,13 +2356,13 @@ def hood_fun_current_post_commit_plans():
         "promote:doppler",
         "promote:flap",
         "promote:trench_today",
-        "promote:hood_fun_previous"
+        "promote:hood_fun_current"
     }
     active = sorted(pre_frontier - canonical_coverages)
     execution = {
-        "canonical_complete_source_ids": ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today","hood_fun_current"],
-        "complete_sources": 8,
-        "incomplete_sources": 6,
+        "canonical_complete_source_ids": ["doppler","flap","hood_fun_current","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today"],
+        "complete_sources": 9,
+        "incomplete_sources": 5,
         "phase2_universe_coverage_complete": False,
         "completed_node_ids": active,
         "ignored_completed_node_ids": sorted(
@@ -2427,13 +2427,13 @@ def hood_fun_current_ledger_approved_receipt():
         "canonical_complete_source_ids": [
             "doppler",
             "flap",
+            "hood_fun_current",
             "pons_v1",
             "pons_v2",
             "pools_fun",
             "pools_trade_instant",
             "pools_trade_lbp",
             "trench_today",
-            "hood_fun_current",
         ],
         "next_promotion_node_id": "promote:hood_fun_previous",
         "human_approval_input": "apply_hood_fun_current_ledger",
@@ -2455,6 +2455,6 @@ def test_hood_fun_current_approved_receipt_validates_9_of_14_handoff():
 
 def test_hood_fun_current_approved_receipt_rejects_wrong_next_source():
     row = hood_fun_current_ledger_approved_receipt()
-    row["next_promotion_node_id"] = "promote:hood_fun_previous"
+    row["next_promotion_node_id"] = "promote:noxa"
     with pytest.raises(ValueError, match="next promotion drift"):
         validate_phase2_hood_fun_current_ledger_approved_receipt(row)

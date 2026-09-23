@@ -4948,13 +4948,13 @@ def validate_phase2_hood_fun_current_post_commit_frontier(
     expected_complete = [
         "doppler",
         "flap",
+        "hood_fun_current",
         "pons_v1",
         "pons_v2",
         "pools_fun",
         "pools_trade_instant",
         "pools_trade_lbp",
         "trench_today",
-        "hood_fun_current",
     ]
     if execution.get("canonical_complete_source_ids") != expected_complete:
         raise ValueError("hood.fun current post-commit canonical source set drift")
@@ -4999,7 +4999,7 @@ def validate_phase2_hood_fun_current_post_commit_frontier(
     if set(execution.get("ignored_completed_node_ids") or []) != removed:
         raise ValueError("hood.fun current post-commit ignored-completion drift")
     if execution.get("ready_to_dispatch_node_ids") != [
-        "promote:hood_fun_current"
+        "promote:hood_fun_previous"
     ]:
         raise ValueError("hood.fun current post-commit next promotion drift")
     if execution.get("awaiting_explicit_approval_node_ids") != []:
@@ -5022,7 +5022,7 @@ def validate_phase2_hood_fun_current_post_commit_frontier(
     if (
         not isinstance(controls, list)
         or len(controls) != 47
-        or len(set(int(value) for value in controls)) != 46
+        or len(set(int(value) for value in controls)) != 47
     ):
         raise ValueError(
             "hood.fun current post-commit requires exactly 47 dispatcher receipts"
@@ -5140,7 +5140,7 @@ def validate_phase2_hood_fun_current_ledger_approved_receipt(
     controls = [int(value) for value in controls_raw]
     if (
         len(controls) != 47
-        or len(set(controls)) != 46
+        or len(set(controls)) != 47
         or min(controls) <= 0
     ):
         raise ValueError(
@@ -5149,13 +5149,13 @@ def validate_phase2_hood_fun_current_ledger_approved_receipt(
     expected_complete = [
         "doppler",
         "flap",
+        "hood_fun_current",
         "pons_v1",
         "pons_v2",
         "pools_fun",
         "pools_trade_instant",
         "pools_trade_lbp",
         "trench_today",
-        "hood_fun_current",
     ]
     if row.get("canonical_complete_source_ids") != expected_complete:
         raise ValueError(
