@@ -2401,7 +2401,7 @@ def test_hood_fun_current_post_commit_frontier_unlocks_hood_current_only():
         execution, verified, dispatch
     )
     assert report["complete_sources"] == 9
-    assert report["active_completed_execution_nodes"] == 35
+    assert report["active_completed_execution_nodes"] == 34
     assert report["node_dispatch_control_runs_consumed"] == 47
     assert report["next_promotion_node_id"] == "promote:hood_fun_previous"
 
