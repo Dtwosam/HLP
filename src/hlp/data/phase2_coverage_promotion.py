@@ -3804,3 +3804,561 @@ def validate_phase2_flap_ledger_approved_receipt(
         "automatic_acquisition_complete": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+
+PHASE2_TRENCH_TODAY_PROMOTION_REVIEW_VERSION = (
+    "phase2-trench-today-promotion-review-v1"
+)
+TRENCH_TODAY_COVERAGE_WORKFLOW = "phase2-trench-source-coverage.yml"
+TRENCH_TODAY_COVERAGE_ARTIFACT = "phase2-trench-source-coverage"
+TRENCH_TODAY_COVERAGE_REPORT_PATH = "trench-source-coverage-report.json"
+PHASE2_TRENCH_TODAY_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-trench-today-promotion-proposal-v1"
+)
+
+
+def build_phase2_trench_today_promotion_review_handoff(
+    current_ledger: Mapping[str, object],
+    coverage_report: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    *,
+    coverage_run_id: int,
+    coverage_artifact_digest: str,
+    coverage_report_sha256: str,
+    planner_run_id: int,
+    planner_artifact_digest: str,
+    canonical_ledger_sha256: str,
+) -> dict:
+    """Prepare exact trench.today promotion inputs at 7/14."""
+
+    inventory = [dict(row) for row in source_inventory]
+    before = validate_phase2_coverage_ledger(dict(current_ledger), inventory)
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    if before["complete_source_ids"] != expected_before:
+        raise ValueError("trench.today review requires exact 7/14 Flap ledger")
+
+    report = dict(coverage_report)
+    if report.get("source_id") != "trench_today":
+        raise ValueError("trench.today review source identity drift")
+    if report.get("coverage_status") != "complete":
+        raise ValueError("trench.today review requires complete coverage report")
+
+    _, after = apply_phase2_source_coverage_report(
+        dict(current_ledger), inventory, report
+    )
+    expected_after = sorted(expected_before + ["trench_today"])
+    if after["complete_source_ids"] != expected_after:
+        raise ValueError(
+            "trench.today review does not complete exactly next source"
+        )
+    if after["phase2_universe_coverage_complete"]:
+        raise ValueError("trench.today review unexpectedly closes Phase 2")
+
+    run_id = _positive_run_id(
+        coverage_run_id, label="trench.today coverage run ID"
+    )
+    artifact_digest = _artifact_digest(
+        coverage_artifact_digest,
+        label="trench.today coverage artifact digest",
+    )
+    report_sha = _sha256(
+        coverage_report_sha256, label="trench.today coverage report"
+    )
+    planner_id = _positive_run_id(
+        planner_run_id, label="trench.today promotion planner run ID"
+    )
+    planner_digest = _artifact_digest(
+        planner_artifact_digest,
+        label="trench.today planner artifact digest",
+    )
+    ledger_sha = _sha256(
+        canonical_ledger_sha256, label="trench.today canonical ledger"
+    )
+    generated_inputs = {
+        "coverage_run_id": str(run_id),
+        "coverage_artifact_name": TRENCH_TODAY_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": artifact_digest,
+        "coverage_report_path": TRENCH_TODAY_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "trench_today",
+    }
+    return {
+        "version": PHASE2_TRENCH_TODAY_PROMOTION_REVIEW_VERSION,
+        "source_id": "trench_today",
+        "coverage_workflow": TRENCH_TODAY_COVERAGE_WORKFLOW,
+        "coverage_run_id": run_id,
+        "coverage_artifact_name": TRENCH_TODAY_COVERAGE_ARTIFACT,
+        "coverage_artifact_digest": artifact_digest,
+        "coverage_report_path": TRENCH_TODAY_COVERAGE_REPORT_PATH,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "complete_source_ids_before": expected_before,
+        "complete_source_ids_after_if_promoted": expected_after,
+        "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+        "promotion_generated_inputs": generated_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_trench_today_promotion_review_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 7/14 trench.today review handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_TRENCH_TODAY_PROMOTION_REVIEW_VERSION
+    ):
+        raise ValueError("trench.today promotion review version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_review_control_run_id"),
+        label="trench.today review control run ID",
+    )
+    prior_run_id = _positive_run_id(
+        row.get("flap_ledger_approval_run_id"),
+        label="Flap ledger approval run ID",
+    )
+    coverage_run_id = _positive_run_id(
+        row.get("coverage_run_id"),
+        label="trench.today coverage run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="trench.today planner run ID",
+    )
+    prior_digest = _artifact_digest(
+        row.get("flap_ledger_approval_artifact_digest"),
+        label="Flap ledger approval artifact digest",
+    )
+    coverage_digest = _artifact_digest(
+        row.get("coverage_artifact_digest"),
+        label="trench.today coverage artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="trench.today planner artifact digest",
+    )
+    report_sha = _sha256(
+        row.get("coverage_report_sha256"),
+        label="trench.today coverage report",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="trench.today canonical ledger",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("trench.today review execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="trench.today review execution head",
+    )
+    if row.get("source_id") != "trench_today":
+        raise ValueError("trench.today review source drift")
+    if row.get("coverage_workflow") != TRENCH_TODAY_COVERAGE_WORKFLOW:
+        raise ValueError("trench.today coverage workflow drift")
+    if row.get("coverage_artifact_name") != TRENCH_TODAY_COVERAGE_ARTIFACT:
+        raise ValueError("trench.today artifact-name drift")
+    if row.get("coverage_report_path") != TRENCH_TODAY_COVERAGE_REPORT_PATH:
+        raise ValueError("trench.today report-path drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("trench.today promotion workflow drift")
+    expected_inputs = {
+        "coverage_run_id": str(coverage_run_id),
+        "coverage_artifact_name": TRENCH_TODAY_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": coverage_digest,
+        "coverage_report_path": TRENCH_TODAY_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "trench_today",
+    }
+    if row.get("promotion_generated_inputs") != expected_inputs:
+        raise ValueError("trench.today promotion generated-input drift")
+    if row.get("promotion_review_required") is not True:
+        raise ValueError("trench.today promotion lost review requirement")
+    for field in (
+        "promotion_dispatched",
+        "proposal_created",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"trench.today review violates read-only field {field}"
+            )
+    return {
+        **row,
+        "promotion_review_control_run_id": control_run_id,
+        "flap_ledger_approval_run_id": prior_run_id,
+        "flap_ledger_approval_artifact_digest": prior_digest,
+        "coverage_run_id": coverage_run_id,
+        "coverage_artifact_digest": coverage_digest,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_generated_inputs": expected_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_trench_today_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate trench.today proposal before ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_TRENCH_TODAY_PROMOTION_PROPOSAL_VERSION
+    ):
+        raise ValueError("trench.today promotion proposal receipt version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="trench.today proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="trench.today review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="trench.today promotion dispatcher run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="trench.today promotion run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("trench.today proposal execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="trench.today proposal execution head",
+    )
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="trench.today review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="trench.today promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="trench.today promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="trench.today proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="trench.today proposal base ledger",
+    )
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    expected_after = sorted(expected_before + ["trench_today"])
+    if row.get("source_id") != "trench_today":
+        raise ValueError("trench.today proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("trench.today proposal workflow identity drift")
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("trench.today proposal before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("trench.today proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("trench.today proposal unexpectedly closes Phase 2")
+    if row.get("proposal_created") is not True:
+        raise ValueError("trench.today proposal lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("trench.today proposal lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("trench.today proposal unexpectedly mutates ledger")
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError("trench.today proposal authorizes ledger commit")
+    if row.get("ledger_commit_approval_input") != "apply_proposed_ledger":
+        raise ValueError("trench.today proposal ledger approval input drift")
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError("trench.today proposal already supplies approval")
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "trench_today",
+    }
+    if row.get("ledger_commit_generated_inputs") != expected_generated:
+        raise ValueError("trench.today proposal ledger-commit input drift")
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "trench_today",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def validate_phase2_trench_today_ledger_commit_receipt(
+    receipt: Mapping[str, object],
+    *,
+    expected_promotion_run_id: int,
+    expected_promotion_artifact_digest: str,
+    expected_promotion_handoff_sha256: str,
+    expected_proposed_ledger_sha256: str,
+) -> dict:
+    """Validate approved trench.today canonical-ledger write."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-source-coverage-ledger-commit-v1"
+    ):
+        raise ValueError("trench.today ledger commit receipt version changed")
+    if row.get("source_id") != "trench_today":
+        raise ValueError("trench.today ledger commit source identity drift")
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="trench.today ledger promotion run ID",
+    )
+    if promotion_run_id != int(expected_promotion_run_id):
+        raise ValueError("trench.today ledger commit promotion run drift")
+    if row.get("promotion_artifact_name") != (
+        "phase2-source-coverage-promotion-trench_today"
+    ):
+        raise ValueError("trench.today ledger commit artifact-name drift")
+    artifact_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="trench.today promotion artifact digest",
+    )
+    if artifact_digest != _artifact_digest(
+        expected_promotion_artifact_digest,
+        label="expected trench.today promotion artifact digest",
+    ):
+        raise ValueError("trench.today ledger commit promotion artifact drift")
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="trench.today promotion handoff",
+    )
+    if handoff_sha != _sha256(
+        expected_promotion_handoff_sha256,
+        label="expected trench.today promotion handoff",
+    ):
+        raise ValueError("trench.today ledger commit promotion handoff drift")
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="trench.today proposed ledger",
+    )
+    if proposed_sha != _sha256(
+        expected_proposed_ledger_sha256,
+        label="expected trench.today proposed ledger",
+    ):
+        raise ValueError("trench.today ledger commit proposed-ledger drift")
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="trench.today base ledger",
+    )
+    expected_before = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+    ]
+    expected_after = sorted(expected_before + ["trench_today"])
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("trench.today ledger commit before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("trench.today ledger commit after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("trench.today commit unexpectedly closes Phase 2")
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="trench.today canonical ledger commit",
+    )
+    if row.get("explicit_approval") is not True:
+        raise ValueError("trench.today ledger commit lacks explicit approval")
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("trench.today ledger commit lacks mutation proof")
+    return {
+        **row,
+        "promotion_run_id": promotion_run_id,
+        "promotion_artifact_digest": artifact_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "base_ledger_sha256": base_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "canonical_ledger_commit_sha": commit_sha,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def validate_phase2_trench_today_post_commit_frontier(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze exact 8/14 frontier after trench.today is canonical."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+    expected_complete = [
+        "doppler",
+        "flap",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    if execution.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("trench.today post-commit canonical source set drift")
+    if int(execution.get("complete_sources", -1)) != 8:
+        raise ValueError("trench.today post-commit source count drift")
+    if int(execution.get("incomplete_sources", -1)) != 6:
+        raise ValueError("trench.today post-commit incomplete count drift")
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("trench.today post-commit unexpectedly closes Phase 2")
+
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    canonical_coverages = {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+        "coverage:pools_trade_lbp",
+        "coverage:doppler",
+        "coverage:flap",
+        "coverage:trench_today",
+    }
+    removed = canonical_coverages | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+    }
+    expected_active = pre_frontier - canonical_coverages
+    if set(execution.get("completed_node_ids") or []) != expected_active:
+        raise ValueError("trench.today post-commit active completion drift")
+    if set(execution.get("ignored_completed_node_ids") or []) != removed:
+        raise ValueError("trench.today post-commit ignored-completion drift")
+    if execution.get("ready_to_dispatch_node_ids") != [
+        "promote:hood_fun_current"
+    ]:
+        raise ValueError("trench.today post-commit next promotion drift")
+    if execution.get("awaiting_explicit_approval_node_ids") != []:
+        raise ValueError("trench.today post-commit unexpected approvals")
+    if execution.get("ledger_commit_approval_node_ids") != []:
+        raise ValueError("trench.today post-commit unexpected ledger approval")
+
+    expected_verified = pre_frontier | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+    }
+    if set(verified.get("completed_node_ids") or []) != expected_verified:
+        raise ValueError("trench.today post-commit verified completion drift")
+    controls = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(controls, list)
+        or len(controls) != 46
+        or len(set(int(value) for value in controls)) != 46
+    ):
+        raise ValueError(
+            "trench.today post-commit requires exactly 46 dispatcher receipts"
+        )
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError("trench.today post-commit lacks lineage proof")
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise ValueError("trench.today post-commit dispatch row count drift")
+    row = dict(rows[0])
+    if row.get("node_id") != "promote:hood_fun_current":
+        raise ValueError("trench.today post-commit dispatch node drift")
+    if row.get("workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("trench.today post-commit promotion workflow drift")
+    if set(dict(row.get("run_id_inputs") or {})) != {"coverage_run_id"}:
+        raise ValueError("hood.fun current promotion coverage-run binding drift")
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value) for value in row.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError("hood.fun current promotion manual-input drift")
+    return {
+        "version": "phase2-trench-today-post-commit-frontier-v1",
+        "canonical_complete_source_ids": expected_complete,
+        "complete_sources": 8,
+        "incomplete_sources": 6,
+        "active_completed_execution_nodes": len(expected_active),
+        "ignored_completed_node_ids": sorted(removed),
+        "node_dispatch_control_runs_consumed": len(controls),
+        "next_promotion_node_id": "promote:hood_fun_current",
+        "next_promotion_manual_inputs": actual_manual,
+        "automatic_acquisition_complete": True,
+        "canonical_ledger_advanced": True,
+        "phase2_universe_coverage_complete": False,
+    }
