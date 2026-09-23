@@ -1,0 +1,1356 @@
+name: phase2-direct-source-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_id:
+        description: Direct DEX source to reconstruct
+        required: true
+        type: choice
+        options:
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+          - direct_uniswap_v4
+      population_run_id:
+        description: Exact phase2-direct-source-population-handoff run ID
+        required: true
+        type: string
+      expected_population_artifact_digest:
+        description: Exact direct-source-population artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_population_handoff_sha256:
+        description: Exact SHA-256 of direct-source-population-handoff.json
+        required: true
+        type: string
+      initialize_run_id:
+        description: Exact shared V3 or V4 Initialize backfill run ID
+        required: true
+        type: string
+      swap_run_id:
+        description: Exact shared V3 or V4 Swap backfill run ID
+        required: true
+        type: string
+      supply_delta_run_id:
+        description: Exact shared supply-delta backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Exact direct quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-direct-source-coverage-${{ inputs.source_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      market_version: ${{ steps.config.outputs.market_version }}
+      required_start_block: ${{ steps.config.outputs.required_start_block }}
+      shared_start_block: ${{ steps.config.outputs.shared_start_block }}
+      initialize_artifact: ${{ steps.config.outputs.initialize_artifact }}
+      swap_manifest_artifact: ${{ steps.config.outputs.swap_manifest_artifact }}
+      swap_shard_prefix: ${{ steps.config.outputs.swap_shard_prefix }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ID: ${{ inputs.source_id }}
+      POPULATION_RUN_ID: ${{ inputs.population_run_id }}
+      EXPECTED_POPULATION_ARTIFACT_DIGEST: ${{ inputs.expected_population_artifact_digest }}
+      EXPECTED_POPULATION_HANDOFF_SHA256: ${{ inputs.expected_population_handoff_sha256 }}
+      INITIALIZE_RUN_ID: ${{ inputs.initialize_run_id }}
+      SWAP_RUN_ID: ${{ inputs.swap_run_id }}
+      SUPPLY_DELTA_RUN_ID: ${{ inputs.supply_delta_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: config
+        name: Resolve direct source contract
+        run: |
+          python - <<'PY'
+          import os
+
+          from hlp.data.direct_source_coverage import (
+              DIRECT_SOURCE_COVERAGE_CONFIG,
+          )
+
+          source = os.environ["SOURCE_ID"]
+          config = DIRECT_SOURCE_COVERAGE_CONFIG[source]
+          version = config["version"]
+          shared_start = 8_930 if version == "v3" else 9_070
+          initialize_artifact = (
+              "phase2-direct-v3-initialize-merged"
+              if version == "v3"
+              else "phase2-direct-v4-initialize-merged"
+          )
+          swap_manifest_artifact = (
+              "phase2-direct-v3-swap-manifest"
+              if version == "v3"
+              else "phase2-direct-v4-swap-manifest"
+          )
+          swap_shard_prefix = (
+              "phase2-direct-v3-swap"
+              if version == "v3"
+              else "phase2-direct-v4-swap"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"market_version={version}\n")
+              handle.write(
+                  "required_start_block="
+                  f"{config['required_start_block']}\n"
+              )
+              handle.write(f"shared_start_block={shared_start}\n")
+              handle.write(
+                  f"initialize_artifact={initialize_artifact}\n"
+              )
+              handle.write(
+                  "swap_manifest_artifact="
+                  f"{swap_manifest_artifact}\n"
+              )
+              handle.write(
+                  f"swap_shard_prefix={swap_shard_prefix}\n"
+              )
+          PY
+
+      - name: Verify exact source-population artifact
+        run: |
+          set -euo pipefail
+          NAME=phase2-direct-source-population-handoff
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${POPULATION_RUN_ID}/artifacts?name=${NAME}" \
+            > /tmp/direct-source-population-artifacts.json
+          python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(
+              open("/tmp/direct-source-population-artifacts.json")
+          )
+          name = "phase2-direct-source-population-handoff"
+          matches = [
+              row
+              for row in payload.get("artifacts", [])
+              if row.get("name") == name
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected one direct source population artifact; "
+                  f"found {len(matches)}"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit(
+                  "direct source population artifact is expired"
+              )
+          actual = str(artifact.get("digest") or "").lower()
+          expected = os.environ[
+              "EXPECTED_POPULATION_ARTIFACT_DIGEST"
+          ].lower()
+          if not expected.startswith("sha256:"):
+              raise SystemExit(
+                  "population artifact digest must use sha256:<hex>"
+              )
+          if actual != expected:
+              raise SystemExit(
+                  f"direct source population artifact digest drift: "
+                  f"{actual} != {expected}"
+              )
+          PY
+
+      - name: Download direct source population
+        run: |
+          mkdir -p inputs/population
+          gh run download "${POPULATION_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name phase2-direct-source-population-handoff \
+            --dir inputs/population
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.config.outputs.initialize_artifact }}
+          path: inputs/initialize
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.initialize_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.config.outputs.swap_manifest_artifact }}
+          path: inputs/swap-manifest
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.swap_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-supply-delta-*
+          path: inputs/supply
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.supply_delta_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+
+      - name: Validate upstream identities and build compact setup
+        env:
+          MARKET_VERSION: ${{ steps.config.outputs.market_version }}
+          REQUIRED_START_BLOCK: ${{ steps.config.outputs.required_start_block }}
+          SHARED_START_BLOCK: ${{ steps.config.outputs.shared_start_block }}
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.reconstruct import event_order
+          from hlp.data.sharded_tape import validate_shard_block_coverage
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source = os.environ["SOURCE_ID"]
+          version = os.environ["MARKET_VERSION"]
+          required_start = int(os.environ["REQUIRED_START_BLOCK"])
+          shared_start = int(os.environ["SHARED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = int(os.environ["SHARD_COUNT"])
+
+          population_root = Path("inputs/population")
+          handoff_path = (
+              population_root / "direct-source-population-handoff.json"
+          )
+          handoff_bytes = handoff_path.read_bytes()
+          actual_handoff_sha = hashlib.sha256(
+              handoff_bytes
+          ).hexdigest()
+          expected_handoff_sha = os.environ[
+              "EXPECTED_POPULATION_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if actual_handoff_sha != expected_handoff_sha:
+              raise SystemExit(
+                  "direct source population handoff SHA drift"
+              )
+          handoff = json.loads(handoff_bytes)
+          if (
+              handoff.get("version")
+              != "phase2-direct-source-population-handoff-v1"
+          ):
+              raise SystemExit(
+                  "direct source population handoff version changed"
+              )
+          if int(handoff["snapshot_head_block"]) != head:
+              raise SystemExit(
+                  "direct source population snapshot drift"
+              )
+          if handoff.get("selector_rule_frozen") is not True:
+              raise SystemExit(
+                  "direct source population selector is not frozen"
+              )
+          if handoff.get(
+              "canonical_market_selection_applied"
+          ) is not False:
+              raise SystemExit(
+                  "direct source population already applied selector"
+              )
+          if handoff.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "direct source population prematurely closes coverage"
+              )
+
+          registry_name = f"{source}-direct-population.jsonl"
+          registry_path = population_root / registry_name
+          expected_registry = handoff["source_manifests"].get(source)
+          if not isinstance(expected_registry, dict):
+              raise SystemExit(
+                  "direct source population lacks selected source manifest"
+              )
+          registry_sha = hashlib.sha256(
+              registry_path.read_bytes()
+          ).hexdigest()
+          if registry_sha != expected_registry["sha256"]:
+              raise SystemExit(
+                  "direct source population registry SHA drift"
+              )
+          registry_rows = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          if len(registry_rows) != int(expected_registry["records"]):
+              raise SystemExit(
+                  "direct source population registry record drift"
+              )
+          market_field = "pool" if version == "v3" else "pool_id"
+          markets = {
+              str(row[market_field]).lower()
+              for row in registry_rows
+          }
+          tokens = {
+              str(row["token"]).lower()
+              for row in registry_rows
+          }
+          if len(markets) != len(registry_rows):
+              raise SystemExit(
+                  "direct source population repeats market identity"
+              )
+
+          init_name = f"direct-{version}-initialize.jsonl"
+          init_path = Path("inputs/initialize") / init_name
+          init_manifest = json.loads(
+              init_path.with_suffix(
+                  init_path.suffix + ".manifest.json"
+              ).read_text()
+          )
+          init_summary = json.loads(
+              Path(
+                  f"inputs/initialize/direct-{version}-initialize-summary.json"
+              ).read_text()
+          )
+          if (
+              init_summary["version"]
+              != f"phase2-direct-{version}-initialize-discovery-v1"
+          ):
+              raise SystemExit(
+                  "shared Initialize version drift"
+              )
+          if int(init_summary["required_start_block"]) != shared_start:
+              raise SystemExit(
+                  "shared Initialize start drift"
+              )
+          if int(init_summary["snapshot_head_block"]) != head:
+              raise SystemExit(
+                  "shared Initialize snapshot drift"
+              )
+          if init_summary["continuous_event_scan"] is not True:
+              raise SystemExit(
+                  "shared Initialize scan is not continuous"
+              )
+          if init_summary["missing_ranges"]:
+              raise SystemExit(
+                  "shared Initialize scan has missing ranges"
+              )
+          if hashlib.sha256(init_path.read_bytes()).hexdigest() != (
+              init_summary["initialize_sha256"]
+          ):
+              raise SystemExit(
+                  "shared Initialize SHA drift"
+              )
+          if init_manifest["sha256"] != (
+              init_summary["initialize_sha256"]
+          ):
+              raise SystemExit(
+                  "shared Initialize manifest SHA drift"
+              )
+
+          filtered_init = []
+          seen_init = set()
+          for line in init_path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              row = json.loads(line)
+              market = str(row.get(market_field) or "").lower()
+              if market not in markets:
+                  continue
+              if market in seen_init:
+                  raise SystemExit(
+                      f"direct source repeats Initialize: {market}"
+                  )
+              seen_init.add(market)
+              filtered_init.append(row)
+          if seen_init != markets:
+              missing = sorted(markets - seen_init)
+              raise SystemExit(
+                  "direct source population lacks exact shared Initialize: "
+                  + ", ".join(missing[:10])
+              )
+          filtered_init.sort(
+              key=lambda row: (
+                  event_order(row),
+                  str(row[market_field]).lower(),
+              )
+          )
+          filtered_init_manifest = write_jsonl_snapshot(
+              filtered_init,
+              output=Path(
+                  "artifacts/direct-source-initializes.jsonl"
+              ),
+              provenance={
+                  "source": (
+                      "filtered_shared_initialize_for_direct_source"
+                  ),
+                  "chain_id": 4663,
+                  "source_id": source,
+                  "market_version": version,
+                  "shared_initialize_sha256": init_summary[
+                      "initialize_sha256"
+                  ],
+              },
+          )
+
+          swap_virtual = json.loads(
+              Path(
+                  f"inputs/swap-manifest/direct-{version}-swap-sharded.manifest.json"
+              ).read_text()
+          )
+          swap_summary = json.loads(
+              Path(
+                  f"inputs/swap-manifest/direct-{version}-swap-summary.json"
+              ).read_text()
+          )
+          if (
+              swap_summary["version"]
+              != f"phase2-direct-{version}-swap-discovery-v1"
+          ):
+              raise SystemExit("shared Swap version drift")
+          if int(swap_summary["required_start_block"]) != shared_start:
+              raise SystemExit("shared Swap start drift")
+          if int(swap_summary["snapshot_head_block"]) != head:
+              raise SystemExit("shared Swap snapshot drift")
+          if swap_summary["continuous_event_scan"] is not True:
+              raise SystemExit("shared Swap scan is not continuous")
+          if swap_summary["missing_ranges"]:
+              raise SystemExit("shared Swap scan has missing ranges")
+          if swap_summary["swap_sha256"] != swap_virtual["sha256"]:
+              raise SystemExit("shared Swap aggregate SHA drift")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          for field, filename in (
+              ("decimals_sha256", "direct-quote-decimals.json"),
+              ("feed_specs_sha256", "direct-quote-feeds.jsonl"),
+          ):
+              path = Path("inputs/quotes") / filename
+              if hashlib.sha256(path.read_bytes()).hexdigest() != (
+                  quote_summary[field]
+              ):
+                  raise SystemExit(
+                      f"direct quote artifact SHA drift: {field}"
+                  )
+          quote_decimals = {
+              key.lower(): int(value)
+              for key, value in json.loads(
+                  Path(
+                      "inputs/quotes/direct-quote-decimals.json"
+                  ).read_text()
+              ).items()
+          }
+          missing_quotes = sorted({
+              str(row["quote_token"]).lower()
+              for row in registry_rows
+          } - set(quote_decimals))
+          if missing_quotes:
+              raise SystemExit(
+                  "direct source has unpriceable quote assets: "
+                  + ", ".join(missing_quotes)
+              )
+
+          supply_virtual_path = Path(
+              "inputs/supply/direct-supply-delta-sharded.manifest.json"
+          )
+          supply_summary_path = Path(
+              "inputs/supply/direct-supply-delta-summary.json"
+          )
+          supply_virtual = json.loads(supply_virtual_path.read_text())
+          supply_summary = json.loads(supply_summary_path.read_text())
+          if (
+              supply_summary["version"]
+              != "phase2-direct-supply-delta-v1"
+          ):
+              raise SystemExit(
+                  "shared supply-delta version drift"
+              )
+          supply_provenance = supply_virtual.get("provenance") or {}
+          if int(supply_provenance["from_block"]) != 8_930:
+              raise SystemExit(
+                  "shared supply-delta start drift"
+              )
+          if int(supply_provenance["to_block"]) != head:
+              raise SystemExit(
+                  "shared supply-delta snapshot drift"
+              )
+          if (
+              supply_summary["supply_delta_sha256"]
+              != supply_virtual["sha256"]
+          ):
+              raise SystemExit(
+                  "shared supply-delta aggregate SHA drift"
+              )
+
+          expected_supply_shards = {
+              row["file"]: row
+              for row in supply_provenance.get("shards", [])
+          }
+          supply_files = sorted(
+              Path("inputs/supply").glob(
+                  "direct-supply-delta-*.jsonl"
+              )
+          )
+          if (
+              len(supply_files) != shard_count
+              or len(expected_supply_shards) != shard_count
+          ):
+              raise SystemExit(
+                  "shared supply-delta shard count changed"
+              )
+          coverage = []
+          filtered_supply = []
+          seen_supply = set()
+          for path in supply_files:
+              expected = expected_supply_shards.get(path.name)
+              if expected is None:
+                  raise SystemExit(
+                      f"unexpected supply shard: {path.name}"
+                  )
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              provenance = manifest.get("provenance") or {}
+              if (
+                  provenance.get("event")
+                  != "erc20_transfer_supply_delta"
+                  or provenance.get(
+                      "shared_direct_supply_surface"
+                  ) is not True
+                  or provenance.get("address_filter") is not None
+              ):
+                  raise SystemExit(
+                      f"{path.name}: shared supply identity drift"
+                  )
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if (
+                  digest != manifest["sha256"]
+                  or digest != expected["sha256"]
+              ):
+                  raise SystemExit(
+                      f"{path.name}: shared supply SHA drift"
+                  )
+              lo = int(provenance["from_block"])
+              hi = int(provenance["to_block"])
+              coverage.append({
+                  "file": path.name,
+                  "records": int(manifest["records"]),
+                  "sha256": digest,
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+              for line in path.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  token = str(row["token"]).lower()
+                  if token not in tokens:
+                      continue
+                  key = (
+                      token,
+                      str(row["transaction_hash"]).lower(),
+                      int(row["log_index"]),
+                  )
+                  if key in seen_supply:
+                      raise SystemExit(
+                          f"duplicate direct source supply delta: {key}"
+                      )
+                  seen_supply.add(key)
+                  filtered_supply.append(row)
+
+          validate_shard_block_coverage(
+              coverage,
+              start_block=8_930,
+              end_block=head,
+          )
+          filtered_supply.sort(
+              key=lambda row: (
+                  event_order(row),
+                  str(row["token"]).lower(),
+              )
+          )
+          filtered_supply_manifest = write_jsonl_snapshot(
+              filtered_supply,
+              output=Path(
+                  "artifacts/direct-source-supply-deltas.jsonl"
+              ),
+              provenance={
+                  "source": (
+                      "filtered_shared_supply_deltas_for_direct_source"
+                  ),
+                  "chain_id": 4663,
+                  "source_id": source,
+                  "source_population_handoff_sha256": (
+                      actual_handoff_sha
+                  ),
+                  "shared_supply_delta_sha256": supply_virtual[
+                      "sha256"
+                  ],
+                  "snapshot_head_block": head,
+              },
+          )
+
+          Path("artifacts/direct-source-registry.jsonl").write_bytes(
+              registry_path.read_bytes()
+          )
+          Path(
+              "artifacts/direct-source-population-handoff.json"
+          ).write_bytes(handoff_bytes)
+          for filename in (
+              "direct-quote-decimals.json",
+              "direct-quote-feeds.jsonl",
+              "direct-quote-summary.json",
+          ):
+              Path(f"artifacts/{filename}").write_bytes(
+                  (Path("inputs/quotes") / filename).read_bytes()
+              )
+          Path(
+              f"artifacts/direct-{version}-swap-summary.json"
+          ).write_bytes(
+              Path(
+                  f"inputs/swap-manifest/direct-{version}-swap-summary.json"
+              ).read_bytes()
+          )
+
+          setup = {
+              "version": "phase2-direct-source-coverage-setup-v1",
+              "source_id": source,
+              "market_version": version,
+              "required_start_block": required_start,
+              "shared_start_block": shared_start,
+              "snapshot_head_block": head,
+              "population_run_id": int(
+                  os.environ["POPULATION_RUN_ID"]
+              ),
+              "population_artifact_digest": os.environ[
+                  "EXPECTED_POPULATION_ARTIFACT_DIGEST"
+              ].lower(),
+              "population_handoff_sha256": actual_handoff_sha,
+              "source_registry_records": len(registry_rows),
+              "source_registry_sha256": registry_sha,
+              "filtered_initialize_sha256": (
+                  filtered_init_manifest["sha256"]
+              ),
+              "shared_initialize_sha256": init_summary[
+                  "initialize_sha256"
+              ],
+              "shared_swap_sha256": swap_summary["swap_sha256"],
+              "shared_supply_delta_sha256": supply_virtual["sha256"],
+              "filtered_supply_sha256": filtered_supply_manifest[
+                  "sha256"
+              ],
+              "quote_decimals_sha256": quote_summary[
+                  "decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "selector_version": handoff["selector_version"],
+              "selector_descriptor_sha256": handoff[
+                  "selector_descriptor_sha256"
+              ],
+              "selector_rule_frozen": True,
+              "canonical_market_selection_applied": False,
+              "source_coverage_complete": False,
+          }
+          Path("artifacts/direct-source-coverage-setup.json").write_text(
+              json.dumps(setup, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(setup, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-setup-${{ inputs.source_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  price:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SOURCE_ID: ${{ inputs.source_id }}
+      MARKET_VERSION: ${{ needs.setup.outputs.market_version }}
+      SWAP_RUN_ID: ${{ inputs.swap_run_id }}
+      SWAP_SHARD_PREFIX: ${{ needs.setup.outputs.swap_shard_prefix }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-setup-${{ inputs.source_id }}
+          path: inputs/setup
+      - name: Download exact shared Swap shard
+        run: |
+          mkdir -p inputs/raw
+          gh run download "${SWAP_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${SWAP_SHARD_PREFIX}-${SHARD_INDEX}" \
+            --dir inputs/raw
+
+      - id: raw
+        name: Validate exact shared Swap shard
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["MARKET_VERSION"]
+          files = sorted(
+              Path("inputs/raw").glob(
+                  f"direct-{version}-swap-*.jsonl"
+              )
+          )
+          if len(files) != 1:
+              raise SystemExit(
+                  f"expected one direct {version} Swap shard; "
+                  f"found {len(files)}"
+              )
+          path = files[0]
+          manifest = json.loads(
+              path.with_suffix(
+                  path.suffix + ".manifest.json"
+              ).read_text()
+          )
+          provenance = manifest.get("provenance") or {}
+          if version == "v3":
+              if provenance.get("event") != "uniswap_v3_swap":
+                  raise SystemExit("V3 Swap event identity drift")
+              if provenance.get(
+                  "shared_direct_v3_surface"
+              ) is not True:
+                  raise SystemExit("V3 Swap surface identity drift")
+          else:
+              if provenance.get("event") != "uniswap_v4_swap":
+                  raise SystemExit("V4 Swap event identity drift")
+              if provenance.get(
+                  "shared_direct_v4_surface"
+              ) is not True:
+                  raise SystemExit("V4 Swap surface identity drift")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != manifest["sha256"]:
+              raise SystemExit("shared Swap shard SHA drift")
+          records = sum(
+              1
+              for line in path.open(encoding="utf-8")
+              if line.strip()
+          )
+          if records != int(manifest["records"]):
+              raise SystemExit("shared Swap shard record count drift")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"path={path}\n")
+              handle.write(
+                  f"from_block={int(provenance['from_block'])}\n"
+              )
+              handle.write(
+                  f"to_block={int(provenance['to_block'])}\n"
+              )
+              handle.write(f"sha256={digest}\n")
+          PY
+
+      - name: Reconstruct direct source market points
+        env:
+          RAW_SWAP: ${{ steps.raw.outputs.path }}
+          FROM_BLOCK: ${{ steps.raw.outputs.from_block }}
+          TO_BLOCK: ${{ steps.raw.outputs.to_block }}
+        run: |
+          mkdir -p artifacts
+          printf -v SHARD "%03d" "${SHARD_INDEX}"
+          if [ ! -s inputs/setup/direct-source-registry.jsonl ]; then
+            python - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+
+            from hlp.data.snapshot import write_jsonl_snapshot
+
+            source = os.environ["SOURCE_ID"]
+            version = os.environ["MARKET_VERSION"]
+            lo = int(os.environ["FROM_BLOCK"])
+            hi = int(os.environ["TO_BLOCK"])
+            shard = int(os.environ["SHARD_INDEX"])
+            out = Path(
+                f"artifacts/{source}-points-{shard:03d}.jsonl"
+            )
+            manifest = write_jsonl_snapshot(
+                [],
+                output=out,
+                provenance={
+                    "source": (
+                        "empty_conclusive_direct_source_population"
+                    ),
+                    "chain_id": 4663,
+                    "source_id": source,
+                    "from_block": lo,
+                    "to_block": hi,
+                },
+            )
+            report = {
+                "version": (
+                    f"phase2-direct-{version}-market-window-v1"
+                ),
+                "source_id": source,
+                "from_block": lo,
+                "to_block": hi,
+                "registry_markets": 0,
+                "initialize_events": 0,
+                "swap_events": 0,
+                "market_cap_points": 0,
+                "priced_points": 0,
+                "quality_ready_points": 0,
+                "points_sha256": manifest["sha256"],
+                "market_selection_rule_frozen": False,
+                "threshold_summary_emitted": False,
+                "empty_source_population": True,
+            }
+            Path(
+                f"artifacts/{source}-report-{shard:03d}.json"
+            ).write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            )
+            PY
+          else
+            if [ "${MARKET_VERSION}" = "v3" ]; then
+              COMMAND=phase2-direct-v3-market-window
+            else
+              COMMAND=phase2-direct-v4-market-window
+            fi
+            if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+              echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+              exit 1
+            fi
+            CHUNK=50000
+            hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+              "${COMMAND}" \
+              --registry inputs/setup/direct-source-registry.jsonl \
+              --initializes inputs/setup/direct-source-initializes.jsonl \
+              --supply-deltas inputs/setup/direct-source-supply-deltas.jsonl \
+              --swaps "${RAW_SWAP}" \
+              --from-block "${FROM_BLOCK}" \
+              --to-block "${TO_BLOCK}" \
+              --chunk-size "${CHUNK}" \
+              --min-chunk-size 25 \
+              --quote-feeds inputs/setup/direct-quote-feeds.jsonl \
+              --out "artifacts/${SOURCE_ID}-points-${SHARD}.jsonl" \
+              --report-out "artifacts/${SOURCE_ID}-report-${SHARD}.json"
+          fi
+
+      - name: Require fully priced research-only shard
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = os.environ["SOURCE_ID"]
+          shard = int(os.environ["SHARD_INDEX"])
+          report = json.loads(
+              Path(
+                  f"artifacts/{source}-report-{shard:03d}.json"
+              ).read_text()
+          )
+          if report["market_selection_rule_frozen"] is not False:
+              raise SystemExit(
+                  "direct coverage shard applied selector during replay"
+              )
+          if report["threshold_summary_emitted"] is not False:
+              raise SystemExit(
+                  "direct coverage shard emitted threshold labels"
+              )
+          if int(report["priced_points"]) != int(
+              report["market_cap_points"]
+          ):
+              raise SystemExit(
+                  "direct coverage shard contains unpriced points"
+              )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-price-${{ inputs.source_id }}-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [setup, price]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_ID: ${{ inputs.source_id }}
+      MARKET_VERSION: ${{ needs.setup.outputs.market_version }}
+      REQUIRED_START_BLOCK: ${{ needs.setup.outputs.required_start_block }}
+      SHARED_START_BLOCK: ${{ needs.setup.outputs.shared_start_block }}
+      POPULATION_RUN_ID: ${{ inputs.population_run_id }}
+      INITIALIZE_RUN_ID: ${{ inputs.initialize_run_id }}
+      SWAP_RUN_ID: ${{ inputs.swap_run_id }}
+      SUPPLY_DELTA_RUN_ID: ${{ inputs.supply_delta_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+      EXPECTED_POPULATION_ARTIFACT_DIGEST: ${{ inputs.expected_population_artifact_digest }}
+      EXPECTED_POPULATION_HANDOFF_SHA256: ${{ inputs.expected_population_handoff_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-setup-${{ inputs.source_id }}
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-source-coverage-price-${{ inputs.source_id }}-*
+          path: inputs/price
+          merge-multiple: true
+
+      - id: merge
+        name: Validate and merge direct source coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.direct_source_coverage import (
+              audit_direct_source_market_points,
+              build_direct_source_coverage_report,
+          )
+          from hlp.data.phase2_coverage import (
+              apply_phase2_source_coverage_report,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+          from hlp.data.sharded_tape import (
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+
+          source = os.environ["SOURCE_ID"]
+          version = os.environ["MARKET_VERSION"]
+          required_start = int(os.environ["REQUIRED_START_BLOCK"])
+          shared_start = int(os.environ["SHARED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          count = int(os.environ["SHARD_COUNT"])
+
+          setup = json.loads(
+              Path(
+                  "inputs/setup/direct-source-coverage-setup.json"
+              ).read_text()
+          )
+          if setup["source_id"] != source:
+              raise SystemExit("direct coverage setup source drift")
+          if setup["market_version"] != version:
+              raise SystemExit("direct coverage setup version drift")
+          if int(setup["required_start_block"]) != required_start:
+              raise SystemExit(
+                  "direct coverage required start drift"
+              )
+          if int(setup["snapshot_head_block"]) != head:
+              raise SystemExit("direct coverage snapshot drift")
+          if setup["selector_rule_frozen"] is not True:
+              raise SystemExit(
+                  "direct coverage setup selector is not frozen"
+              )
+          if setup[
+              "canonical_market_selection_applied"
+          ] is not False:
+              raise SystemExit(
+                  "direct coverage setup already selected markets"
+              )
+
+          registry_path = Path(
+              "inputs/setup/direct-source-registry.jsonl"
+          )
+          registry_rows = [
+              json.loads(line)
+              for line in registry_path.read_text().splitlines()
+              if line.strip()
+          ]
+          if hashlib.sha256(registry_path.read_bytes()).hexdigest() != (
+              setup["source_registry_sha256"]
+          ):
+              raise SystemExit(
+                  "direct coverage registry SHA drift"
+              )
+
+          point_files = sorted(
+              Path("inputs/price").glob(
+                  f"{source}-points-*.jsonl"
+              )
+          )
+          report_files = sorted(
+              Path("inputs/price").glob(
+                  f"{source}-report-*.json"
+              )
+          )
+          if len(point_files) != count or len(report_files) != count:
+              raise SystemExit(
+                  "direct coverage shard artifact count changed"
+              )
+
+          aggregate = hashlib.sha256()
+          total_records = 0
+          coverage = []
+          shards = []
+          reports = {}
+          for report_path in report_files:
+              suffix = report_path.stem.rsplit("-", 1)[-1]
+              reports[suffix] = json.loads(report_path.read_text())
+
+          def point_rows():
+              nonlocal total_records
+              previous_suffix = None
+              for point_path in point_files:
+                  suffix = point_path.stem.rsplit("-", 1)[-1]
+                  if previous_suffix is not None and suffix <= previous_suffix:
+                      raise SystemExit(
+                          "direct coverage point shard order changed"
+                      )
+                  previous_suffix = suffix
+                  report = reports.get(suffix)
+                  if report is None:
+                      raise SystemExit(
+                          f"missing direct coverage report: {suffix}"
+                      )
+                  manifest_path = point_path.with_suffix(
+                      point_path.suffix + ".manifest.json"
+                  )
+                  manifest = json.loads(manifest_path.read_text())
+                  local = hashlib.sha256()
+                  records = 0
+                  rows = []
+                  with point_path.open("rb") as handle:
+                      for raw in handle:
+                          aggregate.update(raw)
+                          local.update(raw)
+                          if not raw.strip():
+                              continue
+                          records += 1
+                          rows.append(json.loads(raw))
+                  digest = local.hexdigest()
+                  if (
+                      records != int(manifest["records"])
+                      or digest != manifest["sha256"]
+                  ):
+                      raise SystemExit(
+                          f"direct coverage point shard drift: {suffix}"
+                      )
+                  if digest != report["points_sha256"]:
+                      raise SystemExit(
+                          f"direct coverage report point SHA drift: {suffix}"
+                      )
+                  if int(report["market_cap_points"]) != records:
+                      raise SystemExit(
+                          f"direct coverage report record drift: {suffix}"
+                      )
+                  if int(report["priced_points"]) != records:
+                      raise SystemExit(
+                          f"direct coverage unpriced shard: {suffix}"
+                      )
+                  if report[
+                      "market_selection_rule_frozen"
+                  ] is not False:
+                      raise SystemExit(
+                          "direct coverage replay unexpectedly applied selector"
+                      )
+                  if report[
+                      "threshold_summary_emitted"
+                  ] is not False:
+                      raise SystemExit(
+                          "direct coverage replay emitted threshold labels"
+                      )
+                  lo = int(report["from_block"])
+                  hi = int(report["to_block"])
+                  coverage.append({
+                      "file": point_path.name,
+                      "records": records,
+                      "sha256": digest,
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+                  shards.append({
+                      "file": point_path.name,
+                      "records": records,
+                      "sha256": digest,
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+                  total_records += records
+                  for row in rows:
+                      yield row
+
+          audit = audit_direct_source_market_points(
+              registry_rows,
+              point_rows(),
+              source_id=source,
+              snapshot_head_block=head,
+          )
+          validate_shard_block_coverage(
+              coverage,
+              start_block=shared_start,
+              end_block=head,
+          )
+          if int(audit["required_start_block"]) != required_start:
+              raise SystemExit(
+                  "direct source audit required start drift"
+              )
+          if int(audit["price_points"]) != total_records:
+              raise SystemExit(
+                  "direct source point accounting drift"
+              )
+
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=Path(
+                  "artifacts/direct-source-market-points-sharded.manifest.json"
+              ),
+              path_name="direct-source-market-points.jsonl",
+              records=total_records,
+              sha256=aggregate.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "phase2_direct_source_market_points",
+                  "chain_id": 4663,
+                  "source_id": source,
+                  "from_block": shared_start,
+                  "required_start_block": required_start,
+                  "to_block": head,
+                  "shards": shards,
+              },
+          )
+
+          swap_summary = json.loads(
+              Path(
+                  f"inputs/setup/direct-{version}-swap-summary.json"
+              ).read_text()
+          )
+          supply_manifest = json.loads(
+              Path(
+                  "inputs/setup/"
+                  "direct-source-supply-deltas.jsonl.manifest.json"
+              ).read_text()
+          )
+          quote_summary = json.loads(
+              Path(
+                  "inputs/setup/direct-quote-summary.json"
+              ).read_text()
+          )
+          provenance_payload = {
+              "version": "phase2-direct-source-provenance-v1",
+              "chain_id": 4663,
+              "source_id": source,
+              "snapshot_head_block": head,
+              "required_start_block": required_start,
+              "population_run_id": int(
+                  os.environ["POPULATION_RUN_ID"]
+              ),
+              "population_artifact_digest": os.environ[
+                  "EXPECTED_POPULATION_ARTIFACT_DIGEST"
+              ].lower(),
+              "population_handoff_sha256": os.environ[
+                  "EXPECTED_POPULATION_HANDOFF_SHA256"
+              ].lower().removeprefix("sha256:"),
+              "source_registry_sha256": setup[
+                  "source_registry_sha256"
+              ],
+              "selector_version": setup["selector_version"],
+              "selector_descriptor_sha256": setup[
+                  "selector_descriptor_sha256"
+              ],
+              "initialize_run_id": int(
+                  os.environ["INITIALIZE_RUN_ID"]
+              ),
+              "shared_initialize_sha256": setup[
+                  "shared_initialize_sha256"
+              ],
+              "filtered_initialize_sha256": setup[
+                  "filtered_initialize_sha256"
+              ],
+              "swap_run_id": int(os.environ["SWAP_RUN_ID"]),
+              "shared_swap_sha256": swap_summary["swap_sha256"],
+              "supply_delta_run_id": int(
+                  os.environ["SUPPLY_DELTA_RUN_ID"]
+              ),
+              "shared_supply_delta_sha256": setup[
+                  "shared_supply_delta_sha256"
+              ],
+              "filtered_supply_sha256": supply_manifest["sha256"],
+              "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              "quote_decimals_sha256": quote_summary[
+                  "decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "market_points_sha256": virtual["sha256"],
+              "selector_rule_applied_to_coverage_points": False,
+          }
+          provenance_bytes = (
+              json.dumps(
+                  provenance_payload,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ) + "\n"
+          ).encode()
+          provenance_sha = hashlib.sha256(
+              provenance_bytes
+          ).hexdigest()
+          Path(
+              "artifacts/direct-source-provenance.json"
+          ).write_bytes(provenance_bytes)
+
+          report = build_direct_source_coverage_report(
+              audit,
+              provenance_sha256=provenance_sha,
+          )
+          report.update({
+              "selector_version": setup["selector_version"],
+              "selector_descriptor_sha256": setup[
+                  "selector_descriptor_sha256"
+              ],
+              "source_registry_sha256": setup[
+                  "source_registry_sha256"
+              ],
+              "shared_initialize_sha256": setup[
+                  "shared_initialize_sha256"
+              ],
+              "shared_swap_sha256": setup[
+                  "shared_swap_sha256"
+              ],
+              "shared_supply_delta_sha256": setup[
+                  "shared_supply_delta_sha256"
+              ],
+              "filtered_supply_sha256": setup[
+                  "filtered_supply_sha256"
+              ],
+              "quote_decimals_sha256": setup[
+                  "quote_decimals_sha256"
+              ],
+              "quote_feed_specs_sha256": setup[
+                  "quote_feed_specs_sha256"
+              ],
+              "market_points_sha256": virtual["sha256"],
+          })
+
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          proposed, validation = (
+              apply_phase2_source_coverage_report(
+                  ledger,
+                  build_phase2_source_inventory(),
+                  report,
+              )
+          )
+          if source not in validation["complete_source_ids"]:
+              raise SystemExit(
+                  "direct source coverage did not validate as complete"
+              )
+          if validation["phase2_universe_coverage_complete"]:
+              raise SystemExit(
+                  "one direct source cannot close Phase-2 coverage"
+              )
+
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/direct-source-coverage-report.json"
+          ).write_text(report_text)
+          Path(
+              "artifacts/direct-source-coverage-audit.json"
+          ).write_text(
+              json.dumps(audit, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/direct-source-coverage-validation.json"
+          ).write_text(
+              json.dumps(validation, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/direct-source-coverage-proposed-ledger.json"
+          ).write_text(
+              json.dumps(proposed, indent=2) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "coverage_report": report,
+              "coverage_report_sha256": report_sha,
+              "validation": validation,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload direct source coverage evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-${{ inputs.source_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish coverage-promotion inputs
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.merge.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## ${SOURCE_ID} coverage promotion"
+            echo
+            echo "- coverage_run_id: ${GITHUB_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-direct-source-coverage-${SOURCE_ID}"
+            echo "- expected_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: direct-source-coverage-report.json"
+            echo "- expected_report_sha256: ${REPORT_SHA256}"
+            echo "- expected_source_id: ${SOURCE_ID}"
+          } >> "${GITHUB_STEP_SUMMARY}"

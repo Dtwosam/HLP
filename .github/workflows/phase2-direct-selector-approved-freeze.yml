@@ -1,0 +1,714 @@
+name: phase2-direct-selector-approved-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_handoff_run_id:
+        description: Exact successful phase2-direct-selector-approval-handoff workflow_dispatch run ID
+        required: true
+        type: string
+      expected_handoff_artifact_digest:
+        description: Exact approval-handoff artifact digest (sha256:...)
+        required: true
+        type: string
+      approve_freeze:
+        description: Explicitly approve freezing active-quote-liquidity-causal-v1 from the reviewed evidence
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-direct-selector-approved-freeze-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APPROVAL_HANDOFF_RUN_ID: ${{ inputs.approval_handoff_run_id }}
+  EXPECTED_HANDOFF_ARTIFACT_DIGEST: ${{ inputs.expected_handoff_artifact_digest }}
+  APPROVE_FREEZE: ${{ inputs.approve_freeze }}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit human selector approval
+        run: |
+          set -euo pipefail
+          if [ "${APPROVE_FREEZE}" != "true" ]; then
+            echo "selector freeze execution requires approve_freeze=true" >&2
+            exit 1
+          fi
+
+      - id: freeze
+        name: Verify approval handoff, freeze selector, and refresh planner
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.direct_selector import (
+              validate_direct_selector_freeze,
+          )
+          from hlp.data.phase2_dispatch_readiness import (
+              workflow_dispatch_interface_sha256,
+          )
+          from hlp.data.phase2_post_fanout import (
+              validate_phase2_pre_selector_wave_completion_receipt,
+              validate_phase2_selector_freeze_completion,
+          )
+          from hlp.data.phase2_selector_approval import (
+              validate_phase2_selector_approval_handoff_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([
+                  f"/repos/{repo}/actions/runs/{run_id}",
+              ])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def wait_run(run_id, *, workflow, timeout_seconds=900):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(path),
+              ])
+              return path
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method",
+                      "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input",
+                      "-",
+                  ],
+                  payload={
+                      "ref": branch,
+                      "inputs": inputs,
+                  },
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          def default_workflow_text(workflow):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/contents/.github/workflows/"
+                      f"{workflow}?ref={default_branch}"
+                  ),
+              ])
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding drift: {workflow}"
+                  )
+              return base64.b64decode(
+                  str(payload.get("content") or "").replace("\n", "")
+              ).decode("utf-8")
+
+          try:
+              handoff_run_id = int(
+                  os.environ["APPROVAL_HANDOFF_RUN_ID"]
+              )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "approval_handoff_run_id is invalid"
+              ) from exc
+          if handoff_run_id <= 0:
+              raise SystemExit(
+                  "approval_handoff_run_id must be positive"
+              )
+
+          expected_digest = str(
+              os.environ["EXPECTED_HANDOFF_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_handoff_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+          try:
+              int(expected_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_handoff_artifact_digest is not hexadecimal"
+              ) from exc
+
+          ledger_sha = hashlib.sha256(
+              Path(".github/phase2-source-coverage.json").read_bytes()
+          ).hexdigest()
+
+          handoff_workflow = (
+              "phase2-direct-selector-approval-handoff.yml"
+          )
+          handoff_run = get_run(handoff_run_id)
+          assert_run_identity(
+              handoff_run,
+              workflow=handoff_workflow,
+              run_id=handoff_run_id,
+          )
+          if handoff_run.get("status") != "completed":
+              raise SystemExit(
+                  "selector approval handoff run is not completed"
+              )
+          if handoff_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "selector approval handoff run did not succeed"
+              )
+
+          handoff_artifact_name = (
+              "phase2-direct-selector-approval-handoff"
+          )
+          handoff_artifact = artifact_row(
+              handoff_run_id,
+              handoff_artifact_name,
+          )
+          actual_handoff_digest = str(
+              handoff_artifact.get("digest") or ""
+          ).lower()
+          if actual_handoff_digest != expected_digest:
+              raise SystemExit(
+                  "selector approval handoff artifact digest drift"
+              )
+          handoff_dir = download_artifact(
+              handoff_run_id,
+              handoff_artifact_name,
+              "upstream/selector-approval-handoff",
+          )
+          handoff_path = (
+              handoff_dir
+              / "phase2-direct-selector-approval-handoff.json"
+          )
+          if not handoff_path.is_file():
+              raise SystemExit(
+                  "selector approval handoff artifact lacks receipt"
+              )
+          try:
+              handoff = validate_phase2_selector_approval_handoff_receipt(
+                  json.loads(handoff_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if handoff["approval_handoff_control_run_id"] != handoff_run_id:
+              raise SystemExit(
+                  "selector approval handoff/control run identity drift"
+              )
+          if handoff["execution_branch"] != branch:
+              raise SystemExit(
+                  "selector approval handoff branch drift"
+              )
+          if handoff["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "selector approval handoff HEAD drift"
+              )
+          if handoff[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "selector approval handoff canonical-ledger SHA drift"
+              )
+
+          pre_selector_run_id = int(
+              handoff["pre_selector_completion_run_id"]
+          )
+          pre_selector_digest = str(
+              handoff["pre_selector_completion_artifact_digest"]
+          )
+          pre_selector_workflow = (
+              "phase2-pre-selector-wave-completion.yml"
+          )
+          pre_selector_run = get_run(pre_selector_run_id)
+          assert_run_identity(
+              pre_selector_run,
+              workflow=pre_selector_workflow,
+              run_id=pre_selector_run_id,
+          )
+          if pre_selector_run.get("status") != "completed":
+              raise SystemExit(
+                  "pre-selector completion run is not completed"
+              )
+          if pre_selector_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "pre-selector completion run did not succeed"
+              )
+          pre_selector_artifact = artifact_row(
+              pre_selector_run_id,
+              "phase2-pre-selector-wave-completion",
+          )
+          if str(
+              pre_selector_artifact.get("digest") or ""
+          ).lower() != pre_selector_digest:
+              raise SystemExit(
+                  "pre-selector completion artifact digest drift"
+              )
+          pre_selector_dir = download_artifact(
+              pre_selector_run_id,
+              "phase2-pre-selector-wave-completion",
+              "upstream/pre-selector-completion",
+          )
+          pre_selector_path = (
+              pre_selector_dir
+              / "phase2-pre-selector-wave-completion-receipt.json"
+          )
+          try:
+              pre_selector = (
+                  validate_phase2_pre_selector_wave_completion_receipt(
+                      json.loads(pre_selector_path.read_text())
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if pre_selector[
+              "pre_selector_completion_control_run_id"
+          ] != pre_selector_run_id:
+              raise SystemExit(
+                  "pre-selector completion receipt/control identity drift"
+              )
+          if pre_selector["execution_branch"] != branch:
+              raise SystemExit(
+                  "pre-selector completion receipt branch drift"
+              )
+          if pre_selector["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "pre-selector completion receipt HEAD drift"
+              )
+          if pre_selector[
+              "canonical_coverage_ledger_sha256"
+          ] != ledger_sha:
+              raise SystemExit(
+                  "pre-selector completion receipt ledger SHA drift"
+              )
+          if handoff["planner_run_id"] != pre_selector["planner_run_id"]:
+              raise SystemExit(
+                  "selector approval handoff planner-run linkage drift"
+              )
+          if handoff["planner_artifact_digest"] != pre_selector[
+              "planner_artifact_digest"
+          ]:
+              raise SystemExit(
+                  "selector approval handoff planner-digest linkage drift"
+              )
+
+          metadata = gh_json([f"/repos/{repo}"])
+          default_branch = str(metadata.get("default_branch") or "")
+          if not default_branch:
+              raise SystemExit(
+                  "repository default branch is unavailable"
+              )
+          selector_workflow = str(
+              handoff["selector_freeze_workflow"]
+          )
+          if selector_workflow != (
+              "phase2-direct-market-selector-freeze.yml"
+          ):
+              raise SystemExit(
+                  "selector approval handoff workflow identity drift"
+              )
+          planner_workflow = "phase2-coverage-execution-plan.yml"
+          for workflow in (selector_workflow, planner_workflow):
+              expected_interface = workflow_dispatch_interface_sha256(
+                  Path(".github/workflows", workflow).read_text()
+              )
+              actual_interface = workflow_dispatch_interface_sha256(
+                  default_workflow_text(workflow)
+              )
+              if actual_interface != expected_interface:
+                  raise SystemExit(
+                      "default-branch dispatch interface drift: "
+                      f"{workflow}"
+                  )
+
+          generated = dict(
+              handoff["selector_freeze_generated_inputs"]
+          )
+          selector_run_id = dispatch(
+              selector_workflow,
+              {
+                  **generated,
+                  "freeze_active_quote_liquidity_causal_v1": True,
+              },
+          )
+          wait_run(
+              selector_run_id,
+              workflow=selector_workflow,
+              timeout_seconds=900,
+          )
+
+          selector_artifact_name = (
+              "phase2-direct-market-selector-freeze"
+          )
+          selector_artifact = artifact_row(
+              selector_run_id,
+              selector_artifact_name,
+          )
+          selector_artifact_digest = str(
+              selector_artifact.get("digest") or ""
+          ).lower()
+          selector_dir = download_artifact(
+              selector_run_id,
+              selector_artifact_name,
+              "upstream/selector-freeze",
+          )
+          descriptor_path = (
+              selector_dir
+              / "direct-market-selector-freeze.json"
+          )
+          if not descriptor_path.is_file():
+              raise SystemExit(
+                  "selector freeze artifact lacks descriptor"
+              )
+          descriptor_bytes = descriptor_path.read_bytes()
+          descriptor_sha = hashlib.sha256(
+              descriptor_bytes
+          ).hexdigest()
+          try:
+              descriptor = validate_direct_selector_freeze(
+                  json.loads(descriptor_bytes),
+                  expected_evidence_run_id=int(
+                      handoff["evidence_run_id"]
+                  ),
+                  expected_evidence_artifact_digest=str(
+                      handoff["evidence_artifact_digest"]
+                  ),
+                  expected_evidence_handoff_sha256=str(
+                      handoff["evidence_handoff_sha256"]
+                  ),
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          prior_control_ids = list(
+              pre_selector["node_dispatch_control_run_ids_consumed"]
+          )
+          if (
+              len(prior_control_ids) != 35
+              or len(set(prior_control_ids)) != 35
+          ):
+              raise SystemExit(
+                  "selector freeze refresh requires exactly 35 prior "
+                  "dispatcher control runs"
+              )
+
+          planner_run_id = dispatch(
+              planner_workflow,
+              {
+                  "completed_node_runs_json": json.dumps(
+                      {
+                          "shared:direct_selector_freeze": (
+                              selector_run_id
+                          )
+                      },
+                      separators=(",", ":"),
+                  ),
+                  "node_dispatch_run_ids_json": json.dumps(
+                      prior_control_ids,
+                      separators=(",", ":"),
+                  ),
+              },
+          )
+          wait_run(
+              planner_run_id,
+              workflow=planner_workflow,
+              timeout_seconds=900,
+          )
+          planner_artifact = artifact_row(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+          )
+          planner_digest = str(
+              planner_artifact.get("digest") or ""
+          ).lower()
+          planner_dir = download_artifact(
+              planner_run_id,
+              "phase2-coverage-execution-plan",
+              "upstream/post-selector-planner",
+          )
+          execution_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-coverage-execution-plan.json"
+              ).read_text()
+          )
+          verified_receipts = json.loads(
+              (
+                  planner_dir
+                  / "phase2-execution-run-receipts.json"
+              ).read_text()
+          )
+          dispatch_plan = json.loads(
+              (
+                  planner_dir
+                  / "phase2-dispatch-input-plan.json"
+              ).read_text()
+          )
+          if execution_plan.get("planner_head_sha") != current_head:
+              raise SystemExit(
+                  "post-selector planner HEAD linkage drift"
+              )
+          if execution_plan.get(
+              "canonical_coverage_ledger_sha256"
+          ) != ledger_sha:
+              raise SystemExit(
+                  "post-selector planner canonical-ledger SHA drift"
+              )
+          try:
+              post_selector = validate_phase2_selector_freeze_completion(
+                  execution_plan,
+                  verified_receipts,
+                  dispatch_plan,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+
+          receipt = {
+              "version": "phase2-direct-selector-approved-freeze-receipt-v1",
+              "approved_freeze_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_coverage_ledger_sha256": ledger_sha,
+              "approval_handoff_run_id": handoff_run_id,
+              "approval_handoff_artifact_digest": actual_handoff_digest,
+              "pre_selector_completion_run_id": pre_selector_run_id,
+              "pre_selector_completion_artifact_digest": (
+                  pre_selector_digest
+              ),
+              "selector_run_id": selector_run_id,
+              "selector_artifact_digest": selector_artifact_digest,
+              "selector_descriptor_sha256": descriptor_sha,
+              "selector_version": descriptor["selector_version"],
+              "evidence_run_id": descriptor["evidence_run_id"],
+              "evidence_artifact_digest": descriptor[
+                  "evidence_artifact_digest"
+              ],
+              "evidence_handoff_sha256": descriptor[
+                  "evidence_handoff_sha256"
+              ],
+              "planner_run_id": planner_run_id,
+              "planner_artifact_digest": planner_digest,
+              "node_dispatch_control_run_ids_consumed": sorted(
+                  prior_control_ids
+              ),
+              "auto_node_ids": post_selector["auto_node_ids"],
+              "manual_promotion_node_ids": post_selector[
+                  "manual_promotion_node_ids"
+              ],
+              "human_approval_input": "approve_freeze",
+              "human_approval_value": True,
+              "selector_approval_performed": True,
+              "selector_freeze_completed": True,
+              "coverage_promotion_performed": False,
+              "canonical_coverage_ledger_mutated": False,
+              "canonical_ledger_write_authorized": False,
+          }
+          Path(
+              "artifacts/phase2-direct-selector-approved-freeze-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"selector_run_id={selector_run_id}\n")
+              handle.write(
+                  f"selector_artifact_digest={selector_artifact_digest}\n"
+              )
+              handle.write(
+                  f"selector_descriptor_sha256={descriptor_sha}\n"
+              )
+              handle.write(f"planner_run_id={planner_run_id}\n")
+              handle.write(f"planner_digest={planner_digest}\n")
+              handle.write(
+                  "auto_node_ids_json="
+                  + json.dumps(
+                      post_selector["auto_node_ids"],
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload approved selector-freeze receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-selector-approved-freeze
+          path: artifacts/phase2-direct-selector-approved-freeze-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish approved selector-freeze summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          SELECTOR_RUN_ID: ${{ steps.freeze.outputs.selector_run_id }}
+          SELECTOR_ARTIFACT_DIGEST: ${{ steps.freeze.outputs.selector_artifact_digest }}
+          SELECTOR_DESCRIPTOR_SHA256: ${{ steps.freeze.outputs.selector_descriptor_sha256 }}
+          PLANNER_RUN_ID: ${{ steps.freeze.outputs.planner_run_id }}
+          PLANNER_DIGEST: ${{ steps.freeze.outputs.planner_digest }}
+          AUTO_NODE_IDS_JSON: ${{ steps.freeze.outputs.auto_node_ids_json }}
+        run: |
+          {
+            echo "## Phase-2 approved direct selector freeze"
+            echo
+            echo "- approved_freeze_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- approved_freeze_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- human_approval_input: approve_freeze"
+            echo "- human_approval_value: true"
+            echo "- selector_run_id: ${SELECTOR_RUN_ID}"
+            echo "- selector_artifact_digest: ${SELECTOR_ARTIFACT_DIGEST}"
+            echo "- selector_descriptor_sha256: ${SELECTOR_DESCRIPTOR_SHA256}"
+            echo "- selector_version: active-quote-liquidity-causal-v1"
+            echo "- selector_approval_performed: true"
+            echo "- selector_freeze_completed: true"
+            echo "- planner_run_id: ${PLANNER_RUN_ID}"
+            echo "- planner_artifact_digest: ${PLANNER_DIGEST}"
+            echo "- auto_node_ids: ${AUTO_NODE_IDS_JSON}"
+            echo "- pools_fun_promotion_held_for_operator: true"
+            echo "- coverage_promotion_performed: false"
+            echo "- canonical_coverage_ledger_mutated: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

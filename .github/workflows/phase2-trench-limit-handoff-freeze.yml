@@ -1,0 +1,281 @@
+name: phase2-trench-limit-handoff-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: Successful phase2-trench-limit-market-evidence run ID
+        required: true
+        type: string
+      expected_evidence_artifact_digest:
+        description: Exact evidence artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_evidence_report_sha256:
+        description: Exact SHA-256 of trench-limit-market-evidence.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+      EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_evidence_artifact_digest }}
+      EXPECTED_REPORT_SHA256: ${{ inputs.expected_evidence_report_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify exact trench handoff evidence artifact
+        run: |
+          set -euo pipefail
+          ARTIFACT_NAME=phase2-trench-limit-market-evidence
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${EVIDENCE_RUN_ID}/artifacts?name=${ARTIFACT_NAME}" \
+            > /tmp/trench-evidence-artifacts.json
+          python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(open("/tmp/trench-evidence-artifacts.json"))
+          name = "phase2-trench-limit-market-evidence"
+          matches = [
+              row
+              for row in payload.get("artifacts", [])
+              if row.get("name") == name
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected one trench evidence artifact; found {len(matches)}"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit("trench evidence artifact is expired")
+          actual = str(artifact.get("digest") or "").lower()
+          expected = os.environ["EXPECTED_ARTIFACT_DIGEST"].lower()
+          if not expected.startswith("sha256:"):
+              raise SystemExit(
+                  "expected evidence digest must use sha256:<hex>"
+              )
+          if actual != expected:
+              raise SystemExit(
+                  f"trench evidence artifact digest drift: "
+                  f"{actual} != {expected}"
+              )
+          PY
+          mkdir -p evidence
+          gh run download "${EVIDENCE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${ARTIFACT_NAME}" \
+            --dir evidence
+
+      - id: freeze
+        name: Freeze only a uniquely proven same-transaction handoff
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.trench_lifecycle import (
+              TRENCH_HANDOFF_RULE_VERSION,
+              freeze_trench_limit_market_handoffs,
+              summarize_trench_limit_market_candidates,
+          )
+
+          report_path = Path(
+              "evidence/trench-limit-market-evidence.json"
+          )
+          candidate_path = Path(
+              "evidence/trench-limit-market-candidates.jsonl"
+          )
+          report_bytes = report_path.read_bytes()
+          actual_report_sha = hashlib.sha256(
+              report_bytes
+          ).hexdigest()
+          expected_report_sha = os.environ[
+              "EXPECTED_REPORT_SHA256"
+          ].lower().removeprefix("sha256:")
+          if actual_report_sha != expected_report_sha:
+              raise SystemExit(
+                  "trench evidence report SHA drift: "
+                  f"{actual_report_sha} != {expected_report_sha}"
+              )
+
+          report = json.loads(report_bytes)
+          if report.get("version") != (
+              "phase2-trench-limit-market-evidence-v1"
+          ):
+              raise SystemExit("trench evidence report version changed")
+          if report.get("source_id") != "trench_today":
+              raise SystemExit("trench evidence source changed")
+          if report.get("handoff_rule_frozen") is not False:
+              raise SystemExit(
+                  "input trench evidence unexpectedly froze a handoff rule"
+              )
+          if report.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "input trench evidence unexpectedly closed coverage"
+              )
+
+          candidate_sha = hashlib.sha256(
+              candidate_path.read_bytes()
+          ).hexdigest()
+          if candidate_sha != report["candidate_manifest_sha256"]:
+              raise SystemExit("trench candidate manifest SHA drift")
+          rows = [
+              json.loads(line)
+              for line in candidate_path.read_text().splitlines()
+              if line.strip()
+          ]
+          recomputed = summarize_trench_limit_market_candidates(rows)
+          for key in (
+              "limit_reach_tokens",
+              "candidate_rows",
+              "tokens_with_candidates",
+              "tokens_without_candidates",
+              "single_candidate_tokens",
+              "multi_candidate_tokens",
+              "same_transaction_tokens",
+              "same_block_tokens",
+          ):
+              if recomputed[key] != report[key]:
+                  raise SystemExit(
+                      f"trench evidence summary drift: {key}"
+                  )
+
+          selected, summary = freeze_trench_limit_market_handoffs(
+              rows
+          )
+          if summary["limit_reach_tokens"] != int(
+              report["limit_reach_tokens"]
+          ):
+              raise SystemExit(
+                  "trench handoff freeze population changed"
+              )
+          if not summary["all_limit_reach_tokens_resolved"]:
+              raise SystemExit(
+                  "trench handoff freeze left unresolved tokens"
+              )
+          if summary["handoff_rule_frozen"] is not True:
+              raise SystemExit("trench handoff rule did not freeze")
+          if summary["source_coverage_complete"] is not False:
+              raise SystemExit(
+                  "trench handoff freeze cannot close source coverage"
+              )
+
+          manifest = write_jsonl_snapshot(
+              selected,
+              output=Path(
+                  "artifacts/trench-limit-market-handoffs.jsonl"
+              ),
+              provenance={
+                  "source": "phase2_trench_limit_handoff_freeze",
+                  "chain_id": 4663,
+                  "evidence_run_id": int(
+                      os.environ["EVIDENCE_RUN_ID"]
+                  ),
+                  "evidence_artifact_digest": os.environ[
+                      "EXPECTED_ARTIFACT_DIGEST"
+                  ].lower(),
+                  "evidence_report_sha256": actual_report_sha,
+                  "candidate_manifest_sha256": candidate_sha,
+                  "handoff_rule_version": (
+                      TRENCH_HANDOFF_RULE_VERSION
+                  ),
+              },
+          )
+          handoff_report = {
+              "version": "phase2-trench-limit-handoff-freeze-v1",
+              "chain_id": 4663,
+              "source_id": "trench_today",
+              "snapshot_head_block": int(
+                  report["snapshot_head_block"]
+              ),
+              "evidence_run_id": int(
+                  os.environ["EVIDENCE_RUN_ID"]
+              ),
+              "evidence_artifact_digest": os.environ[
+                  "EXPECTED_ARTIFACT_DIGEST"
+              ].lower(),
+              "evidence_report_sha256": actual_report_sha,
+              "registry_run_id": int(report["registry_run_id"]),
+              "direct_registry_run_id": int(
+                  report["direct_registry_run_id"]
+              ),
+              "trench_registry_sha256": report[
+                  "trench_registry_sha256"
+              ],
+              "direct_registry_sha256": report[
+                  "direct_registry_sha256"
+              ],
+              "candidate_manifest_sha256": candidate_sha,
+              "handoff_manifest_sha256": manifest["sha256"],
+              **summary,
+          }
+          report_text = (
+              json.dumps(
+                  handoff_report,
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/trench-limit-handoff-freeze.json"
+          ).write_text(report_text)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "report": handoff_report,
+              "report_sha256": report_sha,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload frozen trench handoff registry
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-limit-handoff-freeze
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish frozen handoff identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.freeze.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## trench.today frozen LimitReach handoffs"
+            echo
+            echo "- handoff_run_id: ${GITHUB_RUN_ID}"
+            echo "- handoff_artifact_name: phase2-trench-limit-handoff-freeze"
+            echo "- expected_handoff_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_report_path: trench-limit-handoff-freeze.json"
+            echo "- expected_handoff_report_sha256: ${REPORT_SHA256}"
+            echo "- handoff_rule_version: trench-limit-same-transaction-after-v1"
+            echo "- handoff_rule_frozen: true"
+            echo "- source_coverage_complete: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

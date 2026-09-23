@@ -1,0 +1,64 @@
+name: phase2-direct-quote-registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-direct-quote-registry-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Freeze direct DEX quote registry
+        run: |
+          mkdir -p artifacts
+          hlp --timeout 30 --attempts 5 \
+            phase2-direct-quote-registry \
+            --registry-out artifacts/direct-quotes.jsonl \
+            --decimals-out artifacts/direct-quote-decimals.json \
+            --feed-out artifacts/direct-quote-feeds.jsonl \
+            --summary-out artifacts/direct-quote-summary.json
+      - name: Verify fail-closed quote outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(
+              Path("artifacts/direct-quote-summary.json").read_text()
+          )
+          decimals = json.loads(
+              Path("artifacts/direct-quote-decimals.json").read_text()
+          )
+          if summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          if summary["chain_id"] != 4663:
+              raise SystemExit("direct quote registry chain drift")
+          if summary["priceable_quotes"] != len(decimals):
+              raise SystemExit("direct quote allowlist count drift")
+          if summary["priceable_quotes"] < 3:
+              raise SystemExit(
+                  "direct quote registry lost WETH/USDG/native anchors"
+              )
+          if not summary["chainlink_directory_sha256"]:
+              raise SystemExit("direct quote registry lacks directory SHA")
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: artifacts/
+          if-no-files-found: error
