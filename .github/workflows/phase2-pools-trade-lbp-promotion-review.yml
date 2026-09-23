@@ -356,7 +356,7 @@ jobs:
                   os.environ["GITHUB_RUN_ID"]
               ),
               "pools_trade_instant_ledger_approval_run_id": approval_run_id,
-              "pools_fun_ledger_approval_artifact_digest": actual_digest,
+              "pools_trade_instant_ledger_approval_artifact_digest": actual_digest,
               "execution_branch": branch,
               "execution_head_sha": current_head,
           }
