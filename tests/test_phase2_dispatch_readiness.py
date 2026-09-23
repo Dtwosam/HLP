@@ -68,6 +68,12 @@ def test_required_workflows_cover_planner_and_dynamic_gates():
     assert "phase2-flap-promotion-review.yml" in required
     assert "phase2-flap-promotion-propose.yml" in required
     assert "phase2-flap-ledger-approved.yml" in required
+    assert "phase2-trench-today-promotion-review.yml" in required
+    assert "phase2-trench-today-promotion-propose.yml" in required
+    assert "phase2-trench-today-ledger-approved.yml" in required
+    assert "phase2-hoodfun-current-promotion-review.yml" in required
+    assert "phase2-hoodfun-current-promotion-propose.yml" in required
+    assert "phase2-hoodfun-current-ledger-approved.yml" in required
     assert "phase2-archive-fanout-launch.yml" in required
     assert "phase2-archive-fanout-completion.yml" in required
     assert "phase2-post-fanout-wave-launch.yml" in required
