@@ -528,12 +528,12 @@ jobs:
               build_phase2_source_inventory(),
           )
           if validation["complete_source_ids"] != [
+              "doppler",
               "pons_v1",
               "pons_v2",
               "pools_fun",
               "pools_trade_instant",
               "pools_trade_lbp",
-              "doppler",
           ]:
               raise SystemExit(
                   "Doppler committed source set drift"
