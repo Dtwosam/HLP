@@ -16,6 +16,8 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_pools_fun_post_commit_frontier,
     validate_phase2_pools_trade_instant_promotion_review_receipt,
     validate_phase2_pools_trade_instant_promotion_proposal_receipt,
+    validate_phase2_pools_trade_instant_ledger_commit_receipt,
+    validate_phase2_pools_trade_instant_post_commit_frontier,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
 from hlp.data.phase2_first_wave import (
@@ -715,3 +717,119 @@ def test_pools_trade_instant_proposal_receipt_rejects_authorization():
     row["ledger_commit_authorized"] = True
     with pytest.raises(ValueError, match="authorizes"):
         validate_phase2_pools_trade_instant_promotion_proposal_receipt(row)
+
+
+
+def pools_trade_instant_ledger_commit_receipt():
+    row = pools_fun_ledger_commit_receipt()
+    row.update({
+        "source_id": "pools_trade_instant",
+        "promotion_run_id": 804,
+        "promotion_artifact_name": (
+            "phase2-source-coverage-promotion-pools_trade_instant"
+        ),
+        "promotion_artifact_digest": "sha256:" + "33" * 32,
+        "promotion_handoff_sha256": "44" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "proposed_ledger_sha256": "66" * 32,
+        "complete_source_ids_before": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+        ],
+        "complete_source_ids_after": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+        ],
+        "canonical_ledger_commit_sha": "77" * 20,
+    })
+    return row
+
+
+def test_pools_trade_instant_ledger_commit_receipt_validates_4_of_14():
+    report = validate_phase2_pools_trade_instant_ledger_commit_receipt(
+        pools_trade_instant_ledger_commit_receipt(),
+        expected_promotion_run_id=804,
+        expected_promotion_artifact_digest="sha256:" + "33" * 32,
+        expected_promotion_handoff_sha256="44" * 32,
+        expected_proposed_ledger_sha256="66" * 32,
+    )
+    assert report["canonical_ledger_commit_sha"] == "77" * 20
+
+
+def pools_trade_instant_post_commit_plans():
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    active = sorted(pre_frontier - {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+    })
+    verified_completed = sorted(pre_frontier | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+    })
+    execution = {
+        "canonical_complete_source_ids": [
+            "pons_v1",
+            "pons_v2",
+            "pools_fun",
+            "pools_trade_instant",
+        ],
+        "complete_sources": 4,
+        "incomplete_sources": 10,
+        "phase2_universe_coverage_complete": False,
+        "completed_node_ids": active,
+        "ignored_completed_node_ids": [
+            "coverage:pools_fun",
+            "promote:pools_fun",
+            "coverage:pools_trade_instant",
+            "promote:pools_trade_instant",
+        ],
+        "ready_to_dispatch_node_ids": ["promote:pools_trade_lbp"],
+        "awaiting_explicit_approval_node_ids": [],
+        "ledger_commit_approval_node_ids": [],
+    }
+    verified = {
+        "completed_node_ids": verified_completed,
+        "node_dispatch_run_ids_consumed": list(range(40000, 40042)),
+        "all_runs_current_or_ledger_only_ancestors": True,
+    }
+    dispatch = {
+        "nodes": [{
+            "node_id": "promote:pools_trade_lbp",
+            "workflow": "phase2-source-coverage-promotion.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"coverage_run_id": "41000"},
+            "remaining_manual_inputs": [
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+        }],
+    }
+    return execution, verified, dispatch
+
+
+def test_pools_trade_instant_post_commit_frontier_unlocks_lbp_only():
+    execution, verified, dispatch = pools_trade_instant_post_commit_plans()
+    report = validate_phase2_pools_trade_instant_post_commit_frontier(
+        execution,
+        verified,
+        dispatch,
+    )
+    assert report["complete_sources"] == 4
+    assert report["active_completed_execution_nodes"] == 39
+    assert report["node_dispatch_control_runs_consumed"] == 42
+    assert report["next_promotion_node_id"] == "promote:pools_trade_lbp"
