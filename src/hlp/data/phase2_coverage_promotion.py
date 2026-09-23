@@ -2493,7 +2493,7 @@ def build_phase2_doppler_promotion_review_handoff(
         inventory,
         report,
     )
-    expected_after = expected_before + ["doppler"]
+    expected_after = sorted(expected_before + ["doppler"])
     if after["complete_source_ids"] != expected_after:
         raise ValueError(
             "Doppler review does not complete exactly next source"
@@ -2724,7 +2724,7 @@ def validate_phase2_doppler_promotion_proposal_receipt(
         "pools_trade_instant",
         "pools_trade_lbp",
     ]
-    expected_after = expected_before + ["doppler"]
+    expected_after = sorted(expected_before + ["doppler"])
 
     if row.get("source_id") != "doppler":
         raise ValueError("Doppler proposal source identity drift")
@@ -2848,7 +2848,7 @@ def validate_phase2_doppler_ledger_commit_receipt(
         "pools_trade_instant",
         "pools_trade_lbp",
     ]
-    expected_after = expected_before + ["doppler"]
+    expected_after = sorted(expected_before + ["doppler"])
     if row.get("complete_source_ids_before") != expected_before:
         raise ValueError("Doppler ledger commit before-set drift")
     if row.get("complete_source_ids_after") != expected_after:
@@ -2887,12 +2887,12 @@ def validate_phase2_doppler_post_commit_frontier(
     verified = dict(verified_receipts)
     dispatch = dict(dispatch_plan)
     expected_complete = [
+        "doppler",
         "pons_v1",
         "pons_v2",
         "pools_fun",
         "pools_trade_instant",
         "pools_trade_lbp",
-        "doppler",
     ]
     if execution.get("canonical_complete_source_ids") != expected_complete:
         raise ValueError("Doppler post-commit canonical source set drift")

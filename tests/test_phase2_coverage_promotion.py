@@ -1257,12 +1257,12 @@ def test_doppler_review_prepares_exact_6_of_14_advance():
         canonical_ledger_sha256="44" * 32,
     )
     assert report["complete_source_ids_after_if_promoted"] == [
+        "doppler",
         "pons_v1",
         "pons_v2",
         "pools_fun",
         "pools_trade_instant",
         "pools_trade_lbp",
-        "doppler",
     ]
     assert report["promotion_dispatched"] is False
 
@@ -1332,12 +1332,12 @@ def doppler_proposal_receipt():
             "pools_trade_lbp",
         ],
         "complete_source_ids_after": [
+            "doppler",
             "pons_v1",
             "pons_v2",
             "pools_fun",
             "pools_trade_instant",
             "pools_trade_lbp",
-            "doppler",
         ],
         "phase2_universe_coverage_complete": False,
         "ledger_commit_generated_inputs": {
@@ -1385,12 +1385,12 @@ def doppler_ledger_commit_receipt():
             "pools_trade_lbp",
         ],
         "complete_source_ids_after": [
+            "doppler",
             "pons_v1",
             "pons_v2",
             "pools_fun",
             "pools_trade_instant",
             "pools_trade_lbp",
-            "doppler",
         ],
         "phase2_universe_coverage_complete": False,
         "canonical_ledger_commit_sha": "77" * 20,
@@ -1436,12 +1436,12 @@ def doppler_post_commit_plans():
     })
     execution = {
         "canonical_complete_source_ids": [
+            "doppler",
             "pons_v1",
             "pons_v2",
             "pools_fun",
             "pools_trade_instant",
             "pools_trade_lbp",
-            "doppler",
         ],
         "complete_sources": 6,
         "incomplete_sources": 8,
