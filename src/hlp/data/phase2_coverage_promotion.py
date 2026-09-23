@@ -8,6 +8,17 @@ from hlp.data.phase2_coverage import (
     apply_phase2_source_coverage_report,
     validate_phase2_coverage_ledger,
 )
+from hlp.data.phase2_first_wave import (
+    PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS,
+    PHASE2_FIRST_WAVE_NODE_IDS,
+)
+from hlp.data.phase2_post_fanout import (
+    PHASE2_POST_FANOUT_AUTO_NODE_IDS,
+    PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS,
+    PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+    PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS,
+    PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS,
+)
 
 
 PHASE2_COVERAGE_PROMOTION_VERSION = "phase2-source-coverage-promotion-v1"
@@ -505,4 +516,230 @@ def validate_phase2_pools_fun_promotion_proposal_receipt(
         "proposal_validated": True,
         "canonical_coverage_ledger_mutated": False,
         "ledger_commit_authorized": False,
+    }
+
+
+
+def _commit_sha(value: object, *, label: str) -> str:
+    text = str(value or "").lower()
+    if len(text) != 40:
+        raise ValueError(f"{label} must be a 40-char commit SHA")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not hexadecimal") from exc
+    return text
+
+
+def validate_phase2_pools_fun_ledger_commit_receipt(
+    receipt: Mapping[str, object],
+    *,
+    expected_promotion_run_id: int,
+    expected_promotion_artifact_digest: str,
+    expected_promotion_handoff_sha256: str,
+    expected_proposed_ledger_sha256: str,
+) -> dict:
+    """Validate the exact approved pools.fun canonical-ledger write."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-source-coverage-ledger-commit-v1"
+    ):
+        raise ValueError("pools.fun ledger commit receipt version changed")
+    if row.get("source_id") != "pools_fun":
+        raise ValueError("pools.fun ledger commit source identity drift")
+
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="pools.fun ledger commit promotion run ID",
+    )
+    if promotion_run_id != int(expected_promotion_run_id):
+        raise ValueError("pools.fun ledger commit promotion run drift")
+    artifact_name = str(row.get("promotion_artifact_name") or "")
+    if artifact_name != "phase2-source-coverage-promotion-pools_fun":
+        raise ValueError("pools.fun ledger commit artifact-name drift")
+    artifact_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="pools.fun ledger commit promotion artifact digest",
+    )
+    if artifact_digest != _artifact_digest(
+        expected_promotion_artifact_digest,
+        label="expected pools.fun promotion artifact digest",
+    ):
+        raise ValueError("pools.fun ledger commit promotion artifact drift")
+
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="pools.fun ledger commit promotion handoff",
+    )
+    if handoff_sha != _sha256(
+        expected_promotion_handoff_sha256,
+        label="expected pools.fun promotion handoff",
+    ):
+        raise ValueError("pools.fun ledger commit promotion handoff drift")
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="pools.fun ledger commit proposed ledger",
+    )
+    if proposed_sha != _sha256(
+        expected_proposed_ledger_sha256,
+        label="expected pools.fun proposed ledger",
+    ):
+        raise ValueError("pools.fun ledger commit proposed-ledger drift")
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="pools.fun ledger commit base ledger",
+    )
+
+    before = [
+        str(value) for value in row.get("complete_source_ids_before") or []
+    ]
+    after = [
+        str(value) for value in row.get("complete_source_ids_after") or []
+    ]
+    if before != ["pons_v1", "pons_v2"]:
+        raise ValueError("pools.fun ledger commit before-set drift")
+    if after != ["pons_v1", "pons_v2", "pools_fun"]:
+        raise ValueError("pools.fun ledger commit after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("pools.fun ledger commit unexpectedly closes Phase 2")
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="pools.fun canonical ledger commit",
+    )
+    if row.get("explicit_approval") is not True:
+        raise ValueError("pools.fun ledger commit lacks explicit approval")
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("pools.fun ledger commit lacks mutation proof")
+
+    return {
+        **row,
+        "source_id": "pools_fun",
+        "promotion_run_id": promotion_run_id,
+        "promotion_artifact_name": artifact_name,
+        "promotion_artifact_digest": artifact_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "base_ledger_sha256": base_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "complete_source_ids_before": before,
+        "complete_source_ids_after": after,
+        "canonical_ledger_commit_sha": commit_sha,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def validate_phase2_pools_fun_post_commit_frontier(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze the exact 3/14 planner boundary after pools.fun is canonical."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+
+    expected_complete = ["pons_v1", "pons_v2", "pools_fun"]
+    if execution.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("pools.fun post-commit canonical source set drift")
+    if int(execution.get("complete_sources", -1)) != 3:
+        raise ValueError("pools.fun post-commit source count drift")
+    if int(execution.get("incomplete_sources", -1)) != 11:
+        raise ValueError("pools.fun post-commit incomplete count drift")
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("pools.fun post-commit unexpectedly closes Phase 2")
+
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    expected_active_completed = pre_frontier - {"coverage:pools_fun"}
+    completed = execution.get("completed_node_ids")
+    if not isinstance(completed, list) or set(completed) != expected_active_completed:
+        raise ValueError("pools.fun post-commit active completion drift")
+
+    ignored = execution.get("ignored_completed_node_ids")
+    if not isinstance(ignored, list) or set(ignored) != {
+        "coverage:pools_fun",
+        "promote:pools_fun",
+    }:
+        raise ValueError("pools.fun post-commit ignored-completion drift")
+
+    ready = execution.get("ready_to_dispatch_node_ids")
+    if ready != ["promote:pools_trade_instant"]:
+        raise ValueError("pools.fun post-commit next promotion drift")
+    if execution.get("awaiting_explicit_approval_node_ids") != []:
+        raise ValueError("pools.fun post-commit has unexpected approval nodes")
+    if execution.get("ledger_commit_approval_node_ids") != []:
+        raise ValueError("pools.fun post-commit has unexpected ledger approval")
+    if execution.get("manual_ledger_commit_node_ids") != []:
+        raise ValueError("pools.fun post-commit has unexpected manual commits")
+
+    verified_completed = verified.get("completed_node_ids")
+    expected_verified = pre_frontier | {"promote:pools_fun"}
+    if (
+        not isinstance(verified_completed, list)
+        or set(verified_completed) != expected_verified
+    ):
+        raise ValueError("pools.fun post-commit verified completion drift")
+    control_ids = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(control_ids, list)
+        or len(control_ids) != 41
+        or len(set(int(value) for value in control_ids)) != 41
+    ):
+        raise ValueError(
+            "pools.fun post-commit requires exactly 41 dispatcher receipts"
+        )
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError("pools.fun post-commit lacks lineage proof")
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise ValueError("pools.fun post-commit dispatch row count drift")
+    row = dict(rows[0])
+    if row.get("node_id") != "promote:pools_trade_instant":
+        raise ValueError("pools.fun post-commit dispatch node drift")
+    if row.get("workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("pools.fun post-commit promotion workflow drift")
+    if row.get("status") != "ready_to_dispatch":
+        raise ValueError("pools.trade Instant promotion is not ready")
+    if set(dict(row.get("run_id_inputs") or {})) != {"coverage_run_id"}:
+        raise ValueError("pools.trade Instant promotion run binding drift")
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value) for value in row.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError("pools.trade Instant promotion manual-input drift")
+
+    return {
+        "version": "phase2-pools-fun-post-commit-frontier-v1",
+        "canonical_complete_source_ids": expected_complete,
+        "complete_sources": 3,
+        "incomplete_sources": 11,
+        "active_completed_execution_nodes": len(expected_active_completed),
+        "ignored_completed_node_ids": [
+            "coverage:pools_fun",
+            "promote:pools_fun",
+        ],
+        "node_dispatch_control_runs_consumed": len(control_ids),
+        "next_promotion_node_id": "promote:pools_trade_instant",
+        "next_promotion_manual_inputs": actual_manual,
+        "automatic_acquisition_complete": True,
+        "canonical_ledger_advanced": True,
+        "phase2_universe_coverage_complete": False,
     }

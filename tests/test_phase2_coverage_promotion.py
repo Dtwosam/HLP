@@ -10,8 +10,21 @@ from hlp.data.phase2_coverage_promotion import (
     validate_phase2_coverage_ledger_commit,
     validate_phase2_pools_fun_promotion_review_receipt,
     validate_phase2_pools_fun_promotion_proposal_receipt,
+    validate_phase2_pools_fun_ledger_commit_receipt,
+    validate_phase2_pools_fun_post_commit_frontier,
 )
 from hlp.data.phase2_sources import build_phase2_source_inventory
+from hlp.data.phase2_first_wave import (
+    PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS,
+    PHASE2_FIRST_WAVE_NODE_IDS,
+)
+from hlp.data.phase2_post_fanout import (
+    PHASE2_POST_FANOUT_AUTO_NODE_IDS,
+    PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS,
+    PHASE2_PRE_SELECTOR_AUTO_NODE_IDS,
+    PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS,
+    PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS,
+)
 
 
 SHA = "ab" * 32
@@ -364,3 +377,135 @@ def test_pools_fun_proposal_receipt_rejects_authorization_drift(
     row[field] = value
     with pytest.raises(ValueError, match=match):
         validate_phase2_pools_fun_promotion_proposal_receipt(row)
+
+
+
+def pools_fun_ledger_commit_receipt():
+    return {
+        "version": "phase2-source-coverage-ledger-commit-v1",
+        "source_id": "pools_fun",
+        "promotion_run_id": 404,
+        "promotion_artifact_name": "phase2-source-coverage-promotion-pools_fun",
+        "promotion_artifact_digest": "sha256:" + "22" * 32,
+        "promotion_handoff_sha256": "33" * 32,
+        "base_ledger_sha256": "55" * 32,
+        "proposed_ledger_sha256": "44" * 32,
+        "complete_source_ids_before": ["pons_v1", "pons_v2"],
+        "complete_source_ids_after": ["pons_v1", "pons_v2", "pools_fun"],
+        "phase2_universe_coverage_complete": False,
+        "canonical_ledger_commit_sha": "66" * 20,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def test_pools_fun_ledger_commit_receipt_requires_exact_approved_write():
+    report = validate_phase2_pools_fun_ledger_commit_receipt(
+        pools_fun_ledger_commit_receipt(),
+        expected_promotion_run_id=404,
+        expected_promotion_artifact_digest="sha256:" + "22" * 32,
+        expected_promotion_handoff_sha256="33" * 32,
+        expected_proposed_ledger_sha256="44" * 32,
+    )
+    assert report["canonical_ledger_commit_sha"] == "66" * 20
+    assert report["complete_source_ids_after"] == [
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("explicit_approval", False, "explicit approval"),
+        ("canonical_ledger_mutated", False, "mutation proof"),
+        ("source_id", "doppler", "source identity"),
+    ],
+)
+def test_pools_fun_ledger_commit_receipt_rejects_drift(field, value, match):
+    row = pools_fun_ledger_commit_receipt()
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        validate_phase2_pools_fun_ledger_commit_receipt(
+            row,
+            expected_promotion_run_id=404,
+            expected_promotion_artifact_digest="sha256:" + "22" * 32,
+            expected_promotion_handoff_sha256="33" * 32,
+            expected_proposed_ledger_sha256="44" * 32,
+        )
+
+
+def pools_fun_post_commit_plans():
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    active = sorted(pre_frontier - {"coverage:pools_fun"})
+    verified_completed = sorted(pre_frontier | {"promote:pools_fun"})
+    execution = {
+        "canonical_complete_source_ids": ["pons_v1", "pons_v2", "pools_fun"],
+        "complete_sources": 3,
+        "incomplete_sources": 11,
+        "phase2_universe_coverage_complete": False,
+        "completed_node_ids": active,
+        "ignored_completed_node_ids": [
+            "coverage:pools_fun",
+            "promote:pools_fun",
+        ],
+        "ready_to_dispatch_node_ids": ["promote:pools_trade_instant"],
+        "awaiting_explicit_approval_node_ids": [],
+        "ledger_commit_approval_node_ids": [],
+        "manual_ledger_commit_node_ids": [],
+    }
+    verified = {
+        "completed_node_ids": verified_completed,
+        "node_dispatch_run_ids_consumed": list(range(30000, 30041)),
+        "all_runs_current_or_ledger_only_ancestors": True,
+    }
+    dispatch = {
+        "nodes": [{
+            "node_id": "promote:pools_trade_instant",
+            "workflow": "phase2-source-coverage-promotion.yml",
+            "status": "ready_to_dispatch",
+            "run_id_inputs": {"coverage_run_id": "31000"},
+            "remaining_manual_inputs": [
+                "coverage_artifact_name",
+                "coverage_report_path",
+                "expected_artifact_digest",
+                "expected_report_sha256",
+                "expected_source_id",
+            ],
+        }],
+    }
+    return execution, verified, dispatch
+
+
+def test_pools_fun_post_commit_frontier_unlocks_only_next_promotion():
+    execution, verified, dispatch = pools_fun_post_commit_plans()
+    report = validate_phase2_pools_fun_post_commit_frontier(
+        execution,
+        verified,
+        dispatch,
+    )
+    assert report["complete_sources"] == 3
+    assert report["active_completed_execution_nodes"] == 40
+    assert report["node_dispatch_control_runs_consumed"] == 41
+    assert report["next_promotion_node_id"] == "promote:pools_trade_instant"
+
+
+def test_pools_fun_post_commit_frontier_rejects_hidden_auto_work():
+    execution, verified, dispatch = pools_fun_post_commit_plans()
+    execution["ready_to_dispatch_node_ids"].append("coverage:doppler")
+    with pytest.raises(ValueError, match="next promotion drift"):
+        validate_phase2_pools_fun_post_commit_frontier(
+            execution,
+            verified,
+            dispatch,
+        )
