@@ -54,7 +54,7 @@ jobs:
           fi
 
       - id: review
-        name: Verify 5/14 frontier and prepare exact pools.trade Instant inputs
+        name: Verify 5/14 frontier and prepare exact Doppler inputs
         run: |
           mkdir -p artifacts upstream
           python - <<'PY'
@@ -184,7 +184,7 @@ jobs:
           ).lower()
           if actual_digest != expected_digest:
               raise SystemExit(
-                  "pools.fun approved-ledger artifact digest drift"
+                  "pools.trade LBP approved-ledger artifact digest drift"
               )
           approval_dir = download_artifact(
               approval_run_id,
@@ -203,15 +203,15 @@ jobs:
               raise SystemExit(str(exc)) from exc
           if approval["ledger_approval_control_run_id"] != approval_run_id:
               raise SystemExit(
-                  "pools.fun approved-ledger receipt/control identity drift"
+                  "pools.trade LBP approved-ledger receipt/control identity drift"
               )
           if approval["execution_branch"] != branch:
               raise SystemExit(
-                  "pools.fun approved-ledger receipt branch drift"
+                  "pools.trade LBP approved-ledger receipt branch drift"
               )
           if approval["canonical_ledger_commit_sha"] != current_head:
               raise SystemExit(
-                  "pools.fun canonical commit is not review HEAD"
+                  "pools.trade LBP canonical commit is not review HEAD"
               )
 
           ledger_path = Path(".github/phase2-source-coverage.json")
@@ -219,7 +219,7 @@ jobs:
           ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
           if ledger_sha != approval["canonical_coverage_ledger_sha256"]:
               raise SystemExit(
-                  "pools.fun approved-ledger canonical SHA drift"
+                  "pools.trade LBP approved-ledger canonical SHA drift"
               )
 
           planner_run_id = int(approval["planner_run_id"])
@@ -231,7 +231,7 @@ jobs:
           )
           if str(planner_run.get("head_sha") or "").lower() != current_head:
               raise SystemExit(
-                  "pools.fun post-commit planner HEAD drift"
+                  "pools.trade LBP post-commit planner HEAD drift"
               )
           planner_artifact = artifact_row(
               planner_run_id,
@@ -242,7 +242,7 @@ jobs:
           ).lower()
           if planner_digest != approval["planner_artifact_digest"]:
               raise SystemExit(
-                  "pools.fun post-commit planner artifact digest drift"
+                  "pools.trade LBP post-commit planner artifact digest drift"
               )
           planner_dir = download_artifact(
               planner_run_id,
@@ -279,7 +279,7 @@ jobs:
               "promote:doppler"
           ):
               raise SystemExit(
-                  "5/14 frontier no longer points to pools.trade Instant"
+                  "5/14 frontier no longer points to Doppler"
               )
 
           promotion_rows = [

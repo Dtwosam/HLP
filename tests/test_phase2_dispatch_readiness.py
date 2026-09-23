@@ -61,6 +61,10 @@ def test_required_workflows_cover_planner_and_dynamic_gates():
     assert "phase2-pools-trade-instant-ledger-approved.yml" in required
     assert "phase2-pools-trade-lbp-promotion-review.yml" in required
     assert "phase2-pools-trade-lbp-promotion-propose.yml" in required
+    assert "phase2-pools-trade-lbp-ledger-approved.yml" in required
+    assert "phase2-doppler-promotion-review.yml" in required
+    assert "phase2-doppler-promotion-propose.yml" in required
+    assert "phase2-doppler-ledger-approved.yml" in required
     assert "phase2-archive-fanout-launch.yml" in required
     assert "phase2-archive-fanout-completion.yml" in required
     assert "phase2-post-fanout-wave-launch.yml" in required

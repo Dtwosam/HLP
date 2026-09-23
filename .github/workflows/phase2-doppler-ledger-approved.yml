@@ -392,7 +392,7 @@ jobs:
               "pools_trade_lbp_ledger_approval_artifact_digest"
           ]:
               raise SystemExit(
-                  "pools.trade Instant approved handoff artifact digest drift"
+                  "pools.trade LBP approved handoff artifact digest drift"
               )
           prior_dir = download_artifact(
               prior_run_id,
@@ -411,11 +411,11 @@ jobs:
               raise SystemExit(str(exc)) from exc
           if prior["ledger_approval_control_run_id"] != prior_run_id:
               raise SystemExit(
-                  "pools.trade Instant approved receipt/control identity drift"
+                  "pools.trade LBP approved receipt/control identity drift"
               )
           if prior["canonical_ledger_commit_sha"] != approval_head:
               raise SystemExit(
-                  "pools.trade Instant approved commit is not current 3/14 HEAD"
+                  "pools.trade LBP approved commit is not current 5/14 HEAD"
               )
 
           all_control_ids = sorted(
