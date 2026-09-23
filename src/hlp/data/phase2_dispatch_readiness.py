@@ -35,6 +35,7 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-pools-trade-instant-promotion-review.yml",
     "phase2-pools-trade-instant-promotion-propose.yml",
     "phase2-pools-trade-instant-ledger-approved.yml",
+    "phase2-pools-trade-lbp-promotion-review.yml",
     "phase2-archive-fanout-launch.yml",
     "phase2-archive-fanout-completion.yml",
     "phase2-post-fanout-wave-launch.yml",
