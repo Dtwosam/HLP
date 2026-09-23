@@ -2253,7 +2253,7 @@ def test_hood_fun_current_review_receipt_is_read_only():
 def hood_fun_current_proposal_receipt():
     before = ["doppler","flap","pons_v1","pons_v2","pools_fun","pools_trade_instant","pools_trade_lbp","trench_today"]
     return {
-        "version": "phase2-hood-fun-current-promotion-proposal-v1",
+        "version": "phase2-hoodfun-current-promotion-proposal-v1",
         "promotion_proposal_control_run_id": 2401,
         "execution_branch": "phase1/data-acquisition-spike",
         "execution_head_sha": "11" * 20,
@@ -2409,7 +2409,7 @@ def test_hood_fun_current_post_commit_frontier_unlocks_hood_current_only():
 
 def hood_fun_current_ledger_approved_receipt():
     return {
-        "version": "phase2-hood-fun-current-ledger-approved-receipt-v1",
+        "version": "phase2-hoodfun-current-ledger-approved-receipt-v1",
         "ledger_approval_control_run_id": 2501,
         "execution_branch": "phase1/data-acquisition-spike",
         "approval_execution_head_sha": "11" * 20,

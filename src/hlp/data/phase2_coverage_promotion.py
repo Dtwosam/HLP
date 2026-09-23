@@ -4505,13 +4505,13 @@ def validate_phase2_trench_today_ledger_approved_receipt(
 
 
 PHASE2_HOOD_FUN_CURRENT_PROMOTION_REVIEW_VERSION = (
-    "phase2-hood-fun-current-promotion-review-v1"
+    "phase2-hoodfun-current-promotion-review-v1"
 )
 HOOD_FUN_CURRENT_COVERAGE_WORKFLOW = "phase2-hoodfun-current-coverage.yml"
 HOOD_FUN_CURRENT_COVERAGE_ARTIFACT = "phase2-hoodfun-current-coverage"
 HOOD_FUN_CURRENT_COVERAGE_REPORT_PATH = "hood-current-coverage.json"
 PHASE2_HOOD_FUN_CURRENT_PROMOTION_PROPOSAL_VERSION = (
-    "phase2-hood-fun-current-promotion-proposal-v1"
+    "phase2-hoodfun-current-promotion-proposal-v1"
 )
 
 
@@ -5053,7 +5053,7 @@ def validate_phase2_hood_fun_current_post_commit_frontier(
     if actual_manual != expected_manual:
         raise ValueError("hood.fun previous promotion manual-input drift")
     return {
-        "version": "phase2-hood-fun-current-post-commit-frontier-v1",
+        "version": "phase2-hoodfun-current-post-commit-frontier-v1",
         "canonical_complete_source_ids": expected_complete,
         "complete_sources": 9,
         "incomplete_sources": 5,
@@ -5076,7 +5076,7 @@ def validate_phase2_hood_fun_current_ledger_approved_receipt(
 
     row = dict(receipt)
     if str(row.get("version") or "") != (
-        "phase2-hood-fun-current-ledger-approved-receipt-v1"
+        "phase2-hoodfun-current-ledger-approved-receipt-v1"
     ):
         raise ValueError(
             "hood.fun current approved-ledger receipt version changed"
