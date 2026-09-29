@@ -1,0 +1,284 @@
+name: phase2-hoodfun-legacy-curve-semantics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Require authenticated archive key
+        run: |
+          set -euo pipefail
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
+          fi
+      - name: Prove legacy hood.fun supply and reserve semantics
+        id: proof
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+              SOLIDRPC_PUBLIC_RPC_URL,
+          )
+          from hlp.data.hood_fun_generations import (
+              validate_hood_fun_deployments,
+              validate_hood_fun_legacy_compatibility,
+          )
+          from hlp.data.hood_fun_registry import (
+              build_hood_fun_launch_registry,
+          )
+          from hlp.data.hood_fun_semantics import (
+              audit_hood_fun_curve_semantics,
+          )
+          from hlp.data.rpc import RpcClient
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.protocols.erc20 import read_erc20_static
+          from hlp.protocols.hood_fun import (
+              HOOD_FUN_CURVE_TOPICS,
+              decode_hood_fun_event,
+          )
+
+          deployment_raw = json.loads(
+              Path(".github/phase2-hoodfun-deployments.json").read_text()
+          )
+          deployments = validate_hood_fun_deployments(deployment_raw)
+          compatibility_raw = json.loads(
+              Path(
+                  ".github/phase2-hoodfun-legacy-compatibility.json"
+              ).read_text()
+          )
+          compatibility = validate_hood_fun_legacy_compatibility(
+              compatibility_raw
+          )
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          if deployments["snapshot_head_block"] != head:
+              raise SystemExit("legacy semantics snapshot drift")
+
+          previous = deployments["generations"]["previous"]
+          current = deployments["generations"]["current"]
+          contract = previous["address"]
+          if compatibility["contract"] != contract:
+              raise SystemExit("legacy compatibility contract drift")
+          if (
+              compatibility["first_code_block"]
+              != previous["first_code_block"]
+          ):
+              raise SystemExit("legacy compatibility boundary drift")
+
+          sample = compatibility_raw["first_samples"]["token_created"]
+          sample_token = str(sample["token"]).lower()
+          start = int(sample["block_number"])
+          end = int(current["first_code_block"]) - 1
+          if start < previous["first_code_block"] or start > end:
+              raise SystemExit("legacy semantic cohort bounds changed")
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY")
+          url = os.environ.get("ROBINHOOD_ARCHIVE_RPC_URL")
+          if not url:
+              url = (
+                  SOLIDRPC_AUTH_RPC_URL
+                  if key else SOLIDRPC_PUBLIC_RPC_URL
+              )
+          rpc = RpcClient(
+              url,
+              timeout=30,
+              attempts=5,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key} if key else None,
+              route_label=(
+                  "solidrpc_authenticated_free"
+                  if key else "solidrpc_keyless_public"
+              ),
+          )
+          rpc.assert_robinhood()
+          chunk = (
+              50_000
+              if key
+              else SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+          )
+          events = [
+              decode_hood_fun_event(raw, contract=contract)
+              for raw in rpc.iter_logs_chunked(
+                  start,
+                  end,
+                  address=contract,
+                  topics=[list(HOOD_FUN_CURVE_TOPICS)],
+                  chunk_size=chunk,
+                  min_chunk_size=25,
+              )
+          ]
+          if not events:
+              raise SystemExit("legacy semantic cohort has no events")
+
+          registry = build_hood_fun_launch_registry(
+              events,
+              generation="previous",
+          )
+          by_token = {row["token"]: row for row in registry}
+          if sample_token not in by_token:
+              raise SystemExit(
+                  "frozen legacy TokenCreated sample missing from cohort"
+              )
+
+          supply_checks = []
+          for row in registry:
+              static = read_erc20_static(
+                  rpc,
+                  row["token"],
+                  block=row["launch_block"],
+              )
+              if static.decimals != 18:
+                  raise SystemExit(
+                      f"legacy hood.fun decimals changed: {row['token']}"
+                  )
+              if static.total_supply != int(row["supply_raw"]):
+                  raise SystemExit(
+                      f"legacy hood.fun supply mismatch: {row['token']}"
+                  )
+              if (
+                  int(row["curve_inventory_raw"]) * 5
+                  != int(row["supply_raw"]) * 4
+              ):
+                  raise SystemExit(
+                      f"legacy hood.fun 80/20 split failed: {row['token']}"
+                  )
+              supply_checks.append({
+                  "token": row["token"],
+                  "launch_block": int(row["launch_block"]),
+                  "decimals": static.decimals,
+                  "total_supply": static.total_supply,
+                  "curve_inventory_raw": int(
+                      row["curve_inventory_raw"]
+                  ),
+              })
+
+          semantics = audit_hood_fun_curve_semantics(events, registry)
+          if not semantics["reserve_conservation_complete"]:
+              raise SystemExit(
+                  "legacy hood.fun reserve conservation incomplete"
+              )
+          if semantics["checked_sequential_trades"] <= 0:
+              raise SystemExit(
+                  "legacy hood.fun lacks launch-linked trades"
+              )
+
+          event_manifest = write_jsonl_snapshot(
+              events,
+              output=Path("artifacts/hood-legacy-semantic-events.jsonl"),
+              provenance={
+                  "source": "hood_fun_previous_semantic_cohort",
+                  "chain_id": 4663,
+                  "generation": "previous",
+                  "contract": contract,
+                  "from_block": start,
+                  "to_block": end,
+                  "compatibility_artifact_digest": compatibility[
+                      "artifact_digest"
+                  ],
+              },
+          )
+          registry_manifest = write_jsonl_snapshot(
+              registry,
+              output=Path(
+                  "artifacts/hood-legacy-semantic-registry.jsonl"
+              ),
+              provenance={
+                  "source": "hood_fun_previous_semantic_registry",
+                  "chain_id": 4663,
+                  "events_sha256": event_manifest["sha256"],
+              },
+          )
+          report = {
+              "version": "phase2-hoodfun-legacy-curve-semantics-v1",
+              "chain_id": 4663,
+              "snapshot_head_block": head,
+              "generation": "previous",
+              "contract": contract,
+              "from_block": start,
+              "to_block": end,
+              "sample_launch_token": sample_token,
+              "compatibility_evidence_run_id": compatibility[
+                  "evidence_run_id"
+              ],
+              "compatibility_artifact_id": compatibility["artifact_id"],
+              "compatibility_artifact_digest": compatibility[
+                  "artifact_digest"
+              ],
+              "events": len(events),
+              "registry_tokens": len(registry),
+              "event_tape_sha256": event_manifest["sha256"],
+              "registry_sha256": registry_manifest["sha256"],
+              "supply_checks": supply_checks,
+              "supply_checks_complete": (
+                  len(supply_checks) == len(registry)
+              ),
+              "semantics": semantics,
+              "semantic_proof_complete": True,
+              "rpc_route": rpc.route_label,
+              "rpc_requests": rpc.requests_made,
+          }
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/hoodfun-legacy-curve-semantics.json"
+          ).write_text(report_text)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "report": report,
+              "report_sha256": report_sha,
+          }, sort_keys=True))
+          PY
+      - name: Upload legacy semantic proof
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-hoodfun-legacy-curve-semantics
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish semantic-proof handoff
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.proof.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## hood.fun previous semantic proof"
+            echo
+            echo "- semantics_run_id: ${GITHUB_RUN_ID}"
+            echo "- semantics_artifact_name: phase2-hoodfun-legacy-curve-semantics"
+            echo "- expected_semantics_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- expected_semantics_report_sha256: ${REPORT_SHA256}"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,270 @@
+name: phase2-pools-trade-launcher-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-trade-launcher-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '3338007'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute launcher shard bounds
+        run: |
+          python - <<'PY'
+          import os
+
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + span * index // count
+          hi = start + span * (index + 1) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty pools.trade launcher shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": index, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire shared pools.trade launcher tapes
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
+          fi
+          CHUNK=50000
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pools-trade-launcher-tape \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --created-out "artifacts/pools-trade-created-${SHARD}.jsonl" \
+            --distributed-out "artifacts/pools-trade-distributed-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-launcher-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-trade-launcher-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate and merge shared launcher tapes
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = int(os.environ["SHARD_COUNT"])
+
+          def merge_kind(kind):
+              files = sorted(
+                  root.glob(f"pools-trade-{kind}-*.jsonl")
+              )
+              if len(files) != shard_count:
+                  raise SystemExit(
+                      f"expected {shard_count} {kind} shards, "
+                      f"found {len(files)}"
+                  )
+
+              aggregate_digest = hashlib.sha256()
+              total_records = 0
+              shards = []
+              for path in files:
+                  manifest_path = path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  )
+                  manifest = json.loads(manifest_path.read_text())
+                  provenance = manifest.get("provenance") or {}
+                  lo = int(provenance["from_block"])
+                  hi = int(provenance["to_block"])
+                  local_digest = hashlib.sha256()
+                  records = 0
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          aggregate_digest.update(raw)
+                          local_digest.update(raw)
+                          if raw.strip():
+                              records += 1
+                  if records != int(manifest["records"]):
+                      raise SystemExit(
+                          f"{path.name}: record count changed"
+                      )
+                  if local_digest.hexdigest() != manifest["sha256"]:
+                      raise SystemExit(f"{path.name}: SHA changed")
+                  total_records += records
+                  shards.append({
+                      "file": path.name,
+                      "records": records,
+                      "sha256": manifest["sha256"],
+                      "from_block": lo,
+                      "to_block": hi,
+                  })
+
+              shards = validate_shard_block_coverage(
+                  shards,
+                  start_block=start,
+                  end_block=head,
+              )
+              virtual_path = Path(
+                  f"artifacts/pools-trade-{kind}-sharded.manifest.json"
+              )
+              virtual = write_virtual_jsonl_manifest(
+                  manifest_path=virtual_path,
+                  path_name=f"pools-trade-{kind}.jsonl",
+                  records=total_records,
+                  sha256=aggregate_digest.hexdigest(),
+                  provenance={
+                      "storage_mode": "sharded_artifacts",
+                      "source": "pools_trade_launcher_events",
+                      "event_kind": kind,
+                      "chain_id": 4663,
+                      "from_block": start,
+                      "to_block": head,
+                      "shards": shards,
+                  },
+              )
+              rows = list(iter_sharded_jsonl(root, virtual_path))
+              merged = write_jsonl_snapshot(
+                  rows,
+                  output=Path(
+                      f"artifacts/pools-trade-{kind}.jsonl"
+                  ),
+                  provenance={
+                      "source": "merged_pools_trade_launcher_shards",
+                      "event_kind": kind,
+                      "chain_id": 4663,
+                      "required_start_block": start,
+                      "snapshot_head_block": head,
+                      "shard_count": shard_count,
+                      "sharded_sha256": virtual["sha256"],
+                  },
+              )
+              if merged["records"] != virtual["records"]:
+                  raise SystemExit(
+                      f"merged {kind} record count changed"
+                  )
+              if merged["sha256"] != virtual["sha256"]:
+                  raise SystemExit(
+                      f"merged {kind} bytes changed"
+                  )
+              return rows, merged
+
+          created, created_manifest = merge_kind("created")
+          distributed, distributed_manifest = merge_kind("distributed")
+
+          created_tokens = [row["token"].lower() for row in created]
+          if len(created_tokens) != len(set(created_tokens)):
+              raise SystemExit("duplicate pools.trade TokenCreated token")
+
+          distribution_pairs = [
+              (row["token"].lower(), row["strategy"].lower())
+              for row in distributed
+          ]
+          if len(distribution_pairs) != len(set(distribution_pairs)):
+              raise SystemExit(
+                  "duplicate pools.trade TokenDistributed token/strategy"
+              )
+
+          created_set = set(created_tokens)
+          orphan_distributions = sorted({
+              token
+              for token, _ in distribution_pairs
+              if token not in created_set
+          })
+          if orphan_distributions:
+              raise SystemExit(
+                  "pools.trade distributions without TokenCreated: "
+                  f"{orphan_distributions[:20]}"
+              )
+
+          summary = {
+              "version": "phase2-pools-trade-launcher-backfill-v1",
+              "chain_id": 4663,
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous": True,
+              "missing_ranges": [],
+              "shards": shard_count,
+              "created_records": len(created),
+              "distributed_records": len(distributed),
+              "created_sha256": created_manifest["sha256"],
+              "distributed_sha256": distributed_manifest["sha256"],
+              "unique_created_tokens": len(created_set),
+              "unique_distribution_pairs": len(
+                  set(distribution_pairs)
+              ),
+          }
+          Path(
+              "artifacts/pools-trade-launcher-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-trade-launcher-merged
+          path: artifacts/
+          if-no-files-found: error

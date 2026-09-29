@@ -1,0 +1,585 @@
+name: phase2-doppler-promotion-propose
+
+on:
+  workflow_dispatch:
+    inputs:
+      promotion_review_run_id:
+        description: Exact successful phase2-doppler-promotion-review workflow_dispatch run ID
+        required: true
+        type: string
+      expected_review_artifact_digest:
+        description: Exact promotion-review artifact digest (sha256:...)
+        required: true
+        type: string
+      confirm_create_proposal:
+        description: Explicitly create and validate the Doppler proposal without writing the canonical ledger
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-doppler-promotion-propose-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROMOTION_REVIEW_RUN_ID: ${{ inputs.promotion_review_run_id }}
+  EXPECTED_REVIEW_ARTIFACT_DIGEST: ${{ inputs.expected_review_artifact_digest }}
+  CONFIRM_CREATE_PROPOSAL: ${{ inputs.confirm_create_proposal }}
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require explicit proposal creation
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM_CREATE_PROPOSAL}" != "true" ]; then
+            echo "Doppler proposal creation requires confirm_create_proposal=true" >&2
+            exit 1
+          fi
+
+      - id: propose
+        name: Dispatch reviewed proposal and validate immutable result
+        run: |
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage_promotion import (
+              SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+              validate_phase2_coverage_ledger_commit,
+              validate_phase2_doppler_promotion_review_receipt,
+          )
+          from hlp.data.phase2_execution_dispatch import (
+              validate_phase2_node_dispatch_evidence,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh", "api",
+                  "-H", "Accept: application/vnd.github+json",
+                  "-H", f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              if not raw.strip():
+                  return None
+              return json.loads(raw)
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              expected_path = f".github/workflows/{workflow}"
+              if run.get("path") != expected_path:
+                  raise SystemExit(f"run {run_id} workflow identity drift")
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(f"run {run_id} is not workflow_dispatch")
+              if run.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} branch identity drift")
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(f"run {run_id} HEAD identity drift")
+
+          def wait_run(run_id, *, workflow, timeout_seconds=900):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      conclusion = str(run.get("conclusion") or "")
+                      if conclusion != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with {conclusion!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} did not finish before timeout"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              path = Path(destination)
+              if path.exists():
+                  shutil.rmtree(path)
+              path.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(path),
+              ])
+              return path
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method", "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input", "-",
+                  ],
+                  payload={"ref": branch, "inputs": inputs},
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          try:
+              review_run_id = int(os.environ["PROMOTION_REVIEW_RUN_ID"])
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "promotion_review_run_id is invalid"
+              ) from exc
+          if review_run_id <= 0:
+              raise SystemExit(
+                  "promotion_review_run_id must be positive"
+              )
+          expected_review_digest = str(
+              os.environ["EXPECTED_REVIEW_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_review_digest.startswith("sha256:")
+              or len(expected_review_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_review_artifact_digest must be "
+                  "sha256:<64 hex chars>"
+              )
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          current_ledger_bytes = ledger_path.read_bytes()
+          current_ledger_sha = hashlib.sha256(
+              current_ledger_bytes
+          ).hexdigest()
+          current_ledger = json.loads(current_ledger_bytes)
+
+          review_workflow = "phase2-doppler-promotion-review.yml"
+          review_run = get_run(review_run_id)
+          assert_run_identity(
+              review_run,
+              workflow=review_workflow,
+              run_id=review_run_id,
+          )
+          if review_run.get("status") != "completed":
+              raise SystemExit(
+                  "Doppler promotion review run is not completed"
+              )
+          if review_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "Doppler promotion review run did not succeed"
+              )
+          review_artifact = artifact_row(
+              review_run_id,
+              "phase2-doppler-promotion-review",
+          )
+          actual_review_digest = str(
+              review_artifact.get("digest") or ""
+          ).lower()
+          if actual_review_digest != expected_review_digest:
+              raise SystemExit(
+                  "Doppler promotion review artifact digest drift"
+              )
+          review_dir = download_artifact(
+              review_run_id,
+              "phase2-doppler-promotion-review",
+              "upstream/promotion-review",
+          )
+          review_path = (
+              review_dir
+              / "phase2-doppler-promotion-review.json"
+          )
+          if not review_path.is_file():
+              raise SystemExit(
+                  "Doppler promotion review artifact lacks handoff"
+              )
+          try:
+              review = validate_phase2_doppler_promotion_review_receipt(
+                  json.loads(review_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if review["promotion_review_control_run_id"] != review_run_id:
+              raise SystemExit(
+                  "Doppler promotion review/control identity drift"
+              )
+          if review["execution_branch"] != branch:
+              raise SystemExit(
+                  "Doppler promotion review branch drift"
+              )
+          if review["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "Doppler promotion review HEAD drift"
+              )
+          if review[
+              "canonical_coverage_ledger_sha256"
+          ] != current_ledger_sha:
+              raise SystemExit(
+                  "Doppler promotion review canonical-ledger SHA drift"
+              )
+
+          generated = dict(review["promotion_generated_inputs"])
+          manual_inputs = dict(generated)
+          coverage_run_id = manual_inputs.pop("coverage_run_id")
+          if str(coverage_run_id) != str(review["coverage_run_id"]):
+              raise SystemExit(
+                  "Doppler promotion review coverage-run linkage drift"
+              )
+          expected_manual_names = {
+              "coverage_artifact_name",
+              "expected_artifact_digest",
+              "coverage_report_path",
+              "expected_report_sha256",
+              "expected_source_id",
+          }
+          if set(manual_inputs) != expected_manual_names:
+              raise SystemExit(
+                  "Doppler promotion review manual-input set drift"
+              )
+
+          dispatcher_workflow = "phase2-execution-node-dispatch.yml"
+          control_run_id = dispatch(
+              dispatcher_workflow,
+              {
+                  "planner_run_id": str(review["planner_run_id"]),
+                  "expected_planner_artifact_digest": str(
+                      review["planner_artifact_digest"]
+                  ),
+                  "node_id": "promote:doppler",
+                  "manual_inputs_json": json.dumps(
+                      manual_inputs,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ),
+                  "confirm_dispatch": True,
+              },
+          )
+          wait_run(
+              control_run_id,
+              workflow=dispatcher_workflow,
+          )
+
+          evidence_dir = download_artifact(
+              control_run_id,
+              "phase2-execution-node-dispatch",
+              f"upstream/control-{control_run_id}",
+          )
+          attempt_path = (
+              evidence_dir
+              / "phase2-execution-node-dispatch-attempt.json"
+          )
+          final_path = (
+              evidence_dir
+              / "phase2-execution-node-dispatch.json"
+          )
+          if not attempt_path.is_file() or not final_path.is_file():
+              raise SystemExit(
+                  "Doppler promotion dispatcher lacks paired evidence"
+              )
+          attempt_bytes = attempt_path.read_bytes()
+          attempt_sha = hashlib.sha256(attempt_bytes).hexdigest()
+          try:
+              evidence = validate_phase2_node_dispatch_evidence(
+                  json.loads(attempt_bytes),
+                  json.loads(final_path.read_text()),
+                  attempt_file_sha256=attempt_sha,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if evidence["node_dispatch_control_run_id"] != control_run_id:
+              raise SystemExit(
+                  "Doppler promotion dispatcher/control identity drift"
+              )
+          if evidence["node_id"] != "promote:doppler":
+              raise SystemExit(
+                  "Doppler promotion dispatcher node identity drift"
+              )
+          if evidence["planner_run_id"] != review["planner_run_id"]:
+              raise SystemExit(
+                  "Doppler promotion dispatcher planner identity drift"
+              )
+          if evidence["planner_artifact_digest"] != review[
+              "planner_artifact_digest"
+          ]:
+              raise SystemExit(
+                  "Doppler promotion dispatcher planner digest drift"
+              )
+          if evidence["target_workflow"] != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+              raise SystemExit(
+                  "Doppler promotion target workflow identity drift"
+              )
+          if set(evidence["dispatch_input_names"]) != set(generated):
+              raise SystemExit(
+                  "Doppler promotion dispatch input schema drift"
+              )
+
+          promotion_run_id = int(evidence["dispatched_run_id"])
+          wait_run(
+              promotion_run_id,
+              workflow=SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+          )
+
+          promotion_artifact_name = (
+              "phase2-source-coverage-promotion-doppler"
+          )
+          promotion_artifact = artifact_row(
+              promotion_run_id,
+              promotion_artifact_name,
+          )
+          promotion_artifact_digest = str(
+              promotion_artifact.get("digest") or ""
+          ).lower()
+          promotion_dir = download_artifact(
+              promotion_run_id,
+              promotion_artifact_name,
+              "upstream/promotion-proposal",
+          )
+          proposed_path = (
+              promotion_dir
+              / "phase2-source-coverage.proposed.json"
+          )
+          handoff_path = (
+              promotion_dir
+              / "phase2-source-coverage-promotion.json"
+          )
+          validation_path = (
+              promotion_dir
+              / "phase2-source-coverage-validation.json"
+          )
+          for path in (proposed_path, handoff_path, validation_path):
+              if not path.is_file():
+                  raise SystemExit(
+                      f"Doppler promotion artifact missing {path.name}"
+                  )
+
+          proposed_bytes = proposed_path.read_bytes()
+          handoff_bytes = handoff_path.read_bytes()
+          proposed_sha = hashlib.sha256(proposed_bytes).hexdigest()
+          handoff_sha = hashlib.sha256(handoff_bytes).hexdigest()
+          proposed = json.loads(proposed_bytes)
+          handoff = json.loads(handoff_bytes)
+          validation = json.loads(validation_path.read_bytes())
+
+          if int(handoff.get("coverage_run_id") or 0) != int(
+              review["coverage_run_id"]
+          ):
+              raise SystemExit(
+                  "Doppler proposal coverage-run linkage drift"
+              )
+          if handoff.get("coverage_artifact_name") != review[
+              "coverage_artifact_name"
+          ]:
+              raise SystemExit(
+                  "Doppler proposal coverage artifact-name drift"
+              )
+          if str(handoff.get("coverage_artifact_digest") or "").lower() != (
+              review["coverage_artifact_digest"]
+          ):
+              raise SystemExit(
+                  "Doppler proposal coverage artifact digest drift"
+              )
+          if handoff.get("coverage_report_path") != review[
+              "coverage_report_path"
+          ]:
+              raise SystemExit(
+                  "Doppler proposal coverage report-path drift"
+              )
+          if handoff.get("coverage_report_sha256") != review[
+              "coverage_report_sha256"
+          ]:
+              raise SystemExit(
+                  "Doppler proposal coverage report SHA drift"
+              )
+
+          try:
+              proposal_validation = validate_phase2_coverage_ledger_commit(
+                  current_ledger,
+                  proposed,
+                  handoff,
+                  validation,
+                  build_phase2_source_inventory(),
+                  expected_source_id="doppler",
+                  current_ledger_sha256=current_ledger_sha,
+                  proposed_ledger_sha256=proposed_sha,
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if ledger_path.read_bytes() != current_ledger_bytes:
+              raise SystemExit(
+                  "canonical coverage ledger changed during proposal validation"
+              )
+
+          ledger_commit_inputs = {
+              "promotion_run_id": str(promotion_run_id),
+              "expected_artifact_digest": promotion_artifact_digest,
+              "expected_handoff_sha256": handoff_sha,
+              "expected_proposed_ledger_sha256": proposed_sha,
+              "expected_source_id": "doppler",
+          }
+          receipt = {
+              "version": "phase2-doppler-promotion-proposal-v1",
+              "promotion_proposal_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "promotion_review_run_id": review_run_id,
+              "promotion_review_artifact_digest": actual_review_digest,
+              "node_dispatch_control_run_id": control_run_id,
+              "promotion_run_id": promotion_run_id,
+              "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+              "promotion_artifact_digest": promotion_artifact_digest,
+              "promotion_handoff_sha256": handoff_sha,
+              "base_ledger_sha256": current_ledger_sha,
+              "proposed_ledger_sha256": proposed_sha,
+              "source_id": "doppler",
+              "complete_source_ids_before": proposal_validation[
+                  "complete_source_ids_before"
+              ],
+              "complete_source_ids_after": proposal_validation[
+                  "complete_source_ids_after"
+              ],
+              "phase2_universe_coverage_complete": proposal_validation[
+                  "phase2_universe_coverage_complete"
+              ],
+              "ledger_commit_generated_inputs": ledger_commit_inputs,
+              "ledger_commit_approval_input": "apply_proposed_ledger",
+              "ledger_commit_approval_value_supplied": False,
+              "proposal_created": True,
+              "proposal_validated": True,
+              "canonical_coverage_ledger_mutated": False,
+              "ledger_commit_authorized": False,
+          }
+          Path(
+              "artifacts/phase2-doppler-promotion-proposal.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"promotion_run_id={promotion_run_id}\n")
+              handle.write(
+                  f"promotion_artifact_digest="
+                  f"{promotion_artifact_digest}\n"
+              )
+              handle.write(
+                  f"promotion_handoff_sha256={handoff_sha}\n"
+              )
+              handle.write(
+                  f"proposed_ledger_sha256={proposed_sha}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload validated Doppler proposal handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-doppler-promotion-proposal
+          path: artifacts/phase2-doppler-promotion-proposal.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish exact ledger-commit inputs without approval
+        env:
+          PROPOSAL_RECEIPT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          PROMOTION_RUN_ID: ${{ steps.propose.outputs.promotion_run_id }}
+          PROMOTION_ARTIFACT_DIGEST: ${{ steps.propose.outputs.promotion_artifact_digest }}
+          PROMOTION_HANDOFF_SHA256: ${{ steps.propose.outputs.promotion_handoff_sha256 }}
+          PROPOSED_LEDGER_SHA256: ${{ steps.propose.outputs.proposed_ledger_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 Doppler validated promotion proposal"
+            echo
+            echo "- proposal_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- proposal_receipt_artifact_digest: ${PROPOSAL_RECEIPT_DIGEST}"
+            echo "- promotion_run_id: ${PROMOTION_RUN_ID}"
+            echo "- expected_artifact_digest: ${PROMOTION_ARTIFACT_DIGEST}"
+            echo "- expected_handoff_sha256: ${PROMOTION_HANDOFF_SHA256}"
+            echo "- expected_proposed_ledger_sha256: ${PROPOSED_LEDGER_SHA256}"
+            echo "- expected_source_id: doppler"
+            echo "- ledger_commit_approval_input: apply_proposed_ledger"
+            echo "- ledger_commit_approval_value_supplied: false"
+            echo "- proposal_created: true"
+            echo "- proposal_validated: true"
+            echo "- canonical_coverage_ledger_mutated: false"
+            echo "- ledger_commit_authorized: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

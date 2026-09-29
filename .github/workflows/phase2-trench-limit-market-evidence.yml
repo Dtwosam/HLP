@@ -1,0 +1,242 @@
+name: phase2-trench-limit-market-evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-trench-registry-backfill run ID
+        required: true
+        type: string
+      direct_registry_run_id:
+        description: Successful phase2-direct-market-registry-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      DIRECT_REGISTRY_RUN_ID: ${{ inputs.direct_registry_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-trench-registry-merged
+          path: inputs/trench
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v3-market-registry
+          path: inputs/direct_uniswap_v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.direct_registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_sushiswap_v3-market-registry
+          path: inputs/direct_sushiswap_v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.direct_registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-registry
+          path: inputs/direct_uniswap_v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.direct_registry_run_id }}
+      - id: build
+        name: Build fail-closed LimitReach market evidence
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.snapshot import write_jsonl_snapshot
+          from hlp.data.trench_lifecycle import (
+              build_trench_limit_market_candidates,
+              summarize_trench_limit_market_candidates,
+          )
+
+          trench_path = Path("inputs/trench/trench-registry.jsonl")
+          trench_summary = json.loads(
+              Path(
+                  "inputs/trench/trench-registry-summary.json"
+              ).read_text()
+          )
+          if trench_summary["version"] != "phase2-trench-registry-v1":
+              raise SystemExit("trench.today registry version drift")
+          if trench_summary["source_id"] != "trench_today":
+              raise SystemExit("trench.today registry source drift")
+          if hashlib.sha256(trench_path.read_bytes()).hexdigest() != (
+              trench_summary["registry_sha256"]
+          ):
+              raise SystemExit("trench.today registry SHA drift")
+
+          trench_rows = [
+              json.loads(line)
+              for line in trench_path.read_text().splitlines()
+              if line.strip()
+          ]
+          direct_rows = []
+          direct_shas = {}
+          for source_id in (
+              "direct_uniswap_v3",
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+          ):
+              root = Path("inputs") / source_id
+              path = root / f"{source_id}-registry.jsonl"
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != manifest["sha256"]:
+                  raise SystemExit(
+                      f"direct registry SHA drift: {source_id}"
+                  )
+              rows = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+              if any(
+                  row.get("source_id") != source_id
+                  for row in rows
+              ):
+                  raise SystemExit(
+                      f"direct registry source drift: {source_id}"
+                  )
+              if any(
+                  row.get("source_kind") != "direct_dex"
+                  for row in rows
+              ):
+                  raise SystemExit(
+                      f"direct registry kind drift: {source_id}"
+                  )
+              direct_rows.extend(rows)
+              direct_shas[source_id] = digest
+
+          candidates = build_trench_limit_market_candidates(
+              trench_rows,
+              direct_rows,
+          )
+          summary = summarize_trench_limit_market_candidates(
+              candidates
+          )
+          expected_limits = int(
+              trench_summary["limit_reach_tokens"]
+          )
+          if summary["limit_reach_tokens"] != expected_limits:
+              raise SystemExit(
+                  "trench.today LimitReach population drift: "
+                  f"{summary['limit_reach_tokens']} != "
+                  f"{expected_limits}"
+              )
+          if summary["handoff_rule_frozen"] is not False:
+              raise SystemExit(
+                  "trench.today handoff evidence cannot freeze rule"
+              )
+          if summary["source_coverage_complete"] is not False:
+              raise SystemExit(
+                  "trench.today handoff evidence cannot close coverage"
+              )
+
+          manifest = write_jsonl_snapshot(
+              candidates,
+              output=Path(
+                  "artifacts/trench-limit-market-candidates.jsonl"
+              ),
+              provenance={
+                  "source": "phase2_trench_limit_market_evidence",
+                  "chain_id": 4663,
+                  "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+                  "direct_registry_run_id": int(
+                      os.environ["DIRECT_REGISTRY_RUN_ID"]
+                  ),
+                  "trench_registry_sha256": trench_summary[
+                      "registry_sha256"
+                  ],
+                  "direct_registry_sha256": direct_shas,
+                  "matching_semantics": (
+                      "exact token plus canonicalized quote; "
+                      "all direct V3/V4 candidates retained without selection"
+                  ),
+              },
+          )
+          report = {
+              "version": "phase2-trench-limit-market-evidence-v1",
+              "chain_id": 4663,
+              "source_id": "trench_today",
+              "snapshot_head_block": int(
+                  trench_summary["snapshot_head_block"]
+              ),
+              "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+              "direct_registry_run_id": int(
+                  os.environ["DIRECT_REGISTRY_RUN_ID"]
+              ),
+              "trench_registry_sha256": trench_summary[
+                  "registry_sha256"
+              ],
+              "direct_registry_sha256": direct_shas,
+              "candidate_manifest_sha256": manifest["sha256"],
+              **summary,
+          }
+          report_text = (
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path(
+              "artifacts/trench-limit-market-evidence.json"
+          ).write_text(report_text)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "report": report,
+              "report_sha256": report_sha,
+          }, sort_keys=True))
+          PY
+      - name: Upload trench.today handoff evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-trench-limit-market-evidence
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish evidence handoff
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.build.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_DIGEST"
+          test -n "$REPORT_SHA256"
+          {
+            echo "## trench.today LimitReach market evidence"
+            echo
+            echo "- evidence_run_id: ${GITHUB_RUN_ID}"
+            echo "- evidence_artifact_name: phase2-trench-limit-market-evidence"
+            echo "- expected_evidence_artifact_digest: $ARTIFACT_DIGEST"
+            echo "- evidence_report_path: trench-limit-market-evidence.json"
+            echo "- expected_evidence_report_sha256: $REPORT_SHA256"
+            echo "- handoff_rule_frozen: false"
+            echo "- source_coverage_complete: false"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,506 @@
+name: phase2-flap-curve-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-flap-registry-backfill run ID
+        required: true
+        type: string
+      quote_run_id:
+        description: Successful phase2-direct-quote-registry run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-flap-curve-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '4180724'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '256'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-flap-registry-merged
+          path: inputs/registry
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-quote-registry
+          path: inputs/quotes
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.quote_run_id }}
+      - name: Validate registry and quote ownership
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import ROBINHOOD_USDG, ROBINHOOD_WETH
+
+          registry_path = Path("inputs/registry/flap-registry.jsonl")
+          summary = json.loads(
+              Path("inputs/registry/flap-registry-summary.json").read_text()
+          )
+          if summary["version"] != "phase2-flap-registry-v1":
+              raise SystemExit("Flap registry version drift")
+          if summary["source_id"] != "flap":
+              raise SystemExit("Flap registry source drift")
+          if summary["required_start_block"] != int(
+              os.environ["REQUIRED_START_BLOCK"]
+          ):
+              raise SystemExit("Flap registry required start drift")
+          if summary["snapshot_head_block"] != int(
+              os.environ["SNAPSHOT_HEAD"]
+          ):
+              raise SystemExit("Flap registry snapshot drift")
+          if summary["continuous_event_scan"] is not True:
+              raise SystemExit("Flap registry scan is not continuous")
+          if summary["missing_ranges"]:
+              raise SystemExit("Flap registry has missing ranges")
+          if hashlib.sha256(registry_path.read_bytes()).hexdigest() != (
+              summary["registry_sha256"]
+          ):
+              raise SystemExit("Flap registry SHA drift")
+
+          quote_summary = json.loads(
+              Path("inputs/quotes/direct-quote-summary.json").read_text()
+          )
+          if quote_summary["version"] != "phase2-direct-quotes-v1":
+              raise SystemExit("direct quote registry version drift")
+          feed_path = Path("inputs/quotes/direct-quote-feeds.jsonl")
+          if hashlib.sha256(feed_path.read_bytes()).hexdigest() != (
+              quote_summary["feed_specs_sha256"]
+          ):
+              raise SystemExit("direct quote feed SHA drift")
+
+          feeds = {
+              json.loads(line)["quote_token"].lower()
+              for line in feed_path.read_text().splitlines()
+              if line.strip()
+          }
+          builtins = {
+              "0x" + "00" * 20,
+              ROBINHOOD_WETH.lower(),
+              ROBINHOOD_USDG.lower(),
+          }
+          historical_quotes = set()
+          registry = []
+          for line in registry_path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              row = json.loads(line)
+              registry.append(row)
+              history = row.get("quote_history") or []
+              historical_quotes.update(
+                  str(item["quote_token"]).lower()
+                  for item in history
+              )
+          missing = sorted(historical_quotes - builtins - feeds)
+          if missing:
+              raise SystemExit(
+                  "Flap historical quotes lack canonical USD feeds: "
+                  + ", ".join(missing)
+              )
+
+          for source, target in (
+              (registry_path, Path("artifacts/flap-registry.jsonl")),
+              (feed_path, Path("artifacts/direct-quote-feeds.jsonl")),
+              (
+                  Path("inputs/registry/flap-registry-summary.json"),
+                  Path("artifacts/flap-registry-summary.json"),
+              ),
+              (
+                  Path("inputs/quotes/direct-quote-summary.json"),
+                  Path("artifacts/direct-quote-summary.json"),
+              ),
+          ):
+              target.write_bytes(source.read_bytes())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-flap-curve-coverage-setup
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  price:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-flap-curve-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-flap-events-${{ matrix.shard }}
+          path: inputs/events
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - id: shard
+        name: Validate exact Flap event shard
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          index = int(os.environ["SHARD_INDEX"])
+          path = Path("inputs/events") / f"flap-events-{index:03d}.jsonl"
+          manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+          manifest = json.loads(manifest_path.read_text())
+          provenance = manifest.get("provenance") or {}
+          if provenance.get("protocol") != "flap_portal_shared_tape":
+              raise SystemExit("Flap shard protocol drift")
+          if int(provenance.get("chain_id", -1)) != 4663:
+              raise SystemExit("Flap shard chain drift")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != manifest["sha256"]:
+              raise SystemExit("Flap event shard SHA drift")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"from_block={int(provenance['from_block'])}\n")
+              handle.write(f"to_block={int(provenance['to_block'])}\n")
+              handle.write(f"event_sha256={digest}\n")
+          PY
+      - name: Price Flap curve shard causally
+        env:
+          FROM_BLOCK: ${{ steps.shard.outputs.from_block }}
+          TO_BLOCK: ${{ steps.shard.outputs.to_block }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
+          fi
+          CHUNK=50000
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-flap-curve-market-cap-window \
+            --events "inputs/events/flap-events-${SHARD}.jsonl" \
+            --registry inputs/setup/flap-registry.jsonl \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --quote-feeds inputs/setup/direct-quote-feeds.jsonl \
+            --out "artifacts/flap-curve-points-${SHARD}.jsonl" \
+            --summary-out "artifacts/flap-curve-summary-${SHARD}.jsonl"
+      - name: Require fully priced curve shard
+        env:
+          EVENT_SHA256: ${{ steps.shard.outputs.event_sha256 }}
+          FROM_BLOCK: ${{ steps.shard.outputs.from_block }}
+          TO_BLOCK: ${{ steps.shard.outputs.to_block }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          index = int(os.environ["SHARD_INDEX"])
+          suffix = f"{index:03d}"
+          points = Path(f"artifacts/flap-curve-points-{suffix}.jsonl")
+          summary = Path(f"artifacts/flap-curve-summary-{suffix}.jsonl")
+          point_manifest = json.loads(
+              points.with_suffix(points.suffix + ".manifest.json").read_text()
+          )
+          summary_manifest = json.loads(
+              summary.with_suffix(summary.suffix + ".manifest.json").read_text()
+          )
+          if hashlib.sha256(points.read_bytes()).hexdigest() != (
+              point_manifest["sha256"]
+          ):
+              raise SystemExit("Flap curve point SHA drift")
+          if hashlib.sha256(summary.read_bytes()).hexdigest() != (
+              summary_manifest["sha256"]
+          ):
+              raise SystemExit("Flap curve summary SHA drift")
+          rows = [
+              json.loads(line)
+              for line in summary.read_text().splitlines()
+              if line.strip()
+          ]
+          price_points = sum(int(row["price_points"]) for row in rows)
+          priced_points = sum(int(row["priced_points"]) for row in rows)
+          if priced_points != price_points:
+              raise SystemExit(
+                  f"Flap curve shard has unpriced points: {suffix}"
+              )
+          report = {
+              "shard": index,
+              "from_block": int(os.environ["FROM_BLOCK"]),
+              "to_block": int(os.environ["TO_BLOCK"]),
+              "event_sha256": os.environ["EVENT_SHA256"],
+              "points": int(point_manifest["records"]),
+              "priced_points": priced_points,
+              "points_sha256": point_manifest["sha256"],
+              "summary_sha256": summary_manifest["sha256"],
+              "source_coverage_complete": False,
+          }
+          Path(f"artifacts/flap-curve-report-{suffix}.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-flap-curve-price-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [setup, price]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+      QUOTE_RUN_ID: ${{ inputs.quote_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-flap-curve-coverage-setup
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-flap-curve-price-*
+          path: inputs/price
+          merge-multiple: true
+      - id: merge
+        name: Validate and merge Flap curve coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.flap_coverage import (
+              validate_flap_curve_coverage_report,
+          )
+          from hlp.data.flap_curve import summarize_flap_curve_market_caps
+          from hlp.data.sharded_tape import validate_shard_block_coverage
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs/price")
+          count = int(os.environ["SHARD_COUNT"])
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          points_files = sorted(root.glob("flap-curve-points-*.jsonl"))
+          reports = sorted(root.glob("flap-curve-report-*.json"))
+          if len(points_files) != count or len(reports) != count:
+              raise SystemExit(
+                  "Flap curve shard artifact count changed: "
+                  f"points={len(points_files)} reports={len(reports)} "
+                  f"expected={count}"
+              )
+
+          coverage = []
+          aggregate = hashlib.sha256()
+          total_points = 0
+          total_priced = 0
+
+          def point_rows():
+              nonlocal total_points, total_priced
+              for path in points_files:
+                  suffix = path.stem.rsplit("-", 1)[-1]
+                  report = json.loads(
+                      (root / f"flap-curve-report-{suffix}.json").read_text()
+                  )
+                  manifest = json.loads(
+                      path.with_suffix(
+                          path.suffix + ".manifest.json"
+                      ).read_text()
+                  )
+                  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                  if digest != manifest["sha256"]:
+                      raise SystemExit(
+                          f"Flap curve point SHA drift: {suffix}"
+                      )
+                  if digest != report["points_sha256"]:
+                      raise SystemExit(
+                          f"Flap curve report point SHA drift: {suffix}"
+                      )
+                  if int(report["priced_points"]) != int(report["points"]):
+                      raise SystemExit(
+                          f"Flap curve shard is not fully priced: {suffix}"
+                      )
+                  coverage.append({
+                      "file": path.name,
+                      "records": int(manifest["records"]),
+                      "sha256": digest,
+                      "from_block": int(report["from_block"]),
+                      "to_block": int(report["to_block"]),
+                  })
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          aggregate.update(raw)
+                          if raw.strip():
+                              row = json.loads(raw)
+                              total_points += 1
+                              if row["market_cap_proxy_usd"] is not None:
+                                  total_priced += 1
+                              yield row
+
+          global_summary = summarize_flap_curve_market_caps(point_rows())
+          validate_shard_block_coverage(
+              coverage,
+              start_block=start,
+              end_block=head,
+          )
+          if total_priced != total_points:
+              raise SystemExit("Flap merged curve has unpriced points")
+
+          summary_manifest = write_jsonl_snapshot(
+              global_summary,
+              output=Path("artifacts/flap-curve-summary.jsonl"),
+              provenance={
+                  "source": "phase2_flap_curve_summary",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "registry_run_id": int(os.environ["REGISTRY_RUN_ID"]),
+                  "quote_run_id": int(os.environ["QUOTE_RUN_ID"]),
+              },
+          )
+          registry_summary = json.loads(
+              Path("inputs/setup/flap-registry-summary.json").read_text()
+          )
+          quote_summary = json.loads(
+              Path("inputs/setup/direct-quote-summary.json").read_text()
+          )
+          tokens = int(registry_summary["tokens_discovered"])
+          graduated = int(registry_summary["graduated_tokens"])
+          report = {
+              "version": "phase2-flap-curve-coverage-v1",
+              "source_id": "flap",
+              "coverage_segment": "bonding_curve",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_event_scan": True,
+              "missing_ranges": [],
+              "tokens_discovered": tokens,
+              "tokens_with_curve_trades": len(global_summary),
+              "graduated_tokens": graduated,
+              "curve_price_points": total_points,
+              "curve_priced_points": total_priced,
+              "curve_tokens_crossed_100k": sum(
+                  bool(row["crossed_100k"])
+                  for row in global_summary
+              ),
+              "event_tape_sha256": registry_summary["event_tape_sha256"],
+              "registry_sha256": registry_summary["registry_sha256"],
+              "quote_feed_specs_sha256": quote_summary[
+                  "feed_specs_sha256"
+              ],
+              "curve_points_sha256": aggregate.hexdigest(),
+              "curve_summary_sha256": summary_manifest["sha256"],
+              "blocking_reason": (
+                  "post_graduation_dex_lifecycle_not_yet_merged"
+                  if graduated else None
+              ),
+              "source_coverage_complete": False,
+          }
+          validated = validate_flap_curve_coverage_report(
+              report,
+              required_start_block=start,
+              snapshot_head_block=head,
+          )
+          report_text = (
+              json.dumps(validated, indent=2, sort_keys=True) + "\n"
+          )
+          report_sha = hashlib.sha256(
+              report_text.encode("utf-8")
+          ).hexdigest()
+          Path("artifacts/flap-curve-coverage-report.json").write_text(
+              report_text
+          )
+          Path("artifacts/flap-curve-points.manifest.json").write_text(
+              json.dumps({
+                  "records": total_points,
+                  "priced_points": total_priced,
+                  "sha256": aggregate.hexdigest(),
+                  "shards": coverage,
+              }, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+          print(json.dumps({
+              "coverage_report": validated,
+              "coverage_report_sha256": report_sha,
+          }, sort_keys=True))
+          PY
+      - name: Upload Flap curve coverage evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-flap-curve-coverage
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish next-stage handoff
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.merge.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_DIGEST"
+          test -n "$REPORT_SHA256"
+          {
+            echo "## Flap curve coverage handoff"
+            echo
+            echo "- curve_run_id: ${GITHUB_RUN_ID}"
+            echo "- curve_artifact_name: phase2-flap-curve-coverage"
+            echo "- expected_curve_artifact_digest: $ARTIFACT_DIGEST"
+            echo "- expected_curve_report_sha256: $REPORT_SHA256"
+            echo "- source_coverage_complete: false"
+          } >> "$GITHUB_STEP_SUMMARY"

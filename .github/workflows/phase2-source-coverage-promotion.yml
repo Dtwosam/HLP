@@ -1,0 +1,241 @@
+name: phase2-source-coverage-promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      coverage_run_id:
+        description: Exact upstream workflow run containing the source coverage artifact
+        required: true
+        type: string
+      coverage_artifact_name:
+        description: Exact upstream artifact name
+        required: true
+        type: string
+      expected_artifact_digest:
+        description: Exact GitHub artifact digest (sha256:...)
+        required: true
+        type: string
+      coverage_report_path:
+        description: Relative JSON report path inside the downloaded artifact
+        required: true
+        type: string
+      expected_report_sha256:
+        description: Exact SHA-256 of the source coverage report JSON
+        required: true
+        type: string
+      expected_source_id:
+        description: Source ID that this promotion is allowed to update
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COVERAGE_RUN_ID: ${{ inputs.coverage_run_id }}
+      COVERAGE_ARTIFACT_NAME: ${{ inputs.coverage_artifact_name }}
+      EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
+      COVERAGE_REPORT_PATH: ${{ inputs.coverage_report_path }}
+      EXPECTED_REPORT_SHA256: ${{ inputs.expected_report_sha256 }}
+      EXPECTED_SOURCE_ID: ${{ inputs.expected_source_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify exact upstream artifact identity
+        id: artifact
+        run: |
+          set -euo pipefail
+          gh api             -H 'Accept: application/vnd.github+json'             "/repos/${GITHUB_REPOSITORY}/actions/runs/${COVERAGE_RUN_ID}/artifacts?name=${COVERAGE_ARTIFACT_NAME}"             > /tmp/coverage-artifacts.json
+          python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(open("/tmp/coverage-artifacts.json"))
+          name = os.environ["COVERAGE_ARTIFACT_NAME"]
+          matches = [
+              item
+              for item in payload.get("artifacts", [])
+              if item.get("name") == name
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one artifact named {name!r}; "
+                  f"found {len(matches)}"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit("coverage artifact is expired")
+
+          actual = str(artifact.get("digest") or "").lower()
+          expected = os.environ["EXPECTED_ARTIFACT_DIGEST"].lower()
+          if not expected.startswith("sha256:"):
+              raise SystemExit(
+                  "expected_artifact_digest must use sha256:<hex>"
+              )
+          if actual != expected:
+              raise SystemExit(
+                  f"artifact digest drift: {actual!r} != {expected!r}"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"artifact_id={artifact['id']}\n")
+              handle.write(f"artifact_digest={actual}\n")
+          PY
+
+      - name: Download exact upstream artifact
+        run: |
+          set -euo pipefail
+          mkdir -p upstream
+          gh run download "${COVERAGE_RUN_ID}"             --repo "${GITHUB_REPOSITORY}"             --name "${COVERAGE_ARTIFACT_NAME}"             --dir upstream
+
+      - name: Validate report and build proposed ledger
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import (
+              apply_phase2_source_coverage_report,
+              validate_phase2_coverage_ledger,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          root = Path("upstream").resolve()
+          relative = Path(os.environ["COVERAGE_REPORT_PATH"])
+          if relative.is_absolute():
+              raise SystemExit("coverage_report_path must be relative")
+          report_path = (root / relative).resolve()
+          if root not in report_path.parents:
+              raise SystemExit("coverage_report_path escapes artifact root")
+          if not report_path.is_file():
+              raise SystemExit(
+                  f"coverage report not found: {relative.as_posix()}"
+              )
+
+          report_bytes = report_path.read_bytes()
+          report_sha = hashlib.sha256(report_bytes).hexdigest()
+          expected_sha = os.environ["EXPECTED_REPORT_SHA256"].lower()
+          if expected_sha.startswith("sha256:"):
+              expected_sha = expected_sha.split(":", 1)[1]
+          if len(expected_sha) != 64:
+              raise SystemExit("expected_report_sha256 must be 64 hex chars")
+          try:
+              int(expected_sha, 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "expected_report_sha256 must be hexadecimal"
+              ) from exc
+          if report_sha != expected_sha:
+              raise SystemExit(
+                  f"coverage report SHA drift: {report_sha} != "
+                  f"{expected_sha}"
+              )
+
+          report = json.loads(report_bytes)
+          if not isinstance(report, dict):
+              raise SystemExit("coverage report must be a JSON object")
+          expected_source = os.environ["EXPECTED_SOURCE_ID"]
+          if report.get("source_id") != expected_source:
+              raise SystemExit(
+                  "coverage report source mismatch: "
+                  f"{report.get('source_id')!r} != {expected_source!r}"
+              )
+          if report.get("coverage_status") != "complete":
+              raise SystemExit(
+                  "promotion only accepts coverage_status=complete"
+              )
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          canonical_bytes = ledger_path.read_bytes()
+          ledger = json.loads(canonical_bytes)
+          inventory = build_phase2_source_inventory()
+          before = validate_phase2_coverage_ledger(ledger, inventory)
+
+          proposed, validation = apply_phase2_source_coverage_report(
+              ledger,
+              inventory,
+              report,
+          )
+          if expected_source not in validation["complete_source_ids"]:
+              raise SystemExit(
+                  "target source did not validate as complete"
+              )
+          if not set(before["complete_source_ids"]).issubset(
+              validation["complete_source_ids"]
+          ):
+              raise SystemExit(
+                  "promotion regressed an already-complete source"
+              )
+          if ledger_path.read_bytes() != canonical_bytes:
+              raise SystemExit(
+                  "canonical coverage ledger changed during proposal build"
+              )
+
+          base_ledger_sha = hashlib.sha256(
+              canonical_bytes
+          ).hexdigest()
+          proposed_text = json.dumps(proposed, indent=2) + "\n"
+          proposed_ledger_sha = hashlib.sha256(
+              proposed_text.encode()
+          ).hexdigest()
+          Path("phase2-source-coverage.proposed.json").write_text(
+              proposed_text
+          )
+          handoff = {
+              "version": "phase2-source-coverage-promotion-v1",
+              "base_commit": os.environ["GITHUB_SHA"],
+              "base_ledger_sha256": base_ledger_sha,
+              "proposed_ledger_sha256": proposed_ledger_sha,
+              "coverage_run_id": int(os.environ["COVERAGE_RUN_ID"]),
+              "coverage_artifact_name": os.environ[
+                  "COVERAGE_ARTIFACT_NAME"
+              ],
+              "coverage_artifact_digest": os.environ[
+                  "EXPECTED_ARTIFACT_DIGEST"
+              ].lower(),
+              "coverage_report_path": relative.as_posix(),
+              "coverage_report_sha256": report_sha,
+              "source_id": expected_source,
+              "complete_source_ids_before": before[
+                  "complete_source_ids"
+              ],
+              "complete_source_ids_after": validation[
+                  "complete_source_ids"
+              ],
+              "phase2_universe_coverage_complete": validation[
+                  "phase2_universe_coverage_complete"
+              ],
+              "proposal_only": True,
+              "canonical_ledger_mutated": False,
+          }
+          Path("phase2-source-coverage-promotion.json").write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          Path("phase2-source-coverage-validation.json").write_text(
+              json.dumps(validation, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Upload proposed ledger
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-source-coverage-promotion-${{ inputs.expected_source_id }}
+          path: |
+            phase2-source-coverage.proposed.json
+            phase2-source-coverage-promotion.json
+            phase2-source-coverage-validation.json
+          if-no-files-found: error
+          retention-days: 30

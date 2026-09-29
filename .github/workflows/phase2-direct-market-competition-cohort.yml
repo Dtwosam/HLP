@@ -1,0 +1,120 @@
+name: phase2-direct-market-competition-cohort
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_run_id:
+        description: Successful phase2-direct-market-registry-backfill run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: phase2-direct-market-competition-cohort-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cohort:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      REGISTRY_RUN_ID: ${{ inputs.registry_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v3-market-registry
+          path: inputs/uniswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_sushiswap_v3-market-registry
+          path: inputs/sushiswap-v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct_uniswap_v4-market-registry
+          path: inputs/uniswap-v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.registry_run_id }}
+      - name: Validate registry handoffs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          expected = {
+              "direct_uniswap_v3": Path("inputs/uniswap-v3"),
+              "direct_sushiswap_v3": Path("inputs/sushiswap-v3"),
+              "direct_uniswap_v4": Path("inputs/uniswap-v4"),
+          }
+          run_id = int(os.environ["REGISTRY_RUN_ID"])
+          for source, root in expected.items():
+              handoff = json.loads(
+                  (root / f"{source}-registry-handoff.json").read_text()
+              )
+              if handoff["version"] != (
+                  "phase2-direct-market-registry-handoff-v1"
+              ):
+                  raise SystemExit(f"{source}: registry handoff version drift")
+              if handoff["source_id"] != source:
+                  raise SystemExit(f"{source}: registry handoff identity drift")
+              if handoff["source_coverage_complete"] is not False:
+                  raise SystemExit(
+                      f"{source}: registry handoff cannot close coverage"
+                  )
+              registry = root / f"{source}-registry.jsonl"
+              digest = hashlib.sha256(registry.read_bytes()).hexdigest()
+              if digest != handoff["registry_sha256"]:
+                  raise SystemExit(f"{source}: registry SHA drift")
+          print(json.dumps({
+              "registry_run_id": run_id,
+              "sources": sorted(expected),
+          }, sort_keys=True))
+          PY
+      - name: Build direct multi-market competition cohort
+        run: |
+          mkdir -p artifacts
+          hlp phase2-direct-market-competition-cohort \
+            --registry inputs/uniswap-v3/direct_uniswap_v3-registry.jsonl \
+            --registry inputs/sushiswap-v3/direct_sushiswap_v3-registry.jsonl \
+            --registry inputs/uniswap-v4/direct_uniswap_v4-registry.jsonl \
+            --out artifacts/direct-market-competition-cohort.jsonl \
+            --summary-out artifacts/direct-market-competition-summary.json
+      - name: Bind cohort provenance
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary_path = Path(
+              "artifacts/direct-market-competition-summary.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          if summary["canonical_market_selection_complete"] is not False:
+              raise SystemExit("competition cohort cannot freeze selector")
+          summary["registry_run_id"] = int(os.environ["REGISTRY_RUN_ID"])
+          summary_path.write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-market-competition-cohort
+          path: artifacts/
+          if-no-files-found: error

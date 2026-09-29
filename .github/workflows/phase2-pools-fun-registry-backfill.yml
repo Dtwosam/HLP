@@ -1,0 +1,269 @@
+name: phase2-pools-fun-registry-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-pools-fun-registry-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_START_BLOCK: '33570152'
+  SNAPSHOT_HEAD: '54486035'
+  SHARD_COUNT: '128'
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - id: bounds
+        name: Compute exact registry shard bounds
+        run: |
+          python - <<'PY'
+          import os
+
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          end = int(os.environ["SNAPSHOT_HEAD"])
+          index = int(os.environ["SHARD_INDEX"])
+          count = int(os.environ["SHARD_COUNT"])
+          span = end - start + 1
+          lo = start + (span * index) // count
+          hi = start + (span * (index + 1)) // count - 1
+          if hi < lo:
+              raise SystemExit(
+                  f"empty pools.fun registry shard {index}: {lo}..{hi}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"lo={lo}\nhi={hi}\n")
+          print({"shard": index, "from_block": lo, "to_block": hi})
+          PY
+      - name: Acquire pools.fun launch registry shard
+        env:
+          FROM_BLOCK: ${{ steps.bounds.outputs.lo }}
+          TO_BLOCK: ${{ steps.bounds.outputs.hi }}
+        run: |
+          mkdir -p artifacts
+          if [ -z "$ROBINHOOD_ARCHIVE_RPC_API_KEY" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is required for Phase-2 full-history execution" >&2
+            exit 1
+          fi
+          CHUNK=50000
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1 \
+            rpc-pools-fun-registry-window \
+            --from-block "$FROM_BLOCK" \
+            --to-block "$TO_BLOCK" \
+            --chunk-size "$CHUNK" \
+            --min-chunk-size 25 \
+            --out "artifacts/pools-fun-registry-shard-${SHARD}.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-registry-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-pools-fun-registry-*
+          path: inputs
+          merge-multiple: true
+      - name: Validate and merge pools.fun registry
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.sharded_tape import (
+              iter_sharded_jsonl,
+              validate_shard_block_coverage,
+              write_virtual_jsonl_manifest,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          root = Path("inputs")
+          start = int(os.environ["REQUIRED_START_BLOCK"])
+          head = int(os.environ["SNAPSHOT_HEAD"])
+          shard_count = int(os.environ["SHARD_COUNT"])
+
+          files = sorted(
+              root.glob("pools-fun-registry-shard-*.jsonl")
+          )
+          if len(files) != shard_count:
+              raise SystemExit(
+                  f"expected {shard_count} registry shards, found {len(files)}"
+              )
+
+          aggregate_digest = hashlib.sha256()
+          total_records = 0
+          shards = []
+          for path in files:
+              manifest_path = path.with_suffix(
+                  path.suffix + ".manifest.json"
+              )
+              manifest = json.loads(manifest_path.read_text())
+              provenance = manifest.get("provenance") or {}
+              lo = int(provenance["from_block"])
+              hi = int(provenance["to_block"])
+
+              local_digest = hashlib.sha256()
+              records = 0
+              with path.open("rb") as handle:
+                  for raw in handle:
+                      aggregate_digest.update(raw)
+                      local_digest.update(raw)
+                      if raw.strip():
+                          records += 1
+              if records != int(manifest["records"]):
+                  raise SystemExit(
+                      f"{path.name}: registry record count changed"
+                  )
+              if local_digest.hexdigest() != manifest["sha256"]:
+                  raise SystemExit(
+                      f"{path.name}: registry SHA changed"
+                  )
+              total_records += records
+              shards.append({
+                  "file": path.name,
+                  "records": records,
+                  "sha256": manifest["sha256"],
+                  "from_block": lo,
+                  "to_block": hi,
+              })
+
+          shards = validate_shard_block_coverage(
+              shards,
+              start_block=start,
+              end_block=head,
+          )
+          virtual_path = Path(
+              "artifacts/pools-fun-registry-sharded.manifest.json"
+          )
+          virtual = write_virtual_jsonl_manifest(
+              manifest_path=virtual_path,
+              path_name="pools-fun-registry.jsonl",
+              records=total_records,
+              sha256=aggregate_digest.hexdigest(),
+              provenance={
+                  "storage_mode": "sharded_artifacts",
+                  "source": "pools_fun_party_factory_events",
+                  "chain_id": 4663,
+                  "from_block": start,
+                  "to_block": head,
+                  "shards": shards,
+              },
+          )
+
+          rows = list(iter_sharded_jsonl(root, virtual_path))
+          seen_tokens = set()
+          seen_pools = set()
+          previous = None
+          for row in rows:
+              token = row["token"].lower()
+              pool = row["pool"].lower()
+              order = (
+                  int(row["launch_block"]),
+                  -1
+                  if row.get("launch_transaction_index") is None
+                  else int(row["launch_transaction_index"]),
+                  int(row["launch_log_index"]),
+              )
+              if previous is not None and order < previous:
+                  raise SystemExit(
+                      "merged pools.fun registry is not chronological"
+                  )
+              previous = order
+              if token in seen_tokens:
+                  raise SystemExit(
+                      f"duplicate pools.fun token across shards: {token}"
+                  )
+              if pool in seen_pools:
+                  raise SystemExit(
+                      f"duplicate pools.fun pool across shards: {pool}"
+                  )
+              seen_tokens.add(token)
+              seen_pools.add(pool)
+
+          merged = write_jsonl_snapshot(
+              rows,
+              output=Path(
+                  "artifacts/pools-fun-registry.jsonl"
+              ),
+              provenance={
+                  "source": "merged_pools_fun_registry_shards",
+                  "chain_id": 4663,
+                  "required_start_block": start,
+                  "snapshot_head_block": head,
+                  "shard_count": shard_count,
+                  "sharded_sha256": virtual["sha256"],
+              },
+          )
+          if merged["records"] != virtual["records"]:
+              raise SystemExit("merged pools.fun registry count changed")
+          if merged["sha256"] != virtual["sha256"]:
+              raise SystemExit("merged pools.fun registry bytes changed")
+
+          summary = {
+              "source_id": "pools_fun",
+              "required_start_block": start,
+              "snapshot_head_block": head,
+              "continuous_registry_scan": True,
+              "missing_ranges": [],
+              "shards": shard_count,
+              "tokens_discovered": len(rows),
+              "pools_discovered": len(seen_pools),
+              "quote_tokens": sorted({
+                  row["quote_token"].lower()
+                  for row in rows
+              }),
+              "first_launch_block": (
+                  None if not rows else int(rows[0]["launch_block"])
+              ),
+              "last_launch_block": (
+                  None if not rows else int(rows[-1]["launch_block"])
+              ),
+              "registry_sha256": merged["sha256"],
+          }
+          Path(
+              "artifacts/pools-fun-registry-summary.json"
+          ).write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pools-fun-registry-merged
+          path: artifacts/
+          if-no-files-found: error

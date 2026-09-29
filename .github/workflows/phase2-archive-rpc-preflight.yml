@@ -1,0 +1,160 @@
+name: phase2-archive-rpc-preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-archive-rpc-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  HISTORICAL_CODE_BLOCK: '8600612'
+  WIDE_LOG_FROM: '8621500'
+  WIDE_LOG_TO: '8622499'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require authenticated archive key
+        run: |
+          set -euo pipefail
+          if [ -z "${ROBINHOOD_ARCHIVE_RPC_API_KEY}" ]; then
+            echo "ROBINHOOD_ARCHIVE_RPC_API_KEY is not configured" >&2
+            exit 1
+          fi
+
+      - id: probe
+        name: Prove authenticated historical state and wide filtered logs
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import (
+              PONS_V1_FACTORY_LEGACY,
+              SOLIDRPC_AUTH_RPC_URL,
+              SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP,
+          )
+          from hlp.data.rpc import RpcClient
+
+          key = os.environ.get("ROBINHOOD_ARCHIVE_RPC_API_KEY", "")
+          if not key:
+              raise SystemExit("archive API key is empty")
+
+          snapshot = int(os.environ["SNAPSHOT_HEAD"])
+          code_block = int(os.environ["HISTORICAL_CODE_BLOCK"])
+          log_from = int(os.environ["WIDE_LOG_FROM"])
+          log_to = int(os.environ["WIDE_LOG_TO"])
+          window = log_to - log_from + 1
+          if window <= SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP:
+              raise SystemExit(
+                  "archive preflight log window no longer exceeds public cap"
+              )
+
+          rpc = RpcClient(
+              SOLIDRPC_AUTH_RPC_URL,
+              timeout=20,
+              attempts=3,
+              min_interval_seconds=0.1,
+              extra_headers={"X-API-Key": key},
+              route_label="solidrpc_authenticated_free",
+          )
+          rpc.assert_robinhood()
+          head = rpc.block_number()
+          if head < snapshot:
+              raise SystemExit(
+                  f"archive head {head} is behind frozen snapshot {snapshot}"
+              )
+
+          code = rpc.get_code(
+              PONS_V1_FACTORY_LEGACY,
+              code_block,
+          )
+          if code in {"", "0x", "0x0"}:
+              raise SystemExit(
+                  "authenticated archive route lost historical Pons bytecode"
+              )
+
+          logs = rpc.get_logs(
+              log_from,
+              log_to,
+              address=PONS_V1_FACTORY_LEGACY,
+          )
+          if not logs:
+              raise SystemExit(
+                  "authenticated wide historical log probe returned no logs"
+              )
+
+          report = {
+              "version": "phase2-archive-rpc-preflight-v1",
+              "chain_id": 4663,
+              "route": "solidrpc_authenticated_free",
+              "snapshot_head_block": snapshot,
+              "observed_head_block": head,
+              "historical_code_address": (
+                  PONS_V1_FACTORY_LEGACY.lower()
+              ),
+              "historical_code_block": code_block,
+              "historical_code_present": True,
+              "wide_log_from_block": log_from,
+              "wide_log_to_block": log_to,
+              "wide_log_window_blocks": window,
+              "public_filtered_log_block_cap": (
+                  SOLIDRPC_PUBLIC_FILTERED_LOG_BLOCK_CAP
+              ),
+              "wide_log_records": len(logs),
+              "wide_log_probe_exceeds_public_cap": True,
+              "authenticated_archive_ready": True,
+              "requests_made": rpc.requests_made,
+          }
+          Path(
+              "artifacts/phase2-archive-rpc-preflight.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"head={head}\n")
+              handle.write(f"logs={len(logs)}\n")
+          print(json.dumps(report, sort_keys=True))
+          PY
+
+      - name: Upload archive preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-archive-rpc-preflight
+          path: artifacts/phase2-archive-rpc-preflight.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish archive preflight summary
+        env:
+          OBSERVED_HEAD: ${{ steps.probe.outputs.head }}
+          LOGS: ${{ steps.probe.outputs.logs }}
+        run: |
+          {
+            echo "## Phase-2 authenticated archive preflight"
+            echo
+            echo "- authenticated_archive_ready: true"
+            echo "- observed_head_block: ${OBSERVED_HEAD}"
+            echo "- wide_log_window_blocks: 1000"
+            echo "- wide_log_records: ${LOGS}"
+            echo "- public_filtered_log_block_cap: 200"
+          } >> "${GITHUB_STEP_SUMMARY}"
