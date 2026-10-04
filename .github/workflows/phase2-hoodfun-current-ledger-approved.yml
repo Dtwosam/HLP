@@ -530,13 +530,13 @@ jobs:
           if validation["complete_source_ids"] != [
               "doppler",
               "flap",
+              "hood_fun_current",
               "pons_v1",
               "pons_v2",
               "pools_fun",
               "pools_trade_instant",
               "pools_trade_lbp",
               "trench_today",
-              "hood_fun_current",
           ]:
               raise SystemExit(
                   "hood.fun current committed source set drift"
