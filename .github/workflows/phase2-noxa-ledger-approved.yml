@@ -424,7 +424,7 @@ jobs:
           )
           if (
               len(all_control_ids) != 49
-              or len(set(all_control_ids)) != 44
+              or len(set(all_control_ids)) != 49
           ):
               raise SystemExit(
                   "Noxa ledger approval requires exactly "
