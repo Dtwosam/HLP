@@ -1,0 +1,128 @@
+name: phase2-outcome-labels-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-outcome-labels-launch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact outcome-label launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 140
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify outcome labels
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase2_outcome_dispatch import validate_phase2_outcome_label_launch_receipt,validate_phase2_outcome_label_completion_receipt
+          from hlp.data.phase2_outcomes import PHASE2_OUTCOME_HANDOFF_VERSION,build_phase2_outcome_handoff
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[]); rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"]); lr=api(f"actions/runs/{launch_run}")
+          if lr.get("path")!=".github/workflows/phase2-outcome-labels-launch.yml" or lr.get("head_branch")!=branch or str(lr.get("head_sha") or "").lower()!=head or lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("outcome-label launch identity/status drift")
+          lname="phase2-outcome-labels-launch"; la=artifact(launch_run,lname); actual=str(la.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("outcome-label launch digest drift")
+          lroot=download(launch_run,lname,"upstream/launch")
+          launch=validate_phase2_outcome_label_launch_receipt(json.loads((lroot/"phase2-outcome-labels-launch-receipt.json").read_text()))
+          target=launch["outcome_label_run_id"]; deadline=time.monotonic()+7800
+          while True:
+              row=api(f"actions/runs/{target}")
+              if row.get("path")!=".github/workflows/phase2-outcome-labels.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head: raise SystemExit("outcome-label target identity drift")
+              if row.get("status")=="completed":
+                  if row.get("conclusion")!="success": raise SystemExit(f"outcome-label run failed: {row.get('conclusion')}")
+                  break
+              if time.monotonic()>=deadline: raise SystemExit("outcome-label run timed out")
+              time.sleep(15)
+          full_name="phase2-outcome-labels"; handoff_name="phase2-outcome-labels-handoff"
+          full_art=artifact(target,full_name); handoff_art=artifact(target,handoff_name)
+          root=download(target,full_name,"upstream/outcomes"); hroot=download(target,handoff_name,"upstream/outcome-handoff")
+          summary_path=root/"phase2-outcome-labels-summary.json"; manifest_path=root/"phase2-outcome-labels.jsonl.manifest.json"; handoff_path=hroot/"phase2-outcome-labels-handoff.json"
+          summary=json.loads(summary_path.read_text()); manifest=json.loads(manifest_path.read_text()); handoff=json.loads(handoff_path.read_text())
+          summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
+          if handoff.get("version")!=PHASE2_OUTCOME_HANDOFF_VERSION: raise SystemExit("outcome handoff version drift")
+          rebuilt=build_phase2_outcome_handoff(summary,outcome_summary_sha256=summary_sha,detector_freeze_handoff_sha256=launch["detector_freeze_handoff_sha256"],price_path_handoff_sha256=launch["price_path_handoff_sha256"])
+          if rebuilt!=handoff: raise SystemExit("outcome handoff semantic drift")
+          if str(manifest.get("sha256") or "").lower()!=handoff["outcome_rows_sha256"]: raise SystemExit("outcome rows manifest SHA drift")
+          receipt={
+              "version":"phase2-outcome-labels-completion-receipt-v1",
+              "outcome_label_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "outcome_label_launch_run_id":launch_run,
+              "outcome_label_launch_artifact_digest":actual,
+              "outcome_label_run_id":target,
+              "outcome_artifact_digest":str(full_art.get("digest") or "").lower(),
+              "outcome_handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),
+              "outcome_rows_sha256":handoff["outcome_rows_sha256"],
+              "outcome_summary_sha256":handoff["outcome_summary_sha256"],
+              "outcome_handoff_sha256":handoff_sha,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "detector_freeze_run_id":launch["detector_freeze_run_id"],
+              "detector_freeze_artifact_digest":launch["detector_freeze_artifact_digest"],
+              "detector_freeze_handoff_sha256":launch["detector_freeze_handoff_sha256"],
+              "price_path_run_id":launch["price_path_run_id"],
+              "price_path_artifact_digest":launch["price_path_artifact_digest"],
+              "price_path_handoff_sha256":launch["price_path_handoff_sha256"],
+              "tokens":int(handoff["tokens"]),
+              "confirmed_dump_tokens":int(handoff["confirmed_dump_tokens"]),
+              "comeback_5x_tokens":int(handoff["comeback_5x_tokens"]),
+              "phase2_dump_detector_frozen":True,
+              "outcome_labels_computed":True,
+              "max_post_dump_multiple_retained":True,
+              "target_run_completed":True,
+              "target_run_successful":True,
+              "workflow_dispatch_performed":False,
+          }
+          receipt=validate_phase2_outcome_label_completion_receipt(receipt)
+          Path("artifacts/phase2-outcome-labels-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"outcome_run_id={target}\n")
+              h.write(f"outcome_artifact_digest={receipt['outcome_artifact_digest']}\n")
+              h.write(f"outcome_handoff_sha256={receipt['outcome_handoff_sha256']}\n")
+          PY
+      - name: Upload outcome-label completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-outcome-labels-completion
+          path: artifacts/phase2-outcome-labels-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
