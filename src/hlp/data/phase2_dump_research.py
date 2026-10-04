@@ -283,6 +283,14 @@ def _normalize_candidate_specs(
     return normalized
 
 
+
+def normalize_phase2_dump_candidate_specs(
+    candidate_specs: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    """Normalize explicit research-only dump candidate specs."""
+
+    return _normalize_candidate_specs(candidate_specs)
+
 def research_phase2_dump_candidates(
     geometry_rows: Iterable[Mapping[str, object]],
     candidate_specs: Iterable[Mapping[str, object]],

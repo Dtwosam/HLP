@@ -1,0 +1,166 @@
+{
+  "version": "phase2-dump-candidate-grid-v1",
+  "family": "peak_drawdown_rebound",
+  "semantics": "research_only_no_selection",
+  "drawdown_fractions": [
+    "0.30",
+    "0.40",
+    "0.50",
+    "0.60",
+    "0.70",
+    "0.80"
+  ],
+  "rebound_fractions": [
+    "0.15",
+    "0.25",
+    "0.40",
+    "0.60"
+  ],
+  "candidates": [
+    {
+      "candidate_id": "dd030_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.30",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd030_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.30",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd030_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.30",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd030_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.30",
+      "confirmation_rebound_fraction": "0.60"
+    },
+    {
+      "candidate_id": "dd040_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.40",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd040_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.40",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd040_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.40",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd040_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.40",
+      "confirmation_rebound_fraction": "0.60"
+    },
+    {
+      "candidate_id": "dd050_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.50",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd050_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.50",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd050_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.50",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd050_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.50",
+      "confirmation_rebound_fraction": "0.60"
+    },
+    {
+      "candidate_id": "dd060_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.60",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd060_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.60",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd060_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.60",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd060_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.60",
+      "confirmation_rebound_fraction": "0.60"
+    },
+    {
+      "candidate_id": "dd070_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.70",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd070_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.70",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd070_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.70",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd070_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.70",
+      "confirmation_rebound_fraction": "0.60"
+    },
+    {
+      "candidate_id": "dd080_rb015",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.80",
+      "confirmation_rebound_fraction": "0.15"
+    },
+    {
+      "candidate_id": "dd080_rb025",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.80",
+      "confirmation_rebound_fraction": "0.25"
+    },
+    {
+      "candidate_id": "dd080_rb040",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.80",
+      "confirmation_rebound_fraction": "0.40"
+    },
+    {
+      "candidate_id": "dd080_rb060",
+      "family": "peak_drawdown_rebound",
+      "min_drawdown_fraction": "0.80",
+      "confirmation_rebound_fraction": "0.60"
+    }
+  ],
+  "candidate_count": 24
+}
