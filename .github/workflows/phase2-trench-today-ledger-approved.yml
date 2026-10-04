@@ -424,7 +424,7 @@ jobs:
           )
           if (
               len(all_control_ids) != 46
-              or len(set(all_control_ids)) != 44
+              or len(set(all_control_ids)) != 46
           ):
               raise SystemExit(
                   "trench.today ledger approval requires exactly "
