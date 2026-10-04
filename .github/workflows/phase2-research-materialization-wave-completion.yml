@@ -1,0 +1,129 @@
+name: phase2-research-materialization-wave-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-research-materialization-wave-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact materialization-wave launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-materialization-wave-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Wait for all 12 research components
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase2_research_materialization_dispatch import (
+              _workflow_for_component,
+              validate_phase2_research_materialization_wave_launch_receipt,
+              validate_phase2_research_materialization_wave_completion_receipt,
+          )
+          from hlp.data.phase2_research_source_layouts import build_phase2_research_source_layouts
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def identity(row,workflow,run_id):
+              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+                  raise SystemExit(f"run {run_id} identity drift")
+          def wait(run_id,workflow):
+              deadline=time.monotonic()+20700
+              while True:
+                  row=api(f"actions/runs/{run_id}"); identity(row,workflow,run_id)
+                  if row.get("status")=="completed":
+                      if row.get("conclusion")!="success": raise SystemExit(f"component run {run_id} failed: {row.get('conclusion')}")
+                      return
+                  if time.monotonic()>=deadline: raise SystemExit(f"component run {run_id} timed out")
+                  time.sleep(15)
+          launch_run=int(os.environ["LAUNCH_RUN_ID"])
+          row=api(f"actions/runs/{launch_run}"); identity(row,"phase2-research-materialization-wave-launch.yml",launch_run)
+          if row.get("status")!="completed" or row.get("conclusion")!="success": raise SystemExit("materialization launch is not successful")
+          payload=api(f"actions/runs/{launch_run}/artifacts?name=phase2-research-materialization-wave-launch")
+          matches=[x for x in payload.get("artifacts",[]) if x.get("name")=="phase2-research-materialization-wave-launch" and not x.get("expired")]
+          if len(matches)!=1: raise SystemExit("materialization launch artifact cardinality drift")
+          actual=str(matches[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("materialization launch digest drift")
+          root=Path("upstream/launch")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(launch_run),"--repo",repo,"--name","phase2-research-materialization-wave-launch","--dir",str(root)])
+          launch=validate_phase2_research_materialization_wave_launch_receipt(json.loads((root/"phase2-research-materialization-wave-launch-receipt.json").read_text()))
+          layouts=build_phase2_research_source_layouts()
+          for component,run_id in launch["component_run_ids"].items():
+              workflow=_workflow_for_component(component,str(layouts[component]["strategy"]))
+              wait(run_id,workflow)
+          runs=launch["component_run_ids"]
+          receipt={
+              "version":"phase2-research-materialization-wave-completion-receipt-v1",
+              "materialization_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "materialization_wave_launch_run_id":launch_run,
+              "materialization_wave_launch_artifact_digest":actual,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "component_run_ids":runs,
+              "component_runs_json":json.dumps(runs,sort_keys=True,separators=(",",":")),
+              "component_runs_completed":12,
+              "all_component_runs_successful":True,
+              "research_components_ready":True,
+              "research_price_paths_materialized":False,
+              "dump_threshold_frozen":False,
+              "outcome_labels_computed":False,
+              "workflow_dispatch_performed":False,
+          }
+          receipt=validate_phase2_research_materialization_wave_completion_receipt(receipt)
+          Path("artifacts/phase2-research-materialization-wave-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"component_runs_json={receipt['component_runs_json']}\n")
+          PY
+      - name: Upload materialization-wave completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialization-wave-completion
+          path: artifacts/phase2-research-materialization-wave-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish materialization-freeze input
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          COMPONENT_RUNS_JSON: ${{ steps.complete.outputs.component_runs_json }}
+        run: |
+          {
+            echo "## Phase-2 research component completion"
+            echo "- completion_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- component_runs_json: ${COMPONENT_RUNS_JSON}"
+            echo "- component_runs_completed: 12"
+            echo "- research_components_ready: true"
+          } >> "${GITHUB_STEP_SUMMARY}"

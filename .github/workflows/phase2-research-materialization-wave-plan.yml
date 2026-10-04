@@ -1,0 +1,149 @@
+name: phase2-research-materialization-wave-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe_completion_run_id:
+        description: Exact successful phase2-universe-freeze-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_universe_completion_artifact_digest:
+        description: Exact frozen-universe completion artifact digest (sha256:...)
+        required: true
+        type: string
+      rehydration_plan_run_id:
+        description: Exact successful phase2-research-rehydration-plan workflow_dispatch run ID
+        required: true
+        type: string
+      expected_rehydration_plan_artifact_digest:
+        description: Exact research rehydration-plan artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-materialization-wave-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UNIVERSE_COMPLETION_RUN_ID: ${{ inputs.universe_completion_run_id }}
+      EXPECTED_UNIVERSE_COMPLETION_DIGEST: ${{ inputs.expected_universe_completion_artifact_digest }}
+      REHYDRATION_PLAN_RUN_ID: ${{ inputs.rehydration_plan_run_id }}
+      EXPECTED_REHYDRATION_PLAN_DIGEST: ${{ inputs.expected_rehydration_plan_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Build exact 12-component materialization dispatch plan
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+          from hlp.data.phase2_research_materialization_dispatch import (
+              build_phase2_research_materialization_dispatch_plan,
+              validate_phase2_research_materialization_dispatch_plan,
+          )
+          from hlp.data.phase2_universe_freeze_dispatch import (
+              validate_phase2_universe_freeze_completion_receipt,
+          )
+
+          repo=os.environ["GITHUB_REPOSITORY"]
+          branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+
+          def api(path):
+              return json.loads(subprocess.check_output([
+                  "gh","api","-H","Accept: application/vnd.github+json",
+                  f"/repos/{repo}/{path}"
+              ]))
+          def run(run_id, workflow):
+              row=api(f"actions/runs/{run_id}")
+              if row.get("path") != f".github/workflows/{workflow}":
+                  raise SystemExit(f"run {run_id} workflow drift")
+              if row.get("event") != "workflow_dispatch" or row.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} identity drift")
+              if str(row.get("head_sha") or "").lower() != head:
+                  raise SystemExit(f"run {run_id} HEAD drift")
+              if row.get("status") != "completed" or row.get("conclusion") != "success":
+                  raise SystemExit(f"run {run_id} is not successful")
+              return row
+          def artifact(run_id,name,expected):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[])
+              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              actual=str(rows[0].get("digest") or "").lower()
+              if actual != str(expected).lower(): raise SystemExit(f"{name} digest drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          u_run=int(os.environ["UNIVERSE_COMPLETION_RUN_ID"])
+          p_run=int(os.environ["REHYDRATION_PLAN_RUN_ID"])
+          run(u_run,"phase2-universe-freeze-completion.yml")
+          run(p_run,"phase2-research-rehydration-plan.yml")
+          u_name="phase2-universe-freeze-completion"
+          u_art=artifact(u_run,u_name,os.environ["EXPECTED_UNIVERSE_COMPLETION_DIGEST"])
+          u_root=download(u_run,u_name,"upstream/universe-completion")
+          u=validate_phase2_universe_freeze_completion_receipt(json.loads((u_root/"phase2-universe-freeze-completion-receipt.json").read_text()))
+          p_name="phase2-research-rehydration-plan"
+          p_art=artifact(p_run,p_name,os.environ["EXPECTED_REHYDRATION_PLAN_DIGEST"])
+          p_root=download(p_run,p_name,"upstream/rehydration-plan")
+          p_path=p_root/"phase2-research-rehydration-plan.json"
+          p_sha=hashlib.sha256(p_path.read_bytes()).hexdigest()
+          plan=build_phase2_research_materialization_dispatch_plan(
+              json.loads(p_path.read_text()),
+              rehydration_plan_run_id=p_run,
+              rehydration_plan_artifact_digest=str(p_art.get("digest") or "").lower(),
+              rehydration_plan_sha256=p_sha,
+              universe_completion=u,
+          )
+          plan["universe_completion_run_id"]=u_run
+          plan["universe_completion_artifact_digest"]=str(u_art.get("digest") or "").lower()
+          plan=validate_phase2_research_materialization_dispatch_plan(plan)
+          out=Path("artifacts/phase2-research-materialization-dispatch-plan.json")
+          out.write_text(json.dumps(plan,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"component_count={plan['component_count']}\n")
+          print(json.dumps(plan,sort_keys=True))
+          PY
+      - name: Upload materialization dispatch plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialization-dispatch-plan
+          path: artifacts/phase2-research-materialization-dispatch-plan.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish materialization plan summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          COMPONENT_COUNT: ${{ steps.plan.outputs.component_count }}
+        run: |
+          {
+            echo "## Phase-2 research materialization plan"
+            echo "- plan_run_id: ${GITHUB_RUN_ID}"
+            echo "- plan_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- component_count: ${COMPONENT_COUNT}"
+            echo "- pons_jobs: 2"
+            echo "- simple_jobs: 7"
+            echo "- composite_jobs: 3"
+            echo "- workflow_dispatch_performed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
