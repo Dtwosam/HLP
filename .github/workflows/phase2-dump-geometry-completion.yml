@@ -37,15 +37,20 @@ jobs:
       - name: Install
         run: python -m pip install -e .
       - id: complete
-        name: Verify dump geometry and publish research identity
+        name: Verify dump geometry and publish candidate-research base inputs
         run: |
           set -euo pipefail
           mkdir -p artifacts upstream
           python - <<'PY'
-          import hashlib,json,os,shutil,subprocess,time
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
           from pathlib import Path
+
           from hlp.data.phase2_dump_geometry_dispatch import (
-              DUMP_GEOMETRY_WORKFLOW,
               validate_phase2_dump_geometry_launch_receipt,
               validate_phase2_dump_geometry_completion_receipt,
           )
@@ -54,103 +59,179 @@ jobs:
               build_phase2_dump_geometry_handoff,
           )
 
-          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
-          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
-          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
-          def identity(row,workflow,run_id):
-              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True
+          ).strip().lower()
+
+          def api(path):
+              return json.loads(
+                  subprocess.check_output([
+                      "gh", "api", "-H", "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/{path}",
+                  ])
+              )
+
+          def identity(row, workflow, run_id):
+              if (
+                  row.get("path") != f".github/workflows/{workflow}"
+                  or row.get("event") != "workflow_dispatch"
+                  or row.get("head_branch") != branch
+                  or str(row.get("head_sha") or "").lower() != head
+              ):
                   raise SystemExit(f"run {run_id} identity drift")
-          def wait(run_id,workflow):
-              deadline=time.monotonic()+7800
+
+          def wait(run_id, workflow):
+              deadline = time.monotonic() + 7800
               while True:
-                  row=api(f"actions/runs/{run_id}"); identity(row,workflow,run_id)
-                  if row.get("status")=="completed":
-                      if row.get("conclusion")!="success": raise SystemExit(f"geometry run {run_id} failed: {row.get('conclusion')}")
+                  row = api(f"actions/runs/{run_id}")
+                  identity(row, workflow, run_id)
+                  if row.get("status") == "completed":
+                      if row.get("conclusion") != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed: {row.get('conclusion')}"
+                          )
                       return
-                  if time.monotonic()>=deadline: raise SystemExit(f"geometry run {run_id} timed out")
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(f"run {run_id} timed out")
                   time.sleep(15)
-          def artifact(run_id,name):
-              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[])
-              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
-              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+
+          def artifact(run_id, name):
+              rows = api(
+                  f"actions/runs/{run_id}/artifacts?name={name}"
+              ).get("artifacts", [])
+              rows = [x for x in rows if x.get("name") == name and not x.get("expired")]
+              if len(rows) != 1:
+                  raise SystemExit(f"{name} artifact cardinality drift")
               return rows[0]
-          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-          launch_run=int(os.environ["LAUNCH_RUN_ID"])
-          lr=api(f"actions/runs/{launch_run}"); identity(lr,"phase2-dump-geometry-launch.yml",launch_run)
-          if lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("geometry launch is not successful")
-          lname="phase2-dump-geometry-launch"; la=artifact(launch_run,lname)
-          actual_launch=str(la.get("digest") or "").lower()
-          if actual_launch!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("geometry launch digest drift")
-          lroot=Path("upstream/launch")
-          if lroot.exists(): shutil.rmtree(lroot)
-          lroot.mkdir(parents=True)
-          subprocess.check_call(["gh","run","download",str(launch_run),"--repo",repo,"--name",lname,"--dir",str(lroot)])
-          launch=validate_phase2_dump_geometry_launch_receipt(json.loads((lroot/"phase2-dump-geometry-launch-receipt.json").read_text()))
-          target=launch["geometry_run_id"]; wait(target,DUMP_GEOMETRY_WORKFLOW)
+          def download(run_id, name, destination):
+              root = Path(destination)
+              if root.exists():
+                  shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo, "--name", name, "--dir", str(root),
+              ])
+              return root
 
-          name="phase2-dump-geometry-research"; art=artifact(target,name)
-          root=Path("upstream/geometry")
-          if root.exists(): shutil.rmtree(root)
-          root.mkdir(parents=True)
-          subprocess.check_call(["gh","run","download",str(target),"--repo",repo,"--name",name,"--dir",str(root)])
-          summary_path=root/"phase2-dump-geometry-summary.json"
-          handoff_path=root/"phase2-dump-geometry-handoff.json"
-          manifest_path=root/"phase2-dump-geometry.jsonl.manifest.json"
-          if not(summary_path.is_file() and handoff_path.is_file() and manifest_path.is_file()):
-              raise SystemExit("geometry artifact lacks canonical checkpoint files")
-          summary=json.loads(summary_path.read_text()); handoff=json.loads(handoff_path.read_text()); manifest=json.loads(manifest_path.read_text())
-          if handoff.get("version")!=PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION: raise SystemExit("geometry handoff version drift")
-          summary_sha=sha(summary_path)
-          rebuilt=build_phase2_dump_geometry_handoff(
+          def sha(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          launch_run = int(os.environ["LAUNCH_RUN_ID"])
+          row = api(f"actions/runs/{launch_run}")
+          identity(row, "phase2-dump-geometry-launch.yml", launch_run)
+          if row.get("status") != "completed" or row.get("conclusion") != "success":
+              raise SystemExit("dump-geometry launch is not successful")
+          launch_name = "phase2-dump-geometry-launch"
+          launch_art = artifact(launch_run, launch_name)
+          actual_launch = str(launch_art.get("digest") or "").lower()
+          if actual_launch != os.environ["EXPECTED_LAUNCH_DIGEST"].lower():
+              raise SystemExit("dump-geometry launch digest drift")
+          launch_root = download(
+              launch_run, launch_name, "upstream/launch"
+          )
+          launch = validate_phase2_dump_geometry_launch_receipt(
+              json.loads(
+                  (launch_root / "phase2-dump-geometry-launch-receipt.json").read_text()
+              )
+          )
+          if launch["execution_head_sha"] != head:
+              raise SystemExit("dump-geometry launch receipt HEAD drift")
+
+          target = launch["dump_geometry_run_id"]
+          wait(target, "phase2-dump-geometry-research.yml")
+          full_name = "phase2-dump-geometry-research"
+          handoff_name = "phase2-dump-geometry-handoff"
+          full_art = artifact(target, full_name)
+          handoff_art = artifact(target, handoff_name)
+          root = download(target, full_name, "upstream/geometry")
+          handoff_root = download(
+              target, handoff_name, "upstream/geometry-handoff"
+          )
+          summary_path = root / "phase2-dump-geometry-summary.json"
+          manifest_path = root / "phase2-dump-geometry.jsonl.manifest.json"
+          handoff_path = handoff_root / "phase2-dump-geometry-handoff.json"
+          if not (
+              summary_path.is_file()
+              and manifest_path.is_file()
+              and handoff_path.is_file()
+          ):
+              raise SystemExit("dump-geometry artifact lacks checkpoint files")
+          summary = json.loads(summary_path.read_text())
+          manifest = json.loads(manifest_path.read_text())
+          handoff = json.loads(handoff_path.read_text())
+          summary_sha = sha(summary_path)
+          handoff_sha = sha(handoff_path)
+          if handoff.get("version") != PHASE2_DUMP_GEOMETRY_HANDOFF_VERSION:
+              raise SystemExit("dump-geometry handoff version drift")
+          rebuilt = build_phase2_dump_geometry_handoff(
               summary,
               geometry_summary_sha256=summary_sha,
-              price_path_handoff_sha256=launch["price_path_handoff_sha256"],
+              price_path_handoff_sha256=launch[
+                  "price_path_handoff_sha256"
+              ],
           )
-          if rebuilt!=handoff: raise SystemExit("geometry handoff content drift")
-          geometry_sha=str(manifest.get("sha256") or "").lower()
-          if geometry_sha!=handoff["geometry_sha256"]: raise SystemExit("geometry manifest SHA drift")
-          if int(manifest.get("records",-1))!=int(handoff["price_points"]): raise SystemExit("geometry manifest record drift")
-          if handoff["normalized_price_path_sha256"]!=launch["normalized_price_path_sha256"]: raise SystemExit("geometry normalized path SHA drift")
-          receipt={
-              "version":"phase2-dump-geometry-completion-receipt-v1",
-              "geometry_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
-              "geometry_launch_run_id":launch_run,
-              "geometry_launch_artifact_digest":actual_launch,
-              "geometry_run_id":target,
-              "geometry_artifact_digest":str(art.get("digest") or "").lower(),
-              "geometry_handoff_sha256":sha(handoff_path),
-              "geometry_sha256":geometry_sha,
-              "geometry_summary_sha256":summary_sha,
-              "normalized_price_path_sha256":handoff["normalized_price_path_sha256"],
-              "price_path_handoff_sha256":handoff["price_path_handoff_sha256"],
-              "execution_branch":branch,
-              "execution_head_sha":head,
-              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
-              "snapshot_head_block":int(handoff["snapshot_head_block"]),
-              "tokens":int(handoff["tokens"]),
-              "price_points":int(handoff["price_points"]),
-              "candidate_research_identity":{
-                  "geometry_run_id":str(target),
-                  "expected_geometry_artifact_digest":str(art.get("digest") or "").lower(),
-                  "expected_geometry_handoff_sha256":sha(handoff_path),
+          if rebuilt != handoff:
+              raise SystemExit("dump-geometry handoff semantic drift")
+          if str(manifest.get("sha256") or "").lower() != handoff["geometry_sha256"]:
+              raise SystemExit("dump-geometry manifest SHA drift")
+          if handoff["price_path_handoff_sha256"] != launch[
+              "price_path_handoff_sha256"
+          ]:
+              raise SystemExit("dump-geometry price-path lineage drift")
+
+          receipt = {
+              "version": "phase2-dump-geometry-completion-receipt-v1",
+              "dump_geometry_completion_control_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "dump_geometry_launch_run_id": launch_run,
+              "dump_geometry_launch_artifact_digest": actual_launch,
+              "dump_geometry_run_id": target,
+              "dump_geometry_artifact_digest": str(full_art.get("digest") or "").lower(),
+              "dump_geometry_handoff_artifact_digest": str(
+                  handoff_art.get("digest") or ""
+              ).lower(),
+              "geometry_sha256": handoff["geometry_sha256"],
+              "geometry_summary_sha256": handoff["geometry_summary_sha256"],
+              "geometry_handoff_sha256": handoff_sha,
+              "execution_branch": branch,
+              "execution_head_sha": head,
+              "canonical_ledger_commit_sha": launch["canonical_ledger_commit_sha"],
+              "price_path_run_id": launch["price_path_run_id"],
+              "price_path_artifact_digest": launch["price_path_artifact_digest"],
+              "price_path_handoff_sha256": launch["price_path_handoff_sha256"],
+              "snapshot_head_block": int(handoff["snapshot_head_block"]),
+              "tokens": int(handoff["tokens"]),
+              "price_points": int(handoff["price_points"]),
+              "candidate_research_base_inputs": {
+                  "geometry_run_id": str(target),
+                  "expected_geometry_artifact_digest": str(
+                      full_art.get("digest") or ""
+                  ).lower(),
+                  "expected_geometry_handoff_sha256": handoff_sha,
               },
-              "uses_price_path_only":True,
-              "dump_geometry_ready":True,
-              "candidate_selected":False,
-              "dump_threshold_frozen":False,
-              "phase2_dump_detector_frozen":False,
-              "outcome_labels_computed":False,
-              "target_run_completed":True,
-              "target_run_successful":True,
-              "workflow_dispatch_performed":False,
+              "target_run_completed": True,
+              "target_run_successful": True,
+              "uses_price_path_only": True,
+              "dump_geometry_ready": True,
+              "candidate_selected": False,
+              "dump_threshold_frozen": False,
+              "phase2_dump_detector_frozen": False,
+              "outcome_labels_computed": False,
+              "workflow_dispatch_performed": False,
           }
-          receipt=validate_phase2_dump_geometry_completion_receipt(receipt)
-          Path("artifacts/phase2-dump-geometry-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
-          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
-              h.write(f"geometry_run_id={target}\n")
-              h.write(f"geometry_artifact_digest={receipt['geometry_artifact_digest']}\n")
-              h.write(f"geometry_handoff_sha256={receipt['geometry_handoff_sha256']}\n")
+          receipt = validate_phase2_dump_geometry_completion_receipt(receipt)
+          Path(
+              "artifacts/phase2-dump-geometry-completion-receipt.json"
+          ).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key, value in receipt["candidate_research_base_inputs"].items():
+                  handle.write(f"{key}={value}\n")
+          print(json.dumps(receipt, sort_keys=True))
           PY
       - name: Upload dump-geometry completion receipt
         id: upload
@@ -160,20 +241,21 @@ jobs:
           path: artifacts/phase2-dump-geometry-completion-receipt.json
           if-no-files-found: error
           retention-days: 90
-      - name: Publish candidate-research geometry identity
+      - name: Publish dump-candidate research base inputs
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          GEOMETRY_RUN_ID: ${{ steps.complete.outputs.geometry_run_id }}
-          GEOMETRY_ARTIFACT_DIGEST: ${{ steps.complete.outputs.geometry_artifact_digest }}
-          GEOMETRY_HANDOFF_SHA: ${{ steps.complete.outputs.geometry_handoff_sha256 }}
+          GEOMETRY_RUN: ${{ steps.complete.outputs.geometry_run_id }}
+          GEOMETRY_DIGEST: ${{ steps.complete.outputs.expected_geometry_artifact_digest }}
+          GEOMETRY_HANDOFF: ${{ steps.complete.outputs.expected_geometry_handoff_sha256 }}
         run: |
           {
-            echo "## Phase-2 dump geometry checkpoint"
+            echo "## Phase-2 dump geometry completion"
             echo "- completion_run_id: ${GITHUB_RUN_ID}"
             echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
-            echo "- geometry_run_id: ${GEOMETRY_RUN_ID}"
-            echo "- expected_geometry_artifact_digest: ${GEOMETRY_ARTIFACT_DIGEST}"
-            echo "- expected_geometry_handoff_sha256: ${GEOMETRY_HANDOFF_SHA}"
+            echo "- geometry_run_id: ${GEOMETRY_RUN}"
+            echo "- expected_geometry_artifact_digest: ${GEOMETRY_DIGEST}"
+            echo "- expected_geometry_handoff_sha256: ${GEOMETRY_HANDOFF}"
+            echo "- candidate_specs_required: true"
             echo "- candidate_selected: false"
             echo "- dump_threshold_frozen: false"
           } >> "${GITHUB_STEP_SUMMARY}"
