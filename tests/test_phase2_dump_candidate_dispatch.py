@@ -1,39 +1,42 @@
 import json
+
 import pytest
 
 from hlp.data.phase2_dump_candidate_dispatch import (
-    build_phase2_dump_candidate_dispatch_plan,
-    validate_phase2_dump_candidate_dispatch_plan,
-    validate_phase2_dump_candidate_launch_receipt,
+    RESEARCH_CANDIDATE_SPECS,
+    build_phase2_dump_candidate_research_plan,
+    candidate_specs_sha256,
+    validate_phase2_dump_candidate_research_plan,
     validate_phase2_dump_candidate_completion_receipt,
+    validate_phase2_dump_diagnostics_completion_receipt,
 )
 
 
 def geometry_completion():
     return {
         "version": "phase2-dump-geometry-completion-receipt-v1",
-        "dump_geometry_completion_control_run_id": 12001,
-        "dump_geometry_launch_run_id": 12002,
+        "dump_geometry_completion_control_run_id": 11001,
+        "dump_geometry_launch_run_id": 11002,
         "dump_geometry_launch_artifact_digest": "sha256:" + "11" * 32,
-        "dump_geometry_run_id": 12003,
-        "dump_geometry_artifact_digest": "sha256:" + "22" * 32,
-        "dump_geometry_handoff_artifact_digest": "sha256:" + "23" * 32,
-        "geometry_sha256": "24" * 32,
-        "geometry_summary_sha256": "25" * 32,
-        "geometry_handoff_sha256": "26" * 32,
+        "dump_geometry_run_id": 11003,
+        "dump_geometry_artifact_digest": "sha256:" + "12" * 32,
+        "dump_geometry_handoff_artifact_digest": "sha256:" + "13" * 32,
+        "geometry_sha256": "14" * 32,
+        "geometry_summary_sha256": "15" * 32,
+        "geometry_handoff_sha256": "16" * 32,
         "execution_branch": "phase1/data-acquisition-spike",
-        "execution_head_sha": "27" * 20,
-        "canonical_ledger_commit_sha": "27" * 20,
-        "price_path_run_id": 12004,
-        "price_path_artifact_digest": "sha256:" + "28" * 32,
-        "price_path_handoff_sha256": "29" * 32,
+        "execution_head_sha": "17" * 20,
+        "canonical_ledger_commit_sha": "17" * 20,
+        "price_path_run_id": 11004,
+        "price_path_artifact_digest": "sha256:" + "18" * 32,
+        "price_path_handoff_sha256": "19" * 32,
         "snapshot_head_block": 54_486_035,
-        "tokens": 100,
-        "price_points": 10000,
+        "tokens": 500,
+        "price_points": 5000,
         "candidate_research_base_inputs": {
-            "geometry_run_id": "12003",
-            "expected_geometry_artifact_digest": "sha256:" + "22" * 32,
-            "expected_geometry_handoff_sha256": "26" * 32,
+            "geometry_run_id": "11003",
+            "expected_geometry_artifact_digest": "sha256:" + "12" * 32,
+            "expected_geometry_handoff_sha256": "16" * 32,
         },
         "target_run_completed": True,
         "target_run_successful": True,
@@ -47,120 +50,119 @@ def geometry_completion():
     }
 
 
-def grid():
-    return {
-        "version": "phase2-dump-candidate-grid-v1",
-        "semantics": "research_only_no_selection",
-        "candidate_count": 2,
-        "candidates": [
-            {
-                "candidate_id": "a",
-                "family": "peak_drawdown_rebound",
-                "min_drawdown_fraction": "0.4",
-                "confirmation_rebound_fraction": "0.25",
-            },
-            {
-                "candidate_id": "b",
-                "family": "peak_drawdown_rebound",
-                "min_drawdown_fraction": "0.6",
-                "confirmation_rebound_fraction": "0.4",
-            },
-        ],
-    }
-
-
-def test_candidate_plan_is_research_only():
-    plan = build_phase2_dump_candidate_dispatch_plan(
-        geometry_completion(), grid()
+def test_candidate_plan_freezes_explicit_grid_without_selection():
+    report = build_phase2_dump_candidate_research_plan(
+        geometry_completion()
     )
-    assert plan["candidate_count"] == 2
-    assert plan["candidate_selected"] is False
-    assert json.loads(plan["candidate_specs_json"])[0]["candidate_id"] == "a"
-    validated = validate_phase2_dump_candidate_dispatch_plan(plan)
-    assert validated["candidate_count"] == 2
+    assert report["candidate_count"] == 9
+    assert len(report["candidate_specs"]) == 9
+    assert report["candidate_selected"] is False
+    assert report["uses_outcome_labels"] is False
+    assert report["candidate_specs_sha256"] == candidate_specs_sha256()
+    assert json.loads(report["candidate_specs_json"]) == list(
+        RESEARCH_CANDIDATE_SPECS
+    )
+    validate_phase2_dump_candidate_research_plan(report)
 
 
-def test_candidate_plan_rejects_selection_semantics():
-    row = grid()
-    row["semantics"] = "pick_best"
-    with pytest.raises(ValueError, match="semantics changed"):
-        build_phase2_dump_candidate_dispatch_plan(
-            geometry_completion(), row
-        )
-
-
-def launch_receipt():
+def candidate_completion():
     return {
-        "version": "phase2-dump-candidate-launch-receipt-v1",
-        "candidate_control_run_id": 12101,
-        "candidate_plan_run_id": 12102,
-        "candidate_plan_artifact_digest": "sha256:" + "31" * 32,
-        "candidate_research_run_id": 12103,
+        "version": "phase2-dump-candidate-research-completion-receipt-v1",
+        "candidate_completion_control_run_id": 11100,
+        "candidate_launch_run_id": 11101,
+        "candidate_launch_artifact_digest": "sha256:" + "21" * 32,
+        "candidate_research_run_id": 11102,
+        "candidate_artifact_digest": "sha256:" + "22" * 32,
+        "candidate_handoff_artifact_digest": "sha256:" + "23" * 32,
+        "candidate_handoff_sha256": "24" * 32,
+        "candidate_rows_sha256": "25" * 32,
+        "candidate_specs_sha256": candidate_specs_sha256(),
+        "candidate_summary_sha256": "26" * 32,
         "execution_branch": "phase1/data-acquisition-spike",
-        "execution_head_sha": "32" * 20,
-        "canonical_ledger_commit_sha": "32" * 20,
-        "candidate_specs_sha256": "33" * 32,
-        "candidate_count": 24,
-        "target_runs_created": 1,
-        "target_run_waited_for_completion": False,
+        "execution_head_sha": "27" * 20,
+        "canonical_ledger_commit_sha": "27" * 20,
+        "tokens": 500,
+        "candidate_rows": 4500,
+        "candidates": 9,
+        "diagnostics_inputs": {
+            "candidate_research_run_id": "11102",
+            "expected_candidate_artifact_digest": "sha256:" + "22" * 32,
+            "expected_candidate_handoff_sha256": "24" * 32,
+        },
+        "candidate_research_ready": True,
+        "uses_outcome_labels": False,
         "candidate_selected": False,
+        "detector_freeze_ready": False,
         "dump_threshold_frozen": False,
         "phase2_dump_detector_frozen": False,
         "outcome_labels_computed": False,
-        "workflow_dispatch_performed": True,
-    }
-
-
-def test_candidate_launch_cannot_select_detector():
-    report = validate_phase2_dump_candidate_launch_receipt(
-        launch_receipt()
-    )
-    assert report["candidate_count"] == 24
-    row = launch_receipt()
-    row["candidate_selected"] = True
-    with pytest.raises(ValueError, match="selects candidate"):
-        validate_phase2_dump_candidate_launch_receipt(row)
-
-
-def completion_receipt():
-    launch = launch_receipt()
-    return {
-        "version": "phase2-dump-candidate-completion-receipt-v1",
-        "candidate_completion_control_run_id": 12201,
-        "candidate_launch_run_id": 12202,
-        "candidate_launch_artifact_digest": "sha256:" + "41" * 32,
-        "candidate_research_run_id": launch["candidate_research_run_id"],
-        "candidate_research_artifact_digest": "sha256:" + "42" * 32,
-        "candidate_research_handoff_artifact_digest": "sha256:" + "43" * 32,
-        "candidate_research_handoff_sha256": "44" * 32,
-        "candidate_specs_sha256": "45" * 32,
-        "candidate_rows_sha256": "46" * 32,
-        "candidate_summary_sha256": "47" * 32,
-        "candidate_count": 24,
-        "tokens": 100,
-        "candidate_rows": 2400,
-        "diagnostics_inputs": {
-            "candidate_research_run_id": "12103",
-            "expected_candidate_artifact_digest": "sha256:" + "42" * 32,
-            "expected_candidate_handoff_sha256": "44" * 32,
-        },
         "target_run_completed": True,
         "target_run_successful": True,
-        "uses_price_path_only": True,
-        "point_in_time_confirmation": True,
-        "candidate_selected": False,
-        "dump_threshold_frozen": False,
-        "phase2_dump_detector_frozen": False,
-        "outcome_labels_computed": False,
         "workflow_dispatch_performed": False,
     }
 
 
 def test_candidate_completion_emits_diagnostics_inputs():
     report = validate_phase2_dump_candidate_completion_receipt(
-        completion_receipt()
+        candidate_completion()
     )
-    assert report["candidate_rows"] == 2400
     assert report["diagnostics_inputs"]["candidate_research_run_id"] == (
-        "12103"
+        "11102"
     )
+
+
+def diagnostics_completion():
+    return {
+        "version": "phase2-dump-candidate-diagnostics-completion-receipt-v1",
+        "diagnostics_completion_control_run_id": 11200,
+        "diagnostics_launch_run_id": 11201,
+        "diagnostics_launch_artifact_digest": "sha256:" + "31" * 32,
+        "diagnostics_run_id": 11202,
+        "diagnostics_artifact_digest": "sha256:" + "32" * 32,
+        "diagnostics_handoff_sha256": "33" * 32,
+        "diagnostics_sha256": "34" * 32,
+        "diagnostics_summary_sha256": "35" * 32,
+        "candidate_research_run_id": 11102,
+        "candidate_artifact_digest": "sha256:" + "22" * 32,
+        "candidate_handoff_sha256": "24" * 32,
+        "candidate_specs_sha256": candidate_specs_sha256(),
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "36" * 20,
+        "canonical_ledger_commit_sha": "36" * 20,
+        "candidates": 9,
+        "detector_freeze_base_inputs": {
+            "candidate_research_run_id": "11102",
+            "expected_candidate_artifact_digest": "sha256:" + "22" * 32,
+            "expected_candidate_handoff_sha256": "24" * 32,
+            "diagnostics_run_id": "11202",
+            "expected_diagnostics_artifact_digest": "sha256:" + "32" * 32,
+            "expected_diagnostics_handoff_sha256": "33" * 32,
+        },
+        "selected_candidate_id": None,
+        "selected_candidate_id_required": True,
+        "uses_outcome_labels": False,
+        "candidate_selected": False,
+        "detector_freeze_ready": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "workflow_dispatch_performed": False,
+    }
+
+
+def test_diagnostics_completion_stops_at_explicit_selection_gate():
+    report = validate_phase2_dump_diagnostics_completion_receipt(
+        diagnostics_completion()
+    )
+    assert report["selected_candidate_id"] is None
+    assert report["selected_candidate_id_required"] is True
+    assert report["detector_freeze_ready"] is False
+
+
+def test_diagnostics_completion_rejects_hidden_selection():
+    row = diagnostics_completion()
+    row["selected_candidate_id"] = "dd40-rb25"
+    with pytest.raises(ValueError, match="selected a candidate"):
+        validate_phase2_dump_diagnostics_completion_receipt(row)

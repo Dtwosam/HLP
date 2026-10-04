@@ -1,0 +1,157 @@
+name: phase2-dump-candidate-research-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-dump-candidate-research-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact candidate-research launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-dump-candidate-research-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify candidate comparison and publish diagnostics inputs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase2_dump_candidate_dispatch import (
+              CANDIDATE_RESEARCH_WORKFLOW,
+              candidate_specs_sha256,
+              validate_phase2_dump_candidate_launch_receipt,
+              validate_phase2_dump_candidate_completion_receipt,
+          )
+          from hlp.data.phase2_dump_research import (
+              PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION,
+              build_phase2_dump_candidate_handoff,
+          )
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def identity(row,workflow,run_id):
+              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+                  raise SystemExit(f"run {run_id} identity drift")
+          def wait(run_id,workflow):
+              deadline=time.monotonic()+6300
+              while True:
+                  row=api(f"actions/runs/{run_id}"); identity(row,workflow,run_id)
+                  if row.get("status")=="completed":
+                      if row.get("conclusion")!="success": raise SystemExit(f"candidate run {run_id} failed: {row.get('conclusion')}")
+                      return
+                  if time.monotonic()>=deadline: raise SystemExit(f"candidate run {run_id} timed out")
+                  time.sleep(15)
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[])
+              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"]); lr=api(f"actions/runs/{launch_run}")
+          identity(lr,"phase2-dump-candidate-research-launch.yml",launch_run)
+          if lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("candidate launch is not successful")
+          lname="phase2-dump-candidate-research-launch"; la=artifact(launch_run,lname)
+          actual_launch=str(la.get("digest") or "").lower()
+          if actual_launch!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("candidate launch digest drift")
+          lroot=Path("upstream/launch")
+          if lroot.exists(): shutil.rmtree(lroot)
+          lroot.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(launch_run),"--repo",repo,"--name",lname,"--dir",str(lroot)])
+          launch=validate_phase2_dump_candidate_launch_receipt(json.loads((lroot/"phase2-dump-candidate-research-launch-receipt.json").read_text()))
+          target=launch["candidate_research_run_id"]; wait(target,CANDIDATE_RESEARCH_WORKFLOW)
+          name="phase2-dump-candidate-research"; art=artifact(target,name)
+          compact=artifact(target,"phase2-dump-candidate-research-handoff")
+          root=Path("upstream/candidates")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(target),"--repo",repo,"--name",name,"--dir",str(root)])
+          summary_path=root/"phase2-dump-candidate-research-summary.json"
+          handoff_path=root/"phase2-dump-candidate-research-handoff.json"
+          manifest_path=root/"phase2-dump-candidate-research.jsonl.manifest.json"
+          summary=json.loads(summary_path.read_text()); handoff=json.loads(handoff_path.read_text()); manifest=json.loads(manifest_path.read_text())
+          if handoff.get("version")!=PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION: raise SystemExit("candidate handoff version drift")
+          summary_sha=sha(summary_path)
+          rebuilt=build_phase2_dump_candidate_handoff(summary,research_summary_sha256=summary_sha,geometry_handoff_sha256=handoff["geometry_handoff_sha256"])
+          if rebuilt!=handoff: raise SystemExit("candidate handoff content drift")
+          if str(summary.get("candidate_specs_sha256") or "").lower()!=candidate_specs_sha256(): raise SystemExit("candidate spec SHA drift")
+          rows_sha=str(manifest.get("sha256") or "").lower()
+          if rows_sha!=handoff["candidate_rows_sha256"]: raise SystemExit("candidate rows SHA drift")
+          if int(manifest.get("records",-1))!=int(handoff["candidate_rows"]): raise SystemExit("candidate row count drift")
+          candidates=len(summary.get("candidate_specs") or [])
+          receipt={
+              "version":"phase2-dump-candidate-research-completion-receipt-v1",
+              "candidate_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "candidate_launch_run_id":launch_run,
+              "candidate_launch_artifact_digest":actual_launch,
+              "candidate_research_run_id":target,
+              "candidate_artifact_digest":str(art.get("digest") or "").lower(),
+              "candidate_handoff_artifact_digest":str(compact.get("digest") or "").lower(),
+              "candidate_handoff_sha256":sha(handoff_path),
+              "candidate_rows_sha256":rows_sha,
+              "candidate_specs_sha256":summary["candidate_specs_sha256"],
+              "candidate_summary_sha256":summary_sha,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "tokens":int(handoff["tokens"]),
+              "candidate_rows":int(handoff["candidate_rows"]),
+              "candidates":candidates,
+              "diagnostics_inputs":{
+                  "candidate_research_run_id":str(target),
+                  "expected_candidate_artifact_digest":str(art.get("digest") or "").lower(),
+                  "expected_candidate_handoff_sha256":sha(handoff_path),
+              },
+              "candidate_research_ready":True,
+              "uses_outcome_labels":False,
+              "candidate_selected":False,
+              "detector_freeze_ready":False,
+              "dump_threshold_frozen":False,
+              "phase2_dump_detector_frozen":False,
+              "outcome_labels_computed":False,
+              "target_run_completed":True,
+              "target_run_successful":True,
+              "workflow_dispatch_performed":False,
+          }
+          receipt=validate_phase2_dump_candidate_completion_receipt(receipt)
+          Path("artifacts/phase2-dump-candidate-research-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"candidate_run_id={target}\n")
+              h.write(f"candidate_artifact_digest={receipt['candidate_artifact_digest']}\n")
+              h.write(f"candidate_handoff_sha256={receipt['candidate_handoff_sha256']}\n")
+          PY
+      - name: Upload candidate completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-candidate-research-completion
+          path: artifacts/phase2-dump-candidate-research-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
