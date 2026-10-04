@@ -1,0 +1,509 @@
+name: phase2-eligibility-wave-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-eligibility-wave-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact eligibility-wave launch receipt artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-eligibility-wave-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+  EXPECTED_LAUNCH_ARTIFACT_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: complete
+        name: Verify all eligibility handoffs and freeze universe inputs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.direct_eligibility import (
+              DIRECT_ELIGIBILITY_HANDOFF_VERSION,
+          )
+          from hlp.data.phase2_eligibility import (
+              PHASE2_LAUNCHPAD_ELIGIBILITY_VERSION,
+          )
+          from hlp.data.phase2_eligibility_dispatch import (
+              DIRECT_ELIGIBILITY_WORKFLOW,
+              DIRECT_SOURCES,
+              LAUNCHPAD_ELIGIBILITY_WORKFLOW,
+              LAUNCHPAD_SOURCES,
+              validate_phase2_eligibility_wave_completion_receipt,
+              validate_phase2_eligibility_wave_launch_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args):
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ])
+              return json.loads(raw) if raw.strip() else None
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              if run.get("path") != f".github/workflows/{workflow}":
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def wait_run(run_id, *, workflow, timeout_seconds=2700):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  run = get_run(run_id)
+                  assert_run_identity(
+                      run,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if str(run.get("status") or "") == "completed":
+                      if str(run.get("conclusion") or "") != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with "
+                              f"{run.get('conclusion')!r}"
+                          )
+                      return run
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} timed out"
+                      )
+                  time.sleep(5)
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download_artifact(run_id, name, destination):
+              root = Path(destination)
+              if root.exists():
+                  shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(root),
+              ])
+              return root
+
+          def sha256_path(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          try:
+              launch_run_id = int(os.environ["LAUNCH_RUN_ID"])
+          except (TypeError, ValueError) as exc:
+              raise SystemExit("launch_run_id is invalid") from exc
+          if launch_run_id <= 0:
+              raise SystemExit("launch_run_id must be positive")
+          expected_digest = str(
+              os.environ["EXPECTED_LAUNCH_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_launch_artifact_digest must be sha256:<64 hex chars>"
+              )
+
+          launch_workflow = "phase2-eligibility-wave-launch.yml"
+          launch_run = wait_run(
+              launch_run_id,
+              workflow=launch_workflow,
+          )
+          launch_artifact_name = "phase2-eligibility-wave-launch"
+          launch_artifact = artifact_row(
+              launch_run_id,
+              launch_artifact_name,
+          )
+          actual_launch_digest = str(
+              launch_artifact.get("digest") or ""
+          ).lower()
+          if actual_launch_digest != expected_digest:
+              raise SystemExit(
+                  "eligibility launch artifact digest drift"
+              )
+          launch_root = download_artifact(
+              launch_run_id,
+              launch_artifact_name,
+              "upstream/eligibility-launch",
+          )
+          launch_path = (
+              launch_root
+              / "phase2-eligibility-wave-launch-receipt.json"
+          )
+          try:
+              launch = validate_phase2_eligibility_wave_launch_receipt(
+                  json.loads(launch_path.read_text())
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          if launch["eligibility_wave_control_run_id"] != launch_run_id:
+              raise SystemExit(
+                  "eligibility launch receipt/control identity drift"
+              )
+          if launch["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "eligibility launch receipt HEAD drift"
+              )
+
+          launchpad_handoffs = {}
+          for source in LAUNCHPAD_SOURCES:
+              run_id = int(launch["launchpad_run_ids"][source])
+              wait_run(
+                  run_id,
+                  workflow=LAUNCHPAD_ELIGIBILITY_WORKFLOW,
+              )
+              name = f"phase2-launchpad-eligibility-{source}"
+              artifact = artifact_row(run_id, name)
+              root = download_artifact(
+                  run_id,
+                  name,
+                  f"upstream/launchpad-{source}",
+              )
+              summary_path = (
+                  root / "phase2-source-eligibility-summary.json"
+              )
+              manifest_path = (
+                  root / "phase2-source-eligibility.jsonl.manifest.json"
+              )
+              rows_path = root / "phase2-source-eligibility.jsonl"
+              for path in (
+                  summary_path,
+                  manifest_path,
+                  rows_path,
+              ):
+                  if not path.is_file():
+                      raise SystemExit(
+                          f"{source} eligibility artifact lacks {path.name}"
+                      )
+              summary = json.loads(summary_path.read_text())
+              manifest = json.loads(manifest_path.read_text())
+              if summary.get("version") != (
+                  PHASE2_LAUNCHPAD_ELIGIBILITY_VERSION
+              ):
+                  raise SystemExit(
+                      f"{source} eligibility summary version drift"
+                  )
+              if summary.get("source_id") != source:
+                  raise SystemExit(
+                      f"{source} eligibility summary source drift"
+                  )
+              for field in (
+                  "canonical_price_series",
+                  "source_coverage_complete",
+                  "phase2_universe_source_ready",
+              ):
+                  if summary.get(field) is not True:
+                      raise SystemExit(
+                          f"{source} eligibility lost {field}"
+                      )
+              if summary.get("phase2_universe_frozen") is not False:
+                  raise SystemExit(
+                      f"{source} eligibility prematurely freezes universe"
+                  )
+              rows_sha = sha256_path(rows_path)
+              if str(manifest.get("sha256") or "").lower() != rows_sha:
+                  raise SystemExit(
+                      f"{source} eligibility manifest SHA drift"
+                  )
+              if int(manifest.get("records", -1)) != int(
+                  summary.get("tokens", -2)
+              ):
+                  raise SystemExit(
+                      f"{source} eligibility record count drift"
+                  )
+              launchpad_handoffs[source] = {
+                  "run_id": run_id,
+                  "artifact_digest": str(
+                      artifact.get("digest") or ""
+                  ).lower(),
+                  "summary_sha256": sha256_path(summary_path),
+              }
+
+          direct_run_id = int(launch["direct_run_id"])
+          wait_run(
+              direct_run_id,
+              workflow=DIRECT_ELIGIBILITY_WORKFLOW,
+          )
+          direct_name = "phase2-direct-eligibility-handoff"
+          direct_artifact = artifact_row(
+              direct_run_id,
+              direct_name,
+          )
+          direct_root = download_artifact(
+              direct_run_id,
+              direct_name,
+              "upstream/direct-eligibility",
+          )
+          direct_path = (
+              direct_root / "direct-eligibility-handoff.json"
+          )
+          if not direct_path.is_file():
+              raise SystemExit(
+                  "direct eligibility artifact lacks handoff"
+              )
+          direct_handoff = json.loads(direct_path.read_text())
+          if direct_handoff.get("version") != (
+              DIRECT_ELIGIBILITY_HANDOFF_VERSION
+          ):
+              raise SystemExit(
+                  "direct eligibility handoff version drift"
+              )
+          for field in (
+              "canonical_price_series",
+              "source_coverage_complete",
+              "phase2_universe_source_ready",
+          ):
+              if direct_handoff.get(field) is not True:
+                  raise SystemExit(
+                      f"direct eligibility lost {field}"
+                  )
+          if direct_handoff.get("phase2_universe_frozen") is not False:
+              raise SystemExit(
+                  "direct eligibility prematurely freezes universe"
+              )
+          manifests = direct_handoff.get(
+              "source_eligibility_manifests"
+          )
+          summaries = direct_handoff.get("source_summaries")
+          if not isinstance(manifests, dict) or set(manifests) != set(
+              DIRECT_SOURCES
+          ):
+              raise SystemExit(
+                  "direct eligibility manifest source set drift"
+              )
+          if not isinstance(summaries, dict) or set(summaries) != set(
+              DIRECT_SOURCES
+          ):
+              raise SystemExit(
+                  "direct eligibility summary source set drift"
+              )
+          for source in DIRECT_SOURCES:
+              rows_path = (
+                  direct_root
+                  / f"phase2-source-eligibility-{source}.jsonl"
+              )
+              manifest_path = Path(str(rows_path) + ".manifest.json")
+              if not rows_path.is_file() or not manifest_path.is_file():
+                  raise SystemExit(
+                      f"{source} direct eligibility files are missing"
+                  )
+              manifest = json.loads(manifest_path.read_text())
+              actual_sha = sha256_path(rows_path)
+              expected_manifest = manifests[source]
+              if actual_sha != str(
+                  expected_manifest.get("sha256") or ""
+              ).lower():
+                  raise SystemExit(
+                      f"{source} direct eligibility SHA drift"
+                  )
+              if str(manifest.get("sha256") or "").lower() != actual_sha:
+                  raise SystemExit(
+                      f"{source} direct manifest SHA drift"
+                  )
+              if int(manifest.get("records", -1)) != int(
+                  expected_manifest.get("records", -2)
+              ):
+                  raise SystemExit(
+                      f"{source} direct eligibility record drift"
+                  )
+              summary = summaries[source]
+              if summary.get("source_id") != source:
+                  raise SystemExit(
+                      f"{source} direct eligibility summary drift"
+                  )
+              if summary.get(
+                  "phase2_universe_source_ready"
+              ) is not True:
+                  raise SystemExit(
+                      f"{source} direct eligibility is not universe-ready"
+                  )
+
+          receipt = {
+              "version": (
+                  "phase2-eligibility-wave-completion-receipt-v1"
+              ),
+              "eligibility_completion_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "eligibility_wave_launch_run_id": launch_run_id,
+              "eligibility_wave_launch_artifact_digest": (
+                  actual_launch_digest
+              ),
+              "plan_run_id": launch["plan_run_id"],
+              "plan_artifact_digest": launch["plan_artifact_digest"],
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_ledger_commit_sha": launch[
+                  "canonical_ledger_commit_sha"
+              ],
+              "launchpad_handoffs": launchpad_handoffs,
+              "direct_handoff": {
+                  "run_id": direct_run_id,
+                  "artifact_digest": str(
+                      direct_artifact.get("digest") or ""
+                  ).lower(),
+                  "handoff_sha256": sha256_path(direct_path),
+              },
+              "eligibility_runs_completed": 12,
+              "all_eligibility_runs_successful": True,
+              "phase2_universe_coverage_complete": True,
+              "phase2_universe_sources_ready": True,
+              "phase2_universe_frozen": False,
+              "canonical_coverage_ledger_mutated": False,
+              "workflow_dispatch_performed": False,
+          }
+          try:
+              receipt = (
+                  validate_phase2_eligibility_wave_completion_receipt(
+                      receipt
+                  )
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          output = Path(
+              "artifacts/"
+              "phase2-eligibility-wave-completion-receipt.json"
+          )
+          output.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"launchpad_handoffs_json="
+                  + json.dumps(
+                      receipt["launchpad_handoffs"],
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              handle.write(
+                  f"direct_run_id={receipt['direct_handoff']['run_id']}\n"
+              )
+              handle.write(
+                  "direct_artifact_digest="
+                  f"{receipt['direct_handoff']['artifact_digest']}\n"
+              )
+              handle.write(
+                  "direct_handoff_sha256="
+                  f"{receipt['direct_handoff']['handoff_sha256']}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload eligibility-wave completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-eligibility-wave-completion
+          path: artifacts/phase2-eligibility-wave-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish universe-freeze input summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          LAUNCHPAD_HANDOFFS_JSON: ${{ steps.complete.outputs.launchpad_handoffs_json }}
+          DIRECT_RUN_ID: ${{ steps.complete.outputs.direct_run_id }}
+          DIRECT_ARTIFACT_DIGEST: ${{ steps.complete.outputs.direct_artifact_digest }}
+          DIRECT_HANDOFF_SHA256: ${{ steps.complete.outputs.direct_handoff_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 eligibility wave completion"
+            echo
+            echo "- eligibility_completion_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- eligibility_runs_completed: 12"
+            echo "- launchpad_handoffs_json: ${LAUNCHPAD_HANDOFFS_JSON}"
+            echo "- direct_run_id: ${DIRECT_RUN_ID}"
+            echo "- expected_direct_artifact_digest: ${DIRECT_ARTIFACT_DIGEST}"
+            echo "- expected_direct_handoff_sha256: ${DIRECT_HANDOFF_SHA256}"
+            echo "- phase2_universe_sources_ready: true"
+            echo "- phase2_universe_frozen: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

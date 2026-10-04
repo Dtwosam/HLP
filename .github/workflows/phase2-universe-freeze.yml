@@ -1,0 +1,638 @@
+name: phase2-universe-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      launchpad_handoffs_json:
+        description: JSON map of all 11 launchpad eligibility handoffs
+        required: true
+        type: string
+      direct_run_id:
+        description: Exact phase2-direct-eligibility-handoff run ID
+        required: true
+        type: string
+      expected_direct_artifact_digest:
+        description: Exact direct eligibility artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_direct_handoff_sha256:
+        description: Exact SHA-256 of direct-eligibility-handoff.json
+        required: true
+        type: string
+      exclusion_run_id:
+        description: Exact phase2-exclusion-registry run ID
+        required: true
+        type: string
+      expected_exclusion_artifact_digest:
+        description: Exact exclusion-registry artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_exclusion_summary_sha256:
+        description: Exact SHA-256 of phase2-exclusion-registry-summary.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-universe-freeze-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  LAUNCHPAD_HANDOFFS_JSON: ${{ inputs.launchpad_handoffs_json }}
+  DIRECT_RUN_ID: ${{ inputs.direct_run_id }}
+  EXPECTED_DIRECT_ARTIFACT_DIGEST: ${{ inputs.expected_direct_artifact_digest }}
+  EXPECTED_DIRECT_HANDOFF_SHA256: ${{ inputs.expected_direct_handoff_sha256 }}
+  EXCLUSION_RUN_ID: ${{ inputs.exclusion_run_id }}
+  EXPECTED_EXCLUSION_ARTIFACT_DIGEST: ${{ inputs.expected_exclusion_artifact_digest }}
+  EXPECTED_EXCLUSION_SUMMARY_SHA256: ${{ inputs.expected_exclusion_summary_sha256 }}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Require canonical 14/14 source coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from hlp.data.phase2_coverage import (
+              validate_phase2_coverage_ledger,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          report = validate_phase2_coverage_ledger(
+              ledger,
+              build_phase2_source_inventory(),
+          )
+          if report["phase2_universe_coverage_complete"] is not True:
+              raise SystemExit(
+                  "Phase-2 universe freeze requires 14/14 complete coverage"
+              )
+          if len(report["complete_source_ids"]) != 14:
+              raise SystemExit(
+                  "Phase-2 universe freeze complete-source count changed"
+              )
+          print(json.dumps(report, sort_keys=True))
+          PY
+
+      - name: Validate launchpad handoff manifest
+        run: |
+          mkdir -p inputs
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          expected = {
+              "pons_v1",
+              "pons_v2",
+              "pools_fun",
+              "pools_trade_instant",
+              "pools_trade_lbp",
+              "doppler",
+              "flap",
+              "trench_today",
+              "hood_fun_current",
+              "hood_fun_previous",
+              "noxa",
+          }
+          try:
+              payload = json.loads(os.environ["LAUNCHPAD_HANDOFFS_JSON"])
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "launchpad_handoffs_json is not valid JSON"
+              ) from exc
+          if not isinstance(payload, dict) or set(payload) != expected:
+              raise SystemExit(
+                  "launchpad handoff source set must be exactly 11 sources"
+              )
+          normalized = {}
+          for source in sorted(expected):
+              raw = payload[source]
+              if not isinstance(raw, dict):
+                  raise SystemExit(
+                      f"{source}: launchpad handoff must be an object"
+                  )
+              run_id = int(raw.get("run_id", 0))
+              digest = str(raw.get("artifact_digest") or "").lower()
+              summary_sha = str(
+                  raw.get("summary_sha256") or ""
+              ).lower().removeprefix("sha256:")
+              if run_id <= 0:
+                  raise SystemExit(f"{source}: invalid run_id")
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      f"{source}: invalid artifact_digest"
+                  )
+              if len(summary_sha) != 64:
+                  raise SystemExit(
+                      f"{source}: invalid summary_sha256"
+                  )
+              try:
+                  int(digest.removeprefix("sha256:"), 16)
+                  int(summary_sha, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{source}: handoff SHA is not hexadecimal"
+                  ) from exc
+              normalized[source] = {
+                  "run_id": run_id,
+                  "artifact_digest": digest,
+                  "summary_sha256": summary_sha,
+              }
+          Path("inputs/launchpad-handoffs.json").write_text(
+              json.dumps(normalized, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Verify and download exact universe inputs
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          launchpads = json.loads(
+              Path("inputs/launchpad-handoffs.json").read_text()
+          )
+          specs = []
+          for source, row in launchpads.items():
+              specs.append((
+                  source,
+                  int(row["run_id"]),
+                  f"phase2-launchpad-eligibility-{source}",
+                  row["artifact_digest"],
+                  f"inputs/sources/{source}",
+              ))
+          specs.extend([
+              (
+                  "direct",
+                  int(os.environ["DIRECT_RUN_ID"]),
+                  "phase2-direct-eligibility-handoff",
+                  os.environ["EXPECTED_DIRECT_ARTIFACT_DIGEST"].lower(),
+                  "inputs/direct",
+              ),
+              (
+                  "exclusions",
+                  int(os.environ["EXCLUSION_RUN_ID"]),
+                  "phase2-exclusion-registry",
+                  os.environ["EXPECTED_EXCLUSION_ARTIFACT_DIGEST"].lower(),
+                  "inputs/exclusions",
+              ),
+          ])
+
+          for label, run_id, name, expected, destination in specs:
+              if not expected.startswith("sha256:"):
+                  raise SystemExit(
+                      f"{label}: expected digest must use sha256:<hex>"
+                  )
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                      f"actions/runs/{run_id}/artifacts?name={name}"
+                  ),
+              ])
+              payload = json.loads(raw)
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{label}: expected one artifact; "
+                      f"found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(f"{label}: artifact is expired")
+              actual = str(artifact.get("digest") or "").lower()
+              if actual != expected:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected}"
+                  )
+              Path(destination).mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  os.environ["GITHUB_REPOSITORY"],
+                  "--name",
+                  name,
+                  "--dir",
+                  destination,
+              ])
+          PY
+
+      - id: freeze
+        name: Assemble and freeze Phase-2 universe
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.data.phase2_exclusions import (
+              PHASE2_EXCLUSION_REGISTRY_VERSION,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+          from hlp.data.phase2_universe import build_phase2_universe
+          from hlp.data.phase2_universe_bundle import (
+              validate_phase2_universe_source_bundle,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          LAUNCHPAD_SOURCES = (
+              "pons_v1",
+              "pons_v2",
+              "pools_fun",
+              "pools_trade_instant",
+              "pools_trade_lbp",
+              "doppler",
+              "flap",
+              "trench_today",
+              "hood_fun_current",
+              "hood_fun_previous",
+              "noxa",
+          )
+          DIRECT_SOURCES = (
+              "direct_uniswap_v3",
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+          )
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def expected_sha(name):
+              value = os.environ[name].lower().removeprefix("sha256:")
+              if len(value) != 64:
+                  raise SystemExit(f"{name} is not a SHA-256")
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{name} is not hexadecimal"
+                  ) from exc
+              return value
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_bytes = ledger_path.read_bytes()
+          ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+          ledger = json.loads(ledger_bytes)
+          inventory = build_phase2_source_inventory()
+          launchpad_manifest = json.loads(
+              Path("inputs/launchpad-handoffs.json").read_text()
+          )
+
+          source_rows = {}
+          source_summaries = {}
+          source_handoffs = {}
+
+          for source in LAUNCHPAD_SOURCES:
+              root = Path("inputs/sources") / source
+              summary_path = (
+                  root / "phase2-source-eligibility-summary.json"
+              )
+              expected_summary_sha = launchpad_manifest[source][
+                  "summary_sha256"
+              ]
+              actual_summary_sha = sha256_path(summary_path)
+              if actual_summary_sha != expected_summary_sha:
+                  raise SystemExit(
+                      f"{source} eligibility summary SHA drift"
+                  )
+              summary = json.loads(summary_path.read_text())
+              if summary.get("source_id") != source:
+                  raise SystemExit(
+                      f"{source} eligibility summary source drift"
+                  )
+              if summary.get(
+                  "phase2_universe_source_ready"
+              ) is not True:
+                  raise SystemExit(
+                      f"{source} eligibility is not universe-ready"
+                  )
+              if summary.get("phase2_universe_frozen") is not False:
+                  raise SystemExit(
+                      f"{source} eligibility prematurely freezes universe"
+                  )
+              eligibility_path = (
+                  root / "phase2-source-eligibility.jsonl"
+              )
+              actual_eligibility_sha = sha256_path(eligibility_path)
+              if actual_eligibility_sha != summary.get(
+                  "normalized_eligibility_sha256"
+              ):
+                  raise SystemExit(
+                      f"{source} normalized eligibility SHA drift"
+                  )
+              rows = [
+                  json.loads(line)
+                  for line in eligibility_path.read_text().splitlines()
+                  if line.strip()
+              ]
+              if len(rows) != int(summary.get("tokens", -1)):
+                  raise SystemExit(
+                      f"{source} eligibility token count drift"
+                  )
+              source_rows[source] = rows
+              source_summaries[source] = summary
+              source_handoffs[source] = {
+                  "run_id": int(
+                      launchpad_manifest[source]["run_id"]
+                  ),
+                  "artifact_digest": launchpad_manifest[source][
+                      "artifact_digest"
+                  ],
+                  "summary_sha256": actual_summary_sha,
+                  "eligibility_sha256": actual_eligibility_sha,
+              }
+
+          direct_root = Path("inputs/direct")
+          direct_handoff_path = (
+              direct_root / "direct-eligibility-handoff.json"
+          )
+          direct_handoff_sha = sha256_path(direct_handoff_path)
+          if direct_handoff_sha != expected_sha(
+              "EXPECTED_DIRECT_HANDOFF_SHA256"
+          ):
+              raise SystemExit("direct eligibility handoff SHA drift")
+          direct_handoff = json.loads(direct_handoff_path.read_text())
+          if direct_handoff.get(
+              "phase2_universe_source_ready"
+          ) is not True:
+              raise SystemExit(
+                  "direct eligibility handoff is not universe-ready"
+              )
+          if direct_handoff.get("phase2_universe_frozen") is not False:
+              raise SystemExit(
+                  "direct eligibility handoff prematurely freezes universe"
+              )
+          direct_manifests = direct_handoff.get(
+              "source_eligibility_manifests"
+          ) or {}
+          direct_summaries = direct_handoff.get("source_summaries") or {}
+          if set(direct_manifests) != set(DIRECT_SOURCES):
+              raise SystemExit(
+                  "direct eligibility source manifest set changed"
+              )
+          if set(direct_summaries) != set(DIRECT_SOURCES):
+              raise SystemExit(
+                  "direct eligibility source summary set changed"
+              )
+          for source in DIRECT_SOURCES:
+              path = (
+                  direct_root
+                  / f"phase2-source-eligibility-{source}.jsonl"
+              )
+              digest = sha256_path(path)
+              if digest != direct_manifests[source]["sha256"]:
+                  raise SystemExit(
+                      f"{source} direct eligibility SHA drift"
+                  )
+              rows = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+              if len(rows) != int(direct_manifests[source]["records"]):
+                  raise SystemExit(
+                      f"{source} direct eligibility record drift"
+                  )
+              source_rows[source] = rows
+              source_summaries[source] = dict(
+                  direct_summaries[source]
+              )
+              source_handoffs[source] = {
+                  "run_id": int(os.environ["DIRECT_RUN_ID"]),
+                  "artifact_digest": os.environ[
+                      "EXPECTED_DIRECT_ARTIFACT_DIGEST"
+                  ].lower(),
+                  "handoff_sha256": direct_handoff_sha,
+                  "eligibility_sha256": digest,
+              }
+
+          exclusion_root = Path("inputs/exclusions")
+          exclusion_summary_path = (
+              exclusion_root / "phase2-exclusion-registry-summary.json"
+          )
+          exclusion_summary_sha = sha256_path(
+              exclusion_summary_path
+          )
+          if exclusion_summary_sha != expected_sha(
+              "EXPECTED_EXCLUSION_SUMMARY_SHA256"
+          ):
+              raise SystemExit("exclusion summary SHA drift")
+          exclusion_summary = json.loads(
+              exclusion_summary_path.read_text()
+          )
+          if exclusion_summary.get("version") != (
+              PHASE2_EXCLUSION_REGISTRY_VERSION
+          ):
+              raise SystemExit("exclusion registry version changed")
+          if exclusion_summary.get(
+              "registry_acceptance_ready"
+          ) is not True:
+              raise SystemExit("exclusion registry is not acceptance-ready")
+          if exclusion_summary.get(
+              "phase2_universe_frozen"
+          ) is not False:
+              raise SystemExit(
+                  "exclusion registry prematurely freezes universe"
+              )
+          exclusion_path = (
+              exclusion_root / "phase2-exclusion-registry.jsonl"
+          )
+          exclusion_sha = sha256_path(exclusion_path)
+          if exclusion_sha != exclusion_summary.get(
+              "exclusion_registry_sha256"
+          ):
+              raise SystemExit("exclusion registry SHA drift")
+          exclusions = [
+              json.loads(line)
+              for line in exclusion_path.read_text().splitlines()
+              if line.strip()
+          ]
+
+          bundle = validate_phase2_universe_source_bundle(
+              source_summaries,
+              coverage_ledger=ledger,
+              source_inventory=inventory,
+          )
+
+          universe, rejected, summary = build_phase2_universe(
+              source_rows,
+              source_inventory=inventory,
+              coverage_ledger=ledger,
+              exclusion_rows=exclusions,
+          )
+          if summary["phase2_universe_frozen"] is not True:
+              raise SystemExit(
+                  "Phase-2 universe assembly did not freeze universe"
+              )
+
+          provenance_payload = {
+              "version": "phase2-universe-provenance-v1",
+              "chain_id": 4663,
+              "snapshot_head_block": int(
+                  summary["snapshot_head_block"]
+              ),
+              "coverage_ledger_sha256": ledger_sha,
+              "source_handoffs": source_handoffs,
+              "direct_handoff_sha256": direct_handoff_sha,
+              "exclusion_run_id": int(os.environ["EXCLUSION_RUN_ID"]),
+              "exclusion_artifact_digest": os.environ[
+                  "EXPECTED_EXCLUSION_ARTIFACT_DIGEST"
+              ].lower(),
+              "exclusion_summary_sha256": exclusion_summary_sha,
+              "exclusion_registry_sha256": exclusion_sha,
+          }
+          provenance_bytes = (
+              json.dumps(
+                  provenance_payload,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ) + "\n"
+          ).encode()
+          provenance_sha = hashlib.sha256(
+              provenance_bytes
+          ).hexdigest()
+          Path(
+              "artifacts/phase2-universe-provenance.json"
+          ).write_bytes(provenance_bytes)
+
+          universe_manifest = write_jsonl_snapshot(
+              universe,
+              output=Path("artifacts/phase2-eligible-universe.jsonl"),
+              provenance={
+                  **provenance_payload,
+                  "provenance_sha256": provenance_sha,
+              },
+          )
+          rejected_manifest = write_jsonl_snapshot(
+              rejected,
+              output=Path("artifacts/phase2-universe-rejected.jsonl"),
+              provenance={
+                  **provenance_payload,
+                  "provenance_sha256": provenance_sha,
+              },
+          )
+          final_summary = {
+              **summary,
+              "source_bundle": bundle,
+              "coverage_ledger_sha256": ledger_sha,
+              "eligibility_provenance_sha256": provenance_sha,
+              "eligible_universe_sha256": universe_manifest["sha256"],
+              "rejected_universe_sha256": rejected_manifest["sha256"],
+              "exclusion_registry_sha256": exclusion_sha,
+          }
+          summary_text = (
+              json.dumps(final_summary, indent=2, sort_keys=True)
+              + "\n"
+          )
+          summary_path = Path(
+              "artifacts/phase2-universe-summary.json"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode("utf-8")
+          ).hexdigest()
+
+          handoff = {
+              "version": "phase2-universe-freeze-handoff-v1",
+              "snapshot_head_block": int(
+                  summary["snapshot_head_block"]
+              ),
+              "eligible_universe_sha256": universe_manifest["sha256"],
+              "rejected_universe_sha256": rejected_manifest["sha256"],
+              "universe_summary_sha256": summary_sha,
+              "coverage_ledger_sha256": ledger_sha,
+              "eligibility_provenance_sha256": provenance_sha,
+              "eligible_tokens": int(summary["eligible_tokens"]),
+              "phase2_universe_coverage_complete": True,
+              "phase2_universe_frozen": True,
+          }
+          handoff_path = Path(
+              "artifacts/phase2-universe-freeze-handoff.json"
+          )
+          handoff_path.write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_sha = sha256_path(handoff_path)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"universe_sha256={universe_manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+
+      - name: Upload frozen Phase-2 universe
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-universe-freeze
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish frozen-universe identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_SHA256: ${{ steps.freeze.outputs.handoff_sha256 }}
+          UNIVERSE_SHA256: ${{ steps.freeze.outputs.universe_sha256 }}
+          SUMMARY_SHA256: ${{ steps.freeze.outputs.summary_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_SHA256}"
+          test -n "${UNIVERSE_SHA256}"
+          test -n "${SUMMARY_SHA256}"
+          {
+            echo "## Frozen Phase-2 universe"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-universe-freeze"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- eligible_universe_sha256: ${UNIVERSE_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- coverage_complete: true"
+            echo "- phase2_universe_frozen: true"
+          } >> "${GITHUB_STEP_SUMMARY}"

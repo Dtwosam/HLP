@@ -1,0 +1,299 @@
+name: phase2-universe-freeze-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      eligibility_completion_run_id:
+        description: Exact successful phase2-eligibility-wave-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_completion_artifact_digest:
+        description: Exact eligibility completion artifact digest (sha256:...)
+        required: true
+        type: string
+      exclusion_run_id:
+        description: Exact successful phase2-exclusion-registry workflow_dispatch run ID
+        required: true
+        type: string
+      expected_exclusion_artifact_digest:
+        description: Exact exclusion-registry artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-universe-freeze-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ELIGIBILITY_COMPLETION_RUN_ID: ${{ inputs.eligibility_completion_run_id }}
+  EXPECTED_COMPLETION_ARTIFACT_DIGEST: ${{ inputs.expected_completion_artifact_digest }}
+  EXCLUSION_RUN_ID: ${{ inputs.exclusion_run_id }}
+  EXPECTED_EXCLUSION_ARTIFACT_DIGEST: ${{ inputs.expected_exclusion_artifact_digest }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: plan
+        name: Bind exact eligibility and exclusion evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_eligibility_dispatch import (
+              validate_phase2_eligibility_wave_completion_receipt,
+          )
+          from hlp.data.phase2_exclusions import (
+              PHASE2_EXCLUSION_REGISTRY_VERSION,
+          )
+          from hlp.data.phase2_universe_freeze_dispatch import (
+              build_phase2_universe_freeze_dispatch_plan,
+              validate_phase2_universe_freeze_dispatch_plan,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(path):
+              return json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/{path}",
+                  ])
+              )
+
+          def successful_run(run_id, workflow):
+              row = gh_json(f"actions/runs/{run_id}")
+              if row.get("path") != f".github/workflows/{workflow}":
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if row.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if row.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(row.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+              if row.get("status") != "completed":
+                  raise SystemExit(f"run {run_id} is not completed")
+              if row.get("conclusion") != "success":
+                  raise SystemExit(f"run {run_id} did not succeed")
+              return row
+
+          def artifact_row(run_id, name, expected_digest):
+              payload = gh_json(
+                  f"actions/runs/{run_id}/artifacts?name={name}"
+              )
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              row = matches[0]
+              actual = str(row.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{name} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              return row
+
+          def download(run_id, name, destination):
+              root = Path(destination)
+              if root.exists():
+                  shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(root),
+              ])
+              return root
+
+          def sha256_path(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          completion_run_id = int(
+              os.environ["ELIGIBILITY_COMPLETION_RUN_ID"]
+          )
+          exclusion_run_id = int(os.environ["EXCLUSION_RUN_ID"])
+          if completion_run_id <= 0 or exclusion_run_id <= 0:
+              raise SystemExit("freeze-plan run IDs must be positive")
+
+          successful_run(
+              completion_run_id,
+              "phase2-eligibility-wave-completion.yml",
+          )
+          completion_name = "phase2-eligibility-wave-completion"
+          completion_artifact = artifact_row(
+              completion_run_id,
+              completion_name,
+              os.environ["EXPECTED_COMPLETION_ARTIFACT_DIGEST"],
+          )
+          completion_root = download(
+              completion_run_id,
+              completion_name,
+              "upstream/eligibility-completion",
+          )
+          completion_path = (
+              completion_root
+              / "phase2-eligibility-wave-completion-receipt.json"
+          )
+          completion = validate_phase2_eligibility_wave_completion_receipt(
+              json.loads(completion_path.read_text())
+          )
+          if completion[
+              "eligibility_completion_control_run_id"
+          ] != completion_run_id:
+              raise SystemExit(
+                  "eligibility completion receipt/control drift"
+              )
+          if completion["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "eligibility completion receipt HEAD drift"
+              )
+
+          successful_run(
+              exclusion_run_id,
+              "phase2-exclusion-registry.yml",
+          )
+          exclusion_name = "phase2-exclusion-registry"
+          exclusion_artifact = artifact_row(
+              exclusion_run_id,
+              exclusion_name,
+              os.environ["EXPECTED_EXCLUSION_ARTIFACT_DIGEST"],
+          )
+          exclusion_root = download(
+              exclusion_run_id,
+              exclusion_name,
+              "upstream/exclusions",
+          )
+          exclusion_summary_path = (
+              exclusion_root
+              / "phase2-exclusion-registry-summary.json"
+          )
+          if not exclusion_summary_path.is_file():
+              raise SystemExit("exclusion summary is missing")
+          exclusion_summary = json.loads(
+              exclusion_summary_path.read_text()
+          )
+          if exclusion_summary.get("version") != (
+              PHASE2_EXCLUSION_REGISTRY_VERSION
+          ):
+              raise SystemExit("exclusion summary version drift")
+          if exclusion_summary.get("registry_acceptance_ready") is not True:
+              raise SystemExit("exclusion registry is not acceptance-ready")
+          if exclusion_summary.get("phase2_universe_frozen") is not False:
+              raise SystemExit(
+                  "exclusion registry prematurely freezes universe"
+              )
+          exclusion_binding = {
+              "run_id": exclusion_run_id,
+              "artifact_name": exclusion_name,
+              "artifact_digest": str(
+                  exclusion_artifact.get("digest") or ""
+              ).lower(),
+              "summary_sha256": sha256_path(exclusion_summary_path),
+              "registry_acceptance_ready": True,
+              "phase2_universe_frozen": False,
+          }
+
+          plan = build_phase2_universe_freeze_dispatch_plan(
+              completion,
+              exclusion_binding,
+          )
+          plan["eligibility_completion_artifact_digest"] = str(
+              completion_artifact.get("digest") or ""
+          ).lower()
+          plan = validate_phase2_universe_freeze_dispatch_plan(plan)
+          output = Path(
+              "artifacts/phase2-universe-freeze-dispatch-plan.json"
+          )
+          output.write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  "launchpad_handoffs_json="
+                  + plan["inputs"]["launchpad_handoffs_json"]
+                  + "\n"
+              )
+              handle.write(
+                  f"direct_run_id={plan['inputs']['direct_run_id']}\n"
+              )
+              handle.write(
+                  "exclusion_run_id="
+                  f"{plan['inputs']['exclusion_run_id']}\n"
+              )
+          print(json.dumps(plan, sort_keys=True))
+          PY
+
+      - name: Upload universe-freeze dispatch plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-universe-freeze-dispatch-plan
+          path: artifacts/phase2-universe-freeze-dispatch-plan.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish universe-freeze plan summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          DIRECT_RUN_ID: ${{ steps.plan.outputs.direct_run_id }}
+          EXCLUSION_RUN_ID: ${{ steps.plan.outputs.exclusion_run_id }}
+        run: |
+          {
+            echo "## Phase-2 universe-freeze plan"
+            echo
+            echo "- plan_run_id: ${GITHUB_RUN_ID}"
+            echo "- plan_artifact_name: phase2-universe-freeze-dispatch-plan"
+            echo "- plan_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- launchpad_handoffs: 11"
+            echo "- direct_run_id: ${DIRECT_RUN_ID}"
+            echo "- exclusion_run_id: ${EXCLUSION_RUN_ID}"
+            echo "- phase2_universe_sources_ready: true"
+            echo "- workflow_dispatch_performed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
