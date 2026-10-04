@@ -113,7 +113,7 @@ def test_candidate_completion_emits_diagnostics_inputs():
 
 def diagnostics_completion():
     return {
-        "version": "phase2-dump-candidate-diagnostics-completion-receipt-v1",
+        "version": "phase2-dump-diagnostics-completion-receipt-v1",
         "diagnostics_completion_control_run_id": 11200,
         "diagnostics_launch_run_id": 11201,
         "diagnostics_launch_artifact_digest": "sha256:" + "31" * 32,
