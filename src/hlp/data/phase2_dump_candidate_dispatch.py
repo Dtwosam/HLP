@@ -187,6 +187,13 @@ def build_phase2_dump_candidate_research_plan(
         "geometry_handoff_sha256": geometry[
             "geometry_handoff_sha256"
         ],
+        "price_path_run_id": geometry["price_path_run_id"],
+        "price_path_artifact_digest": geometry[
+            "price_path_artifact_digest"
+        ],
+        "price_path_handoff_sha256": geometry[
+            "price_path_handoff_sha256"
+        ],
         "candidate_specs": canonical_candidate_specs(),
         "candidate_specs_json": specs_json,
         "candidate_specs_sha256": specs_sha,

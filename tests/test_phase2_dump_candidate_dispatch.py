@@ -59,6 +59,9 @@ def test_candidate_plan_freezes_explicit_grid_without_selection():
     assert report["candidate_selected"] is False
     assert report["uses_outcome_labels"] is False
     assert report["candidate_specs_sha256"] == candidate_specs_sha256()
+    assert report["price_path_run_id"] == 11004
+    assert report["price_path_artifact_digest"] == "sha256:" + "18" * 32
+    assert report["price_path_handoff_sha256"] == "19" * 32
     assert json.loads(report["candidate_specs_json"]) == list(
         RESEARCH_CANDIDATE_SPECS
     )
