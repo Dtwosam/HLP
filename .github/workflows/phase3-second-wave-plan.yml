@@ -1,0 +1,68 @@
+name: phase3-second-wave-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      first_wave_completion_run_id:
+        description: Exact successful phase3-first-wave-completion run ID
+        required: true
+        type: string
+      expected_first_wave_completion_artifact_digest:
+        description: Exact first-wave completion artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPLETION_RUN_ID: ${{ inputs.first_wave_completion_run_id }}
+      EXPECTED_COMPLETION_DIGEST: ${{ inputs.expected_first_wave_completion_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Build transfer-dependent Phase-3 feature wave
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase3_first_wave_dispatch import validate_phase3_first_wave_completion_receipt
+          from hlp.data.phase3_second_wave_dispatch import build_phase3_second_wave_plan,validate_phase3_second_wave_plan
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]; head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          run_id=int(os.environ["COMPLETION_RUN_ID"]); row=api(f"actions/runs/{run_id}")
+          if row.get("path")!=".github/workflows/phase3-first-wave-completion.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head or row.get("status")!="completed" or row.get("conclusion")!="success": raise SystemExit("first-wave completion identity/status drift")
+          rows=api(f"actions/runs/{run_id}/artifacts?name=phase3-first-wave-completion").get("artifacts",[]); rows=[x for x in rows if x.get("name")=="phase3-first-wave-completion" and not x.get("expired")]
+          if len(rows)!=1: raise SystemExit("first-wave completion artifact cardinality drift")
+          actual=str(rows[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_COMPLETION_DIGEST"].lower(): raise SystemExit("first-wave completion digest drift")
+          root=Path("upstream/completion")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name","phase3-first-wave-completion","--dir",str(root)])
+          first=validate_phase3_first_wave_completion_receipt(json.loads((root/"phase3-first-wave-completion-receipt.json").read_text()))
+          plan=validate_phase3_second_wave_plan(build_phase3_second_wave_plan(first))
+          Path("artifacts/phase3-second-wave-plan.json").write_text(json.dumps(plan,indent=2,sort_keys=True)+"\n")
+          PY
+      - name: Upload second-wave plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-second-wave-plan
+          path: artifacts/phase3-second-wave-plan.json
+          if-no-files-found: error
+          retention-days: 90
