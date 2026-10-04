@@ -1,0 +1,126 @@
+name: phase2-research-price-path-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      materialization_completion_run_id:
+        description: Exact successful phase2-research-materialization-freeze-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_completion_artifact_digest:
+        description: Exact materialization-freeze completion artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-research-price-path-launch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPLETION_RUN_ID: ${{ inputs.materialization_completion_run_id }}
+      EXPECTED_COMPLETION_DIGEST: ${{ inputs.expected_completion_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: launch
+        name: Dispatch canonical research price path
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64,json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dispatch_readiness import workflow_dispatch_interface_sha256
+          from hlp.data.phase2_research_materialization_dispatch import (
+              validate_phase2_research_materialization_freeze_completion_receipt,
+          )
+          from hlp.data.phase2_research_price_path_dispatch import (
+              PRICE_PATH_WORKFLOW,
+              build_price_path_launch_receipt,
+          )
+
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(args,payload=None):
+              raw=subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",*args],input=(json.dumps(payload,sort_keys=True,separators=(",",":")).encode() if payload is not None else None))
+              return json.loads(raw) if raw.strip() else None
+          def identity(row,workflow,run_id):
+              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+                  raise SystemExit(f"run {run_id} identity drift")
+          def artifact(run_id,name):
+              rows=api([f"/repos/{repo}/actions/runs/{run_id}/artifacts?name={name}"]).get("artifacts",[])
+              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+
+          completion_run=int(os.environ["COMPLETION_RUN_ID"])
+          row=api([f"/repos/{repo}/actions/runs/{completion_run}"])
+          identity(row,"phase2-research-materialization-freeze-completion.yml",completion_run)
+          if row.get("status")!="completed" or row.get("conclusion")!="success":
+              raise SystemExit("materialization-freeze completion is not successful")
+          name="phase2-research-materialization-freeze-completion"; art=artifact(completion_run,name)
+          actual=str(art.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_COMPLETION_DIGEST"].lower():
+              raise SystemExit("materialization-freeze completion digest drift")
+          root=Path("upstream/completion")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(completion_run),"--repo",repo,"--name",name,"--dir",str(root)])
+          completion=validate_phase2_research_materialization_freeze_completion_receipt(json.loads((root/"phase2-research-materialization-freeze-completion-receipt.json").read_text()))
+          if completion["execution_head_sha"]!=head:
+              raise SystemExit("materialization-freeze completion HEAD drift")
+
+          metadata=api([f"/repos/{repo}"]); default_branch=str(metadata.get("default_branch") or "")
+          local=workflow_dispatch_interface_sha256(Path(".github/workflows",PRICE_PATH_WORKFLOW).read_text())
+          payload=api([f"/repos/{repo}/contents/.github/workflows/{PRICE_PATH_WORKFLOW}?ref={default_branch}"])
+          remote=workflow_dispatch_interface_sha256(base64.b64decode(str(payload.get("content") or "").replace("\n","")).decode())
+          if local!=remote: raise SystemExit("default-branch price-path interface drift")
+
+          response=api(["--method","POST",f"/repos/{repo}/actions/workflows/{PRICE_PATH_WORKFLOW}/dispatches","--input","-"],{"ref":branch,"inputs":completion["price_path_inputs"]})
+          target=int((response or {}).get("workflow_run_id",0))
+          if target<=0: raise SystemExit("price-path dispatch lacks run ID")
+          target_row=api([f"/repos/{repo}/actions/runs/{target}"]); identity(target_row,PRICE_PATH_WORKFLOW,target)
+          receipt=build_price_path_launch_receipt(
+              completion,
+              control_run_id=int(os.environ["GITHUB_RUN_ID"]),
+              completion_run_id=completion_run,
+              completion_artifact_digest=actual,
+              price_path_run_id=target,
+          )
+          Path("artifacts/phase2-research-price-path-launch-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h: h.write(f"price_path_run_id={target}\n")
+          PY
+      - name: Upload price-path launch receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-price-path-launch
+          path: artifacts/phase2-research-price-path-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish price-path launch summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          PRICE_PATH_RUN_ID: ${{ steps.launch.outputs.price_path_run_id }}
+        run: |
+          {
+            echo "## Phase-2 research price-path launch"
+            echo "- launch_run_id: ${GITHUB_RUN_ID}"
+            echo "- launch_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- price_path_run_id: ${PRICE_PATH_RUN_ID}"
+            echo "- target_runs_created: 1"
+          } >> "${GITHUB_STEP_SUMMARY}"
