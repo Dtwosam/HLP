@@ -1,0 +1,452 @@
+name: phase2-outcome-labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      detector_freeze_run_id:
+        description: Exact phase2-dump-detector-freeze run ID
+        required: true
+        type: string
+      expected_detector_artifact_digest:
+        description: Exact detector-freeze artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_detector_handoff_sha256:
+        description: Exact SHA-256 of phase2-dump-detector-freeze-handoff.json
+        required: true
+        type: string
+      price_path_run_id:
+        description: Exact phase2-research-price-path run ID
+        required: true
+        type: string
+      expected_price_path_artifact_digest:
+        description: Exact research price-path artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_price_path_handoff_sha256:
+        description: Exact SHA-256 of phase2-research-price-path-handoff.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-outcome-labels-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DETECTOR_RUN_ID: ${{ inputs.detector_freeze_run_id }}
+  EXPECTED_DETECTOR_ARTIFACT_DIGEST: ${{ inputs.expected_detector_artifact_digest }}
+  EXPECTED_DETECTOR_HANDOFF_SHA256: ${{ inputs.expected_detector_handoff_sha256 }}
+  PRICE_PATH_RUN_ID: ${{ inputs.price_path_run_id }}
+  EXPECTED_PRICE_PATH_ARTIFACT_DIGEST: ${{ inputs.expected_price_path_artifact_digest }}
+  EXPECTED_PRICE_PATH_HANDOFF_SHA256: ${{ inputs.expected_price_path_handoff_sha256 }}
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: labels
+        name: Compute continuous post-dump outcomes
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_dump_research import (
+              build_phase2_dump_detector_freeze_handoff,
+          )
+          from hlp.data.phase2_outcomes import (
+              build_phase2_outcome_handoff,
+              materialize_phase2_outcome_labels,
+          )
+          from hlp.data.phase2_research_paths import (
+              build_phase2_research_price_path_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          detector_root = Path("inputs/detector")
+          price_root = Path("inputs/price-path")
+          download_named(
+              int(os.environ["DETECTOR_RUN_ID"]),
+              "phase2-dump-detector-freeze",
+              detector_root,
+              "frozen dump detector",
+              os.environ["EXPECTED_DETECTOR_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["PRICE_PATH_RUN_ID"]),
+              "phase2-research-price-path",
+              price_root,
+              "research price path",
+              os.environ["EXPECTED_PRICE_PATH_ARTIFACT_DIGEST"],
+          )
+
+          detector_rows_path = find_unique(
+              detector_root,
+              "phase2-dump-detector-events.jsonl",
+          )
+          detector_manifest_path = find_unique(
+              detector_root,
+              "phase2-dump-detector-events.jsonl.manifest.json",
+          )
+          detector_manifest = json.loads(
+              detector_manifest_path.read_text()
+          )
+          detector_summary_path = find_unique(
+              detector_root,
+              "phase2-dump-detector-freeze-summary.json",
+          )
+          detector_summary = json.loads(
+              detector_summary_path.read_text()
+          )
+          detector_summary_sha = sha256_path(detector_summary_path)
+          detector_handoff_path = find_unique(
+              detector_root,
+              "phase2-dump-detector-freeze-handoff.json",
+          )
+          detector_handoff_sha = sha256_path(detector_handoff_path)
+          if detector_handoff_sha != os.environ[
+              "EXPECTED_DETECTOR_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("dump detector freeze handoff SHA drift")
+          detector_handoff = json.loads(
+              detector_handoff_path.read_text()
+          )
+          rebuilt_detector_handoff = (
+              build_phase2_dump_detector_freeze_handoff(
+                  detector_summary,
+                  freeze_summary_sha256=detector_summary_sha,
+                  candidate_research_handoff_sha256=detector_summary[
+                      "candidate_research_handoff_sha256"
+                  ],
+                  candidate_diagnostics_handoff_sha256=detector_summary[
+                      "candidate_diagnostics_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_detector_handoff != detector_handoff:
+              raise SystemExit(
+                  "dump detector freeze handoff content drift"
+              )
+          if detector_manifest.get("sha256") != detector_handoff[
+              "detector_rows_sha256"
+          ]:
+              raise SystemExit("dump detector rows manifest SHA drift")
+          if int(detector_manifest.get("records", -1)) != int(
+              detector_handoff["detector_rows"]
+          ):
+              raise SystemExit("dump detector rows record count drift")
+          if detector_handoff.get(
+              "phase2_dump_detector_frozen"
+          ) is not True:
+              raise SystemExit("dump detector is not frozen")
+          if detector_handoff.get(
+              "outcome_labels_computed"
+          ) is not False:
+              raise SystemExit(
+                  "outcome workflow cannot consume labeled detector"
+              )
+
+          price_data_path = find_unique(
+              price_root,
+              "phase2-research-price-path.jsonl",
+          )
+          price_manifest_path = find_unique(
+              price_root,
+              "phase2-research-price-path.jsonl.manifest.json",
+          )
+          price_manifest = json.loads(price_manifest_path.read_text())
+          price_report_path = find_unique(
+              price_root,
+              "phase2-research-price-path-report.json",
+          )
+          price_report = json.loads(price_report_path.read_text())
+          price_report_sha = sha256_path(price_report_path)
+          price_handoff_path = find_unique(
+              price_root,
+              "phase2-research-price-path-handoff.json",
+          )
+          price_handoff_sha = sha256_path(price_handoff_path)
+          if price_handoff_sha != os.environ[
+              "EXPECTED_PRICE_PATH_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("research price-path handoff SHA drift")
+          price_handoff = json.loads(price_handoff_path.read_text())
+          rebuilt_price_handoff = build_phase2_research_price_path_handoff(
+              price_report,
+              report_sha256=price_report_sha,
+              materialization_bundle_sha256=price_report[
+                  "materialization_bundle_sha256"
+              ],
+              materialization_handoff_sha256=price_report[
+                  "materialization_handoff_sha256"
+              ],
+          )
+          if rebuilt_price_handoff != price_handoff:
+              raise SystemExit(
+                  "research price-path handoff content drift"
+              )
+          if price_manifest.get("sha256") != price_handoff[
+              "normalized_price_path_sha256"
+          ]:
+              raise SystemExit(
+                  "research price-path manifest SHA drift"
+              )
+          if int(price_manifest.get("records", -1)) != int(
+              price_handoff["price_points"]
+          ):
+              raise SystemExit(
+                  "research price-path record count drift"
+              )
+
+          if detector_handoff["universe_sha256"] != price_handoff[
+              "universe_sha256"
+          ]:
+              raise SystemExit(
+                  "outcome detector/price-path universe linkage drift"
+              )
+          if detector_handoff[
+              "normalized_price_path_sha256"
+          ] != price_handoff["normalized_price_path_sha256"]:
+              raise SystemExit(
+                  "outcome detector/price-path SHA linkage drift"
+              )
+          if int(detector_handoff["snapshot_head_block"]) != int(
+              price_handoff["snapshot_head_block"]
+          ):
+              raise SystemExit(
+                  "outcome detector/price-path snapshot linkage drift"
+              )
+
+          output = Path("artifacts/phase2-outcome-labels.jsonl")
+          manifest, summary = materialize_phase2_outcome_labels(
+              iter_validated_jsonl(
+                  detector_rows_path,
+                  detector_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  price_data_path,
+                  price_manifest_path,
+              ),
+              detector_summary=detector_summary,
+              price_path_handoff=price_handoff,
+              output=output,
+          )
+          summary.update({
+              "detector_freeze_run_id": int(
+                  os.environ["DETECTOR_RUN_ID"]
+              ),
+              "detector_freeze_handoff_sha256": detector_handoff_sha,
+              "price_path_run_id": int(
+                  os.environ["PRICE_PATH_RUN_ID"]
+              ),
+              "price_path_handoff_sha256": price_handoff_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase2-outcome-labels-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase2_outcome_handoff(
+              summary,
+              outcome_summary_sha256=summary_sha,
+              detector_freeze_handoff_sha256=detector_handoff_sha,
+              price_path_handoff_sha256=price_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase2-outcome-labels-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"outcome_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"confirmed_dump_tokens={summary['confirmed_dump_tokens']}\n"
+              )
+              handle.write(
+                  f"comeback_5x_tokens={summary['comeback_5x_tokens']}\n"
+              )
+          print(json.dumps({
+              "outcome_rows_sha256": manifest["sha256"],
+              "outcome_summary_sha256": summary_sha,
+              "outcome_handoff_sha256": handoff_sha,
+              "confirmed_dump_tokens": summary[
+                  "confirmed_dump_tokens"
+              ],
+              "comeback_5x_tokens": summary["comeback_5x_tokens"],
+              "max_post_dump_multiple_retained": True,
+              "post_dump_base_semantics": "retrospective_trough",
+              "live_signal_semantics": "confirmation_event",
+              "phase2_dump_detector_frozen": True,
+              "outcome_labels_computed": True,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-2 outcome labels
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-outcome-labels
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact outcome handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-outcome-labels-handoff
+          path: |
+            artifacts/phase2-outcome-labels.jsonl.manifest.json
+            artifacts/phase2-outcome-labels-summary.json
+            artifacts/phase2-outcome-labels-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish outcome-label identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          OUTCOME_ROWS_SHA256: ${{ steps.labels.outputs.outcome_rows_sha256 }}
+          SUMMARY_SHA256: ${{ steps.labels.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.labels.outputs.handoff_sha256 }}
+          CONFIRMED: ${{ steps.labels.outputs.confirmed_dump_tokens }}
+          COMEBACK_5X: ${{ steps.labels.outputs.comeback_5x_tokens }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-2 continuous outcome labels"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-outcome-labels"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase2-outcome-labels-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- outcome_rows_sha256: ${OUTCOME_ROWS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- confirmed_dump_tokens: ${CONFIRMED}"
+            echo "- comeback_5x_tokens: ${COMEBACK_5X}"
+            echo "- max_post_dump_multiple_retained: true"
+            echo "- post_dump_base_semantics: retrospective_trough"
+            echo "- live_signal_semantics: confirmation_event"
+            echo "- phase2_dump_detector_frozen: true"
+            echo "- outcome_labels_computed: true"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,923 @@
+name: phase2-research-materialize-pons
+
+on:
+  workflow_dispatch:
+    inputs:
+      rehydration_plan_run_id:
+        description: Exact phase2-research-rehydration-plan run ID
+        required: true
+        type: string
+      expected_plan_artifact_digest:
+        description: Exact rehydration-plan artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_plan_sha256:
+        description: Exact SHA-256 of phase2-research-rehydration-plan.json
+        required: true
+        type: string
+      universe_run_id:
+        description: Exact phase2-universe-freeze run ID
+        required: true
+        type: string
+      expected_universe_artifact_digest:
+        description: Exact frozen-universe artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_universe_handoff_sha256:
+        description: Exact SHA-256 of phase2-universe-freeze-handoff.json
+        required: true
+        type: string
+      component_id:
+        description: Pons source to replay
+        required: true
+        type: choice
+        options:
+          - pons_v1
+          - pons_v2
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-pons-${{ inputs.component_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLAN_RUN_ID: ${{ inputs.rehydration_plan_run_id }}
+  EXPECTED_PLAN_ARTIFACT_DIGEST: ${{ inputs.expected_plan_artifact_digest }}
+  EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+  UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
+  EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
+  EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
+  COMPONENT_ID: ${{ inputs.component_id }}
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: materialize
+        name: Replay accepted Pons lifecycle into research tapes
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import zipfile
+          import io
+          from pathlib import Path
+
+          from hlp.config import normalize_address
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_pons_research_artifacts import (
+              discover_artifact_by_manifest,
+              materialize_bound_shards,
+          )
+          from hlp.data.phase2_pons_research_inputs import (
+              resolve_accepted_pons_replay_inputs,
+          )
+          from hlp.data.phase2_pons_research_materializer import (
+              materialize_pons_v1_research,
+              materialize_pons_v2_research,
+          )
+          from hlp.data.phase2_research_rehydration import (
+              build_phase2_research_rehydration_plan,
+              build_phase2_research_rehydration_seed,
+          )
+          from hlp.data.phase2_research_source_layouts import (
+              build_phase2_research_source_layouts,
+              validate_phase2_research_source_layouts,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+          from hlp.data.pons_v1_v3_artifacts import (
+              resolve_v1_v3_canonical_shard_bindings,
+          )
+          from hlp.data.pons_v2_v4_artifacts import (
+              resolve_v2_v4_canonical_shard_bindings,
+          )
+
+          source_id = os.environ["COMPONENT_ID"]
+          if source_id not in {"pons_v1", "pons_v2"}:
+              raise SystemExit(f"unsupported Pons research component: {source_id}")
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          artifact_cache = {}
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def canonical_sha(payload):
+              raw = (
+                  json.dumps(
+                      payload,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              ).encode()
+              return hashlib.sha256(raw).hexdigest()
+
+          def artifact_rows(run_id):
+              run_id = int(run_id)
+              if run_id in artifact_cache:
+                  return artifact_cache[run_id]
+              output = []
+              page = 1
+              while True:
+                  payload = fetch_github_actions_json(
+                      (
+                          api
+                          + f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                          + f"?per_page=100&page={page}"
+                      ),
+                      token,
+                      timeout=30,
+                  )
+                  rows = list(payload.get("artifacts") or [])
+                  output.extend(rows)
+                  if len(rows) < 100:
+                      break
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+              artifact_cache[run_id] = output
+              return output
+
+          def artifact_zip(row):
+              return fetch_github_actions_artifact_zip(
+                  (
+                      api
+                      + f"/repos/{repo}/actions/artifacts/"
+                      + f"{int(row['id'])}/zip"
+                  ),
+                  token,
+              )
+
+          def selected_named(run_id, name, label, expected_digest=None):
+              matches = [
+                  row
+                  for row in artifact_rows(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == str(name)
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if expected_digest is not None:
+                  expected = str(expected_digest).lower()
+                  if actual != expected:
+                      raise SystemExit(
+                          f"{label} artifact digest drift: "
+                          f"{actual} != {expected}"
+                      )
+              return dict(selected)
+
+          def download_selected(run_id, name, destination, *, label, expected_digest=None):
+              selected = selected_named(
+                  run_id,
+                  name,
+                  label,
+                  expected_digest=expected_digest,
+              )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(int(run_id)),
+                  "--repo",
+                  repo,
+                  "--name",
+                  str(name),
+                  "--dir",
+                  str(destination),
+              ])
+              return selected
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(str(name))
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          def verify_manifest(root, expected, label):
+              path = find_unique(
+                  root,
+                  expected["manifest_filename"],
+              )
+              manifest = json.loads(path.read_text())
+              if str(manifest.get("sha256") or "").lower() != str(
+                  expected["sha256"]
+              ).lower():
+                  raise SystemExit(f"{label} manifest SHA drift")
+              if int(manifest.get("records", -1)) != int(
+                  expected["records"]
+              ):
+                  raise SystemExit(f"{label} manifest record-count drift")
+              return path
+
+          def verify_root_artifact(label, run_id, name, digest, destination):
+              selected = download_selected(
+                  int(run_id),
+                  name,
+                  destination,
+                  label=label,
+                  expected_digest=digest,
+              )
+              if selected.get("expired"):
+                  raise SystemExit(f"{label} artifact is expired")
+              return selected
+
+          plan_root = Path("inputs/plan")
+          universe_root = Path("inputs/universe")
+          verify_root_artifact(
+              "rehydration plan",
+              int(os.environ["PLAN_RUN_ID"]),
+              "phase2-research-rehydration-plan",
+              os.environ["EXPECTED_PLAN_ARTIFACT_DIGEST"],
+              plan_root,
+          )
+          verify_root_artifact(
+              "frozen universe",
+              int(os.environ["UNIVERSE_RUN_ID"]),
+              "phase2-universe-freeze",
+              os.environ["EXPECTED_UNIVERSE_ARTIFACT_DIGEST"],
+              universe_root,
+          )
+
+          plan_path = find_unique(
+              plan_root,
+              "phase2-research-rehydration-plan.json",
+          )
+          plan_sha = sha256_path(plan_path)
+          expected_plan_sha = os.environ[
+              "EXPECTED_PLAN_SHA256"
+          ].lower().removeprefix("sha256:")
+          if plan_sha != expected_plan_sha:
+              raise SystemExit("rehydration plan SHA drift")
+          plan = json.loads(plan_path.read_text())
+          seed = json.loads(
+              find_unique(
+                  plan_root,
+                  "phase2-research-rehydration-seed.json",
+              ).read_text()
+          )
+          if build_phase2_research_rehydration_plan(
+              seed,
+              plan["launchpad_bindings"],
+              plan["direct_binding"],
+          ) != plan:
+              raise SystemExit("rehydration plan content drift")
+
+          handoff_path = find_unique(
+              universe_root,
+              "phase2-universe-freeze-handoff.json",
+          )
+          expected_handoff_sha = os.environ[
+              "EXPECTED_UNIVERSE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if sha256_path(handoff_path) != expected_handoff_sha:
+              raise SystemExit("frozen-universe handoff SHA drift")
+          handoff = json.loads(handoff_path.read_text())
+          universe_summary = json.loads(
+              find_unique(
+                  universe_root,
+                  "phase2-universe-summary.json",
+              ).read_text()
+          )
+          universe_provenance = json.loads(
+              find_unique(
+                  universe_root,
+                  "phase2-universe-provenance.json",
+              ).read_text()
+          )
+          universe_path = find_unique(
+              universe_root,
+              "phase2-eligible-universe.jsonl",
+          )
+          universe_sha = sha256_path(universe_path)
+          if universe_sha != plan["eligible_universe_sha256"]:
+              raise SystemExit("Pons universe SHA disagrees with plan")
+          if build_phase2_research_rehydration_seed(
+              universe_summary,
+              universe_provenance,
+              handoff,
+              source_inventory=build_phase2_source_inventory(),
+              universe_sha256=universe_sha,
+          ) != seed:
+              raise SystemExit(
+                  "Pons frozen-universe seed disagrees with plan"
+              )
+
+          layouts = build_phase2_research_source_layouts()
+          validate_phase2_research_source_layouts(
+              layouts,
+              build_phase2_source_inventory(),
+          )
+          layout = layouts[source_id]
+          if layout["strategy"] != "canonical_replay":
+              raise SystemExit(
+                  f"{source_id}: research layout is not canonical replay"
+              )
+
+          binding = dict(plan["launchpad_bindings"].get(source_id) or {})
+          if not binding:
+              raise SystemExit(f"{source_id}: launchpad binding missing")
+          if binding.get("requires_price_rehydration") is not True:
+              raise SystemExit(
+                  f"{source_id}: plan unexpectedly skips Pons replay"
+              )
+          binding_sha = canonical_sha(binding)
+
+          accepted_root = Path("inputs/accepted")
+          accepted_artifact = download_selected(
+              int(binding["eligibility_run_id"]),
+              str(binding["eligibility_artifact_name"]),
+              accepted_root,
+              label=f"{source_id} accepted lifecycle",
+              expected_digest=binding["eligibility_artifact_digest"],
+          )
+          accepted_path = (
+              accepted_root
+              / Path(binding["eligibility_summary_path"])
+          )
+          if not accepted_path.is_file():
+              accepted_path = find_unique(
+                  accepted_root,
+                  Path(binding["eligibility_summary_path"]).name,
+              )
+          if sha256_path(accepted_path) != binding[
+              "eligibility_summary_sha256"
+          ]:
+              raise SystemExit(
+                  f"{source_id}: accepted lifecycle summary SHA drift"
+              )
+          accepted_manifest_path = accepted_path.with_suffix(
+              accepted_path.suffix + ".manifest.json"
+          )
+          if not accepted_manifest_path.is_file():
+              accepted_manifest_path = find_unique(
+                  accepted_root,
+                  accepted_path.name + ".manifest.json",
+              )
+          accepted_manifest = json.loads(
+              accepted_manifest_path.read_text()
+          )
+          if accepted_manifest.get("sha256") != binding[
+              "eligibility_summary_sha256"
+          ]:
+              raise SystemExit(
+                  f"{source_id}: accepted lifecycle manifest SHA drift"
+              )
+
+          validation_name = (
+              "pons-v1-input-manifest-validation.json"
+              if source_id == "pons_v1"
+              else "pons-v2-input-manifest-validation.json"
+          )
+          validation_report = json.loads(
+              find_unique(
+                  accepted_root,
+                  validation_name,
+              ).read_text()
+          )
+          resolved = resolve_accepted_pons_replay_inputs(
+              source_id,
+              accepted_manifest,
+              validation_report,
+              snapshot_head_block=int(plan["snapshot_head_block"]),
+          )
+          if resolved["accepted_lifecycle_manifest_sha256"] != binding[
+              "eligibility_summary_sha256"
+          ]:
+              raise SystemExit(
+                  f"{source_id}: accepted lifecycle binding drift"
+              )
+
+          eligible_tokens = set()
+          with universe_path.open() as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  if source_id in {
+                      str(value)
+                      for value in row.get("source_ids", [])
+                  }:
+                      eligible_tokens.add(
+                          normalize_address(str(row["token"]))
+                      )
+          if not eligible_tokens:
+              raise SystemExit(
+                  f"{source_id}: frozen universe has no eligible tokens"
+              )
+
+          input_roots = {}
+          artifact_digests = {}
+
+          def materialize_input(key, expected_keys):
+              spec = resolved["artifacts"][key]
+              run_id = int(spec["run_id"])
+              name = spec.get("artifact_name")
+              if name is None:
+                  discovery = spec["discover_by_manifest"]
+                  try:
+                      selected = discover_artifact_by_manifest(
+                          artifact_rows(run_id),
+                          artifact_zip,
+                          manifest_filename=discovery[
+                              "manifest_filename"
+                          ],
+                          expected_sha256=discovery["sha256"],
+                          expected_records=int(discovery["records"]),
+                          label=f"{source_id} {key}",
+                      )
+                  except ValueError as exc:
+                      raise SystemExit(
+                          f"{source_id} {key}: {exc}"
+                      ) from exc
+                  name = str(selected["name"])
+                  expected_digest = str(
+                      selected.get("digest") or ""
+                  ).lower()
+              else:
+                  selected = selected_named(
+                      run_id,
+                      name,
+                      f"{source_id} {key}",
+                  )
+                  expected_digest = str(
+                      selected.get("digest") or ""
+                  ).lower()
+
+              root = Path("inputs/upstream") / key
+              downloaded = download_selected(
+                  run_id,
+                  name,
+                  root,
+                  label=f"{source_id} {key}",
+                  expected_digest=expected_digest,
+              )
+              artifact_digests[key] = str(
+                  downloaded.get("digest") or ""
+              ).lower()
+              for expected_key in expected_keys:
+                  verify_manifest(
+                      root,
+                      resolved["validated_manifests"][expected_key],
+                      f"{source_id} {expected_key}",
+                  )
+              input_roots[key] = root
+              return root
+
+          if source_id == "pons_v1":
+              registry_root = materialize_input(
+                  "registry",
+                  ["registry"],
+              )
+              quote_root = materialize_input(
+                  "quote_registry",
+                  ["quote_registry"],
+              )
+              anchor_root = materialize_input(
+                  "anchor",
+                  ["anchor"],
+              )
+              oracle_root = materialize_input(
+                  "oracle",
+                  ["oracle_initial", "oracle_updates"],
+              )
+          else:
+              registry_root = materialize_input(
+                  "registry",
+                  ["registry"],
+              )
+              curve_root = materialize_input(
+                  "curve",
+                  ["curve_events"],
+              )
+              transition_root = materialize_input(
+                  "transition",
+                  ["graduations", "registrations"],
+              )
+              anchor_root = materialize_input(
+                  "anchor",
+                  ["anchor"],
+              )
+              oracle_root = materialize_input(
+                  "oracle",
+                  ["oracle_initial", "oracle_updates"],
+              )
+              fallback_root = materialize_input(
+                  "fallback",
+                  ["fallback_initial", "fallback_updates"],
+              )
+
+          market_spec = resolved["artifacts"]["market_events"]
+          market_run_id = int(market_spec["run_id"])
+          market_name = str(market_spec["artifact_name"])
+          market_aggregate_root = Path("inputs/upstream/market-events")
+          market_selected = download_selected(
+              market_run_id,
+              market_name,
+              market_aggregate_root,
+              label=f"{source_id} market aggregate",
+          )
+          artifact_digests["market_events"] = str(
+              market_selected.get("digest") or ""
+          ).lower()
+          market_expected = resolved[
+              "validated_manifests"
+          ]["market_events"]
+          market_manifest_path = verify_manifest(
+              market_aggregate_root,
+              market_expected,
+              f"{source_id} market events",
+          )
+          market_manifest = json.loads(
+              market_manifest_path.read_text()
+          )
+          try:
+              if source_id == "pons_v1":
+                  shard_bindings = resolve_v1_v3_canonical_shard_bindings(
+                      market_manifest,
+                      current_run_id=market_run_id,
+                  )
+              else:
+                  shard_bindings = resolve_v2_v4_canonical_shard_bindings(
+                      market_manifest,
+                      current_run_id=market_run_id,
+                  )
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(
+                  f"{source_id}: canonical market shard binding drift: {exc}"
+              ) from exc
+
+          market_shards_root = Path("inputs/market-shards")
+          try:
+              shard_report = materialize_bound_shards(
+                  shard_bindings,
+                  artifacts_for_run=artifact_rows,
+                  artifact_zip=artifact_zip,
+                  destination=market_shards_root,
+                  label=f"{source_id} canonical market tape",
+              )
+          except ValueError as exc:
+              raise SystemExit(
+                  f"{source_id}: market shard materialization failed: {exc}"
+              ) from exc
+
+          provenance = {
+              "source_id": source_id,
+              "source_binding_sha256": binding_sha,
+              "rehydration_plan_sha256": plan_sha,
+              "eligible_universe_sha256": universe_sha,
+              "snapshot_head_block": int(plan["snapshot_head_block"]),
+              "market_registry_sha256": resolved[
+                  "validated_manifests"
+              ]["registry"]["sha256"],
+              "accepted_lifecycle_run_id": int(
+                  binding["eligibility_run_id"]
+              ),
+              "accepted_lifecycle_artifact_name": binding[
+                  "eligibility_artifact_name"
+              ],
+              "accepted_lifecycle_artifact_digest": str(
+                  accepted_artifact.get("digest") or ""
+              ).lower(),
+              "accepted_lifecycle_sha256": binding[
+                  "eligibility_summary_sha256"
+              ],
+              "accepted_input_runs": resolved["runs"],
+              "accepted_input_artifact_digests": dict(
+                  sorted(artifact_digests.items())
+              ),
+              "canonical_market_shards": int(
+                  shard_report["materialized_shards"]
+              ),
+              "canonical_market_shards_by_run": shard_report[
+                  "materialized_shards_by_run"
+              ],
+              "full_inputs_validated": True,
+              "dump_threshold_frozen": False,
+              "outcome_labels_computed": False,
+          }
+
+          def data_and_manifest(root, name):
+              data = find_unique(root, name)
+              manifest = find_unique(
+                  root,
+                  name + ".manifest.json",
+              )
+              return data, manifest
+
+          anchor_events, anchor_manifest_path = data_and_manifest(
+              anchor_root,
+              "pons-weth-usdg-anchor-full.jsonl",
+          )
+          anchor_initial = find_unique(
+              anchor_root,
+              "pons-weth-usdg-anchor-initial.json",
+          )
+          oracle_state, oracle_state_manifest = data_and_manifest(
+              oracle_root,
+              "pons-stock-oracle-initial.jsonl",
+          )
+          oracle_updates, oracle_updates_manifest = data_and_manifest(
+              oracle_root,
+              "pons-stock-oracle-updates.jsonl",
+          )
+
+          accepted_expected = {
+              "records": int(accepted_manifest["records"]),
+              "sha256": binding["eligibility_summary_sha256"],
+          }
+
+          if source_id == "pons_v1":
+              registry, registry_manifest = data_and_manifest(
+                  registry_root,
+                  "pons-full-launch-registry.jsonl",
+              )
+              quote_registry, quote_manifest = data_and_manifest(
+                  quote_root,
+                  "pons-quote-registry.jsonl",
+              )
+              report = materialize_pons_v1_research(
+                  eligible_tokens=eligible_tokens,
+                  accepted_lifecycle_path=accepted_path,
+                  accepted_lifecycle_manifest_path=accepted_manifest_path,
+                  accepted_lifecycle_expected=accepted_expected,
+                  registry_path=registry,
+                  registry_manifest_path=registry_manifest,
+                  registry_expected=resolved[
+                      "validated_manifests"
+                  ]["registry"],
+                  quote_registry_path=quote_registry,
+                  quote_registry_manifest_path=quote_manifest,
+                  quote_registry_expected=resolved[
+                      "validated_manifests"
+                  ]["quote_registry"],
+                  market_events_root=market_shards_root,
+                  market_events_manifest_path=market_manifest_path,
+                  market_events_expected=market_expected,
+                  anchor_events_path=anchor_events,
+                  anchor_events_manifest_path=anchor_manifest_path,
+                  anchor_expected=resolved[
+                      "validated_manifests"
+                  ]["anchor"],
+                  anchor_initial_path=anchor_initial,
+                  oracle_state_path=oracle_state,
+                  oracle_state_manifest_path=oracle_state_manifest,
+                  oracle_state_expected=resolved[
+                      "validated_manifests"
+                  ]["oracle_initial"],
+                  oracle_updates_path=oracle_updates,
+                  oracle_updates_manifest_path=oracle_updates_manifest,
+                  oracle_updates_expected=resolved[
+                      "validated_manifests"
+                  ]["oracle_updates"],
+                  output=Path(
+                      "artifacts/phase2-research-pons_v1.jsonl"
+                  ),
+                  provenance=provenance,
+              )
+          else:
+              registry, registry_manifest = data_and_manifest(
+                  registry_root,
+                  "pons-v2-full-registry.jsonl",
+              )
+              curve_events, curve_manifest = data_and_manifest(
+                  curve_root,
+                  "pons-v2-curve-full.jsonl",
+              )
+              graduations, graduations_manifest = data_and_manifest(
+                  transition_root,
+                  "pons-v2-graduations-full.jsonl",
+              )
+              registrations, registrations_manifest = data_and_manifest(
+                  transition_root,
+                  "pons-v2-registrations-full.jsonl",
+              )
+              fallback_state, fallback_state_manifest = data_and_manifest(
+                  fallback_root,
+                  "pons-quote-fallback-initial.jsonl",
+              )
+              fallback_updates, fallback_updates_manifest = data_and_manifest(
+                  fallback_root,
+                  "pons-quote-fallback-updates.jsonl",
+              )
+              report = materialize_pons_v2_research(
+                  eligible_tokens=eligible_tokens,
+                  accepted_lifecycle_path=accepted_path,
+                  accepted_lifecycle_manifest_path=accepted_manifest_path,
+                  accepted_lifecycle_expected=accepted_expected,
+                  registry_path=registry,
+                  registry_manifest_path=registry_manifest,
+                  registry_expected=resolved[
+                      "validated_manifests"
+                  ]["registry"],
+                  curve_events_path=curve_events,
+                  curve_events_manifest_path=curve_manifest,
+                  curve_events_expected=resolved[
+                      "validated_manifests"
+                  ]["curve_events"],
+                  graduations_path=graduations,
+                  graduations_manifest_path=graduations_manifest,
+                  graduations_expected=resolved[
+                      "validated_manifests"
+                  ]["graduations"],
+                  registrations_path=registrations,
+                  registrations_manifest_path=registrations_manifest,
+                  registrations_expected=resolved[
+                      "validated_manifests"
+                  ]["registrations"],
+                  market_events_root=market_shards_root,
+                  market_events_manifest_path=market_manifest_path,
+                  market_events_expected=market_expected,
+                  anchor_events_path=anchor_events,
+                  anchor_events_manifest_path=anchor_manifest_path,
+                  anchor_expected=resolved[
+                      "validated_manifests"
+                  ]["anchor"],
+                  anchor_initial_path=anchor_initial,
+                  oracle_state_path=oracle_state,
+                  oracle_state_manifest_path=oracle_state_manifest,
+                  oracle_state_expected=resolved[
+                      "validated_manifests"
+                  ]["oracle_initial"],
+                  oracle_updates_path=oracle_updates,
+                  oracle_updates_manifest_path=oracle_updates_manifest,
+                  oracle_updates_expected=resolved[
+                      "validated_manifests"
+                  ]["oracle_updates"],
+                  fallback_state_path=fallback_state,
+                  fallback_state_manifest_path=fallback_state_manifest,
+                  fallback_state_expected=resolved[
+                      "validated_manifests"
+                  ]["fallback_initial"],
+                  fallback_updates_path=fallback_updates,
+                  fallback_updates_manifest_path=fallback_updates_manifest,
+                  fallback_updates_expected=resolved[
+                      "validated_manifests"
+                  ]["fallback_updates"],
+                  curve_output=Path(
+                      "artifacts/phase2-research-pons_v2-curve.jsonl"
+                  ),
+                  seed_output=Path(
+                      "artifacts/"
+                      "phase2-research-pons_v2-graduation-seed.jsonl"
+                  ),
+                  v4_output=Path(
+                      "artifacts/phase2-research-pons_v2-v4.jsonl"
+                  ),
+                  provenance=provenance,
+              )
+
+          final_report = {
+              **report,
+              "component_id": source_id,
+              "source_ids": list(binding["source_ids"]),
+              "source_binding_sha256": binding_sha,
+              "rehydration_plan_sha256": plan_sha,
+              "eligible_universe_sha256": universe_sha,
+              "snapshot_head_block": int(plan["snapshot_head_block"]),
+              "market_registry_sha256": resolved[
+                  "validated_manifests"
+              ]["registry"]["sha256"],
+              "accepted_lifecycle_run_id": int(
+                  binding["eligibility_run_id"]
+              ),
+              "accepted_lifecycle_artifact_name": binding[
+                  "eligibility_artifact_name"
+              ],
+              "accepted_lifecycle_artifact_digest": str(
+                  accepted_artifact.get("digest") or ""
+              ).lower(),
+              "accepted_lifecycle_sha256": binding[
+                  "eligibility_summary_sha256"
+              ],
+              "accepted_input_runs": resolved["runs"],
+              "accepted_input_artifact_digests": dict(
+                  sorted(artifact_digests.items())
+              ),
+              "canonical_market_shards": int(
+                  shard_report["materialized_shards"]
+              ),
+              "canonical_market_shards_by_run": shard_report[
+                  "materialized_shards_by_run"
+              ],
+              "eligible_token_coverage_complete": True,
+              "accepted_lifecycle_replay_equivalent": True,
+              "research_component_ready": True,
+              "dump_threshold_frozen": False,
+              "outcome_labels_computed": False,
+          }
+          report_path = Path(
+              "artifacts/phase2-research-component-report.json"
+          )
+          report_text = (
+              json.dumps(final_report, indent=2, sort_keys=True)
+              + "\n"
+          )
+          report_path.write_text(report_text)
+          report_sha = hashlib.sha256(
+              report_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"report_sha256={report_sha}\n")
+              handle.write(
+                  f"eligible_tokens={report['eligible_tokens']}\n"
+              )
+              handle.write(
+                  f"materialized_records={report['materialized_records']}\n"
+              )
+          print(json.dumps(final_report, sort_keys=True))
+          PY
+
+      - name: Upload Pons research component
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialized-${{ inputs.component_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload research component handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-handoff-${{ inputs.component_id }}
+          path: |
+            artifacts/phase2-research-component-report.json
+            artifacts/*.manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Pons research identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          REPORT_SHA256: ${{ steps.materialize.outputs.report_sha256 }}
+          ELIGIBLE_TOKENS: ${{ steps.materialize.outputs.eligible_tokens }}
+          MATERIALIZED_RECORDS: ${{ steps.materialize.outputs.materialized_records }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${REPORT_SHA256}"
+          {
+            echo "## Phase-2 Pons research component"
+            echo
+            echo "- component_id: ${COMPONENT_ID}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-research-materialized-${COMPONENT_ID}"
+            echo "- handoff_artifact_name: phase2-research-handoff-${COMPONENT_ID}"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- report_sha256: ${REPORT_SHA256}"
+            echo "- eligible_tokens: ${ELIGIBLE_TOKENS}"
+            echo "- materialized_records: ${MATERIALIZED_RECORDS}"
+            echo "- accepted_lifecycle_replay_equivalent: true"
+            echo "- research_component_ready: true"
+            echo "- dump_threshold_frozen: false"
+            echo "- outcome_labels_computed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

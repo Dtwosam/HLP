@@ -1,0 +1,446 @@
+name: phase2-dump-detector-freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_research_run_id:
+        description: Exact phase2-dump-candidate-research run ID
+        required: true
+        type: string
+      expected_candidate_artifact_digest:
+        description: Exact candidate-research artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_candidate_handoff_sha256:
+        description: Exact SHA-256 of phase2-dump-candidate-research-handoff.json
+        required: true
+        type: string
+      diagnostics_run_id:
+        description: Exact phase2-dump-candidate-diagnostics run ID
+        required: true
+        type: string
+      expected_diagnostics_artifact_digest:
+        description: Exact candidate-diagnostics artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_diagnostics_handoff_sha256:
+        description: Exact SHA-256 of phase2-dump-candidate-diagnostics-handoff.json
+        required: true
+        type: string
+      selected_candidate_id:
+        description: Explicit candidate ID to freeze; no automatic selection occurs
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-dump-detector-freeze-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_RUN_ID: ${{ inputs.candidate_research_run_id }}
+  EXPECTED_CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.expected_candidate_artifact_digest }}
+  EXPECTED_CANDIDATE_HANDOFF_SHA256: ${{ inputs.expected_candidate_handoff_sha256 }}
+  DIAGNOSTICS_RUN_ID: ${{ inputs.diagnostics_run_id }}
+  EXPECTED_DIAGNOSTICS_ARTIFACT_DIGEST: ${{ inputs.expected_diagnostics_artifact_digest }}
+  EXPECTED_DIAGNOSTICS_HANDOFF_SHA256: ${{ inputs.expected_diagnostics_handoff_sha256 }}
+  SELECTED_CANDIDATE_ID: ${{ inputs.selected_candidate_id }}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: freeze
+        name: Freeze explicitly selected outcome-blind detector
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_dump_research import (
+              build_phase2_dump_candidate_diagnostics_handoff,
+              build_phase2_dump_candidate_handoff,
+              build_phase2_dump_detector_freeze_handoff,
+              materialize_phase2_dump_detector_freeze,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          candidate_root = Path("inputs/candidates")
+          diagnostics_root = Path("inputs/diagnostics")
+          download_named(
+              int(os.environ["CANDIDATE_RUN_ID"]),
+              "phase2-dump-candidate-research",
+              candidate_root,
+              "dump candidate research",
+              os.environ["EXPECTED_CANDIDATE_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["DIAGNOSTICS_RUN_ID"]),
+              "phase2-dump-candidate-diagnostics",
+              diagnostics_root,
+              "dump candidate diagnostics",
+              os.environ["EXPECTED_DIAGNOSTICS_ARTIFACT_DIGEST"],
+          )
+
+          candidate_rows_path = find_unique(
+              candidate_root,
+              "phase2-dump-candidate-research.jsonl",
+          )
+          candidate_manifest_path = find_unique(
+              candidate_root,
+              "phase2-dump-candidate-research.jsonl.manifest.json",
+          )
+          candidate_manifest = json.loads(
+              candidate_manifest_path.read_text()
+          )
+          candidate_summary_path = find_unique(
+              candidate_root,
+              "phase2-dump-candidate-research-summary.json",
+          )
+          candidate_summary = json.loads(
+              candidate_summary_path.read_text()
+          )
+          candidate_summary_sha = sha256_path(candidate_summary_path)
+          candidate_handoff_path = find_unique(
+              candidate_root,
+              "phase2-dump-candidate-research-handoff.json",
+          )
+          candidate_handoff_sha = sha256_path(candidate_handoff_path)
+          if candidate_handoff_sha != os.environ[
+              "EXPECTED_CANDIDATE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "dump candidate research handoff SHA drift"
+              )
+          candidate_handoff = json.loads(
+              candidate_handoff_path.read_text()
+          )
+          rebuilt_candidate_handoff = build_phase2_dump_candidate_handoff(
+              candidate_summary,
+              research_summary_sha256=candidate_summary_sha,
+              geometry_handoff_sha256=candidate_summary[
+                  "geometry_handoff_sha256"
+              ],
+          )
+          if rebuilt_candidate_handoff != candidate_handoff:
+              raise SystemExit(
+                  "dump candidate research handoff content drift"
+              )
+          if candidate_manifest.get("sha256") != candidate_handoff[
+              "candidate_rows_sha256"
+          ]:
+              raise SystemExit("candidate rows manifest SHA drift")
+          if int(candidate_manifest.get("records", -1)) != int(
+              candidate_handoff["candidate_rows"]
+          ):
+              raise SystemExit("candidate rows record count drift")
+
+          diagnostics_rows_path = find_unique(
+              diagnostics_root,
+              "phase2-dump-candidate-diagnostics.jsonl",
+          )
+          diagnostics_manifest_path = find_unique(
+              diagnostics_root,
+              "phase2-dump-candidate-diagnostics.jsonl.manifest.json",
+          )
+          diagnostics_manifest = json.loads(
+              diagnostics_manifest_path.read_text()
+          )
+          diagnostics_summary_path = find_unique(
+              diagnostics_root,
+              "phase2-dump-candidate-diagnostics-summary.json",
+          )
+          diagnostics_summary = json.loads(
+              diagnostics_summary_path.read_text()
+          )
+          diagnostics_summary_sha = sha256_path(
+              diagnostics_summary_path
+          )
+          diagnostics_handoff_path = find_unique(
+              diagnostics_root,
+              "phase2-dump-candidate-diagnostics-handoff.json",
+          )
+          diagnostics_handoff_sha = sha256_path(
+              diagnostics_handoff_path
+          )
+          if diagnostics_handoff_sha != os.environ[
+              "EXPECTED_DIAGNOSTICS_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit(
+                  "dump candidate diagnostics handoff SHA drift"
+              )
+          diagnostics_handoff = json.loads(
+              diagnostics_handoff_path.read_text()
+          )
+          rebuilt_diagnostics_handoff = (
+              build_phase2_dump_candidate_diagnostics_handoff(
+                  diagnostics_summary,
+                  diagnostics_sha256=diagnostics_manifest["sha256"],
+                  diagnostics_summary_sha256=diagnostics_summary_sha,
+                  candidate_research_handoff_sha256=(
+                      candidate_handoff_sha
+                  ),
+              )
+          )
+          if rebuilt_diagnostics_handoff != diagnostics_handoff:
+              raise SystemExit(
+                  "dump candidate diagnostics handoff content drift"
+              )
+          if diagnostics_handoff[
+              "candidate_research_handoff_sha256"
+          ] != candidate_handoff_sha:
+              raise SystemExit(
+                  "diagnostics candidate-research linkage drift"
+              )
+          if diagnostics_manifest.get("sha256") != diagnostics_handoff[
+              "diagnostics_sha256"
+          ]:
+              raise SystemExit(
+                  "candidate diagnostics manifest SHA drift"
+              )
+
+          selected_candidate_id = os.environ[
+              "SELECTED_CANDIDATE_ID"
+          ].strip()
+          if not selected_candidate_id:
+              raise SystemExit(
+                  "selected_candidate_id must be supplied explicitly"
+              )
+
+          output = Path(
+              "artifacts/phase2-dump-detector-events.jsonl"
+          )
+          manifest, summary = materialize_phase2_dump_detector_freeze(
+              iter_validated_jsonl(
+                  candidate_rows_path,
+                  candidate_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  diagnostics_rows_path,
+                  diagnostics_manifest_path,
+              ),
+              research_summary=candidate_summary,
+              diagnostics_summary=diagnostics_summary,
+              selected_candidate_id=selected_candidate_id,
+              output=output,
+          )
+          summary.update({
+              "candidate_research_run_id": int(
+                  os.environ["CANDIDATE_RUN_ID"]
+              ),
+              "candidate_research_handoff_sha256": candidate_handoff_sha,
+              "candidate_diagnostics_run_id": int(
+                  os.environ["DIAGNOSTICS_RUN_ID"]
+              ),
+              "candidate_diagnostics_handoff_sha256": (
+                  diagnostics_handoff_sha
+              ),
+          })
+          summary_path = Path(
+              "artifacts/phase2-dump-detector-freeze-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase2_dump_detector_freeze_handoff(
+              summary,
+              freeze_summary_sha256=summary_sha,
+              candidate_research_handoff_sha256=candidate_handoff_sha,
+              candidate_diagnostics_handoff_sha256=(
+                  diagnostics_handoff_sha
+              ),
+          )
+          handoff_path = Path(
+              "artifacts/phase2-dump-detector-freeze-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"detector_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"selected_candidate_id={selected_candidate_id}\n"
+              )
+              handle.write(
+                  f"confirmed_tokens={summary['confirmed_tokens']}\n"
+              )
+          print(json.dumps({
+              "detector_rows_sha256": manifest["sha256"],
+              "freeze_summary_sha256": summary_sha,
+              "freeze_handoff_sha256": handoff_sha,
+              "selected_candidate_id": selected_candidate_id,
+              "confirmed_tokens": summary["confirmed_tokens"],
+              "selection_mode": "explicit_candidate_id",
+              "candidate_selected": True,
+              "dump_threshold_frozen": True,
+              "phase2_dump_detector_frozen": True,
+              "outcome_labels_computed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload frozen dump detector
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-detector-freeze
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact detector-freeze handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-detector-freeze-handoff
+          path: |
+            artifacts/phase2-dump-detector-events.jsonl.manifest.json
+            artifacts/phase2-dump-detector-freeze-summary.json
+            artifacts/phase2-dump-detector-freeze-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish detector-freeze identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          DETECTOR_ROWS_SHA256: ${{ steps.freeze.outputs.detector_rows_sha256 }}
+          SUMMARY_SHA256: ${{ steps.freeze.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.freeze.outputs.handoff_sha256 }}
+          SELECTED: ${{ steps.freeze.outputs.selected_candidate_id }}
+          CONFIRMED: ${{ steps.freeze.outputs.confirmed_tokens }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-2 dump detector freeze"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-dump-detector-freeze"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase2-dump-detector-freeze-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- detector_rows_sha256: ${DETECTOR_ROWS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- selected_candidate_id: ${SELECTED}"
+            echo "- confirmed_tokens: ${CONFIRMED}"
+            echo "- selection_mode: explicit_candidate_id"
+            echo "- candidate_selected: true"
+            echo "- dump_threshold_frozen: true"
+            echo "- phase2_dump_detector_frozen: true"
+            echo "- outcome_labels_computed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
