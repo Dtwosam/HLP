@@ -504,6 +504,38 @@ def validate_phase2_research_materialization_wave_completion_receipt(
         row.get("materialization_wave_launch_artifact_digest"),
         label="materialization launch artifact",
     )
+    dispatch_plan_run = _positive_run_id(
+        row.get("dispatch_plan_run_id"),
+        label="materialization dispatch-plan run ID",
+    )
+    dispatch_plan_digest = _artifact_digest(
+        row.get("dispatch_plan_artifact_digest"),
+        label="materialization dispatch-plan artifact",
+    )
+    rehydration_plan_run = _positive_run_id(
+        row.get("rehydration_plan_run_id"),
+        label="materialization freeze rehydration-plan run ID",
+    )
+    rehydration_plan_digest = _artifact_digest(
+        row.get("rehydration_plan_artifact_digest"),
+        label="materialization freeze rehydration-plan artifact",
+    )
+    rehydration_plan_sha = _sha256(
+        row.get("rehydration_plan_sha256"),
+        label="materialization freeze rehydration plan",
+    )
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="materialization freeze universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="materialization freeze universe artifact",
+    )
+    universe_handoff_sha = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="materialization freeze universe handoff",
+    )
     branch = str(row.get("execution_branch") or "")
     head = _commit_sha(
         row.get("execution_head_sha"),
@@ -537,6 +569,17 @@ def validate_phase2_research_materialization_wave_completion_receipt(
     )
     if str(row.get("component_runs_json") or "") != expected_json:
         raise ValueError("materialization component-runs JSON drift")
+    expected_freeze_inputs = {
+        "rehydration_plan_run_id": str(rehydration_plan_run),
+        "expected_plan_artifact_digest": rehydration_plan_digest,
+        "expected_plan_sha256": rehydration_plan_sha,
+        "universe_run_id": str(universe_run),
+        "expected_universe_artifact_digest": universe_digest,
+        "expected_universe_handoff_sha256": universe_handoff_sha,
+        "component_runs_json": expected_json,
+    }
+    if row.get("materialization_freeze_inputs") != expected_freeze_inputs:
+        raise ValueError("materialization freeze input binding drift")
     if int(row.get("component_runs_completed", -1)) != 12:
         raise ValueError("materialization completion count drift")
     if row.get("all_component_runs_successful") is not True:
@@ -556,11 +599,20 @@ def validate_phase2_research_materialization_wave_completion_receipt(
         "materialization_completion_control_run_id": control,
         "materialization_wave_launch_run_id": launch_run,
         "materialization_wave_launch_artifact_digest": launch_digest,
+        "dispatch_plan_run_id": dispatch_plan_run,
+        "dispatch_plan_artifact_digest": dispatch_plan_digest,
+        "rehydration_plan_run_id": rehydration_plan_run,
+        "rehydration_plan_artifact_digest": rehydration_plan_digest,
+        "rehydration_plan_sha256": rehydration_plan_sha,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff_sha,
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
         "component_run_ids": runs,
         "component_runs_json": expected_json,
+        "materialization_freeze_inputs": expected_freeze_inputs,
         "component_runs_completed": 12,
         "all_component_runs_successful": True,
         "research_components_ready": True,
