@@ -139,6 +139,14 @@ def completion_receipt():
         "materialization_completion_control_run_id": 9300,
         "materialization_wave_launch_run_id": 9301,
         "materialization_wave_launch_artifact_digest": "sha256:" + "cc" * 32,
+        "dispatch_plan_run_id": 9302,
+        "dispatch_plan_artifact_digest": "sha256:" + "ce" * 32,
+        "rehydration_plan_run_id": 9303,
+        "rehydration_plan_artifact_digest": "sha256:" + "cf" * 32,
+        "rehydration_plan_sha256": "d0" * 32,
+        "universe_run_id": 9304,
+        "universe_artifact_digest": "sha256:" + "d1" * 32,
+        "universe_handoff_sha256": "d2" * 32,
         "execution_branch": "phase1/data-acquisition-spike",
         "execution_head_sha": "dd" * 20,
         "canonical_ledger_commit_sha": "dd" * 20,
@@ -148,6 +156,19 @@ def completion_receipt():
             sort_keys=True,
             separators=(",", ":"),
         ),
+        "materialization_freeze_inputs": {
+            "rehydration_plan_run_id": "9303",
+            "expected_plan_artifact_digest": "sha256:" + "cf" * 32,
+            "expected_plan_sha256": "d0" * 32,
+            "universe_run_id": "9304",
+            "expected_universe_artifact_digest": "sha256:" + "d1" * 32,
+            "expected_universe_handoff_sha256": "d2" * 32,
+            "component_runs_json": __import__("json").dumps(
+                runs,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        },
         "component_runs_completed": 12,
         "all_component_runs_successful": True,
         "research_components_ready": True,
@@ -166,3 +187,5 @@ def test_materialization_completion_emits_freeze_input_json():
     )
     assert report["component_runs_completed"] == 12
     assert report["component_runs_json"].startswith("{")
+    assert report["materialization_freeze_inputs"]["rehydration_plan_run_id"] == "9303"
+    assert report["materialization_freeze_inputs"]["universe_run_id"] == "9304"
