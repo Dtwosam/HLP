@@ -1,0 +1,532 @@
+name: phase2-eligibility-wave-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      final_ledger_approval_run_id:
+        description: Exact successful phase2-direct-sushiswap-v3-ledger-approved run ID
+        required: true
+        type: string
+      expected_final_artifact_digest:
+        description: Exact final 14/14 approved-ledger artifact digest (sha256:...)
+        required: true
+        type: string
+      pons_coverage_run_id:
+        description: Exact successful phase2-pons-source-coverage run ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-eligibility-wave-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FINAL_RUN_ID: ${{ inputs.final_ledger_approval_run_id }}
+      EXPECTED_FINAL_ARTIFACT_DIGEST: ${{ inputs.expected_final_artifact_digest }}
+      PONS_RUN_ID: ${{ inputs.pons_coverage_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: plan
+        name: Resolve exact coverage chain and build eligibility plan
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import hlp.data.phase2_coverage_promotion as promotion
+          from hlp.data.phase2_eligibility_dispatch import (
+              DIRECT_SOURCES,
+              LAUNCHPAD_COVERAGE_ARTIFACTS,
+              LAUNCHPAD_COVERAGE_REPORT_PATHS,
+              LAUNCHPAD_SOURCES,
+              LAUNCHPAD_SUMMARY_PATHS,
+              build_phase2_eligibility_dispatch_plan,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+
+          slugs = {
+              "pools_fun": "pools-fun",
+              "pools_trade_instant": "pools-trade-instant",
+              "pools_trade_lbp": "pools-trade-lbp",
+              "doppler": "doppler",
+              "flap": "flap",
+              "trench_today": "trench-today",
+              "hood_fun_current": "hoodfun-current",
+              "hood_fun_previous": "hoodfun-previous",
+              "noxa": "noxa",
+              "direct_uniswap_v3": "direct-uniswap-v3",
+              "direct_uniswap_v4": "direct-uniswap-v4",
+              "direct_sushiswap_v3": "direct-sushiswap-v3",
+          }
+          reverse_sources = [
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+              "direct_uniswap_v3",
+              "noxa",
+              "hood_fun_previous",
+              "hood_fun_current",
+              "trench_today",
+              "flap",
+              "doppler",
+              "pools_trade_lbp",
+              "pools_trade_instant",
+              "pools_fun",
+          ]
+          previous = {
+              "direct_sushiswap_v3": "direct_uniswap_v4",
+              "direct_uniswap_v4": "direct_uniswap_v3",
+              "direct_uniswap_v3": "noxa",
+              "noxa": "hood_fun_previous",
+              "hood_fun_previous": "hood_fun_current",
+              "hood_fun_current": "trench_today",
+              "trench_today": "flap",
+              "flap": "doppler",
+              "doppler": "pools_trade_lbp",
+              "pools_trade_lbp": "pools_trade_instant",
+              "pools_trade_instant": "pools_fun",
+          }
+
+          def gh_json(path):
+              return json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      f"/repos/{repo}/{path}",
+                  ])
+              )
+
+          def run_payload(run_id):
+              payload = gh_json(f"actions/runs/{run_id}")
+              if payload.get("conclusion") != "success":
+                  raise SystemExit(f"run {run_id} is not successful")
+              if payload.get("head_branch") != branch:
+                  raise SystemExit(f"run {run_id} branch drift")
+              if str((payload.get("repository") or {}).get("full_name") or "") != repo:
+                  raise SystemExit(f"run {run_id} repository drift")
+              return payload
+
+          def artifact_row(run_id, name, expected_digest=None):
+              payload = gh_json(
+                  f"actions/runs/{run_id}/artifacts?name={name}"
+              )
+              matches = [
+                  row for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{name}: expected one artifact on run {run_id}; "
+                      f"found {len(matches)}"
+                  )
+              row = matches[0]
+              if row.get("expired"):
+                  raise SystemExit(f"{name}: artifact is expired")
+              digest = str(row.get("digest") or "").lower()
+              if expected_digest is not None and digest != str(
+                  expected_digest
+              ).lower():
+                  raise SystemExit(
+                      f"{name}: artifact digest drift: "
+                      f"{digest} != {expected_digest}"
+                  )
+              return row
+
+          def download(run_id, name, destination):
+              root = Path(destination)
+              root.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(root),
+              ])
+              return root
+
+          def sha256_path(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          def exact_file(root, relative, expected_sha, label):
+              path = Path(root) / relative
+              if not path.is_file():
+                  raise SystemExit(f"{label} missing: {relative}")
+              actual = sha256_path(path)
+              if actual != str(expected_sha).lower().removeprefix("sha256:"):
+                  raise SystemExit(
+                      f"{label} SHA drift: {actual} != {expected_sha}"
+                  )
+              return path, actual
+
+          final_run_id = int(os.environ["FINAL_RUN_ID"])
+          if final_run_id <= 0:
+              raise SystemExit("final_ledger_approval_run_id is invalid")
+          final_run = run_payload(final_run_id)
+          if final_run.get("path") != (
+              ".github/workflows/"
+              "phase2-direct-sushiswap-v3-ledger-approved.yml"
+          ):
+              raise SystemExit("final approval workflow identity drift")
+          final_name = "phase2-direct-sushiswap-v3-ledger-approved"
+          final_artifact = artifact_row(
+              final_run_id,
+              final_name,
+              os.environ["EXPECTED_FINAL_ARTIFACT_DIGEST"],
+          )
+          final_root = download(
+              final_run_id,
+              final_name,
+              "upstream/final-approved",
+          )
+          final_receipt = json.loads(
+              (
+                  final_root
+                  / "phase2-direct-sushiswap-v3-ledger-approved-receipt.json"
+              ).read_text()
+          )
+          final_receipt = (
+              promotion.validate_phase2_direct_sushiswap_v3_ledger_approved_receipt(
+                  final_receipt
+              )
+          )
+          if final_receipt["ledger_approval_control_run_id"] != final_run_id:
+              raise SystemExit("final approval receipt/control drift")
+          if final_receipt["phase2_universe_coverage_complete"] is not True:
+              raise SystemExit("final approval receipt is not 14/14 complete")
+
+          ref = gh_json(f"git/ref/heads/{branch}")
+          current_head = str(
+              ((ref or {}).get("object") or {}).get("sha") or ""
+          ).lower()
+          if current_head != final_receipt["canonical_ledger_commit_sha"]:
+              raise SystemExit(
+                  "eligibility plan requires final canonical commit at branch HEAD"
+              )
+
+          coverage = {}
+          approved_run_id = final_run_id
+          approved_digest = str(final_artifact.get("digest") or "").lower()
+
+          for source in reverse_sources:
+              slug = slugs[source]
+              approved_name = f"phase2-{slug}-ledger-approved"
+              approved_run = run_payload(approved_run_id)
+              if approved_run.get("path") != (
+                  f".github/workflows/{approved_name}.yml"
+              ):
+                  raise SystemExit(
+                      f"{source}: approved workflow identity drift"
+                  )
+              approved_artifact = artifact_row(
+                  approved_run_id,
+                  approved_name,
+                  approved_digest,
+              )
+              approved_root = download(
+                  approved_run_id,
+                  approved_name,
+                  f"upstream/{source}/approved",
+              )
+              approved_path = (
+                  approved_root
+                  / f"phase2-{slug}-ledger-approved-receipt.json"
+              )
+              approved_validator = getattr(
+                  promotion,
+                  f"validate_phase2_{source}_ledger_approved_receipt",
+              )
+              approved = approved_validator(
+                  json.loads(approved_path.read_text())
+              )
+              if approved["ledger_approval_control_run_id"] != approved_run_id:
+                  raise SystemExit(
+                      f"{source}: approved receipt/control drift"
+                  )
+
+              proposal_run_id = int(
+                  approved["promotion_proposal_run_id"]
+              )
+              proposal_name = f"phase2-{slug}-promotion-proposal"
+              proposal_run = run_payload(proposal_run_id)
+              if proposal_run.get("path") != (
+                  f".github/workflows/phase2-{slug}-promotion-propose.yml"
+              ):
+                  raise SystemExit(
+                      f"{source}: proposal workflow identity drift"
+                  )
+              proposal_artifact = artifact_row(
+                  proposal_run_id,
+                  proposal_name,
+                  approved["promotion_proposal_artifact_digest"],
+              )
+              proposal_root = download(
+                  proposal_run_id,
+                  proposal_name,
+                  f"upstream/{source}/proposal",
+              )
+              proposal_path = (
+                  proposal_root
+                  / f"phase2-{slug}-promotion-proposal.json"
+              )
+              proposal_validator = getattr(
+                  promotion,
+                  f"validate_phase2_{source}_promotion_proposal_receipt",
+              )
+              proposal = proposal_validator(
+                  json.loads(proposal_path.read_text())
+              )
+              if proposal["promotion_proposal_control_run_id"] != proposal_run_id:
+                  raise SystemExit(
+                      f"{source}: proposal receipt/control drift"
+                  )
+
+              review_run_id = int(proposal["promotion_review_run_id"])
+              review_name = f"phase2-{slug}-promotion-review"
+              review_run = run_payload(review_run_id)
+              if review_run.get("path") != (
+                  f".github/workflows/phase2-{slug}-promotion-review.yml"
+              ):
+                  raise SystemExit(
+                      f"{source}: review workflow identity drift"
+                  )
+              review_artifact = artifact_row(
+                  review_run_id,
+                  review_name,
+                  proposal["promotion_review_artifact_digest"],
+              )
+              review_root = download(
+                  review_run_id,
+                  review_name,
+                  f"upstream/{source}/review",
+              )
+              review_path = (
+                  review_root
+                  / f"phase2-{slug}-promotion-review.json"
+              )
+              review_validator = getattr(
+                  promotion,
+                  f"validate_phase2_{source}_promotion_review_receipt",
+              )
+              review = review_validator(
+                  json.loads(review_path.read_text())
+              )
+              if review["promotion_review_control_run_id"] != review_run_id:
+                  raise SystemExit(
+                      f"{source}: review receipt/control drift"
+                  )
+
+              coverage[source] = {
+                  "run_id": int(review["coverage_run_id"]),
+                  "artifact_name": review["coverage_artifact_name"],
+                  "artifact_digest": review["coverage_artifact_digest"],
+                  "report_path": review["coverage_report_path"],
+                  "report_sha256": review["coverage_report_sha256"],
+              }
+
+              if source in previous:
+                  prior = previous[source]
+                  approved_run_id = int(
+                      review[f"{prior}_ledger_approval_run_id"]
+                  )
+                  approved_digest = review[
+                      f"{prior}_ledger_approval_artifact_digest"
+                  ]
+
+          pons_run_id = int(os.environ["PONS_RUN_ID"])
+          if pons_run_id <= 0:
+              raise SystemExit("pons_coverage_run_id is invalid")
+          pons_run = run_payload(pons_run_id)
+          if pons_run.get("path") != (
+              ".github/workflows/phase2-pons-source-coverage.yml"
+          ):
+              raise SystemExit("Pons coverage workflow identity drift")
+          for source in ("pons_v1", "pons_v2"):
+              name = LAUNCHPAD_COVERAGE_ARTIFACTS[source]
+              row = artifact_row(pons_run_id, name)
+              root = download(
+                  pons_run_id,
+                  name,
+                  f"upstream/{source}/coverage",
+              )
+              report_path = LAUNCHPAD_COVERAGE_REPORT_PATHS[source]
+              report_file = Path(root, report_path)
+              if not report_file.is_file():
+                  raise SystemExit(f"{source}: Pons coverage report missing")
+              report_payload = json.loads(report_file.read_text())
+              if report_payload.get("source_id") != source:
+                  raise SystemExit(f"{source}: Pons coverage source drift")
+              if report_payload.get("coverage_status") != "complete":
+                  raise SystemExit(f"{source}: Pons coverage is incomplete")
+              summary_path = LAUNCHPAD_SUMMARY_PATHS[source]
+              summary_file = Path(root, summary_path)
+              if not summary_file.is_file():
+                  raise SystemExit(f"{source}: Pons summary missing")
+              coverage[source] = {
+                  "run_id": pons_run_id,
+                  "artifact_name": name,
+                  "artifact_digest": str(row.get("digest") or "").lower(),
+                  "report_path": report_path,
+                  "report_sha256": sha256_path(report_file),
+                  "summary_path": summary_path,
+                  "summary_sha256": sha256_path(summary_file),
+              }
+
+          for source in LAUNCHPAD_SOURCES:
+              if source in {"pons_v1", "pons_v2"}:
+                  continue
+              row = coverage[source]
+              artifact = artifact_row(
+                  int(row["run_id"]),
+                  str(row["artifact_name"]),
+                  str(row["artifact_digest"]),
+              )
+              root = download(
+                  int(row["run_id"]),
+                  str(row["artifact_name"]),
+                  f"upstream/{source}/coverage",
+              )
+              _, report_sha = exact_file(
+                  root,
+                  str(row["report_path"]),
+                  str(row["report_sha256"]),
+                  f"{source} coverage report",
+              )
+              summary_path = LAUNCHPAD_SUMMARY_PATHS[source]
+              summary_file = Path(root, summary_path)
+              if not summary_file.is_file():
+                  raise SystemExit(
+                      f"{source}: eligibility summary missing: {summary_path}"
+                  )
+              row["summary_path"] = summary_path
+              row["summary_sha256"] = sha256_path(summary_file)
+              row["artifact_digest"] = str(
+                  artifact.get("digest") or ""
+              ).lower()
+              row["report_sha256"] = report_sha
+
+          for source in DIRECT_SOURCES:
+              row = coverage[source]
+              artifact = artifact_row(
+                  int(row["run_id"]),
+                  str(row["artifact_name"]),
+                  str(row["artifact_digest"]),
+              )
+              root = download(
+                  int(row["run_id"]),
+                  str(row["artifact_name"]),
+                  f"upstream/{source}/coverage",
+              )
+              _, report_sha = exact_file(
+                  root,
+                  str(row["report_path"]),
+                  str(row["report_sha256"]),
+                  f"{source} coverage report",
+              )
+              row["artifact_digest"] = str(
+                  artifact.get("digest") or ""
+              ).lower()
+              row["report_sha256"] = report_sha
+
+          selector_run_id = int(final_receipt["selector_run_id"])
+          selector_run = run_payload(selector_run_id)
+          selector_name = "phase2-direct-market-selector-freeze"
+          selector_artifact = artifact_row(
+              selector_run_id,
+              selector_name,
+          )
+          selector_root = download(
+              selector_run_id,
+              selector_name,
+              "upstream/direct-selector",
+          )
+          selector_path = (
+              selector_root / "direct-market-selector-freeze.json"
+          )
+          if not selector_path.is_file():
+              raise SystemExit("direct selector descriptor is missing")
+          selector_binding = {
+              "run_id": selector_run_id,
+              "artifact_name": selector_name,
+              "artifact_digest": str(
+                  selector_artifact.get("digest") or ""
+              ).lower(),
+              "descriptor_sha256": sha256_path(selector_path),
+          }
+
+          plan = build_phase2_eligibility_dispatch_plan(
+              coverage,
+              selector_binding,
+          )
+          plan["final_ledger_approval_run_id"] = final_run_id
+          plan["final_ledger_approval_artifact_digest"] = str(
+              final_artifact.get("digest") or ""
+          ).lower()
+          plan["canonical_ledger_commit_sha"] = final_receipt[
+              "canonical_ledger_commit_sha"
+          ]
+          plan["pons_coverage_run_id"] = pons_run_id
+          output = Path("artifacts/phase2-eligibility-dispatch-plan.json")
+          output.write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"dispatch_count={plan['dispatch_count']}\n"
+              )
+          print(json.dumps(plan, sort_keys=True))
+          PY
+
+      - name: Upload eligibility dispatch plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-eligibility-dispatch-plan
+          path: artifacts/phase2-eligibility-dispatch-plan.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish eligibility-wave summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          DISPATCH_COUNT: ${{ steps.plan.outputs.dispatch_count }}
+        run: |
+          {
+            echo "## Phase-2 eligibility wave plan"
+            echo
+            echo "- plan_run_id: ${GITHUB_RUN_ID}"
+            echo "- plan_artifact_name: phase2-eligibility-dispatch-plan"
+            echo "- plan_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- dispatchable_handoffs: ${DISPATCH_COUNT}"
+            echo "- launchpad_handoffs: 11"
+            echo "- direct_handoffs: 1"
+            echo "- workflow_dispatch_performed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
