@@ -1,0 +1,82 @@
+name: phase3-first-wave-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_run_id:
+        description: Exact successful phase3-first-wave-plan run ID
+        required: true
+        type: string
+      expected_plan_artifact_digest:
+        description: Exact first-wave plan artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      EXPECTED_PLAN_DIGEST: ${{ inputs.expected_plan_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: launch
+        name: Dispatch first Phase-3 feature wave
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64,json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dispatch_readiness import workflow_dispatch_interface_sha256
+          from hlp.data.phase3_first_wave_dispatch import validate_phase3_first_wave_plan,validate_phase3_first_wave_launch_receipt
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]; head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(args,payload=None):
+              raw=subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",*args],input=(json.dumps(payload,sort_keys=True,separators=(",",":")).encode() if payload is not None else None)); return json.loads(raw) if raw.strip() else None
+          plan_run=int(os.environ["PLAN_RUN_ID"]); row=api([f"/repos/{repo}/actions/runs/{plan_run}"])
+          if row.get("path")!=".github/workflows/phase3-first-wave-plan.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head or row.get("status")!="completed" or row.get("conclusion")!="success": raise SystemExit("first-wave plan identity/status drift")
+          rows=api([f"/repos/{repo}/actions/runs/{plan_run}/artifacts?name=phase3-first-wave-plan"]).get("artifacts",[]); rows=[x for x in rows if x.get("name")=="phase3-first-wave-plan" and not x.get("expired")]
+          if len(rows)!=1: raise SystemExit("first-wave plan artifact cardinality drift")
+          actual=str(rows[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_PLAN_DIGEST"].lower(): raise SystemExit("first-wave plan digest drift")
+          root=Path("upstream/plan")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(plan_run),"--repo",repo,"--name","phase3-first-wave-plan","--dir",str(root)])
+          plan=validate_phase3_first_wave_plan(json.loads((root/"phase3-first-wave-plan.json").read_text()))
+          meta=api([f"/repos/{repo}"]); default=str(meta.get("default_branch") or "")
+          targets={}
+          for item in plan["dispatches"]:
+              workflow=item["workflow"]
+              local=workflow_dispatch_interface_sha256(Path(".github/workflows",workflow).read_text())
+              payload=api([f"/repos/{repo}/contents/.github/workflows/{workflow}?ref={default}"])
+              remote=workflow_dispatch_interface_sha256(base64.b64decode(str(payload.get("content") or "").replace("\n","")).decode())
+              if local!=remote: raise SystemExit(f"default-branch interface drift: {workflow}")
+              response=api(["--method","POST",f"/repos/{repo}/actions/workflows/{workflow}/dispatches","--input","-"],{"ref":branch,"inputs":item["inputs"]})
+              run_id=int((response or {}).get("workflow_run_id",0))
+              if run_id<=0: raise SystemExit(f"dispatch lacks run ID: {workflow}")
+              targets[item["node_id"]]=run_id
+          receipt={"version":"phase3-first-wave-launch-receipt-v1","first_wave_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"first_wave_plan_run_id":plan_run,"first_wave_plan_artifact_digest":actual,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":plan["canonical_ledger_commit_sha"],"target_run_ids":targets,"target_runs_created":4,"target_runs_waited_for_completion":False,"outcome_rows_consumed":False,"workflow_dispatch_performed":True}
+          receipt=validate_phase3_first_wave_launch_receipt(receipt)
+          Path("artifacts/phase3-first-wave-launch-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          PY
+      - name: Upload first-wave launch receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-first-wave-launch
+          path: artifacts/phase3-first-wave-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
