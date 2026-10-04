@@ -46,6 +46,7 @@ jobs:
           from pathlib import Path
           from hlp.data.phase2_research_materialization_dispatch import (
               _workflow_for_component,
+              validate_phase2_research_materialization_dispatch_plan,
               validate_phase2_research_materialization_wave_launch_receipt,
               validate_phase2_research_materialization_wave_completion_receipt,
           )
@@ -78,6 +79,25 @@ jobs:
           root.mkdir(parents=True)
           subprocess.check_call(["gh","run","download",str(launch_run),"--repo",repo,"--name","phase2-research-materialization-wave-launch","--dir",str(root)])
           launch=validate_phase2_research_materialization_wave_launch_receipt(json.loads((root/"phase2-research-materialization-wave-launch-receipt.json").read_text()))
+          dispatch_plan_run=int(launch["dispatch_plan_run_id"])
+          plan_row=api(f"actions/runs/{dispatch_plan_run}")
+          identity(plan_row,"phase2-research-materialization-wave-plan.yml",dispatch_plan_run)
+          if plan_row.get("status")!="completed" or plan_row.get("conclusion")!="success":
+              raise SystemExit("materialization dispatch-plan run is not successful")
+          plan_payload=api(f"actions/runs/{dispatch_plan_run}/artifacts?name=phase2-research-materialization-dispatch-plan")
+          plan_matches=[x for x in plan_payload.get("artifacts",[]) if x.get("name")=="phase2-research-materialization-dispatch-plan" and not x.get("expired")]
+          if len(plan_matches)!=1:
+              raise SystemExit("materialization dispatch-plan artifact cardinality drift")
+          plan_digest=str(plan_matches[0].get("digest") or "").lower()
+          if plan_digest!=launch["dispatch_plan_artifact_digest"]:
+              raise SystemExit("materialization dispatch-plan artifact digest drift")
+          plan_root=Path("upstream/dispatch-plan")
+          if plan_root.exists(): shutil.rmtree(plan_root)
+          plan_root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(dispatch_plan_run),"--repo",repo,"--name","phase2-research-materialization-dispatch-plan","--dir",str(plan_root)])
+          dispatch_plan=validate_phase2_research_materialization_dispatch_plan(json.loads((plan_root/"phase2-research-materialization-dispatch-plan.json").read_text()))
+          if dispatch_plan["execution_head_sha"]!=head:
+              raise SystemExit("materialization dispatch-plan HEAD drift")
           layouts=build_phase2_research_source_layouts()
           for component,run_id in launch["component_run_ids"].items():
               workflow=_workflow_for_component(component,str(layouts[component]["strategy"]))
@@ -88,11 +108,28 @@ jobs:
               "materialization_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
               "materialization_wave_launch_run_id":launch_run,
               "materialization_wave_launch_artifact_digest":actual,
+              "dispatch_plan_run_id":dispatch_plan_run,
+              "dispatch_plan_artifact_digest":plan_digest,
+              "rehydration_plan_run_id":dispatch_plan["rehydration_plan_run_id"],
+              "rehydration_plan_artifact_digest":dispatch_plan["rehydration_plan_artifact_digest"],
+              "rehydration_plan_sha256":dispatch_plan["rehydration_plan_sha256"],
+              "universe_run_id":dispatch_plan["universe_run_id"],
+              "universe_artifact_digest":dispatch_plan["universe_artifact_digest"],
+              "universe_handoff_sha256":dispatch_plan["universe_handoff_sha256"],
               "execution_branch":branch,
               "execution_head_sha":head,
               "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
               "component_run_ids":runs,
               "component_runs_json":json.dumps(runs,sort_keys=True,separators=(",",":")),
+              "materialization_freeze_inputs":{
+                  "rehydration_plan_run_id":str(dispatch_plan["rehydration_plan_run_id"]),
+                  "expected_plan_artifact_digest":dispatch_plan["rehydration_plan_artifact_digest"],
+                  "expected_plan_sha256":dispatch_plan["rehydration_plan_sha256"],
+                  "universe_run_id":str(dispatch_plan["universe_run_id"]),
+                  "expected_universe_artifact_digest":dispatch_plan["universe_artifact_digest"],
+                  "expected_universe_handoff_sha256":dispatch_plan["universe_handoff_sha256"],
+                  "component_runs_json":json.dumps(runs,sort_keys=True,separators=(",",":")),
+              },
               "component_runs_completed":12,
               "all_component_runs_successful":True,
               "research_components_ready":True,
@@ -105,6 +142,12 @@ jobs:
           Path("artifacts/phase2-research-materialization-wave-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
           with open(os.environ["GITHUB_OUTPUT"],"a") as h:
               h.write(f"component_runs_json={receipt['component_runs_json']}\n")
+              h.write(f"rehydration_plan_run_id={receipt['rehydration_plan_run_id']}\n")
+              h.write(f"rehydration_plan_artifact_digest={receipt['rehydration_plan_artifact_digest']}\n")
+              h.write(f"rehydration_plan_sha256={receipt['rehydration_plan_sha256']}\n")
+              h.write(f"universe_run_id={receipt['universe_run_id']}\n")
+              h.write(f"universe_artifact_digest={receipt['universe_artifact_digest']}\n")
+              h.write(f"universe_handoff_sha256={receipt['universe_handoff_sha256']}\n")
           PY
       - name: Upload materialization-wave completion receipt
         id: upload
@@ -118,11 +161,23 @@ jobs:
         env:
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           COMPONENT_RUNS_JSON: ${{ steps.complete.outputs.component_runs_json }}
+          REHYDRATION_PLAN_RUN_ID: ${{ steps.complete.outputs.rehydration_plan_run_id }}
+          REHYDRATION_PLAN_ARTIFACT_DIGEST: ${{ steps.complete.outputs.rehydration_plan_artifact_digest }}
+          REHYDRATION_PLAN_SHA256: ${{ steps.complete.outputs.rehydration_plan_sha256 }}
+          UNIVERSE_RUN_ID: ${{ steps.complete.outputs.universe_run_id }}
+          UNIVERSE_ARTIFACT_DIGEST: ${{ steps.complete.outputs.universe_artifact_digest }}
+          UNIVERSE_HANDOFF_SHA256: ${{ steps.complete.outputs.universe_handoff_sha256 }}
         run: |
           {
             echo "## Phase-2 research component completion"
             echo "- completion_run_id: ${GITHUB_RUN_ID}"
             echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- rehydration_plan_run_id: ${REHYDRATION_PLAN_RUN_ID}"
+            echo "- expected_plan_artifact_digest: ${REHYDRATION_PLAN_ARTIFACT_DIGEST}"
+            echo "- expected_plan_sha256: ${REHYDRATION_PLAN_SHA256}"
+            echo "- universe_run_id: ${UNIVERSE_RUN_ID}"
+            echo "- expected_universe_artifact_digest: ${UNIVERSE_ARTIFACT_DIGEST}"
+            echo "- expected_universe_handoff_sha256: ${UNIVERSE_HANDOFF_SHA256}"
             echo "- component_runs_json: ${COMPONENT_RUNS_JSON}"
             echo "- component_runs_completed: 12"
             echo "- research_components_ready: true"
