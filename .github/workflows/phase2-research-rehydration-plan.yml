@@ -1,0 +1,342 @@
+name: phase2-research-rehydration-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe_run_id:
+        description: Exact phase2-universe-freeze run ID
+        required: true
+        type: string
+      expected_universe_artifact_digest:
+        description: Exact phase2-universe-freeze artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_universe_handoff_sha256:
+        description: Exact SHA-256 of phase2-universe-freeze-handoff.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-rehydration-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
+  EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
+  EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify frozen-universe artifact identity
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          run_id = int(os.environ["UNIVERSE_RUN_ID"])
+          expected = os.environ[
+              "EXPECTED_UNIVERSE_ARTIFACT_DIGEST"
+          ].lower()
+          if run_id <= 0:
+              raise SystemExit("universe run id is invalid")
+          if not expected.startswith("sha256:") or len(expected) != 71:
+              raise SystemExit("universe artifact digest is invalid")
+          raw = subprocess.check_output([
+              "gh",
+              "api",
+              "-H",
+              "Accept: application/vnd.github+json",
+              (
+                  f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                  f"actions/runs/{run_id}/artifacts?"
+                  "name=phase2-universe-freeze"
+              ),
+          ])
+          payload = json.loads(raw)
+          matches = [
+              row
+              for row in payload.get("artifacts", [])
+              if row.get("name") == "phase2-universe-freeze"
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  "expected exactly one frozen-universe artifact"
+              )
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit("frozen-universe artifact is expired")
+          actual = str(artifact.get("digest") or "").lower()
+          if actual != expected:
+              raise SystemExit(
+                  f"frozen-universe artifact digest drift: "
+                  f"{actual} != {expected}"
+              )
+          PY
+
+      - name: Download exact frozen universe
+        run: |
+          mkdir -p inputs/universe
+          gh run download "${UNIVERSE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name phase2-universe-freeze \
+            --dir inputs/universe
+
+      - id: resolve
+        name: Resolve exact research rehydration identities
+        run: |
+          mkdir -p inputs/handoffs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_research_rehydration import (
+              build_phase2_research_rehydration_plan,
+              build_phase2_research_rehydration_seed,
+              resolve_direct_rehydration_binding,
+              resolve_launchpad_rehydration_binding,
+          )
+          from hlp.data.phase2_sources import build_phase2_source_inventory
+
+          root = Path("inputs/universe")
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          handoff_path = root / "phase2-universe-freeze-handoff.json"
+          handoff_sha = sha256_path(handoff_path)
+          expected_handoff_sha = os.environ[
+              "EXPECTED_UNIVERSE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:")
+          if handoff_sha != expected_handoff_sha:
+              raise SystemExit("frozen-universe handoff SHA drift")
+
+          summary_path = root / "phase2-universe-summary.json"
+          provenance_path = root / "phase2-universe-provenance.json"
+          universe_path = root / "phase2-eligible-universe.jsonl"
+          universe_manifest_path = root / (
+              "phase2-eligible-universe.jsonl.manifest.json"
+          )
+          summary = json.loads(summary_path.read_text())
+          provenance = json.loads(provenance_path.read_text())
+          handoff = json.loads(handoff_path.read_text())
+          universe_manifest = json.loads(
+              universe_manifest_path.read_text()
+          )
+          universe_sha = sha256_path(universe_path)
+          if universe_sha != universe_manifest.get("sha256"):
+              raise SystemExit("eligible-universe file SHA drift")
+          if universe_sha != summary.get("eligible_universe_sha256"):
+              raise SystemExit("eligible-universe summary SHA drift")
+
+          ledger_path = Path(".github/phase2-source-coverage.json")
+          ledger_sha = sha256_path(ledger_path)
+          if ledger_sha != provenance.get("coverage_ledger_sha256"):
+              raise SystemExit(
+                  "current coverage ledger differs from frozen universe"
+              )
+
+          seed = build_phase2_research_rehydration_seed(
+              summary,
+              provenance,
+              handoff,
+              source_inventory=build_phase2_source_inventory(),
+              universe_sha256=universe_sha,
+          )
+          Path(
+              "artifacts/phase2-research-rehydration-seed.json"
+          ).write_text(
+              json.dumps(seed, indent=2, sort_keys=True) + "\n"
+          )
+
+          def verify_and_download(component, destination):
+              run_id = int(component["handoff_run_id"])
+              name = str(component["handoff_artifact_name"])
+              expected = str(
+                  component["handoff_artifact_digest"]
+              ).lower()
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                      f"actions/runs/{run_id}/artifacts?name={name}"
+                  ),
+              ])
+              payload = json.loads(raw)
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{component['component_id']}: expected one "
+                      f"handoff artifact; found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(
+                      f"{component['component_id']}: handoff artifact expired"
+                  )
+              actual = str(artifact.get("digest") or "").lower()
+              if actual != expected:
+                  raise SystemExit(
+                      f"{component['component_id']}: handoff digest drift"
+                  )
+              Path(destination).mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  os.environ["GITHUB_REPOSITORY"],
+                  "--name",
+                  name,
+                  "--dir",
+                  destination,
+              ])
+
+          launchpad_bindings = {}
+          direct_binding = None
+          downloaded_direct = False
+          for component_id, component in seed["components"].items():
+              if component["source_kind"] == "launchpad":
+                  destination = (
+                      Path("inputs/handoffs") / component_id
+                  )
+                  verify_and_download(component, destination)
+                  source_summary_path = (
+                      destination
+                      / "phase2-source-eligibility-summary.json"
+                  )
+                  actual_summary_sha = sha256_path(
+                      source_summary_path
+                  )
+                  if actual_summary_sha != component[
+                      "handoff_summary_sha256"
+                  ]:
+                      raise SystemExit(
+                          f"{component_id}: handoff summary SHA drift"
+                      )
+                  source_summary = json.loads(
+                      source_summary_path.read_text()
+                  )
+                  source_provenance = json.loads(
+                      (
+                          destination
+                          / "phase2-source-eligibility-provenance.json"
+                      ).read_text()
+                  )
+                  launchpad_bindings[component_id] = (
+                      resolve_launchpad_rehydration_binding(
+                          seed,
+                          component_id,
+                          source_summary,
+                          source_provenance,
+                      )
+                  )
+              else:
+                  if downloaded_direct:
+                      raise SystemExit(
+                          "direct research handoff resolved more than once"
+                      )
+                  destination = Path("inputs/handoffs/direct")
+                  verify_and_download(component, destination)
+                  direct_handoff_path = (
+                      destination / "direct-eligibility-handoff.json"
+                  )
+                  if sha256_path(direct_handoff_path) != component[
+                      "handoff_sha256"
+                  ]:
+                      raise SystemExit("direct handoff SHA drift")
+                  direct_binding = resolve_direct_rehydration_binding(
+                      seed,
+                      json.loads(direct_handoff_path.read_text()),
+                  )
+                  downloaded_direct = True
+
+          if direct_binding is None:
+              raise SystemExit("direct research binding was not resolved")
+
+          plan = build_phase2_research_rehydration_plan(
+              seed,
+              launchpad_bindings,
+              direct_binding,
+          )
+          plan_path = Path(
+              "artifacts/phase2-research-rehydration-plan.json"
+          )
+          plan_text = json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          plan_path.write_text(plan_text)
+          plan_sha = hashlib.sha256(plan_text.encode()).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"plan_sha256={plan_sha}\n")
+              handle.write(f"universe_sha256={universe_sha}\n")
+
+          print(json.dumps({
+              "plan_sha256": plan_sha,
+              "eligible_universe_sha256": universe_sha,
+              "components": plan["component_count"],
+              "sources": plan["source_count"],
+              "research_price_paths_materialized": False,
+              "dump_threshold_frozen": False,
+              "outcome_labels_computed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload research rehydration plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-rehydration-plan
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish rehydration-plan identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          PLAN_SHA256: ${{ steps.resolve.outputs.plan_sha256 }}
+          UNIVERSE_SHA256: ${{ steps.resolve.outputs.universe_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${PLAN_SHA256}"
+          test -n "${UNIVERSE_SHA256}"
+          {
+            echo "## Phase-2 research rehydration plan"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-research-rehydration-plan"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- plan_sha256: ${PLAN_SHA256}"
+            echo "- eligible_universe_sha256: ${UNIVERSE_SHA256}"
+            echo "- research_price_paths_materialized: false"
+            echo "- dump_threshold_frozen: false"
+            echo "- outcome_labels_computed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

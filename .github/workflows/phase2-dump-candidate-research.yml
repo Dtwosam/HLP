@@ -1,0 +1,374 @@
+name: phase2-dump-candidate-research
+
+on:
+  workflow_dispatch:
+    inputs:
+      geometry_run_id:
+        description: Exact phase2-dump-geometry-research run ID
+        required: true
+        type: string
+      expected_geometry_artifact_digest:
+        description: Exact phase2-dump-geometry-research artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_geometry_handoff_sha256:
+        description: Exact SHA-256 of phase2-dump-geometry-handoff.json
+        required: true
+        type: string
+      candidate_specs_json:
+        description: Explicit JSON array of research-only dump candidate specs; no candidate is selected by this workflow
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-dump-candidate-research-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GEOMETRY_RUN_ID: ${{ inputs.geometry_run_id }}
+  EXPECTED_GEOMETRY_ARTIFACT_DIGEST: ${{ inputs.expected_geometry_artifact_digest }}
+  EXPECTED_GEOMETRY_HANDOFF_SHA256: ${{ inputs.expected_geometry_handoff_sha256 }}
+  CANDIDATE_SPECS_JSON: ${{ inputs.candidate_specs_json }}
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: research
+        name: Compare explicit point-in-time dump candidates
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_dump_research import (
+              build_phase2_dump_candidate_handoff,
+              build_phase2_dump_geometry_handoff,
+              materialize_phase2_dump_candidate_research,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+              return selected
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          geometry_root = Path("inputs/geometry")
+          download_named(
+              int(os.environ["GEOMETRY_RUN_ID"]),
+              "phase2-dump-geometry-research",
+              geometry_root,
+              "dump geometry research",
+              os.environ["EXPECTED_GEOMETRY_ARTIFACT_DIGEST"],
+          )
+
+          geometry_path = find_unique(
+              geometry_root,
+              "phase2-dump-geometry.jsonl",
+          )
+          geometry_manifest_path = find_unique(
+              geometry_root,
+              "phase2-dump-geometry.jsonl.manifest.json",
+          )
+          geometry_manifest = json.loads(
+              geometry_manifest_path.read_text()
+          )
+          geometry_summary_path = find_unique(
+              geometry_root,
+              "phase2-dump-geometry-summary.json",
+          )
+          geometry_summary = json.loads(
+              geometry_summary_path.read_text()
+          )
+          geometry_summary_sha = sha256_path(
+              geometry_summary_path
+          )
+          geometry_handoff_path = find_unique(
+              geometry_root,
+              "phase2-dump-geometry-handoff.json",
+          )
+          geometry_handoff_sha = sha256_path(
+              geometry_handoff_path
+          )
+          if geometry_handoff_sha != os.environ[
+              "EXPECTED_GEOMETRY_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("dump geometry handoff SHA drift")
+          geometry_handoff = json.loads(
+              geometry_handoff_path.read_text()
+          )
+          rebuilt_geometry_handoff = (
+              build_phase2_dump_geometry_handoff(
+                  geometry_summary,
+                  geometry_summary_sha256=geometry_summary_sha,
+                  price_path_handoff_sha256=geometry_summary[
+                      "price_path_handoff_sha256"
+                  ],
+              )
+          )
+          if rebuilt_geometry_handoff != geometry_handoff:
+              raise SystemExit(
+                  "dump geometry handoff content drift"
+              )
+          if geometry_manifest.get("sha256") != geometry_handoff[
+              "geometry_sha256"
+          ]:
+              raise SystemExit("dump geometry manifest SHA drift")
+          if int(geometry_manifest.get("records", -1)) != int(
+              geometry_handoff["price_points"]
+          ):
+              raise SystemExit(
+                  "dump geometry manifest record count drift"
+              )
+          if geometry_handoff.get("candidate_selected") is not False:
+              raise SystemExit(
+                  "candidate research cannot consume selected detector"
+              )
+          if geometry_handoff.get(
+              "phase2_dump_detector_frozen"
+          ) is not False:
+              raise SystemExit(
+                  "candidate research cannot consume frozen detector"
+              )
+          if geometry_handoff.get("outcome_labels_computed") is not False:
+              raise SystemExit(
+                  "candidate research cannot consume outcome labels"
+              )
+
+          try:
+              candidate_specs = json.loads(
+                  os.environ["CANDIDATE_SPECS_JSON"]
+              )
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  f"candidate_specs_json is invalid JSON: {exc}"
+              ) from exc
+          if not isinstance(candidate_specs, list) or not candidate_specs:
+              raise SystemExit(
+                  "candidate_specs_json must be a non-empty JSON array"
+              )
+
+          output = Path(
+              "artifacts/phase2-dump-candidate-research.jsonl"
+          )
+          manifest, summary = (
+              materialize_phase2_dump_candidate_research(
+                  iter_validated_jsonl(
+                      geometry_path,
+                      geometry_manifest_path,
+                  ),
+                  candidate_specs,
+                  geometry_summary=geometry_summary,
+                  output=output,
+              )
+          )
+          summary.update({
+              "geometry_run_id": int(
+                  os.environ["GEOMETRY_RUN_ID"]
+              ),
+              "geometry_handoff_sha256": geometry_handoff_sha,
+              "geometry_summary_sha256": geometry_summary_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase2-dump-candidate-research-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase2_dump_candidate_handoff(
+              summary,
+              research_summary_sha256=summary_sha,
+              geometry_handoff_sha256=geometry_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase2-dump-candidate-research-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"candidate_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(
+                  f"candidate_specs_sha256={summary['candidate_specs_sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"candidate_rows={manifest['records']}\n"
+              )
+          print(json.dumps({
+              "candidate_rows_sha256": manifest["sha256"],
+              "candidate_specs_sha256": summary[
+                  "candidate_specs_sha256"
+              ],
+              "candidate_rows": manifest["records"],
+              "candidate_status_counts": summary[
+                  "candidate_status_counts"
+              ],
+              "candidate_selected": False,
+              "dump_threshold_frozen": False,
+              "phase2_dump_detector_frozen": False,
+              "outcome_labels_computed": False,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload dump candidate research
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-candidate-research
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact candidate-research handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-candidate-research-handoff
+          path: |
+            artifacts/phase2-dump-candidate-research.jsonl.manifest.json
+            artifacts/phase2-dump-candidate-research-summary.json
+            artifacts/phase2-dump-candidate-research-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish candidate-research identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          CANDIDATE_ROWS_SHA256: ${{ steps.research.outputs.candidate_rows_sha256 }}
+          CANDIDATE_SPECS_SHA256: ${{ steps.research.outputs.candidate_specs_sha256 }}
+          SUMMARY_SHA256: ${{ steps.research.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.research.outputs.handoff_sha256 }}
+          CANDIDATE_ROWS: ${{ steps.research.outputs.candidate_rows }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-2 dump candidate research"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-dump-candidate-research"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase2-dump-candidate-research-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- candidate_rows_sha256: ${CANDIDATE_ROWS_SHA256}"
+            echo "- candidate_specs_sha256: ${CANDIDATE_SPECS_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- candidate_rows: ${CANDIDATE_ROWS}"
+            echo "- candidate_selected: false"
+            echo "- dump_threshold_frozen: false"
+            echo "- phase2_dump_detector_frozen: false"
+            echo "- outcome_labels_computed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
