@@ -1,0 +1,103 @@
+name: phase3-second-wave-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase3-second-wave-launch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact second-wave launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify transfer-dependent Phase-3 feature wave
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase3_second_wave_dispatch import validate_phase3_second_wave_launch_receipt,validate_phase3_second_wave_completion_receipt
+          from hlp.data.phase3_early_recipient_features import build_phase3_early_recipient_feature_handoff
+          from hlp.data.phase3_holder_features import build_phase3_holder_feature_handoff
+          from hlp.data.phase3_lifecycle_features import build_phase3_lifecycle_feature_handoff
+          from hlp.data.phase3_redistribution_features import build_phase3_redistribution_feature_handoff
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]; head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[]); rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"]); lr=api(f"actions/runs/{launch_run}")
+          if lr.get("path")!=".github/workflows/phase3-second-wave-launch.yml" or lr.get("head_branch")!=branch or str(lr.get("head_sha") or "").lower()!=head or lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("second-wave launch identity/status drift")
+          lname="phase3-second-wave-launch"; la=artifact(launch_run,lname); actual=str(la.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("second-wave launch digest drift")
+          lroot=download(launch_run,lname,"upstream/launch"); launch=validate_phase3_second_wave_launch_receipt(json.loads((lroot/"phase3-second-wave-launch-receipt.json").read_text()))
+          specs={
+            "early_recipient":("phase3-early-recipient-features.yml","phase3-early-recipient-features","phase3-early-recipient-features-handoff","phase3-early-recipient-features-summary.json","phase3-early-recipient-features-handoff.json",build_phase3_early_recipient_feature_handoff),
+            "holder":("phase3-holder-features.yml","phase3-holder-features","phase3-holder-features-handoff","phase3-holder-features-summary.json","phase3-holder-features-handoff.json",build_phase3_holder_feature_handoff),
+            "lifecycle":("phase3-lifecycle-features.yml","phase3-lifecycle-features","phase3-lifecycle-features-handoff","phase3-lifecycle-features-summary.json","phase3-lifecycle-features-handoff.json",build_phase3_lifecycle_feature_handoff),
+            "redistribution":("phase3-redistribution-features.yml","phase3-redistribution-features","phase3-redistribution-features-handoff","phase3-redistribution-features-summary.json","phase3-redistribution-features-handoff.json",build_phase3_redistribution_feature_handoff),
+          }
+          deadline=time.monotonic()+8400
+          outputs={}
+          transfer_handoff=launch["canonical_transfer"]["handoff_sha256"]
+          for key,run_id in launch["target_run_ids"].items():
+              workflow,full_name,handoff_name,summary_name,handoff_file,builder=specs[key]
+              while True:
+                  row=api(f"actions/runs/{run_id}")
+                  if row.get("path")!=f".github/workflows/{workflow}" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head: raise SystemExit(f"{key} identity drift")
+                  if row.get("status")=="completed":
+                      if row.get("conclusion")!="success": raise SystemExit(f"{key} failed: {row.get('conclusion')}")
+                      break
+                  if time.monotonic()>=deadline: raise SystemExit(f"{key} timed out")
+                  time.sleep(15)
+              full_art=artifact(run_id,full_name); handoff_art=artifact(run_id,handoff_name)
+              root=download(run_id,full_name,f"upstream/{key}"); hroot=download(run_id,handoff_name,f"upstream/{key}-handoff")
+              summary_path=root/summary_name; handoff_path=hroot/handoff_file
+              summary=json.loads(summary_path.read_text()); handoff=json.loads(handoff_path.read_text()); summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
+              rebuilt=builder(summary,feature_summary_sha256=summary_sha,feature_entry_handoff_sha256=launch["feature_entry_handoff_sha256"],canonical_transfer_handoff_sha256=transfer_handoff)
+              if rebuilt!=handoff: raise SystemExit(f"{key} handoff semantic drift")
+              outputs[key]={"run_id":run_id,"artifact_digest":str(full_art.get("digest") or "").lower(),"handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),"handoff_sha256":handoff_sha,"feature_subjects":int(handoff["feature_subjects"])}
+          receipt={"version":"phase3-second-wave-completion-receipt-v1","second_wave_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"second_wave_launch_run_id":launch_run,"second_wave_launch_artifact_digest":actual,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],"feature_entry_run_id":launch["feature_entry_run_id"],"feature_entry_artifact_digest":launch["feature_entry_artifact_digest"],"feature_entry_handoff_sha256":launch["feature_entry_handoff_sha256"],"expected_feature_subjects":launch["feature_subjects"],"canonical_transfer":launch["canonical_transfer"],"prior_feature_outputs":launch["prior_feature_outputs"],"outputs":outputs,"target_runs_completed":4,"all_target_runs_successful":True,"outcome_rows_consumed":False,"outcome_fields_exposed":False,"future_state_allowed":False,"workflow_dispatch_performed":False}
+          receipt=validate_phase3_second_wave_completion_receipt(receipt)
+          Path("artifacts/phase3-second-wave-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          PY
+      - name: Upload second-wave completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-second-wave-completion
+          path: artifacts/phase3-second-wave-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
