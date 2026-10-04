@@ -128,6 +128,13 @@ def build_phase2_dataset_dispatch_plan(
         "outcome_artifact_digest": outcome["outcome_artifact_digest"],
         "outcome_handoff_sha256": outcome["outcome_handoff_sha256"],
         "outcome_rows_sha256": outcome["outcome_rows_sha256"],
+        "detector_freeze_run_id": outcome["detector_freeze_run_id"],
+        "detector_freeze_artifact_digest": outcome[
+            "detector_freeze_artifact_digest"
+        ],
+        "detector_freeze_handoff_sha256": outcome[
+            "detector_freeze_handoff_sha256"
+        ],
         "tokens": int(universe["eligible_tokens"]),
         "confirmed_dump_tokens": int(outcome["confirmed_dump_tokens"]),
         "comeback_5x_tokens": int(outcome["comeback_5x_tokens"]),
@@ -200,6 +207,18 @@ def validate_phase2_dataset_dispatch_plan(
         row.get("outcome_rows_sha256"),
         label="dataset outcome rows",
     )
+    detector_run = _positive_run_id(
+        row.get("detector_freeze_run_id"),
+        label="dataset detector run ID",
+    )
+    detector_digest = _artifact_digest(
+        row.get("detector_freeze_artifact_digest"),
+        label="dataset detector artifact",
+    )
+    detector_handoff = _sha256(
+        row.get("detector_freeze_handoff_sha256"),
+        label="dataset detector handoff",
+    )
     tokens = int(row.get("tokens", -1))
     confirmed = int(row.get("confirmed_dump_tokens", -1))
     comeback = int(row.get("comeback_5x_tokens", -1))
@@ -242,6 +261,9 @@ def validate_phase2_dataset_dispatch_plan(
         "outcome_artifact_digest": outcome_digest,
         "outcome_handoff_sha256": outcome_handoff,
         "outcome_rows_sha256": outcome_rows,
+        "detector_freeze_run_id": detector_run,
+        "detector_freeze_artifact_digest": detector_digest,
+        "detector_freeze_handoff_sha256": detector_handoff,
         "tokens": tokens,
         "confirmed_dump_tokens": confirmed,
         "comeback_5x_tokens": comeback,
@@ -282,6 +304,30 @@ def validate_phase2_dataset_launch_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-2 dataset launch branch/HEAD drift")
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="Phase-2 dataset launch universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="Phase-2 dataset launch universe artifact",
+    )
+    universe_handoff = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="Phase-2 dataset launch universe handoff",
+    )
+    detector_run = _positive_run_id(
+        row.get("detector_freeze_run_id"),
+        label="Phase-2 dataset launch detector run ID",
+    )
+    detector_digest = _artifact_digest(
+        row.get("detector_freeze_artifact_digest"),
+        label="Phase-2 dataset launch detector artifact",
+    )
+    detector_handoff = _sha256(
+        row.get("detector_freeze_handoff_sha256"),
+        label="Phase-2 dataset launch detector handoff",
+    )
     if int(row.get("target_runs_created", -1)) != 1:
         raise ValueError("Phase-2 dataset launch target-run count drift")
     if row.get("target_run_waited_for_completion") is not False:
@@ -299,6 +345,12 @@ def validate_phase2_dataset_launch_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff,
+        "detector_freeze_run_id": detector_run,
+        "detector_freeze_artifact_digest": detector_digest,
+        "detector_freeze_handoff_sha256": detector_handoff,
         "target_runs_created": 1,
         "target_run_waited_for_completion": False,
         "phase2_dataset_ready": False,
@@ -359,6 +411,30 @@ def validate_phase2_dataset_completion_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-2 dataset completion branch/HEAD drift")
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="Phase-2 dataset completion universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="Phase-2 dataset completion universe artifact",
+    )
+    universe_handoff = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="Phase-2 dataset completion universe handoff",
+    )
+    detector_run = _positive_run_id(
+        row.get("detector_freeze_run_id"),
+        label="Phase-2 dataset completion detector run ID",
+    )
+    detector_digest = _artifact_digest(
+        row.get("detector_freeze_artifact_digest"),
+        label="Phase-2 dataset completion detector artifact",
+    )
+    detector_handoff = _sha256(
+        row.get("detector_freeze_handoff_sha256"),
+        label="Phase-2 dataset completion detector handoff",
+    )
     tokens = int(row.get("tokens", -1))
     confirmed = int(row.get("confirmed_dump_tokens", -1))
     comeback = int(row.get("comeback_5x_tokens", -1))
@@ -394,6 +470,12 @@ def validate_phase2_dataset_completion_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff,
+        "detector_freeze_run_id": detector_run,
+        "detector_freeze_artifact_digest": detector_digest,
+        "detector_freeze_handoff_sha256": detector_handoff,
         "tokens": tokens,
         "confirmed_dump_tokens": confirmed,
         "comeback_5x_tokens": comeback,
