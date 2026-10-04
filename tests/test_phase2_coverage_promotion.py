@@ -2689,7 +2689,7 @@ def hood_fun_previous_post_commit_plans():
     return execution, verified, dispatch
 
 
-def test_hood_fun_previous_post_commit_frontier_unlocks_hood_current_only():
+def test_hood_fun_previous_post_commit_frontier_unlocks_noxa_only():
     execution, verified, dispatch = hood_fun_previous_post_commit_plans()
     report = validate_phase2_hood_fun_previous_post_commit_frontier(
         execution, verified, dispatch
@@ -2721,6 +2721,7 @@ def hood_fun_previous_ledger_approved_receipt():
         "canonical_complete_source_ids": [
             "doppler",
             "flap",
+            "hood_fun_current",
             "hood_fun_previous",
             "pons_v1",
             "pons_v2",
