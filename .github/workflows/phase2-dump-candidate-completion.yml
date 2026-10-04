@@ -96,7 +96,7 @@ jobs:
           summary=json.loads(summary_path.read_text()); manifest=json.loads(manifest_path.read_text()); handoff=json.loads(handoff_path.read_text())
           summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
           if handoff.get("version")!=PHASE2_DUMP_CANDIDATE_HANDOFF_VERSION: raise SystemExit("candidate handoff version drift")
-          rebuilt=build_phase2_dump_candidate_handoff(summary,research_summary_sha256=summary_sha,geometry_handoff_sha256=handoff["geometry_handoff_sha256"])
+          rebuilt=build_phase2_dump_candidate_handoff(summary,research_summary_sha256=summary_sha,geometry_handoff_sha256=launch["geometry_handoff_sha256"])
           if rebuilt!=handoff: raise SystemExit("candidate handoff semantic drift")
           if str(manifest.get("sha256") or "").lower()!=handoff["candidate_rows_sha256"]: raise SystemExit("candidate rows SHA drift")
           if handoff["candidate_specs_sha256"]!=launch["candidate_specs_sha256"]: raise SystemExit("candidate specs lineage drift")
@@ -110,6 +110,12 @@ jobs:
               "candidate_research_artifact_digest":str(full_art.get("digest") or "").lower(),
               "candidate_research_handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),
               "candidate_research_handoff_sha256":handoff_sha,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "geometry_run_id":launch["geometry_run_id"],
+              "geometry_artifact_digest":launch["geometry_artifact_digest"],
+              "geometry_handoff_sha256":launch["geometry_handoff_sha256"],
               "candidate_specs_sha256":handoff["candidate_specs_sha256"],
               "candidate_rows_sha256":handoff["candidate_rows_sha256"],
               "candidate_summary_sha256":handoff["research_summary_sha256"],
