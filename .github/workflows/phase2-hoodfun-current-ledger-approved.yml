@@ -424,7 +424,7 @@ jobs:
           )
           if (
               len(all_control_ids) != 47
-              or len(set(all_control_ids)) != 44
+              or len(set(all_control_ids)) != 47
           ):
               raise SystemExit(
                   "hood.fun current ledger approval requires exactly "
