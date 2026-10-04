@@ -1,0 +1,562 @@
+name: phase3-canonical-trade-tape
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature_entry_run_id:
+        description: Exact phase3-feature-entry run ID
+        required: true
+        type: string
+      expected_feature_entry_artifact_digest:
+        description: Exact phase3-feature-entry artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_feature_entry_handoff_sha256:
+        description: Exact SHA-256 of phase3-feature-entry-handoff.json
+        required: true
+        type: string
+      universe_run_id:
+        description: Exact phase2-universe-freeze run ID
+        required: true
+        type: string
+      expected_universe_artifact_digest:
+        description: Exact phase2-universe-freeze artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_universe_handoff_sha256:
+        description: Exact SHA-256 of phase2-universe-freeze-handoff.json
+        required: true
+        type: string
+      source_artifacts_json:
+        description: JSON array of 14 source artifact descriptors
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-canonical-trade-tape-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FEATURE_ENTRY_RUN_ID: ${{ inputs.feature_entry_run_id }}
+  EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
+  EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
+  UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
+  EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
+  EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
+  SOURCE_ARTIFACTS_JSON: ${{ inputs.source_artifacts_json }}
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: assemble
+        name: Validate all source coverage and build canonical trade tape
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+          from hlp.data.phase3_feature_entry import (
+              build_phase3_feature_entry_handoff,
+          )
+          from hlp.data.phase3_trade_tape import (
+              PHASE3_TRADE_SOURCE_COVERAGE_VERSION,
+              build_phase3_canonical_trade_handoff,
+              materialize_phase3_canonical_trade_tape,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh", "api",
+                      "-H", "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              selected = select_equivalent_artifact_retry(
+                  matches,
+                  label=label,
+              )
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          entry_root = Path("inputs/entry")
+          universe_root = Path("inputs/universe")
+          download_named(
+              int(os.environ["FEATURE_ENTRY_RUN_ID"]),
+              "phase3-feature-entry",
+              entry_root,
+              "Phase-3 feature entry",
+              os.environ["EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["UNIVERSE_RUN_ID"]),
+              "phase2-universe-freeze",
+              universe_root,
+              "Phase-2 frozen universe",
+              os.environ["EXPECTED_UNIVERSE_ARTIFACT_DIGEST"],
+          )
+
+          entry_summary_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-summary.json",
+          )
+          entry_summary = json.loads(entry_summary_path.read_text())
+          entry_handoff_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-handoff.json",
+          )
+          entry_handoff_sha = sha256_path(entry_handoff_path)
+          if entry_handoff_sha != os.environ[
+              "EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 feature-entry handoff SHA drift")
+          entry_handoff = json.loads(entry_handoff_path.read_text())
+          rebuilt_entry = build_phase3_feature_entry_handoff(
+              entry_summary,
+              entry_summary_sha256=sha256_path(entry_summary_path),
+              phase2_dataset_handoff_sha256=entry_summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              detector_freeze_handoff_sha256=entry_summary[
+                  "detector_freeze_handoff_sha256"
+              ],
+          )
+          if rebuilt_entry != entry_handoff:
+              raise SystemExit(
+                  "Phase-3 feature-entry handoff content drift"
+              )
+
+          universe_path = find_unique(
+              universe_root,
+              "phase2-eligible-universe.jsonl",
+          )
+          universe_manifest_path = find_unique(
+              universe_root,
+              "phase2-eligible-universe.jsonl.manifest.json",
+          )
+          universe_manifest = json.loads(
+              universe_manifest_path.read_text()
+          )
+          universe_handoff_path = find_unique(
+              universe_root,
+              "phase2-universe-freeze-handoff.json",
+          )
+          universe_handoff_sha = sha256_path(universe_handoff_path)
+          if universe_handoff_sha != os.environ[
+              "EXPECTED_UNIVERSE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-2 universe handoff SHA drift")
+          universe_handoff = json.loads(
+              universe_handoff_path.read_text()
+          )
+          if universe_handoff.get("phase2_universe_frozen") is not True:
+              raise SystemExit("Phase-2 universe is not frozen")
+          if universe_handoff.get(
+              "phase2_universe_coverage_complete"
+          ) is not True:
+              raise SystemExit("Phase-2 universe coverage incomplete")
+          if universe_manifest.get("sha256") != universe_handoff[
+              "eligible_universe_sha256"
+          ]:
+              raise SystemExit("Phase-2 universe manifest SHA drift")
+          if entry_handoff["eligible_universe_sha256"] != (
+              universe_manifest["sha256"]
+          ):
+              raise SystemExit(
+                  "Phase-3 entry/universe SHA linkage drift"
+              )
+
+          inventory_ids = {
+              str(row["source_id"])
+              for row in build_phase2_source_inventory()
+          }
+          try:
+              descriptors = json.loads(
+                  os.environ["SOURCE_ARTIFACTS_JSON"]
+              )
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "source_artifacts_json is invalid JSON"
+              ) from exc
+          if not isinstance(descriptors, list):
+              raise SystemExit(
+                  "source_artifacts_json must be a JSON array"
+              )
+          if len(descriptors) != len(inventory_ids):
+              raise SystemExit(
+                  "source artifact descriptor count drift: "
+                  f"{len(descriptors)} != {len(inventory_ids)}"
+              )
+
+          by_source = {}
+          for raw in descriptors:
+              if not isinstance(raw, dict):
+                  raise SystemExit(
+                      "source artifact descriptor must be an object"
+                  )
+              source_id = str(raw.get("source_id") or "")
+              if source_id not in inventory_ids or source_id in by_source:
+                  raise SystemExit(
+                      f"source artifact id invalid/repeated: {source_id}"
+                  )
+              try:
+                  run_id = int(raw["run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"{source_id}: source run_id invalid"
+                  ) from exc
+              artifact_name = str(raw.get("artifact_name") or "")
+              digest = str(raw.get("artifact_digest") or "").lower()
+              canonical_file = str(raw.get("canonical_file") or "")
+              coverage_file = str(raw.get("coverage_file") or "")
+              if run_id <= 0 or not artifact_name:
+                  raise SystemExit(
+                      f"{source_id}: source artifact identity invalid"
+                  )
+              if not digest.startswith("sha256:") or len(digest) != 71:
+                  raise SystemExit(
+                      f"{source_id}: source artifact digest invalid"
+                  )
+              try:
+                  int(digest.split(":", 1)[1], 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{source_id}: source artifact digest non-hex"
+                  ) from exc
+              for value, label in (
+                  (canonical_file, "canonical_file"),
+                  (coverage_file, "coverage_file"),
+              ):
+                  if (
+                      not value
+                      or Path(value).name != value
+                      or value in {".", ".."}
+                  ):
+                      raise SystemExit(
+                          f"{source_id}: {label} must be a basename"
+                      )
+              by_source[source_id] = {
+                  "run_id": run_id,
+                  "artifact_name": artifact_name,
+                  "artifact_digest": digest,
+                  "canonical_file": canonical_file,
+                  "coverage_file": coverage_file,
+              }
+          if set(by_source) != inventory_ids:
+              raise SystemExit(
+                  "source artifact descriptor set does not match inventory"
+              )
+
+          source_rows = {}
+          coverage_rows = []
+          descriptor_identity = []
+          for source_id in sorted(inventory_ids):
+              descriptor = by_source[source_id]
+              root = Path("inputs/sources") / source_id
+              download_named(
+                  descriptor["run_id"],
+                  descriptor["artifact_name"],
+                  root,
+                  f"Phase-3 {source_id} trade coverage",
+                  descriptor["artifact_digest"],
+              )
+              canonical_path = find_unique(
+                  root,
+                  descriptor["canonical_file"],
+              )
+              coverage_path = find_unique(
+                  root,
+                  descriptor["coverage_file"],
+              )
+              canonical_manifest_path = find_unique(
+                  root,
+                  descriptor["canonical_file"] + ".manifest.json",
+              )
+              coverage_manifest_path = find_unique(
+                  root,
+                  descriptor["coverage_file"] + ".manifest.json",
+              )
+              canonical_manifest = json.loads(
+                  canonical_manifest_path.read_text()
+              )
+              coverage_manifest = json.loads(
+                  coverage_manifest_path.read_text()
+              )
+              rows = iter_validated_jsonl(
+                  canonical_path,
+                  canonical_manifest_path,
+              )
+              cover = list(
+                  iter_validated_jsonl(
+                      coverage_path,
+                      coverage_manifest_path,
+                  )
+              )
+              if len(cover) != 1:
+                  raise SystemExit(
+                      f"{source_id}: expected one source coverage row"
+                  )
+              evidence = cover[0]
+              if evidence.get("version") != (
+                  PHASE3_TRADE_SOURCE_COVERAGE_VERSION
+              ):
+                  raise SystemExit(
+                      f"{source_id}: source coverage version drift"
+                  )
+              if evidence.get("source_id") != source_id:
+                  raise SystemExit(
+                      f"{source_id}: source coverage id drift"
+                  )
+              if evidence.get("trade_coverage_complete") is not True:
+                  raise SystemExit(
+                      f"{source_id}: source trade coverage incomplete"
+                  )
+              if canonical_manifest.get("sha256") != evidence[
+                  "canonical_trade_rows_sha256"
+              ]:
+                  raise SystemExit(
+                      f"{source_id}: canonical trade manifest SHA drift"
+                  )
+              if int(canonical_manifest.get("records", -1)) != int(
+                  evidence["canonical_trade_rows"]
+              ):
+                  raise SystemExit(
+                      f"{source_id}: canonical trade row count drift"
+                  )
+              source_rows[source_id] = rows
+              coverage_rows.append(evidence)
+              descriptor_identity.append({
+                  "source_id": source_id,
+                  **descriptor,
+                  "canonical_rows_sha256": canonical_manifest["sha256"],
+                  "coverage_rows_sha256": coverage_manifest["sha256"],
+              })
+
+          descriptor_payload = (
+              json.dumps(
+                  descriptor_identity,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              )
+              + "\n"
+          ).encode()
+          descriptor_sha = hashlib.sha256(
+              descriptor_payload
+          ).hexdigest()
+          universe_rows = list(
+              iter_validated_jsonl(
+                  universe_path,
+                  universe_manifest_path,
+              )
+          )
+          output = Path(
+              "artifacts/phase3-canonical-trades.jsonl"
+          )
+          manifest, summary = materialize_phase3_canonical_trade_tape(
+              universe_rows,
+              source_rows,
+              coverage_rows,
+              feature_entry_handoff=entry_handoff,
+              output=output,
+          )
+          summary.update({
+              "feature_entry_run_id": int(
+                  os.environ["FEATURE_ENTRY_RUN_ID"]
+              ),
+              "feature_entry_handoff_sha256": entry_handoff_sha,
+              "universe_run_id": int(
+                  os.environ["UNIVERSE_RUN_ID"]
+              ),
+              "universe_handoff_sha256": universe_handoff_sha,
+              "source_artifact_descriptors_sha256": descriptor_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase3-canonical-trade-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+          handoff = build_phase3_canonical_trade_handoff(
+              summary,
+              tape_summary_sha256=summary_sha,
+              feature_entry_handoff_sha256=entry_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-canonical-trade-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+          Path(
+              "artifacts/phase3-trade-source-artifacts.json"
+          ).write_text(
+              json.dumps(
+                  descriptor_identity,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"canonical_trade_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"source_artifacts_sha256={descriptor_sha}\n"
+              )
+              handle.write(
+                  f"trade_rows={summary['trade_rows']}\n"
+              )
+          print(json.dumps({
+              "canonical_trade_rows_sha256": manifest["sha256"],
+              "summary_sha256": summary_sha,
+              "handoff_sha256": handoff_sha,
+              "source_artifacts_sha256": descriptor_sha,
+              "inventory_sources": summary["inventory_sources"],
+              "complete_source_ids": summary["complete_source_ids"],
+              "trade_rows": summary["trade_rows"],
+              "trade_coverage_complete": True,
+              "outcome_rows_consumed": False,
+              "future_state_allowed": False,
+              "phase3_canonical_trade_tape_ready": True,
+          }, sort_keys=True))
+          PY
+      - name: Upload canonical Phase-3 trade tape
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-canonical-trade-tape
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload compact canonical-trade handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-canonical-trade-tape-handoff
+          path: |
+            artifacts/phase3-canonical-trades.jsonl.manifest.json
+            artifacts/phase3-canonical-trade-summary.json
+            artifacts/phase3-canonical-trade-handoff.json
+            artifacts/phase3-trade-source-artifacts.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish canonical-trade identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          ROWS_SHA: ${{ steps.assemble.outputs.canonical_trade_rows_sha256 }}
+          SUMMARY_SHA: ${{ steps.assemble.outputs.summary_sha256 }}
+          HANDOFF_SHA: ${{ steps.assemble.outputs.handoff_sha256 }}
+          SOURCES_SHA: ${{ steps.assemble.outputs.source_artifacts_sha256 }}
+          ROWS: ${{ steps.assemble.outputs.trade_rows }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Phase-3 canonical trade tape"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-canonical-trade-tape"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase3-canonical-trade-tape-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- canonical_trade_rows_sha256: ${ROWS_SHA}"
+            echo "- summary_sha256: ${SUMMARY_SHA}"
+            echo "- handoff_sha256: ${HANDOFF_SHA}"
+            echo "- source_artifacts_sha256: ${SOURCES_SHA}"
+            echo "- trade_rows: ${ROWS}"
+            echo "- inventory_sources: 14"
+            echo "- trade_coverage_complete: true"
+            echo "- outcome_rows_consumed: false"
+            echo "- future_state_allowed: false"
+            echo "- phase3_canonical_trade_tape_ready: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
