@@ -621,3 +621,221 @@ def validate_phase2_research_materialization_wave_completion_receipt(
         "outcome_labels_computed": False,
         "workflow_dispatch_performed": False,
     }
+
+PHASE2_RESEARCH_MATERIALIZATION_FREEZE_LAUNCH_VERSION = (
+    "phase2-research-materialization-freeze-launch-receipt-v1"
+)
+PHASE2_RESEARCH_MATERIALIZATION_FREEZE_COMPLETION_VERSION = (
+    "phase2-research-materialization-freeze-completion-receipt-v1"
+)
+
+
+def validate_phase2_research_materialization_freeze_launch_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_RESEARCH_MATERIALIZATION_FREEZE_LAUNCH_VERSION
+    ):
+        raise ValueError("research materialization-freeze launch version changed")
+    control = _positive_run_id(
+        row.get("materialization_freeze_control_run_id"),
+        label="materialization-freeze control run ID",
+    )
+    completion_run = _positive_run_id(
+        row.get("materialization_completion_run_id"),
+        label="materialization completion run ID",
+    )
+    completion_digest = _artifact_digest(
+        row.get("materialization_completion_artifact_digest"),
+        label="materialization completion artifact",
+    )
+    target_run = _positive_run_id(
+        row.get("materialization_freeze_run_id"),
+        label="materialization-freeze target run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    head = _commit_sha(
+        row.get("execution_head_sha"),
+        label="materialization-freeze launch execution head",
+    )
+    canonical = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="materialization-freeze launch canonical commit",
+    )
+    if not branch or head != canonical:
+        raise ValueError("materialization-freeze launch branch/HEAD drift")
+    rehydration_run = _positive_run_id(
+        row.get("rehydration_plan_run_id"),
+        label="materialization-freeze rehydration plan run ID",
+    )
+    rehydration_digest = _artifact_digest(
+        row.get("rehydration_plan_artifact_digest"),
+        label="materialization-freeze rehydration plan artifact",
+    )
+    rehydration_sha = _sha256(
+        row.get("rehydration_plan_sha256"),
+        label="materialization-freeze rehydration plan",
+    )
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="materialization-freeze universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="materialization-freeze universe artifact",
+    )
+    universe_handoff_sha = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="materialization-freeze universe handoff",
+    )
+    if int(row.get("target_runs_created", -1)) != 1:
+        raise ValueError("materialization-freeze target-run count drift")
+    if row.get("target_run_waited_for_completion") is not False:
+        raise ValueError("materialization-freeze launcher unexpectedly waited")
+    if row.get("workflow_dispatch_performed") is not True:
+        raise ValueError("materialization-freeze launch lacks dispatch proof")
+    return {
+        **row,
+        "materialization_freeze_control_run_id": control,
+        "materialization_completion_run_id": completion_run,
+        "materialization_completion_artifact_digest": completion_digest,
+        "materialization_freeze_run_id": target_run,
+        "execution_branch": branch,
+        "execution_head_sha": head,
+        "canonical_ledger_commit_sha": canonical,
+        "rehydration_plan_run_id": rehydration_run,
+        "rehydration_plan_artifact_digest": rehydration_digest,
+        "rehydration_plan_sha256": rehydration_sha,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff_sha,
+        "target_runs_created": 1,
+        "target_run_waited_for_completion": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def validate_phase2_research_materialization_freeze_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_RESEARCH_MATERIALIZATION_FREEZE_COMPLETION_VERSION
+    ):
+        raise ValueError(
+            "research materialization-freeze completion version changed"
+        )
+    control = _positive_run_id(
+        row.get("materialization_freeze_completion_control_run_id"),
+        label="materialization-freeze completion control run ID",
+    )
+    launch_run = _positive_run_id(
+        row.get("materialization_freeze_launch_run_id"),
+        label="materialization-freeze launch run ID",
+    )
+    launch_digest = _artifact_digest(
+        row.get("materialization_freeze_launch_artifact_digest"),
+        label="materialization-freeze launch artifact",
+    )
+    target_run = _positive_run_id(
+        row.get("materialization_freeze_run_id"),
+        label="completed materialization-freeze run ID",
+    )
+    artifact_digest = _artifact_digest(
+        row.get("materialization_freeze_artifact_digest"),
+        label="materialization-freeze artifact",
+    )
+    bundle_sha = _sha256(
+        row.get("materialization_bundle_sha256"),
+        label="materialization bundle",
+    )
+    handoff_sha = _sha256(
+        row.get("materialization_handoff_sha256"),
+        label="materialization handoff",
+    )
+    branch = str(row.get("execution_branch") or "")
+    head = _commit_sha(
+        row.get("execution_head_sha"),
+        label="materialization-freeze completion execution head",
+    )
+    canonical = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="materialization-freeze completion canonical commit",
+    )
+    if not branch or head != canonical:
+        raise ValueError("materialization-freeze completion branch/HEAD drift")
+    rehydration_run = _positive_run_id(
+        row.get("rehydration_plan_run_id"),
+        label="completed materialization rehydration plan run ID",
+    )
+    rehydration_digest = _artifact_digest(
+        row.get("rehydration_plan_artifact_digest"),
+        label="completed materialization rehydration plan artifact",
+    )
+    rehydration_sha = _sha256(
+        row.get("rehydration_plan_sha256"),
+        label="completed materialization rehydration plan",
+    )
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="completed materialization universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="completed materialization universe artifact",
+    )
+    universe_handoff_sha = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="completed materialization universe handoff",
+    )
+    price_path_inputs = {
+        "materialization_freeze_run_id": str(target_run),
+        "expected_materialization_artifact_digest": artifact_digest,
+        "expected_bundle_sha256": bundle_sha,
+        "expected_materialization_handoff_sha256": handoff_sha,
+        "universe_run_id": str(universe_run),
+        "expected_universe_artifact_digest": universe_digest,
+        "expected_universe_handoff_sha256": universe_handoff_sha,
+    }
+    if row.get("price_path_inputs") != price_path_inputs:
+        raise ValueError("research price-path input binding drift")
+    if row.get("target_run_completed") is not True:
+        raise ValueError("materialization-freeze target is not completed")
+    if row.get("target_run_successful") is not True:
+        raise ValueError("materialization-freeze target is not successful")
+    if row.get("research_price_paths_materialized") is not True:
+        raise ValueError("materialization-freeze lacks materialization proof")
+    if row.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError("materialization-freeze prematurely freezes detector")
+    if row.get("outcome_labels_computed") is not False:
+        raise ValueError("materialization-freeze contains outcome labels")
+    if row.get("workflow_dispatch_performed") is not False:
+        raise ValueError("materialization-freeze completion dispatches workflow")
+    return {
+        **row,
+        "materialization_freeze_completion_control_run_id": control,
+        "materialization_freeze_launch_run_id": launch_run,
+        "materialization_freeze_launch_artifact_digest": launch_digest,
+        "materialization_freeze_run_id": target_run,
+        "materialization_freeze_artifact_digest": artifact_digest,
+        "materialization_bundle_sha256": bundle_sha,
+        "materialization_handoff_sha256": handoff_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head,
+        "canonical_ledger_commit_sha": canonical,
+        "rehydration_plan_run_id": rehydration_run,
+        "rehydration_plan_artifact_digest": rehydration_digest,
+        "rehydration_plan_sha256": rehydration_sha,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff_sha,
+        "price_path_inputs": price_path_inputs,
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "research_price_paths_materialized": True,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+        "workflow_dispatch_performed": False,
+    }
+

@@ -8,6 +8,8 @@ from hlp.data.phase2_research_materialization_dispatch import (
     validate_phase2_research_materialization_dispatch_plan,
     validate_phase2_research_materialization_wave_launch_receipt,
     validate_phase2_research_materialization_wave_completion_receipt,
+    validate_phase2_research_materialization_freeze_launch_receipt,
+    validate_phase2_research_materialization_freeze_completion_receipt,
 )
 from hlp.data.phase2_research_paths import DIRECT_RESEARCH_COMPONENT_ID
 from hlp.data.phase2_research_source_layouts import (
@@ -189,3 +191,82 @@ def test_materialization_completion_emits_freeze_input_json():
     assert report["component_runs_json"].startswith("{")
     assert report["materialization_freeze_inputs"]["rehydration_plan_run_id"] == "9303"
     assert report["materialization_freeze_inputs"]["universe_run_id"] == "9304"
+
+def freeze_launch_receipt():
+    return {
+        "version": "phase2-research-materialization-freeze-launch-receipt-v1",
+        "materialization_freeze_control_run_id": 9400,
+        "materialization_completion_run_id": 9401,
+        "materialization_completion_artifact_digest": "sha256:" + "e1" * 32,
+        "materialization_freeze_run_id": 9402,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "e2" * 20,
+        "canonical_ledger_commit_sha": "e2" * 20,
+        "rehydration_plan_run_id": 9403,
+        "rehydration_plan_artifact_digest": "sha256:" + "e3" * 32,
+        "rehydration_plan_sha256": "e4" * 32,
+        "universe_run_id": 9404,
+        "universe_artifact_digest": "sha256:" + "e5" * 32,
+        "universe_handoff_sha256": "e6" * 32,
+        "target_runs_created": 1,
+        "target_run_waited_for_completion": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_materialization_freeze_launch_requires_one_target():
+    report = validate_phase2_research_materialization_freeze_launch_receipt(
+        freeze_launch_receipt()
+    )
+    assert report["materialization_freeze_run_id"] == 9402
+
+
+def freeze_completion_receipt():
+    launch = freeze_launch_receipt()
+    return {
+        "version": "phase2-research-materialization-freeze-completion-receipt-v1",
+        "materialization_freeze_completion_control_run_id": 9500,
+        "materialization_freeze_launch_run_id": 9501,
+        "materialization_freeze_launch_artifact_digest": "sha256:" + "f1" * 32,
+        "materialization_freeze_run_id": launch["materialization_freeze_run_id"],
+        "materialization_freeze_artifact_digest": "sha256:" + "f2" * 32,
+        "materialization_bundle_sha256": "f3" * 32,
+        "materialization_handoff_sha256": "f4" * 32,
+        "execution_branch": launch["execution_branch"],
+        "execution_head_sha": launch["execution_head_sha"],
+        "canonical_ledger_commit_sha": launch["canonical_ledger_commit_sha"],
+        "rehydration_plan_run_id": launch["rehydration_plan_run_id"],
+        "rehydration_plan_artifact_digest": launch[
+            "rehydration_plan_artifact_digest"
+        ],
+        "rehydration_plan_sha256": launch["rehydration_plan_sha256"],
+        "universe_run_id": launch["universe_run_id"],
+        "universe_artifact_digest": launch["universe_artifact_digest"],
+        "universe_handoff_sha256": launch["universe_handoff_sha256"],
+        "price_path_inputs": {
+            "materialization_freeze_run_id": "9402",
+            "expected_materialization_artifact_digest": "sha256:" + "f2" * 32,
+            "expected_bundle_sha256": "f3" * 32,
+            "expected_materialization_handoff_sha256": "f4" * 32,
+            "universe_run_id": "9404",
+            "expected_universe_artifact_digest": "sha256:" + "e5" * 32,
+            "expected_universe_handoff_sha256": "e6" * 32,
+        },
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "research_price_paths_materialized": True,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+        "workflow_dispatch_performed": False,
+    }
+
+
+def test_materialization_freeze_completion_emits_price_path_inputs():
+    report = (
+        validate_phase2_research_materialization_freeze_completion_receipt(
+            freeze_completion_receipt()
+        )
+    )
+    assert report["research_price_paths_materialized"] is True
+    assert report["price_path_inputs"]["universe_run_id"] == "9404"
+

@@ -79,6 +79,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-research-materialize-component.yml",
     "phase2-research-materialize-composite.yml",
     "phase2-research-materialization-freeze.yml",
+    "phase2-research-materialization-freeze-completion.yml",
+    "phase2-research-materialization-freeze-launch.yml",
     "phase2-research-price-path.yml",
     "phase2-dump-geometry-research.yml",
     "phase2-dump-candidate-research.yml",

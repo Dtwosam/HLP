@@ -1,0 +1,171 @@
+name: phase2-research-materialization-freeze-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-research-materialization-freeze-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact materialization-freeze launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-research-materialization-freeze-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify materialization freeze and publish price-path inputs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase2_research_materialization_bundle import (
+              PHASE2_RESEARCH_MATERIALIZATION_BUNDLE_VERSION,
+              PHASE2_RESEARCH_MATERIALIZATION_HANDOFF_VERSION,
+          )
+          from hlp.data.phase2_research_materialization_dispatch import (
+              validate_phase2_research_materialization_freeze_launch_receipt,
+              validate_phase2_research_materialization_freeze_completion_receipt,
+          )
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def identity(row,workflow,run_id):
+              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+                  raise SystemExit(f"run {run_id} identity drift")
+          def wait(run_id,workflow):
+              deadline=time.monotonic()+4200
+              while True:
+                  row=api(f"actions/runs/{run_id}"); identity(row,workflow,run_id)
+                  if row.get("status")=="completed":
+                      if row.get("conclusion")!="success": raise SystemExit(f"run {run_id} failed: {row.get('conclusion')}")
+                      return
+                  if time.monotonic()>=deadline: raise SystemExit(f"run {run_id} timed out")
+                  time.sleep(10)
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[])
+              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"])
+          lr=api(f"actions/runs/{launch_run}"); identity(lr,"phase2-research-materialization-freeze-launch.yml",launch_run)
+          if lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("materialization-freeze launch is not successful")
+          lname="phase2-research-materialization-freeze-launch"; la=artifact(launch_run,lname)
+          actual=str(la.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("materialization-freeze launch digest drift")
+          lroot=Path("upstream/launch")
+          if lroot.exists(): shutil.rmtree(lroot)
+          lroot.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(launch_run),"--repo",repo,"--name",lname,"--dir",str(lroot)])
+          launch=validate_phase2_research_materialization_freeze_launch_receipt(json.loads((lroot/"phase2-research-materialization-freeze-launch-receipt.json").read_text()))
+          target=launch["materialization_freeze_run_id"]; workflow="phase2-research-materialization-freeze.yml"
+          wait(target,workflow)
+          name="phase2-research-materialization-freeze"; art=artifact(target,name)
+          root=Path("upstream/freeze")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(target),"--repo",repo,"--name",name,"--dir",str(root)])
+          bundle_path=root/"phase2-research-materialization-bundle.json"
+          handoff_path=root/"phase2-research-materialization-handoff.json"
+          bundle=json.loads(bundle_path.read_text()); handoff=json.loads(handoff_path.read_text())
+          if bundle.get("version")!=PHASE2_RESEARCH_MATERIALIZATION_BUNDLE_VERSION: raise SystemExit("materialization bundle version drift")
+          if handoff.get("version")!=PHASE2_RESEARCH_MATERIALIZATION_HANDOFF_VERSION: raise SystemExit("materialization handoff version drift")
+          bundle_sha=sha(bundle_path); handoff_sha=sha(handoff_path)
+          if str(handoff.get("bundle_sha256") or "").lower()!=bundle_sha: raise SystemExit("materialization handoff bundle SHA drift")
+          receipt={
+              "version":"phase2-research-materialization-freeze-completion-receipt-v1",
+              "materialization_freeze_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "materialization_freeze_launch_run_id":launch_run,
+              "materialization_freeze_launch_artifact_digest":actual,
+              "materialization_freeze_run_id":target,
+              "materialization_freeze_artifact_digest":str(art.get("digest") or "").lower(),
+              "materialization_bundle_sha256":bundle_sha,
+              "materialization_handoff_sha256":handoff_sha,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "rehydration_plan_run_id":launch["rehydration_plan_run_id"],
+              "rehydration_plan_artifact_digest":launch["rehydration_plan_artifact_digest"],
+              "rehydration_plan_sha256":launch["rehydration_plan_sha256"],
+              "universe_run_id":launch["universe_run_id"],
+              "universe_artifact_digest":launch["universe_artifact_digest"],
+              "universe_handoff_sha256":launch["universe_handoff_sha256"],
+              "price_path_inputs":{
+                  "materialization_freeze_run_id":str(target),
+                  "expected_materialization_artifact_digest":str(art.get("digest") or "").lower(),
+                  "expected_bundle_sha256":bundle_sha,
+                  "expected_materialization_handoff_sha256":handoff_sha,
+                  "universe_run_id":str(launch["universe_run_id"]),
+                  "expected_universe_artifact_digest":launch["universe_artifact_digest"],
+                  "expected_universe_handoff_sha256":launch["universe_handoff_sha256"],
+              },
+              "target_run_completed":True,
+              "target_run_successful":True,
+              "research_price_paths_materialized":True,
+              "phase2_dump_detector_frozen":False,
+              "outcome_labels_computed":False,
+              "workflow_dispatch_performed":False,
+          }
+          receipt=validate_phase2_research_materialization_freeze_completion_receipt(receipt)
+          Path("artifacts/phase2-research-materialization-freeze-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              for k,v in receipt["price_path_inputs"].items(): h.write(f"{k}={v}\n")
+          PY
+      - name: Upload materialization-freeze completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialization-freeze-completion
+          path: artifacts/phase2-research-materialization-freeze-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish price-path dispatch inputs
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          MATERIALIZATION_RUN: ${{ steps.complete.outputs.materialization_freeze_run_id }}
+          MATERIALIZATION_DIGEST: ${{ steps.complete.outputs.expected_materialization_artifact_digest }}
+          BUNDLE_SHA: ${{ steps.complete.outputs.expected_bundle_sha256 }}
+          HANDOFF_SHA: ${{ steps.complete.outputs.expected_materialization_handoff_sha256 }}
+          UNIVERSE_RUN: ${{ steps.complete.outputs.universe_run_id }}
+          UNIVERSE_DIGEST: ${{ steps.complete.outputs.expected_universe_artifact_digest }}
+          UNIVERSE_HANDOFF_SHA: ${{ steps.complete.outputs.expected_universe_handoff_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 research materialization freeze"
+            echo "- completion_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- materialization_freeze_run_id: ${MATERIALIZATION_RUN}"
+            echo "- expected_materialization_artifact_digest: ${MATERIALIZATION_DIGEST}"
+            echo "- expected_bundle_sha256: ${BUNDLE_SHA}"
+            echo "- expected_materialization_handoff_sha256: ${HANDOFF_SHA}"
+            echo "- universe_run_id: ${UNIVERSE_RUN}"
+            echo "- expected_universe_artifact_digest: ${UNIVERSE_DIGEST}"
+            echo "- expected_universe_handoff_sha256: ${UNIVERSE_HANDOFF_SHA}"
+            echo "- research_price_paths_materialized: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
