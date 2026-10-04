@@ -99,6 +99,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-dump-detector-freeze-launch.yml",
     "phase2-dump-detector-freeze-completion.yml",
     "phase2-outcome-labels.yml",
+    "phase2-outcome-labels-launch.yml",
+    "phase2-outcome-labels-completion.yml",
     "phase2-universe-outcome-dataset.yml",
     "phase2-universe-freeze-plan.yml",
     "phase2-exclusion-registry.yml",

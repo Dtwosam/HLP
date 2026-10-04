@@ -1,0 +1,104 @@
+name: phase2-outcome-labels-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      detector_completion_run_id:
+        description: Exact successful phase2-dump-detector-freeze-completion run ID
+        required: true
+        type: string
+      expected_detector_completion_artifact_digest:
+        description: Exact detector-freeze completion artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPLETION_RUN_ID: ${{ inputs.detector_completion_run_id }}
+      EXPECTED_COMPLETION_DIGEST: ${{ inputs.expected_detector_completion_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: launch
+        name: Dispatch continuous outcome labels
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64,json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dispatch_readiness import workflow_dispatch_interface_sha256
+          from hlp.data.phase2_dump_detector_dispatch import validate_phase2_dump_detector_freeze_completion_receipt
+          from hlp.data.phase2_outcome_dispatch import validate_phase2_outcome_label_launch_receipt
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(args,payload=None):
+              raw=subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",*args],input=(json.dumps(payload,sort_keys=True,separators=(",",":")).encode() if payload is not None else None))
+              return json.loads(raw) if raw.strip() else None
+          run_id=int(os.environ["COMPLETION_RUN_ID"]); row=api([f"/repos/{repo}/actions/runs/{run_id}"])
+          if row.get("path")!=".github/workflows/phase2-dump-detector-freeze-completion.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head or row.get("status")!="completed" or row.get("conclusion")!="success": raise SystemExit("detector completion identity/status drift")
+          rows=api([f"/repos/{repo}/actions/runs/{run_id}/artifacts?name=phase2-dump-detector-freeze-completion"]).get("artifacts",[])
+          rows=[x for x in rows if x.get("name")=="phase2-dump-detector-freeze-completion" and not x.get("expired")]
+          if len(rows)!=1: raise SystemExit("detector completion artifact cardinality drift")
+          actual=str(rows[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_COMPLETION_DIGEST"].lower(): raise SystemExit("detector completion digest drift")
+          root=Path("upstream/completion")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name","phase2-dump-detector-freeze-completion","--dir",str(root)])
+          completion=validate_phase2_dump_detector_freeze_completion_receipt(json.loads((root/"phase2-dump-detector-freeze-completion-receipt.json").read_text()))
+          workflow="phase2-outcome-labels.yml"
+          meta=api([f"/repos/{repo}"]); default=str(meta.get("default_branch") or "")
+          local=workflow_dispatch_interface_sha256(Path(".github/workflows",workflow).read_text())
+          payload=api([f"/repos/{repo}/contents/.github/workflows/{workflow}?ref={default}"])
+          remote=workflow_dispatch_interface_sha256(base64.b64decode(str(payload.get("content") or "").replace("\n","")).decode())
+          if local!=remote: raise SystemExit("default-branch outcome-label interface drift")
+          response=api(["--method","POST",f"/repos/{repo}/actions/workflows/{workflow}/dispatches","--input","-"],{"ref":branch,"inputs":completion["outcome_label_inputs"]})
+          target=int((response or {}).get("workflow_run_id",0))
+          if target<=0: raise SystemExit("outcome-label dispatch lacks run ID")
+          receipt={
+              "version":"phase2-outcome-labels-launch-receipt-v1",
+              "outcome_label_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "detector_freeze_completion_run_id":run_id,
+              "detector_freeze_completion_artifact_digest":actual,
+              "outcome_label_run_id":target,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":completion["canonical_ledger_commit_sha"],
+              "detector_freeze_run_id":completion["detector_freeze_run_id"],
+              "detector_freeze_artifact_digest":completion["detector_freeze_artifact_digest"],
+              "detector_freeze_handoff_sha256":completion["detector_freeze_handoff_sha256"],
+              "price_path_run_id":completion["price_path_run_id"],
+              "price_path_artifact_digest":completion["price_path_artifact_digest"],
+              "price_path_handoff_sha256":completion["price_path_handoff_sha256"],
+              "target_runs_created":1,
+              "target_run_waited_for_completion":False,
+              "phase2_dump_detector_frozen":True,
+              "outcome_labels_computed":False,
+              "workflow_dispatch_performed":True,
+          }
+          receipt=validate_phase2_outcome_label_launch_receipt(receipt)
+          Path("artifacts/phase2-outcome-labels-launch-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h: h.write(f"target_run_id={target}\n")
+          PY
+      - name: Upload outcome-label launch receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-outcome-labels-launch
+          path: artifacts/phase2-outcome-labels-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
