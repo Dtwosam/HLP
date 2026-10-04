@@ -892,11 +892,9 @@ def build_phase2_coverage_execution_plan(
         "version": PHASE2_COVERAGE_EXECUTION_PLAN_VERSION,
         "snapshot_head_block": int(report["snapshot_head_block"]),
         "inventory_sources": int(report["inventory_sources"]),
-        "canonical_complete_source_ids": [
-            source_id
-            for source_id in inventory_order
-            if source_id in complete
-        ],
+        "canonical_complete_source_ids": list(
+            report["complete_source_ids"]
+        ),
         "target_incomplete_source_ids": incomplete,
         "complete_sources": len(complete),
         "incomplete_sources": len(incomplete),

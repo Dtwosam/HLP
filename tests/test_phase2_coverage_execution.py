@@ -15,7 +15,7 @@ SNAPSHOT = 100
 COMPLETE = {"pons_v1", "pons_v2"}
 
 
-def ledger():
+def ledger(complete=COMPLETE):
     inventory = build_phase2_source_inventory()
     rows = []
     for row in inventory:
@@ -27,7 +27,7 @@ def ledger():
             "observed_volume_usd": None,
             "blocking_reason": None,
         }
-        if source_id in COMPLETE:
+        if source_id in complete:
             rows.append({
                 **base,
                 "coverage_status": "complete",
@@ -256,3 +256,25 @@ def test_ledger_commit_nodes_use_explicit_approval_workflow():
     assert report["canonical_ledger_commit_workflow_available"] is True
     assert report["ledger_commit_requires_explicit_approval"] is True
     assert report["manual_ledger_commit_node_ids"] == []
+
+def test_canonical_complete_source_ids_follow_coverage_ledger_sort_order():
+    complete = {
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "doppler",
+        "flap",
+        "trench_today",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+    }
+    report = build_phase2_coverage_execution_plan(
+        ledger(complete),
+        build_phase2_source_inventory(),
+        completed_node_ids=(),
+    )
+    assert report["canonical_complete_source_ids"] == sorted(complete)
+

@@ -1,3 +1,6 @@
+from pathlib import Path
+import re
+
 from hlp.data.phase2_dispatch_readiness import (
     PHASE2_DEFAULT_BRANCH_READINESS_VERSION,
     PHASE2_DYNAMIC_WORKFLOWS,
@@ -199,3 +202,28 @@ def test_full_surface_requires_compatible_dispatch_interfaces():
     assert stale["incompatible_workflow_names"] == [
         PHASE2_PLANNER_WORKFLOW
     ]
+
+def test_approved_ledger_workflows_require_every_dispatch_receipt_unique():
+    expected = {
+        "phase2-pools-fun-ledger-approved.yml": 41,
+        "phase2-pools-trade-instant-ledger-approved.yml": 42,
+        "phase2-pools-trade-lbp-ledger-approved.yml": 43,
+        "phase2-doppler-ledger-approved.yml": 44,
+        "phase2-flap-ledger-approved.yml": 45,
+        "phase2-trench-today-ledger-approved.yml": 46,
+        "phase2-hoodfun-current-ledger-approved.yml": 47,
+        "phase2-hoodfun-previous-ledger-approved.yml": 48,
+        "phase2-noxa-ledger-approved.yml": 49,
+    }
+    root = Path(__file__).parents[1] / ".github" / "workflows"
+    pattern = re.compile(
+        r"len\(all_control_ids\) != (\d+).*?"
+        r"len\(set\(all_control_ids\)\) != (\d+)",
+        re.S,
+    )
+    for name, count in expected.items():
+        match = pattern.search((root / name).read_text())
+        assert match is not None, name
+        assert int(match.group(1)) == count, name
+        assert int(match.group(2)) == count, name
+
