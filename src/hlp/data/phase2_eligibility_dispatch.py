@@ -613,3 +613,158 @@ def validate_phase2_eligibility_wave_launch_receipt(
         "workflow_dispatch_performed": True,
     }
 
+PHASE2_ELIGIBILITY_WAVE_COMPLETION_RECEIPT_VERSION = (
+    "phase2-eligibility-wave-completion-receipt-v1"
+)
+
+
+def validate_phase2_eligibility_wave_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate the immutable 12-run eligibility completion handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_ELIGIBILITY_WAVE_COMPLETION_RECEIPT_VERSION
+    ):
+        raise ValueError(
+            "Phase-2 eligibility-wave completion version changed"
+        )
+    control_run_id = _positive_run_id(
+        row.get("eligibility_completion_control_run_id"),
+        label="eligibility completion control run ID",
+    )
+    launch_run_id = _positive_run_id(
+        row.get("eligibility_wave_launch_run_id"),
+        label="eligibility launch run ID",
+    )
+    launch_digest = _artifact_digest(
+        row.get("eligibility_wave_launch_artifact_digest"),
+        label="eligibility launch artifact digest",
+    )
+    plan_run_id = _positive_run_id(
+        row.get("plan_run_id"),
+        label="eligibility completion plan run ID",
+    )
+    plan_digest = _artifact_digest(
+        row.get("plan_artifact_digest"),
+        label="eligibility completion plan artifact digest",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("eligibility completion branch is empty")
+    head = _commit_sha(
+        row.get("execution_head_sha"),
+        label="eligibility completion execution head",
+    )
+    canonical = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="eligibility completion canonical ledger commit",
+    )
+    if canonical != head:
+        raise ValueError(
+            "eligibility completion canonical commit is not execution HEAD"
+        )
+
+    launchpads_raw = row.get("launchpad_handoffs")
+    if not isinstance(launchpads_raw, Mapping):
+        raise ValueError(
+            "eligibility completion launchpad handoffs are missing"
+        )
+    if set(launchpads_raw) != set(LAUNCHPAD_SOURCES):
+        raise ValueError(
+            "eligibility completion launchpad handoff set drift"
+        )
+    launchpads = {}
+    launchpad_run_ids = []
+    for source in LAUNCHPAD_SOURCES:
+        raw = launchpads_raw[source]
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                f"{source} eligibility completion handoff is invalid"
+            )
+        item = dict(raw)
+        run_id = _positive_run_id(
+            item.get("run_id"),
+            label=f"{source} eligibility completion run ID",
+        )
+        digest = _artifact_digest(
+            item.get("artifact_digest"),
+            label=f"{source} eligibility completion artifact",
+        )
+        summary_sha = _sha256(
+            item.get("summary_sha256"),
+            label=f"{source} eligibility completion summary",
+        )
+        launchpads[source] = {
+            "run_id": run_id,
+            "artifact_digest": digest,
+            "summary_sha256": summary_sha,
+        }
+        launchpad_run_ids.append(run_id)
+
+    direct_raw = row.get("direct_handoff")
+    if not isinstance(direct_raw, Mapping):
+        raise ValueError("eligibility completion direct handoff is missing")
+    direct = dict(direct_raw)
+    direct_run_id = _positive_run_id(
+        direct.get("run_id"),
+        label="direct eligibility completion run ID",
+    )
+    direct_digest = _artifact_digest(
+        direct.get("artifact_digest"),
+        label="direct eligibility completion artifact",
+    )
+    direct_handoff_sha = _sha256(
+        direct.get("handoff_sha256"),
+        label="direct eligibility completion handoff",
+    )
+    all_runs = launchpad_run_ids + [direct_run_id]
+    if len(set(all_runs)) != 12:
+        raise ValueError(
+            "eligibility completion target run IDs are not unique"
+        )
+    if int(row.get("eligibility_runs_completed", -1)) != 12:
+        raise ValueError("eligibility completion run count drift")
+    if row.get("all_eligibility_runs_successful") is not True:
+        raise ValueError("eligibility completion lacks success proof")
+    if row.get("phase2_universe_coverage_complete") is not True:
+        raise ValueError("eligibility completion lost 14/14 coverage proof")
+    if row.get("phase2_universe_sources_ready") is not True:
+        raise ValueError("eligibility completion sources are not ready")
+    if row.get("phase2_universe_frozen") is not False:
+        raise ValueError(
+            "eligibility completion prematurely freezes universe"
+        )
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("eligibility completion mutated canonical ledger")
+    if row.get("workflow_dispatch_performed") is not False:
+        raise ValueError(
+            "eligibility completion unexpectedly dispatches workflow"
+        )
+
+    return {
+        **row,
+        "eligibility_completion_control_run_id": control_run_id,
+        "eligibility_wave_launch_run_id": launch_run_id,
+        "eligibility_wave_launch_artifact_digest": launch_digest,
+        "plan_run_id": plan_run_id,
+        "plan_artifact_digest": plan_digest,
+        "execution_branch": branch,
+        "execution_head_sha": head,
+        "canonical_ledger_commit_sha": canonical,
+        "launchpad_handoffs": launchpads,
+        "direct_handoff": {
+            "run_id": direct_run_id,
+            "artifact_digest": direct_digest,
+            "handoff_sha256": direct_handoff_sha,
+        },
+        "eligibility_runs_completed": 12,
+        "all_eligibility_runs_successful": True,
+        "phase2_universe_coverage_complete": True,
+        "phase2_universe_sources_ready": True,
+        "phase2_universe_frozen": False,
+        "canonical_coverage_ledger_mutated": False,
+        "workflow_dispatch_performed": False,
+    }
+

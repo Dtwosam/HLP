@@ -14,6 +14,7 @@ from hlp.data.phase2_eligibility_dispatch import (
     build_phase2_eligibility_dispatch_plan,
     validate_phase2_eligibility_dispatch_plan,
     validate_phase2_eligibility_wave_launch_receipt,
+    validate_phase2_eligibility_wave_completion_receipt,
 )
 
 
@@ -162,4 +163,59 @@ def test_eligibility_wave_launch_receipt_requires_12_unique_runs():
     )
     with pytest.raises(ValueError, match="not unique"):
         validate_phase2_eligibility_wave_launch_receipt(duplicate)
+
+def completion_receipt():
+    launch = launch_receipt()
+    return {
+        "version": "phase2-eligibility-wave-completion-receipt-v1",
+        "eligibility_completion_control_run_id": 6001,
+        "eligibility_wave_launch_run_id": 6002,
+        "eligibility_wave_launch_artifact_digest": (
+            "sha256:" + "cc" * 32
+        ),
+        "plan_run_id": 6003,
+        "plan_artifact_digest": "sha256:" + "dd" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ee" * 20,
+        "canonical_ledger_commit_sha": "ee" * 20,
+        "launchpad_handoffs": {
+            source: {
+                "run_id": launch["launchpad_run_ids"][source],
+                "artifact_digest": "sha256:" + "11" * 32,
+                "summary_sha256": "22" * 32,
+            }
+            for source in LAUNCHPAD_SOURCES
+        },
+        "direct_handoff": {
+            "run_id": launch["direct_run_id"],
+            "artifact_digest": "sha256:" + "33" * 32,
+            "handoff_sha256": "44" * 32,
+        },
+        "eligibility_runs_completed": 12,
+        "all_eligibility_runs_successful": True,
+        "phase2_universe_coverage_complete": True,
+        "phase2_universe_sources_ready": True,
+        "phase2_universe_frozen": False,
+        "canonical_coverage_ledger_mutated": False,
+        "workflow_dispatch_performed": False,
+    }
+
+
+def test_eligibility_wave_completion_receipt_freezes_exact_handoffs():
+    report = validate_phase2_eligibility_wave_completion_receipt(
+        completion_receipt()
+    )
+    assert report["eligibility_runs_completed"] == 12
+    assert len(report["launchpad_handoffs"]) == 11
+    assert report["phase2_universe_sources_ready"] is True
+    assert report["phase2_universe_frozen"] is False
+
+
+def test_eligibility_wave_completion_rejects_duplicate_target_run():
+    row = completion_receipt()
+    row["direct_handoff"]["run_id"] = row["launchpad_handoffs"][
+        "pons_v1"
+    ]["run_id"]
+    with pytest.raises(ValueError, match="not unique"):
+        validate_phase2_eligibility_wave_completion_receipt(row)
 
