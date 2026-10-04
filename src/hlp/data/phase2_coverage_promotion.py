@@ -7370,3 +7370,740 @@ def validate_phase2_direct_uniswap_v3_ledger_approved_receipt(
         "automatic_acquisition_complete": True,
         "phase2_universe_coverage_complete": False,
     }
+
+
+PHASE2_DIRECT_UNISWAP_V4_PROMOTION_REVIEW_VERSION = (
+    "phase2-direct-uniswap-v4-promotion-review-v1"
+)
+DIRECT_UNISWAP_V4_COVERAGE_WORKFLOW = "phase2-direct-source-coverage.yml"
+DIRECT_UNISWAP_V4_COVERAGE_ARTIFACT = "phase2-direct-source-coverage-direct_uniswap_v4"
+DIRECT_UNISWAP_V4_COVERAGE_REPORT_PATH = "direct-source-coverage-report.json"
+PHASE2_DIRECT_UNISWAP_V4_PROMOTION_PROPOSAL_VERSION = (
+    "phase2-direct-uniswap-v4-promotion-proposal-v1"
+)
+
+
+def build_phase2_direct_uniswap_v4_promotion_review_handoff(
+    current_ledger: Mapping[str, object],
+    coverage_report: Mapping[str, object],
+    source_inventory: Iterable[Mapping[str, object]],
+    *,
+    coverage_run_id: int,
+    coverage_artifact_digest: str,
+    coverage_report_sha256: str,
+    planner_run_id: int,
+    planner_artifact_digest: str,
+    canonical_ledger_sha256: str,
+) -> dict:
+    """Prepare exact direct Uniswap V4 promotion inputs at 12/14."""
+
+    inventory = [dict(row) for row in source_inventory]
+    before = validate_phase2_coverage_ledger(dict(current_ledger), inventory)
+    expected_before = [
+        "direct_uniswap_v3",
+        "doppler",
+        "flap",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    if before["complete_source_ids"] != expected_before:
+        raise ValueError("direct Uniswap V4 review requires exact 12/14 direct Uniswap V3 ledger")
+
+    report = dict(coverage_report)
+    if report.get("source_id") != "direct_uniswap_v4":
+        raise ValueError("direct Uniswap V4 review source identity drift")
+    if report.get("coverage_status") != "complete":
+        raise ValueError("direct Uniswap V4 review requires complete coverage report")
+
+    _, after = apply_phase2_source_coverage_report(
+        dict(current_ledger), inventory, report
+    )
+    expected_after = sorted(expected_before + ["direct_uniswap_v4"])
+    if after["complete_source_ids"] != expected_after:
+        raise ValueError(
+            "direct Uniswap V4 review does not complete exactly next source"
+        )
+    if after["phase2_universe_coverage_complete"]:
+        raise ValueError("direct Uniswap V4 review unexpectedly closes Phase 2")
+
+    run_id = _positive_run_id(
+        coverage_run_id, label="direct Uniswap V4 coverage run ID"
+    )
+    artifact_digest = _artifact_digest(
+        coverage_artifact_digest,
+        label="direct Uniswap V4 coverage artifact digest",
+    )
+    report_sha = _sha256(
+        coverage_report_sha256, label="direct Uniswap V4 coverage report"
+    )
+    planner_id = _positive_run_id(
+        planner_run_id, label="direct Uniswap V4 promotion planner run ID"
+    )
+    planner_digest = _artifact_digest(
+        planner_artifact_digest,
+        label="direct Uniswap V4 planner artifact digest",
+    )
+    ledger_sha = _sha256(
+        canonical_ledger_sha256, label="direct Uniswap V4 canonical ledger"
+    )
+    generated_inputs = {
+        "coverage_run_id": str(run_id),
+        "coverage_artifact_name": DIRECT_UNISWAP_V4_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": artifact_digest,
+        "coverage_report_path": DIRECT_UNISWAP_V4_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "direct_uniswap_v4",
+    }
+    return {
+        "version": PHASE2_DIRECT_UNISWAP_V4_PROMOTION_REVIEW_VERSION,
+        "source_id": "direct_uniswap_v4",
+        "coverage_workflow": DIRECT_UNISWAP_V4_COVERAGE_WORKFLOW,
+        "coverage_run_id": run_id,
+        "coverage_artifact_name": DIRECT_UNISWAP_V4_COVERAGE_ARTIFACT,
+        "coverage_artifact_digest": artifact_digest,
+        "coverage_report_path": DIRECT_UNISWAP_V4_COVERAGE_REPORT_PATH,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "complete_source_ids_before": expected_before,
+        "complete_source_ids_after_if_promoted": expected_after,
+        "promotion_workflow": SOURCE_COVERAGE_PROMOTION_WORKFLOW,
+        "promotion_generated_inputs": generated_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_direct_uniswap_v4_promotion_review_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 12/14 direct Uniswap V4 review handoff."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_DIRECT_UNISWAP_V4_PROMOTION_REVIEW_VERSION
+    ):
+        raise ValueError("direct Uniswap V4 promotion review version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_review_control_run_id"),
+        label="direct Uniswap V4 review control run ID",
+    )
+    prior_run_id = _positive_run_id(
+        row.get("direct_uniswap_v3_ledger_approval_run_id"),
+        label="direct Uniswap V3 ledger approval run ID",
+    )
+    coverage_run_id = _positive_run_id(
+        row.get("coverage_run_id"),
+        label="direct Uniswap V4 coverage run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="direct Uniswap V4 planner run ID",
+    )
+    prior_digest = _artifact_digest(
+        row.get("direct_uniswap_v3_ledger_approval_artifact_digest"),
+        label="direct Uniswap V3 ledger approval artifact digest",
+    )
+    coverage_digest = _artifact_digest(
+        row.get("coverage_artifact_digest"),
+        label="direct Uniswap V4 coverage artifact digest",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="direct Uniswap V4 planner artifact digest",
+    )
+    report_sha = _sha256(
+        row.get("coverage_report_sha256"),
+        label="direct Uniswap V4 coverage report",
+    )
+    ledger_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="direct Uniswap V4 canonical ledger",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("direct Uniswap V4 review execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="direct Uniswap V4 review execution head",
+    )
+    if row.get("source_id") != "direct_uniswap_v4":
+        raise ValueError("direct Uniswap V4 review source drift")
+    if row.get("coverage_workflow") != DIRECT_UNISWAP_V4_COVERAGE_WORKFLOW:
+        raise ValueError("direct Uniswap V4 coverage workflow drift")
+    if row.get("coverage_artifact_name") != DIRECT_UNISWAP_V4_COVERAGE_ARTIFACT:
+        raise ValueError("direct Uniswap V4 artifact-name drift")
+    if row.get("coverage_report_path") != DIRECT_UNISWAP_V4_COVERAGE_REPORT_PATH:
+        raise ValueError("direct Uniswap V4 report-path drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("direct Uniswap V4 promotion workflow drift")
+    expected_inputs = {
+        "coverage_run_id": str(coverage_run_id),
+        "coverage_artifact_name": DIRECT_UNISWAP_V4_COVERAGE_ARTIFACT,
+        "expected_artifact_digest": coverage_digest,
+        "coverage_report_path": DIRECT_UNISWAP_V4_COVERAGE_REPORT_PATH,
+        "expected_report_sha256": report_sha,
+        "expected_source_id": "direct_uniswap_v4",
+    }
+    if row.get("promotion_generated_inputs") != expected_inputs:
+        raise ValueError("direct Uniswap V4 promotion generated-input drift")
+    if row.get("promotion_review_required") is not True:
+        raise ValueError("direct Uniswap V4 promotion lost review requirement")
+    for field in (
+        "promotion_dispatched",
+        "proposal_created",
+        "canonical_coverage_ledger_mutated",
+        "canonical_ledger_write_authorized",
+    ):
+        if row.get(field) is not False:
+            raise ValueError(
+                f"direct Uniswap V4 review violates read-only field {field}"
+            )
+    return {
+        **row,
+        "promotion_review_control_run_id": control_run_id,
+        "direct_uniswap_v3_ledger_approval_run_id": prior_run_id,
+        "direct_uniswap_v3_ledger_approval_artifact_digest": prior_digest,
+        "coverage_run_id": coverage_run_id,
+        "coverage_artifact_digest": coverage_digest,
+        "coverage_report_sha256": report_sha,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_coverage_ledger_sha256": ledger_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_generated_inputs": expected_inputs,
+        "promotion_review_required": True,
+        "promotion_dispatched": False,
+        "proposal_created": False,
+        "canonical_coverage_ledger_mutated": False,
+        "canonical_ledger_write_authorized": False,
+    }
+
+
+def validate_phase2_direct_uniswap_v4_promotion_proposal_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate direct Uniswap V4 proposal before ledger approval."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_DIRECT_UNISWAP_V4_PROMOTION_PROPOSAL_VERSION
+    ):
+        raise ValueError("direct Uniswap V4 promotion proposal receipt version changed")
+    control_run_id = _positive_run_id(
+        row.get("promotion_proposal_control_run_id"),
+        label="direct Uniswap V4 proposal control run ID",
+    )
+    review_run_id = _positive_run_id(
+        row.get("promotion_review_run_id"),
+        label="direct Uniswap V4 review run ID",
+    )
+    dispatcher_run_id = _positive_run_id(
+        row.get("node_dispatch_control_run_id"),
+        label="direct Uniswap V4 promotion dispatcher run ID",
+    )
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="direct Uniswap V4 promotion run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("direct Uniswap V4 proposal execution branch is empty")
+    head_sha = _commit_sha(
+        row.get("execution_head_sha"),
+        label="direct Uniswap V4 proposal execution head",
+    )
+    review_digest = _artifact_digest(
+        row.get("promotion_review_artifact_digest"),
+        label="direct Uniswap V4 review artifact digest",
+    )
+    promotion_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="direct Uniswap V4 promotion artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="direct Uniswap V4 promotion handoff",
+    )
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="direct Uniswap V4 proposed ledger",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="direct Uniswap V4 proposal base ledger",
+    )
+    expected_before = [
+        "direct_uniswap_v3",
+        "doppler",
+        "flap",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    expected_after = sorted(expected_before + ["direct_uniswap_v4"])
+    if row.get("source_id") != "direct_uniswap_v4":
+        raise ValueError("direct Uniswap V4 proposal source identity drift")
+    if row.get("promotion_workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("direct Uniswap V4 proposal workflow identity drift")
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("direct Uniswap V4 proposal before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("direct Uniswap V4 proposal after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("direct Uniswap V4 proposal unexpectedly closes Phase 2")
+    if row.get("proposal_created") is not True:
+        raise ValueError("direct Uniswap V4 proposal lacks proposal proof")
+    if row.get("proposal_validated") is not True:
+        raise ValueError("direct Uniswap V4 proposal lacks validation proof")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("direct Uniswap V4 proposal unexpectedly mutates ledger")
+    if row.get("ledger_commit_authorized") is not False:
+        raise ValueError("direct Uniswap V4 proposal authorizes ledger commit")
+    if row.get("ledger_commit_approval_input") != "apply_proposed_ledger":
+        raise ValueError("direct Uniswap V4 proposal ledger approval input drift")
+    if row.get("ledger_commit_approval_value_supplied") is not False:
+        raise ValueError("direct Uniswap V4 proposal already supplies approval")
+    expected_generated = {
+        "promotion_run_id": str(promotion_run_id),
+        "expected_artifact_digest": promotion_digest,
+        "expected_handoff_sha256": handoff_sha,
+        "expected_proposed_ledger_sha256": proposed_sha,
+        "expected_source_id": "direct_uniswap_v4",
+    }
+    if row.get("ledger_commit_generated_inputs") != expected_generated:
+        raise ValueError("direct Uniswap V4 proposal ledger-commit input drift")
+    return {
+        **row,
+        "promotion_proposal_control_run_id": control_run_id,
+        "promotion_review_run_id": review_run_id,
+        "node_dispatch_control_run_id": dispatcher_run_id,
+        "promotion_run_id": promotion_run_id,
+        "execution_branch": branch,
+        "execution_head_sha": head_sha,
+        "promotion_review_artifact_digest": review_digest,
+        "promotion_artifact_digest": promotion_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "base_ledger_sha256": base_sha,
+        "source_id": "direct_uniswap_v4",
+        "ledger_commit_generated_inputs": expected_generated,
+        "ledger_commit_approval_input": "apply_proposed_ledger",
+        "ledger_commit_approval_value_supplied": False,
+        "proposal_created": True,
+        "proposal_validated": True,
+        "canonical_coverage_ledger_mutated": False,
+        "ledger_commit_authorized": False,
+    }
+
+
+def validate_phase2_direct_uniswap_v4_ledger_commit_receipt(
+    receipt: Mapping[str, object],
+    *,
+    expected_promotion_run_id: int,
+    expected_promotion_artifact_digest: str,
+    expected_promotion_handoff_sha256: str,
+    expected_proposed_ledger_sha256: str,
+) -> dict:
+    """Validate approved direct Uniswap V4 canonical-ledger write."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-source-coverage-ledger-commit-v1"
+    ):
+        raise ValueError("direct Uniswap V4 ledger commit receipt version changed")
+    if row.get("source_id") != "direct_uniswap_v4":
+        raise ValueError("direct Uniswap V4 ledger commit source identity drift")
+    promotion_run_id = _positive_run_id(
+        row.get("promotion_run_id"),
+        label="direct Uniswap V4 ledger promotion run ID",
+    )
+    if promotion_run_id != int(expected_promotion_run_id):
+        raise ValueError("direct Uniswap V4 ledger commit promotion run drift")
+    if row.get("promotion_artifact_name") != (
+        "phase2-source-coverage-promotion-direct_uniswap_v4"
+    ):
+        raise ValueError("direct Uniswap V4 ledger commit artifact-name drift")
+    artifact_digest = _artifact_digest(
+        row.get("promotion_artifact_digest"),
+        label="direct Uniswap V4 promotion artifact digest",
+    )
+    if artifact_digest != _artifact_digest(
+        expected_promotion_artifact_digest,
+        label="expected direct Uniswap V4 promotion artifact digest",
+    ):
+        raise ValueError("direct Uniswap V4 ledger commit promotion artifact drift")
+    handoff_sha = _sha256(
+        row.get("promotion_handoff_sha256"),
+        label="direct Uniswap V4 promotion handoff",
+    )
+    if handoff_sha != _sha256(
+        expected_promotion_handoff_sha256,
+        label="expected direct Uniswap V4 promotion handoff",
+    ):
+        raise ValueError("direct Uniswap V4 ledger commit promotion handoff drift")
+    proposed_sha = _sha256(
+        row.get("proposed_ledger_sha256"),
+        label="direct Uniswap V4 proposed ledger",
+    )
+    if proposed_sha != _sha256(
+        expected_proposed_ledger_sha256,
+        label="expected direct Uniswap V4 proposed ledger",
+    ):
+        raise ValueError("direct Uniswap V4 ledger commit proposed-ledger drift")
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="direct Uniswap V4 base ledger",
+    )
+    expected_before = [
+        "direct_uniswap_v3",
+        "doppler",
+        "flap",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    expected_after = sorted(expected_before + ["direct_uniswap_v4"])
+    if row.get("complete_source_ids_before") != expected_before:
+        raise ValueError("direct Uniswap V4 ledger commit before-set drift")
+    if row.get("complete_source_ids_after") != expected_after:
+        raise ValueError("direct Uniswap V4 ledger commit after-set drift")
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("direct Uniswap V4 commit unexpectedly closes Phase 2")
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="direct Uniswap V4 canonical ledger commit",
+    )
+    if row.get("explicit_approval") is not True:
+        raise ValueError("direct Uniswap V4 ledger commit lacks explicit approval")
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError("direct Uniswap V4 ledger commit lacks mutation proof")
+    return {
+        **row,
+        "promotion_run_id": promotion_run_id,
+        "promotion_artifact_digest": artifact_digest,
+        "promotion_handoff_sha256": handoff_sha,
+        "base_ledger_sha256": base_sha,
+        "proposed_ledger_sha256": proposed_sha,
+        "canonical_ledger_commit_sha": commit_sha,
+        "explicit_approval": True,
+        "canonical_ledger_mutated": True,
+    }
+
+
+def validate_phase2_direct_uniswap_v4_post_commit_frontier(
+    execution_plan: Mapping[str, object],
+    verified_receipts: Mapping[str, object],
+    dispatch_plan: Mapping[str, object],
+) -> dict:
+    """Freeze exact 13/14 frontier after direct Uniswap V4 is canonical."""
+
+    execution = dict(execution_plan)
+    verified = dict(verified_receipts)
+    dispatch = dict(dispatch_plan)
+    expected_complete = [
+        "direct_uniswap_v3",
+        "direct_uniswap_v4",
+        "doppler",
+        "flap",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    if execution.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError("direct Uniswap V4 post-commit canonical source set drift")
+    if int(execution.get("complete_sources", -1)) != 13:
+        raise ValueError("direct Uniswap V4 post-commit source count drift")
+    if int(execution.get("incomplete_sources", -1)) != 1:
+        raise ValueError("direct Uniswap V4 post-commit incomplete count drift")
+    if execution.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError("direct Uniswap V4 post-commit unexpectedly closes Phase 2")
+
+    pre_frontier = (
+        set(PHASE2_FIRST_WAVE_NODE_IDS)
+        | set(PHASE2_EXPECTED_ARCHIVE_FANOUT_NODE_IDS)
+        | set(PHASE2_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_FANOUT_AUTO_NODE_IDS)
+        | set(PHASE2_PRE_SELECTOR_AUTO_NODE_IDS)
+        | {"shared:direct_selector_freeze"}
+        | set(PHASE2_AFTER_SELECTOR_AUTO_NODE_IDS)
+        | set(PHASE2_AFTER_POST_SELECTOR_AUTO_NODE_IDS)
+    )
+    canonical_coverages = {
+        "coverage:pools_fun",
+        "coverage:pools_trade_instant",
+        "coverage:pools_trade_lbp",
+        "coverage:doppler",
+        "coverage:flap",
+        "coverage:trench_today",
+        "coverage:hood_fun_current",
+        "coverage:hood_fun_previous",
+        "coverage:noxa",
+        "coverage:direct_uniswap_v3",
+        "coverage:direct_uniswap_v4",
+    }
+    removed = canonical_coverages | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+        "promote:hood_fun_current",
+        "promote:hood_fun_previous",
+        "promote:noxa",
+        "promote:direct_uniswap_v3",
+        "promote:direct_uniswap_v4",
+    }
+    expected_active = pre_frontier - canonical_coverages
+    if set(execution.get("completed_node_ids") or []) != expected_active:
+        raise ValueError("direct Uniswap V4 post-commit active completion drift")
+    if set(execution.get("ignored_completed_node_ids") or []) != removed:
+        raise ValueError("direct Uniswap V4 post-commit ignored-completion drift")
+    if execution.get("ready_to_dispatch_node_ids") != [
+        "promote:direct_sushiswap_v3"
+    ]:
+        raise ValueError("direct Uniswap V4 post-commit next promotion drift")
+    if execution.get("awaiting_explicit_approval_node_ids") != []:
+        raise ValueError("direct Uniswap V4 post-commit unexpected approvals")
+    if execution.get("ledger_commit_approval_node_ids") != []:
+        raise ValueError("direct Uniswap V4 post-commit unexpected ledger approval")
+
+    expected_verified = pre_frontier | {
+        "promote:pools_fun",
+        "promote:pools_trade_instant",
+        "promote:pools_trade_lbp",
+        "promote:doppler",
+        "promote:flap",
+        "promote:trench_today",
+        "promote:hood_fun_current",
+        "promote:hood_fun_previous",
+        "promote:noxa",
+        "promote:direct_uniswap_v3",
+        "promote:direct_uniswap_v4",
+    }
+    if set(verified.get("completed_node_ids") or []) != expected_verified:
+        raise ValueError("direct Uniswap V4 post-commit verified completion drift")
+    controls = verified.get("node_dispatch_run_ids_consumed")
+    if (
+        not isinstance(controls, list)
+        or len(controls) != 51
+        or len(set(int(value) for value in controls)) != 51
+    ):
+        raise ValueError(
+            "direct Uniswap V4 post-commit requires exactly 51 dispatcher receipts"
+        )
+    if verified.get("all_runs_current_or_ledger_only_ancestors") is not True:
+        raise ValueError("direct Uniswap V4 post-commit lacks lineage proof")
+
+    rows = dispatch.get("nodes")
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise ValueError("direct Uniswap V4 post-commit dispatch row count drift")
+    row = dict(rows[0])
+    if row.get("node_id") != "promote:direct_sushiswap_v3":
+        raise ValueError("direct Uniswap V4 post-commit dispatch node drift")
+    if row.get("workflow") != SOURCE_COVERAGE_PROMOTION_WORKFLOW:
+        raise ValueError("direct Uniswap V4 post-commit promotion workflow drift")
+    if set(dict(row.get("run_id_inputs") or {})) != {"coverage_run_id"}:
+        raise ValueError("direct SushiSwap V3 promotion coverage-run binding drift")
+    expected_manual = sorted([
+        "coverage_artifact_name",
+        "coverage_report_path",
+        "expected_artifact_digest",
+        "expected_report_sha256",
+        "expected_source_id",
+    ])
+    actual_manual = sorted(
+        str(value) for value in row.get("remaining_manual_inputs") or []
+    )
+    if actual_manual != expected_manual:
+        raise ValueError("direct SushiSwap V3 promotion manual-input drift")
+    return {
+        "version": "phase2-direct-uniswap-v4-post-commit-frontier-v1",
+        "canonical_complete_source_ids": expected_complete,
+        "complete_sources": 13,
+        "incomplete_sources": 1,
+        "active_completed_execution_nodes": len(expected_active),
+        "ignored_completed_node_ids": sorted(removed),
+        "node_dispatch_control_runs_consumed": len(controls),
+        "next_promotion_node_id": "promote:direct_sushiswap_v3",
+        "next_promotion_manual_inputs": actual_manual,
+        "automatic_acquisition_complete": True,
+        "canonical_ledger_advanced": True,
+        "phase2_universe_coverage_complete": False,
+    }
+
+
+
+def validate_phase2_direct_uniswap_v4_ledger_approved_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable 13/14 handoff after direct Uniswap V4 commit."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        "phase2-direct-uniswap-v4-ledger-approved-receipt-v1"
+    ):
+        raise ValueError(
+            "direct Uniswap V4 approved-ledger receipt version changed"
+        )
+    control_run_id = _positive_run_id(
+        row.get("ledger_approval_control_run_id"),
+        label="direct Uniswap V4 ledger approval control run ID",
+    )
+    proposal_run_id = _positive_run_id(
+        row.get("promotion_proposal_run_id"),
+        label="direct Uniswap V4 proposal run ID",
+    )
+    ledger_run_id = _positive_run_id(
+        row.get("ledger_commit_run_id"),
+        label="direct Uniswap V4 ledger commit run ID",
+    )
+    selector_run_id = _positive_run_id(
+        row.get("selector_run_id"),
+        label="direct Uniswap V4 selector run ID",
+    )
+    planner_run_id = _positive_run_id(
+        row.get("planner_run_id"),
+        label="direct Uniswap V4 post-commit planner run ID",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("direct Uniswap V4 approved-ledger branch is empty")
+    approval_head = _commit_sha(
+        row.get("approval_execution_head_sha"),
+        label="direct Uniswap V4 approval execution head",
+    )
+    proposal_digest = _artifact_digest(
+        row.get("promotion_proposal_artifact_digest"),
+        label="direct Uniswap V4 proposal artifact digest",
+    )
+    ledger_digest = _artifact_digest(
+        row.get("ledger_commit_artifact_digest"),
+        label="direct Uniswap V4 ledger commit artifact digest",
+    )
+    commit_sha = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="direct Uniswap V4 canonical ledger commit",
+    )
+    base_sha = _sha256(
+        row.get("base_ledger_sha256"),
+        label="direct Uniswap V4 approved base ledger",
+    )
+    canonical_sha = _sha256(
+        row.get("canonical_coverage_ledger_sha256"),
+        label="direct Uniswap V4 approved canonical ledger",
+    )
+    planner_digest = _artifact_digest(
+        row.get("planner_artifact_digest"),
+        label="direct Uniswap V4 post-commit planner artifact digest",
+    )
+    controls_raw = row.get("node_dispatch_control_run_ids_consumed")
+    if not isinstance(controls_raw, list):
+        raise ValueError(
+            "direct Uniswap V4 approved control-run list is missing"
+        )
+    controls = [int(value) for value in controls_raw]
+    if (
+        len(controls) != 51
+        or len(set(controls)) != 51
+        or min(controls) <= 0
+    ):
+        raise ValueError(
+            "direct Uniswap V4 approved handoff requires exactly 51 control runs"
+        )
+    expected_complete = [
+        "direct_uniswap_v3",
+        "direct_uniswap_v4",
+        "doppler",
+        "flap",
+        "hood_fun_current",
+        "hood_fun_previous",
+        "noxa",
+        "pons_v1",
+        "pons_v2",
+        "pools_fun",
+        "pools_trade_instant",
+        "pools_trade_lbp",
+        "trench_today",
+    ]
+    if row.get("canonical_complete_source_ids") != expected_complete:
+        raise ValueError(
+            "direct Uniswap V4 approved canonical source set drift"
+        )
+    if row.get("next_promotion_node_id") != "promote:direct_sushiswap_v3":
+        raise ValueError("direct Uniswap V4 approved next promotion drift")
+    if row.get("human_approval_input") != "apply_direct_uniswap_v4_ledger":
+        raise ValueError(
+            "direct Uniswap V4 approved human-input identity drift"
+        )
+    if row.get("human_approval_value") is not True:
+        raise ValueError(
+            "direct Uniswap V4 approved receipt lacks affirmative approval"
+        )
+    if row.get("canonical_ledger_mutated") is not True:
+        raise ValueError(
+            "direct Uniswap V4 approved receipt lacks ledger mutation"
+        )
+    if row.get("automatic_acquisition_complete") is not True:
+        raise ValueError(
+            "direct Uniswap V4 approved receipt lost acquisition proof"
+        )
+    if row.get("phase2_universe_coverage_complete") is not False:
+        raise ValueError(
+            "direct Uniswap V4 approved receipt unexpectedly closes Phase 2"
+        )
+    return {
+        **row,
+        "ledger_approval_control_run_id": control_run_id,
+        "execution_branch": branch,
+        "approval_execution_head_sha": approval_head,
+        "promotion_proposal_run_id": proposal_run_id,
+        "promotion_proposal_artifact_digest": proposal_digest,
+        "ledger_commit_run_id": ledger_run_id,
+        "ledger_commit_artifact_digest": ledger_digest,
+        "canonical_ledger_commit_sha": commit_sha,
+        "base_ledger_sha256": base_sha,
+        "canonical_coverage_ledger_sha256": canonical_sha,
+        "node_dispatch_control_run_ids_consumed": sorted(controls),
+        "selector_run_id": selector_run_id,
+        "planner_run_id": planner_run_id,
+        "planner_artifact_digest": planner_digest,
+        "canonical_complete_source_ids": expected_complete,
+        "next_promotion_node_id": "promote:direct_sushiswap_v3",
+        "human_approval_input": "apply_direct_uniswap_v4_ledger",
+        "human_approval_value": True,
+        "canonical_ledger_mutated": True,
+        "automatic_acquisition_complete": True,
+        "phase2_universe_coverage_complete": False,
+    }
