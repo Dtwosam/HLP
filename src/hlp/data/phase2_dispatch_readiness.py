@@ -139,6 +139,9 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase3-feature-entry-plan.yml",
     "phase3-feature-entry-launch.yml",
     "phase3-feature-entry-completion.yml",
+    "phase3-first-wave-plan.yml",
+    "phase3-first-wave-launch.yml",
+    "phase3-first-wave-completion.yml",
 )
 PHASE2_FIRST_WAVE_NODE_IDS = (
     "preflight:archive_authenticated",
