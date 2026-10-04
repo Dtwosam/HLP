@@ -1,0 +1,138 @@
+name: phase2-research-materialization-wave-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_run_id:
+        description: Exact successful phase2-research-materialization-wave-plan workflow_dispatch run ID
+        required: true
+        type: string
+      expected_plan_artifact_digest:
+        description: Exact materialization dispatch-plan artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-research-materialization-wave-launch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      EXPECTED_PLAN_DIGEST: ${{ inputs.expected_plan_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: launch
+        name: Dispatch the 12 frozen research components
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64,json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dispatch_readiness import workflow_dispatch_interface_sha256
+          from hlp.data.phase2_research_materialization_dispatch import (
+              validate_phase2_research_materialization_dispatch_plan,
+              validate_phase2_research_materialization_wave_launch_receipt,
+          )
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(args,payload=None):
+              cmd=["gh","api","-H","Accept: application/vnd.github+json",*args]
+              raw=subprocess.check_output(cmd,input=(json.dumps(payload,separators=(",",":"),sort_keys=True).encode() if payload is not None else None))
+              return json.loads(raw) if raw.strip() else None
+          def run(run_id,workflow):
+              row=api([f"/repos/{repo}/actions/runs/{run_id}"])
+              if row.get("path")!=f".github/workflows/{workflow}" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head:
+                  raise SystemExit(f"run {run_id} identity drift")
+              return row
+          def artifact(run_id,name):
+              rows=api([f"/repos/{repo}/actions/runs/{run_id}/artifacts?name={name}"]).get("artifacts",[])
+              rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          def dispatch(workflow,inputs):
+              response=api(["--method","POST",f"/repos/{repo}/actions/workflows/{workflow}/dispatches","--input","-"],{"ref":branch,"inputs":inputs})
+              if not isinstance(response,dict) or int(response.get("workflow_run_id",0))<=0:
+                  raise SystemExit(f"dispatch of {workflow} returned no run id")
+              return int(response["workflow_run_id"])
+          plan_run=int(os.environ["PLAN_RUN_ID"])
+          pr=run(plan_run,"phase2-research-materialization-wave-plan.yml")
+          if pr.get("status")!="completed" or pr.get("conclusion")!="success": raise SystemExit("dispatch plan run is not successful")
+          name="phase2-research-materialization-dispatch-plan"
+          art=artifact(plan_run,name)
+          actual=str(art.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_PLAN_DIGEST"].lower(): raise SystemExit("dispatch plan digest drift")
+          root=download(plan_run,name,"upstream/plan")
+          plan=validate_phase2_research_materialization_dispatch_plan(json.loads((root/"phase2-research-materialization-dispatch-plan.json").read_text()))
+          if plan["execution_head_sha"]!=head: raise SystemExit("materialization plan HEAD drift")
+          metadata=api([f"/repos/{repo}"]); default_branch=str(metadata.get("default_branch") or "")
+          for workflow in sorted({row["workflow"] for row in plan["component_dispatches"]}):
+              local=workflow_dispatch_interface_sha256(Path(".github/workflows",workflow).read_text())
+              payload=api([f"/repos/{repo}/contents/.github/workflows/{workflow}?ref={default_branch}"])
+              remote=workflow_dispatch_interface_sha256(base64.b64decode(str(payload.get("content") or "").replace("\n","")).decode())
+              if local!=remote: raise SystemExit(f"default-branch interface drift: {workflow}")
+          runs={}
+          for spec in plan["component_dispatches"]:
+              rid=dispatch(spec["workflow"],dict(spec["inputs"]))
+              run(rid,spec["workflow"])
+              runs[spec["component_id"]]=rid
+          receipt={
+              "version":"phase2-research-materialization-wave-launch-receipt-v1",
+              "materialization_wave_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "dispatch_plan_run_id":plan_run,
+              "dispatch_plan_artifact_digest":actual,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":plan["canonical_ledger_commit_sha"],
+              "component_run_ids":runs,
+              "target_runs_created":len(runs),
+              "target_runs_waited_for_completion":False,
+              "workflow_dispatch_performed":True,
+          }
+          receipt=validate_phase2_research_materialization_wave_launch_receipt(receipt)
+          Path("artifacts/phase2-research-materialization-wave-launch-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write("component_run_ids_json="+json.dumps(runs,sort_keys=True,separators=(",",":"))+"\n")
+          PY
+      - name: Upload materialization-wave launch receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-research-materialization-wave-launch
+          path: artifacts/phase2-research-materialization-wave-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish materialization-wave launch summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          RUNS: ${{ steps.launch.outputs.component_run_ids_json }}
+        run: |
+          {
+            echo "## Phase-2 research materialization wave"
+            echo "- launch_run_id: ${GITHUB_RUN_ID}"
+            echo "- launch_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- component_run_ids: ${RUNS}"
+            echo "- target_runs_created: 12"
+            echo "- target_runs_waited_for_completion: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
