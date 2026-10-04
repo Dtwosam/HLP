@@ -1,0 +1,687 @@
+name: phase2-direct-eligibility-handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      selector_run_id:
+        description: Exact phase2-direct-market-selector-freeze run ID
+        required: true
+        type: string
+      expected_selector_artifact_digest:
+        description: Exact selector-freeze artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_selector_descriptor_sha256:
+        description: Exact SHA-256 of direct-market-selector-freeze.json
+        required: true
+        type: string
+      uniswap_v3_coverage_run_id:
+        description: Exact direct_uniswap_v3 source-coverage run ID
+        required: true
+        type: string
+      uniswap_v3_expected_artifact_digest:
+        description: Exact direct_uniswap_v3 coverage artifact digest
+        required: true
+        type: string
+      uniswap_v3_expected_report_sha256:
+        description: Exact direct_uniswap_v3 coverage report SHA-256
+        required: true
+        type: string
+      sushiswap_v3_coverage_run_id:
+        description: Exact direct_sushiswap_v3 source-coverage run ID
+        required: true
+        type: string
+      sushiswap_v3_expected_artifact_digest:
+        description: Exact direct_sushiswap_v3 coverage artifact digest
+        required: true
+        type: string
+      sushiswap_v3_expected_report_sha256:
+        description: Exact direct_sushiswap_v3 coverage report SHA-256
+        required: true
+        type: string
+      uniswap_v4_coverage_run_id:
+        description: Exact direct_uniswap_v4 source-coverage run ID
+        required: true
+        type: string
+      uniswap_v4_expected_artifact_digest:
+        description: Exact direct_uniswap_v4 coverage artifact digest
+        required: true
+        type: string
+      uniswap_v4_expected_report_sha256:
+        description: Exact direct_uniswap_v4 coverage report SHA-256
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-direct-eligibility-handoff-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SNAPSHOT_HEAD: '54486035'
+  SELECTOR_RUN_ID: ${{ inputs.selector_run_id }}
+  EXPECTED_SELECTOR_ARTIFACT_DIGEST: ${{ inputs.expected_selector_artifact_digest }}
+  EXPECTED_SELECTOR_DESCRIPTOR_SHA256: ${{ inputs.expected_selector_descriptor_sha256 }}
+  UNISWAP_V3_RUN_ID: ${{ inputs.uniswap_v3_coverage_run_id }}
+  UNISWAP_V3_ARTIFACT_DIGEST: ${{ inputs.uniswap_v3_expected_artifact_digest }}
+  UNISWAP_V3_REPORT_SHA256: ${{ inputs.uniswap_v3_expected_report_sha256 }}
+  SUSHISWAP_V3_RUN_ID: ${{ inputs.sushiswap_v3_coverage_run_id }}
+  SUSHISWAP_V3_ARTIFACT_DIGEST: ${{ inputs.sushiswap_v3_expected_artifact_digest }}
+  SUSHISWAP_V3_REPORT_SHA256: ${{ inputs.sushiswap_v3_expected_report_sha256 }}
+  UNISWAP_V4_RUN_ID: ${{ inputs.uniswap_v4_coverage_run_id }}
+  UNISWAP_V4_ARTIFACT_DIGEST: ${{ inputs.uniswap_v4_expected_artifact_digest }}
+  UNISWAP_V4_REPORT_SHA256: ${{ inputs.uniswap_v4_expected_report_sha256 }}
+
+jobs:
+  canonicalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Verify exact selector and coverage artifacts
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          specs = [
+              (
+                  "selector",
+                  int(os.environ["SELECTOR_RUN_ID"]),
+                  "phase2-direct-market-selector-freeze",
+                  os.environ["EXPECTED_SELECTOR_ARTIFACT_DIGEST"],
+              ),
+              (
+                  "direct_uniswap_v3",
+                  int(os.environ["UNISWAP_V3_RUN_ID"]),
+                  "phase2-direct-source-coverage-direct_uniswap_v3",
+                  os.environ["UNISWAP_V3_ARTIFACT_DIGEST"],
+              ),
+              (
+                  "direct_sushiswap_v3",
+                  int(os.environ["SUSHISWAP_V3_RUN_ID"]),
+                  "phase2-direct-source-coverage-direct_sushiswap_v3",
+                  os.environ["SUSHISWAP_V3_ARTIFACT_DIGEST"],
+              ),
+              (
+                  "direct_uniswap_v4",
+                  int(os.environ["UNISWAP_V4_RUN_ID"]),
+                  "phase2-direct-source-coverage-direct_uniswap_v4",
+                  os.environ["UNISWAP_V4_ARTIFACT_DIGEST"],
+              ),
+          ]
+          for label, run_id, name, expected in specs:
+              raw = subprocess.check_output([
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  (
+                      f"/repos/{os.environ['GITHUB_REPOSITORY']}/"
+                      f"actions/runs/{run_id}/artifacts?name={name}"
+                  ),
+              ])
+              payload = json.loads(raw)
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{label}: expected exactly one artifact; "
+                      f"found {len(matches)}"
+                  )
+              artifact = matches[0]
+              if artifact.get("expired"):
+                  raise SystemExit(f"{label}: artifact is expired")
+              actual = str(artifact.get("digest") or "").lower()
+              expected = str(expected).lower()
+              if not expected.startswith("sha256:"):
+                  raise SystemExit(
+                      f"{label}: digest must use sha256:<hex>"
+                  )
+              if actual != expected:
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected}"
+                  )
+          PY
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-market-selector-freeze
+          path: inputs/selector
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.selector_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-direct_uniswap_v3
+          path: inputs/coverage/direct_uniswap_v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.uniswap_v3_coverage_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-source-coverage-price-direct_uniswap_v3-*
+          path: inputs/points/direct_uniswap_v3
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.uniswap_v3_coverage_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-direct_sushiswap_v3
+          path: inputs/coverage/direct_sushiswap_v3
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.sushiswap_v3_coverage_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-source-coverage-price-direct_sushiswap_v3-*
+          path: inputs/points/direct_sushiswap_v3
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.sushiswap_v3_coverage_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase2-direct-source-coverage-direct_uniswap_v4
+          path: inputs/coverage/direct_uniswap_v4
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.uniswap_v4_coverage_run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase2-direct-source-coverage-price-direct_uniswap_v4-*
+          path: inputs/points/direct_uniswap_v4
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.uniswap_v4_coverage_run_id }}
+
+      - id: build
+        name: Build frozen direct canonical eligibility
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import heapq
+          import json
+          import os
+          from pathlib import Path
+
+          from hlp.config import normalize_address
+          from hlp.data.direct_canonical import (
+              iter_frozen_direct_canonical_series,
+              summarize_frozen_direct_canonical_series,
+          )
+          from hlp.data.direct_eligibility import (
+              build_direct_eligibility_handoff,
+          )
+          from hlp.data.direct_selector import (
+              DIRECT_SELECTOR_FREEZE_VERSION,
+              DIRECT_SELECTOR_VERSION,
+          )
+          from hlp.data.phase2_sources import (
+              build_phase2_source_inventory,
+          )
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          SOURCES = (
+              "direct_uniswap_v3",
+              "direct_sushiswap_v3",
+              "direct_uniswap_v4",
+          )
+          RUN_ENV = {
+              "direct_uniswap_v3": "UNISWAP_V3_RUN_ID",
+              "direct_sushiswap_v3": "SUSHISWAP_V3_RUN_ID",
+              "direct_uniswap_v4": "UNISWAP_V4_RUN_ID",
+          }
+          DIGEST_ENV = {
+              "direct_uniswap_v3": "UNISWAP_V3_ARTIFACT_DIGEST",
+              "direct_sushiswap_v3": "SUSHISWAP_V3_ARTIFACT_DIGEST",
+              "direct_uniswap_v4": "UNISWAP_V4_ARTIFACT_DIGEST",
+          }
+          REPORT_SHA_ENV = {
+              "direct_uniswap_v3": "UNISWAP_V3_REPORT_SHA256",
+              "direct_sushiswap_v3": "SUSHISWAP_V3_REPORT_SHA256",
+              "direct_uniswap_v4": "UNISWAP_V4_REPORT_SHA256",
+          }
+
+          def sha256_bytes(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def normalized_expected(name):
+              value = os.environ[name].lower().removeprefix("sha256:")
+              if len(value) != 64:
+                  raise SystemExit(f"{name} is not a SHA-256")
+              try:
+                  int(value, 16)
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"{name} is not hexadecimal"
+                  ) from exc
+              return value
+
+          def market_id(row):
+              value = (
+                  row.get("market_id")
+                  or row.get("pool_id")
+                  or row.get("pool")
+                  or ""
+              )
+              value = str(value).lower()
+              if not value:
+                  raise SystemExit("direct canonical input lacks market id")
+              return value
+
+          def row_order(row):
+              raw_tx = row.get("transaction_index")
+              tx = -1 if raw_tx is None else int(raw_tx)
+              return (
+                  int(row["block_number"]),
+                  tx,
+                  int(row["log_index"]),
+                  market_id(row),
+              )
+
+          selector_path = Path(
+              "inputs/selector/direct-market-selector-freeze.json"
+          )
+          selector_sha = sha256_bytes(selector_path)
+          if selector_sha != normalized_expected(
+              "EXPECTED_SELECTOR_DESCRIPTOR_SHA256"
+          ):
+              raise SystemExit("direct selector descriptor SHA drift")
+          selector = json.loads(selector_path.read_text())
+          if selector.get("version") != DIRECT_SELECTOR_FREEZE_VERSION:
+              raise SystemExit("direct selector freeze version changed")
+          if selector.get("selector_version") != DIRECT_SELECTOR_VERSION:
+              raise SystemExit("direct selector version changed")
+          if selector.get("selection_rule_frozen") is not True:
+              raise SystemExit("direct selector is not frozen")
+          if selector.get("source_coverage_complete") is not False:
+              raise SystemExit(
+                  "direct selector unexpectedly closes coverage"
+              )
+          snapshot = int(os.environ["SNAPSHOT_HEAD"])
+          if int(selector["snapshot_head_block"]) != snapshot:
+              raise SystemExit("direct selector snapshot drift")
+
+          coverage_reports = {}
+          memberships = {}
+          source_paths = {}
+          coverage_bindings = {}
+
+          for source in SOURCES:
+              coverage_root = Path("inputs/coverage") / source
+              report_path = (
+                  coverage_root / "direct-source-coverage-report.json"
+              )
+              report_sha = sha256_bytes(report_path)
+              if report_sha != normalized_expected(REPORT_SHA_ENV[source]):
+                  raise SystemExit(
+                      f"{source} coverage report SHA drift"
+                  )
+              report = json.loads(report_path.read_text())
+              if report.get("source_id") != source:
+                  raise SystemExit(
+                      f"{source} coverage report source drift"
+                  )
+              if report.get("coverage_status") != "complete":
+                  raise SystemExit(
+                      f"{source} coverage report is not complete"
+                  )
+              if int(report.get("snapshot_head_block", -1)) != snapshot:
+                  raise SystemExit(
+                      f"{source} coverage snapshot drift"
+                  )
+              if report.get(
+                  "selector_rule_applied_to_coverage_points"
+              ) is not False:
+                  raise SystemExit(
+                      f"{source} coverage already applied selector"
+                  )
+              if report.get("selector_version") != DIRECT_SELECTOR_VERSION:
+                  raise SystemExit(
+                      f"{source} coverage selector version drift"
+                  )
+              if str(
+                  report.get("selector_descriptor_sha256") or ""
+              ).lower() != selector_sha:
+                  raise SystemExit(
+                      f"{source} coverage selector descriptor drift"
+                  )
+
+              virtual_path = (
+                  coverage_root
+                  / "direct-source-market-points-sharded.manifest.json"
+              )
+              virtual = json.loads(virtual_path.read_text())
+              if virtual.get("sha256") != report.get(
+                  "market_points_sha256"
+              ):
+                  raise SystemExit(
+                      f"{source} virtual point SHA drift"
+                  )
+              if int(virtual.get("records", -1)) != int(
+                  report.get("price_points", -1)
+              ):
+                  raise SystemExit(
+                      f"{source} virtual point count drift"
+                  )
+              if int(report.get("priced_points", -1)) != int(
+                  report.get("price_points", -1)
+              ):
+                  raise SystemExit(
+                      f"{source} contains unpriced coverage points"
+                  )
+
+              expected_shards = list(
+                  (virtual.get("provenance") or {}).get("shards") or []
+              )
+              if len(expected_shards) != 128:
+                  raise SystemExit(
+                      f"{source} coverage shard count changed"
+                  )
+              point_root = Path("inputs/points") / source
+              actual_files = {
+                  path.name: path
+                  for path in point_root.glob(f"{source}-points-*.jsonl")
+              }
+              expected_names = {
+                  str(row["file"]) for row in expected_shards
+              }
+              if set(actual_files) != expected_names:
+                  raise SystemExit(
+                      f"{source} point shard set changed"
+                  )
+
+              aggregate = hashlib.sha256()
+              records = 0
+              tokens = set()
+              ordered_paths = []
+              for shard in expected_shards:
+                  name = str(shard["file"])
+                  path = actual_files[name]
+                  local = hashlib.sha256()
+                  local_records = 0
+                  with path.open("rb") as handle:
+                      for raw in handle:
+                          aggregate.update(raw)
+                          local.update(raw)
+                          if not raw.strip():
+                              continue
+                          local_records += 1
+                          row = json.loads(raw)
+                          if row.get("source_id") != source:
+                              raise SystemExit(
+                                  f"{source} point source drift: {name}"
+                              )
+                          if row.get("market_cap_proxy_usd") is None:
+                              raise SystemExit(
+                                  f"{source} unpriced point: {name}"
+                              )
+                          tokens.add(normalize_address(str(row["token"])))
+                  if local.hexdigest() != str(shard["sha256"]):
+                      raise SystemExit(
+                          f"{source} point shard SHA drift: {name}"
+                      )
+                  if local_records != int(shard["records"]):
+                      raise SystemExit(
+                          f"{source} point shard record drift: {name}"
+                      )
+                  records += local_records
+                  ordered_paths.append(path)
+
+              if aggregate.hexdigest() != virtual["sha256"]:
+                  raise SystemExit(
+                      f"{source} aggregate point SHA drift"
+                  )
+              if records != int(report["price_points"]):
+                  raise SystemExit(
+                      f"{source} aggregate point count drift"
+                  )
+              if len(tokens) != int(report["tokens_discovered"]):
+                  raise SystemExit(
+                      f"{source} token membership count drift"
+                  )
+
+              coverage_reports[source] = report
+              memberships[source] = tokens
+              source_paths[source] = ordered_paths
+              coverage_bindings[source] = {
+                  "run_id": int(os.environ[RUN_ENV[source]]),
+                  "artifact_digest": os.environ[
+                      DIGEST_ENV[source]
+                  ].lower(),
+                  "coverage_report_sha256": report_sha,
+                  "market_points_sha256": virtual["sha256"],
+                  "coverage_provenance_sha256": report[
+                      "provenance_sha256"
+                  ],
+              }
+
+          expected_tokens = set().union(*memberships.values())
+
+          def source_rows(source):
+              previous = None
+              for path in source_paths[source]:
+                  with path.open(encoding="utf-8") as handle:
+                      for line in handle:
+                          if not line.strip():
+                              continue
+                          row = json.loads(line)
+                          order = row_order(row)
+                          if previous is not None and order < previous:
+                              raise SystemExit(
+                                  f"{source} points are not chronological"
+                              )
+                          previous = order
+                          yield row
+
+          merged = heapq.merge(
+              *(source_rows(source) for source in SOURCES),
+              key=row_order,
+          )
+          upstream_provenance = {
+              "version": "phase2-direct-canonical-provenance-v1",
+              "chain_id": 4663,
+              "snapshot_head_block": snapshot,
+              "selector_run_id": int(os.environ["SELECTOR_RUN_ID"]),
+              "selector_artifact_digest": os.environ[
+                  "EXPECTED_SELECTOR_ARTIFACT_DIGEST"
+              ].lower(),
+              "selector_descriptor_sha256": selector_sha,
+              "selector_version": DIRECT_SELECTOR_VERSION,
+              "source_coverage": coverage_bindings,
+          }
+          canonical_manifest = write_jsonl_snapshot(
+              iter_frozen_direct_canonical_series(
+                  merged,
+                  selector,
+                  expected_tokens=expected_tokens,
+              ),
+              output=Path(
+                  "artifacts/direct-canonical-market-cap-points.jsonl"
+              ),
+              provenance=upstream_provenance,
+          )
+
+          def read_jsonl(path):
+              with path.open(encoding="utf-8") as handle:
+                  for line in handle:
+                      if line.strip():
+                          yield json.loads(line)
+
+          canonical_path = Path(
+              "artifacts/direct-canonical-market-cap-points.jsonl"
+          )
+          token_rows, canonical_report = (
+              summarize_frozen_direct_canonical_series(
+                  read_jsonl(canonical_path)
+              )
+          )
+          token_manifest = write_jsonl_snapshot(
+              token_rows,
+              output=Path(
+                  "artifacts/direct-canonical-token-summary.jsonl"
+              ),
+              provenance={
+                  **upstream_provenance,
+                  "canonical_market_points_sha256": (
+                      canonical_manifest["sha256"]
+                  ),
+              },
+          )
+          canonical_report = {
+              **canonical_report,
+              "snapshot_head_block": snapshot,
+              "canonical_market_points_sha256": (
+                  canonical_manifest["sha256"]
+              ),
+              "canonical_token_summary_sha256": token_manifest["sha256"],
+          }
+          Path(
+              "artifacts/direct-canonical-report.json"
+          ).write_text(
+              json.dumps(
+                  canonical_report,
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+
+          eligibility_provenance_payload = {
+              **upstream_provenance,
+              "canonical_market_points_sha256": (
+                  canonical_manifest["sha256"]
+              ),
+              "canonical_token_summary_sha256": token_manifest["sha256"],
+          }
+          eligibility_provenance_bytes = (
+              json.dumps(
+                  eligibility_provenance_payload,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ) + "\n"
+          ).encode()
+          eligibility_provenance_sha = hashlib.sha256(
+              eligibility_provenance_bytes
+          ).hexdigest()
+          Path(
+              "artifacts/direct-eligibility-provenance.json"
+          ).write_bytes(eligibility_provenance_bytes)
+
+          groups, handoff_summary = build_direct_eligibility_handoff(
+              token_rows,
+              canonical_report,
+              memberships,
+              coverage_reports,
+              selector,
+              source_inventory=build_phase2_source_inventory(),
+              provenance_sha256=eligibility_provenance_sha,
+              selector_descriptor_sha256=selector_sha,
+          )
+
+          eligibility_manifests = {}
+          for source in SOURCES:
+              manifest = write_jsonl_snapshot(
+                  groups[source],
+                  output=Path(
+                      f"artifacts/phase2-source-eligibility-{source}.jsonl"
+                  ),
+                  provenance={
+                      **eligibility_provenance_payload,
+                      "eligibility_provenance_sha256": (
+                          eligibility_provenance_sha
+                      ),
+                      "source_id": source,
+                      "canonical_price_series": True,
+                  },
+              )
+              eligibility_manifests[source] = {
+                  "records": manifest["records"],
+                  "sha256": manifest["sha256"],
+              }
+
+          handoff = {
+              **handoff_summary,
+              "selector_run_id": int(os.environ["SELECTOR_RUN_ID"]),
+              "selector_artifact_digest": os.environ[
+                  "EXPECTED_SELECTOR_ARTIFACT_DIGEST"
+              ].lower(),
+              "canonical_market_points_sha256": (
+                  canonical_manifest["sha256"]
+              ),
+              "canonical_token_summary_sha256": token_manifest["sha256"],
+              "coverage_bindings": coverage_bindings,
+              "source_eligibility_manifests": eligibility_manifests,
+          }
+          handoff_path = Path(
+              "artifacts/direct-eligibility-handoff.json"
+          )
+          handoff_path.write_text(
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_sha = sha256_bytes(handoff_path)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  "canonical_points_sha256="
+                  f"{canonical_manifest['sha256']}\n"
+              )
+              handle.write(
+                  "canonical_summary_sha256="
+                  f"{token_manifest['sha256']}\n"
+              )
+          print(json.dumps(handoff, sort_keys=True))
+          PY
+
+      - name: Upload direct eligibility handoff
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-direct-eligibility-handoff
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish universe-source identities
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_SHA256: ${{ steps.build.outputs.handoff_sha256 }}
+          CANONICAL_POINTS_SHA256: ${{ steps.build.outputs.canonical_points_sha256 }}
+          CANONICAL_SUMMARY_SHA256: ${{ steps.build.outputs.canonical_summary_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_SHA256}"
+          test -n "${CANONICAL_POINTS_SHA256}"
+          test -n "${CANONICAL_SUMMARY_SHA256}"
+          {
+            echo "## Direct DEX universe-source eligibility"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase2-direct-eligibility-handoff"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- canonical_points_sha256: ${CANONICAL_POINTS_SHA256}"
+            echo "- canonical_summary_sha256: ${CANONICAL_SUMMARY_SHA256}"
+            echo "- selector_version: active-quote-liquidity-causal-v1"
+            echo "- canonical_price_series: true"
+            echo "- phase2_universe_source_ready: true"
+            echo "- phase2_universe_frozen: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
