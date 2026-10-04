@@ -1,0 +1,102 @@
+name: phase2-dump-candidate-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      geometry_completion_run_id:
+        description: Exact successful phase2-dump-geometry-completion workflow_dispatch run ID
+        required: true
+        type: string
+      expected_geometry_completion_artifact_digest:
+        description: Exact geometry completion artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-dump-candidate-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPLETION_RUN_ID: ${{ inputs.geometry_completion_run_id }}
+      EXPECTED_COMPLETION_DIGEST: ${{ inputs.expected_geometry_completion_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Build explicit research-only candidate plan
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import json, os, shutil, subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dump_candidate_dispatch import (
+              build_phase2_dump_candidate_dispatch_plan,
+              validate_phase2_dump_candidate_dispatch_plan,
+          )
+          from hlp.data.phase2_dump_geometry_dispatch import (
+              validate_phase2_dump_geometry_completion_receipt,
+          )
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          run_id=int(os.environ["COMPLETION_RUN_ID"]); row=api(f"actions/runs/{run_id}")
+          if row.get("path")!=".github/workflows/phase2-dump-geometry-completion.yml" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head or row.get("status")!="completed" or row.get("conclusion")!="success":
+              raise SystemExit("geometry completion identity/status drift")
+          name="phase2-dump-geometry-completion"
+          arts=[x for x in api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[]) if x.get("name")==name and not x.get("expired")]
+          if len(arts)!=1: raise SystemExit("geometry completion artifact cardinality drift")
+          actual=str(arts[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_COMPLETION_DIGEST"].lower(): raise SystemExit("geometry completion digest drift")
+          root=Path("upstream/geometry-completion")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+          completion=validate_phase2_dump_geometry_completion_receipt(json.loads((root/"phase2-dump-geometry-completion-receipt.json").read_text()))
+          if completion["execution_head_sha"]!=head: raise SystemExit("geometry completion HEAD drift")
+          grid=json.loads(Path(".github/phase2-dump-candidate-grid.json").read_text())
+          plan=build_phase2_dump_candidate_dispatch_plan(completion,grid)
+          plan=validate_phase2_dump_candidate_dispatch_plan(plan)
+          out=Path("artifacts/phase2-dump-candidate-plan.json")
+          out.write_text(json.dumps(plan,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"candidate_count={plan['candidate_count']}\n")
+              h.write(f"candidate_specs_sha256={plan['candidate_specs_sha256']}\n")
+          PY
+      - name: Upload candidate plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-candidate-plan
+          path: artifacts/phase2-dump-candidate-plan.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish candidate-plan summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CANDIDATE_COUNT: ${{ steps.plan.outputs.candidate_count }}
+          SPECS_SHA: ${{ steps.plan.outputs.candidate_specs_sha256 }}
+        run: |
+          {
+            echo "## Phase-2 dump candidate research plan"
+            echo "- plan_run_id: ${GITHUB_RUN_ID}"
+            echo "- plan_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- candidate_count: ${CANDIDATE_COUNT}"
+            echo "- candidate_specs_sha256: ${SPECS_SHA}"
+            echo "- candidate_selected: false"
+            echo "- dump_threshold_frozen: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
