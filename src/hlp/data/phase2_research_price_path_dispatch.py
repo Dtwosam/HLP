@@ -1,4 +1,4 @@
-"""Orchestration contracts for the Phase-2 canonical research price path."""
+"""Orchestration contracts for Phase-2 research price-path materialization."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ PHASE2_RESEARCH_PRICE_PATH_COMPLETION_VERSION = (
     "phase2-research-price-path-completion-receipt-v1"
 )
 PRICE_PATH_WORKFLOW = "phase2-research-price-path.yml"
+GEOMETRY_WORKFLOW = "phase2-dump-geometry-research.yml"
 
 
 def _positive_run_id(value: object, *, label: str) -> int:
@@ -61,7 +62,7 @@ def _commit_sha(value: object, *, label: str) -> str:
 def validate_phase2_research_price_path_launch_receipt(
     receipt: Mapping[str, object],
 ) -> dict:
-    """Validate the single-run price-path dispatch receipt."""
+    """Validate the single-run dispatch receipt for the canonical price path."""
 
     row = dict(receipt)
     if str(row.get("version") or "") != (
@@ -74,13 +75,13 @@ def validate_phase2_research_price_path_launch_receipt(
     )
     completion_run = _positive_run_id(
         row.get("materialization_freeze_completion_run_id"),
-        label="materialization-freeze completion run ID",
+        label="price-path materialization completion run ID",
     )
     completion_digest = _artifact_digest(
         row.get("materialization_freeze_completion_artifact_digest"),
-        label="materialization-freeze completion artifact",
+        label="price-path materialization completion artifact",
     )
-    target_run = _positive_run_id(
+    target = _positive_run_id(
         row.get("price_path_run_id"),
         label="price-path target run ID",
     )
@@ -124,22 +125,24 @@ def validate_phase2_research_price_path_launch_receipt(
         row.get("universe_handoff_sha256"),
         label="price-path universe handoff",
     )
-
     if int(row.get("target_runs_created", -1)) != 1:
         raise ValueError("price-path target-run count drift")
     if row.get("target_run_waited_for_completion") is not False:
         raise ValueError("price-path launcher unexpectedly waited")
+    if row.get("dump_threshold_frozen") is not False:
+        raise ValueError("price-path launcher prematurely freezes threshold")
+    if row.get("phase2_dump_detector_frozen") is not False:
+        raise ValueError("price-path launcher prematurely freezes detector")
+    if row.get("outcome_labels_computed") is not False:
+        raise ValueError("price-path launcher contains outcome labels")
     if row.get("workflow_dispatch_performed") is not True:
         raise ValueError("price-path launch lacks dispatch proof")
-
     return {
         **row,
         "price_path_control_run_id": control,
         "materialization_freeze_completion_run_id": completion_run,
-        "materialization_freeze_completion_artifact_digest": (
-            completion_digest
-        ),
-        "price_path_run_id": target_run,
+        "materialization_freeze_completion_artifact_digest": completion_digest,
+        "price_path_run_id": target,
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
@@ -152,6 +155,9 @@ def validate_phase2_research_price_path_launch_receipt(
         "universe_handoff_sha256": universe_handoff_sha,
         "target_runs_created": 1,
         "target_run_waited_for_completion": False,
+        "dump_threshold_frozen": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
         "workflow_dispatch_performed": True,
     }
 
@@ -159,7 +165,7 @@ def validate_phase2_research_price_path_launch_receipt(
 def validate_phase2_research_price_path_completion_receipt(
     receipt: Mapping[str, object],
 ) -> dict:
-    """Validate immutable canonical price-path evidence for dump geometry."""
+    """Validate completed price-path evidence and exact geometry inputs."""
 
     row = dict(receipt)
     if str(row.get("version") or "") != (
@@ -178,7 +184,7 @@ def validate_phase2_research_price_path_completion_receipt(
         row.get("price_path_launch_artifact_digest"),
         label="price-path launch artifact",
     )
-    target_run = _positive_run_id(
+    target = _positive_run_id(
         row.get("price_path_run_id"),
         label="completed price-path run ID",
     )
@@ -186,17 +192,21 @@ def validate_phase2_research_price_path_completion_receipt(
         row.get("price_path_artifact_digest"),
         label="price-path artifact",
     )
-    handoff_sha = _sha256(
-        row.get("price_path_handoff_sha256"),
-        label="price-path handoff",
+    handoff_artifact_digest = _artifact_digest(
+        row.get("price_path_handoff_artifact_digest"),
+        label="price-path handoff artifact",
     )
-    path_sha = _sha256(
-        row.get("normalized_price_path_sha256"),
-        label="normalized price path",
+    price_path_sha = _sha256(
+        row.get("price_path_sha256"),
+        label="normalized research price path",
     )
     report_sha = _sha256(
         row.get("price_path_report_sha256"),
-        label="price-path report",
+        label="research price-path report",
+    )
+    handoff_sha = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="research price-path handoff",
     )
     branch = str(row.get("execution_branch") or "")
     head = _commit_sha(
@@ -209,7 +219,22 @@ def validate_phase2_research_price_path_completion_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("price-path completion branch/HEAD drift")
-
+    materialization_run = _positive_run_id(
+        row.get("materialization_freeze_run_id"),
+        label="price-path completion materialization run ID",
+    )
+    materialization_digest = _artifact_digest(
+        row.get("materialization_freeze_artifact_digest"),
+        label="price-path completion materialization artifact",
+    )
+    bundle_sha = _sha256(
+        row.get("materialization_bundle_sha256"),
+        label="price-path completion materialization bundle",
+    )
+    materialization_handoff_sha = _sha256(
+        row.get("materialization_handoff_sha256"),
+        label="price-path completion materialization handoff",
+    )
     universe_run = _positive_run_id(
         row.get("universe_run_id"),
         label="price-path completion universe run ID",
@@ -223,15 +248,16 @@ def validate_phase2_research_price_path_completion_receipt(
         label="price-path completion universe handoff",
     )
     snapshot = int(row.get("snapshot_head_block", 0))
-    if snapshot <= 0:
-        raise ValueError("price-path completion snapshot is invalid")
     eligible_tokens = int(row.get("eligible_tokens", -1))
     price_points = int(row.get("price_points", -1))
-    if eligible_tokens < 0 or price_points < 0:
-        raise ValueError("price-path completion counts are invalid")
+    components = int(row.get("components", -1))
+    if snapshot <= 0 or eligible_tokens <= 0 or price_points <= 0:
+        raise ValueError("price-path completion dimensions are invalid")
+    if components != 12:
+        raise ValueError("price-path completion component count drift")
 
     geometry_inputs = {
-        "price_path_run_id": str(target_run),
+        "price_path_run_id": str(target),
         "expected_price_path_artifact_digest": artifact_digest,
         "expected_price_path_handoff_sha256": handoff_sha,
         "universe_run_id": str(universe_run),
@@ -241,39 +267,44 @@ def validate_phase2_research_price_path_completion_receipt(
     if row.get("geometry_inputs") != geometry_inputs:
         raise ValueError("dump-geometry input binding drift")
     if row.get("target_run_completed") is not True:
-        raise ValueError("price-path target run is not completed")
+        raise ValueError("price-path target is not completed")
     if row.get("target_run_successful") is not True:
-        raise ValueError("price-path target run is not successful")
+        raise ValueError("price-path target is not successful")
     if row.get("research_price_path_ready") is not True:
-        raise ValueError("price-path completion lacks path-ready proof")
+        raise ValueError("price-path completion lacks ready proof")
     if row.get("dump_threshold_frozen") is not False:
-        raise ValueError("price-path completion freezes dump threshold")
+        raise ValueError("price-path completion prematurely freezes threshold")
     if row.get("phase2_dump_detector_frozen") is not False:
-        raise ValueError("price-path completion freezes detector")
+        raise ValueError("price-path completion prematurely freezes detector")
     if row.get("outcome_labels_computed") is not False:
-        raise ValueError("price-path completion contains outcomes")
+        raise ValueError("price-path completion contains outcome labels")
     if row.get("workflow_dispatch_performed") is not False:
-        raise ValueError("price-path completion unexpectedly dispatches")
-
+        raise ValueError("price-path completion unexpectedly dispatches workflow")
     return {
         **row,
         "price_path_completion_control_run_id": control,
         "price_path_launch_run_id": launch_run,
         "price_path_launch_artifact_digest": launch_digest,
-        "price_path_run_id": target_run,
+        "price_path_run_id": target,
         "price_path_artifact_digest": artifact_digest,
-        "price_path_handoff_sha256": handoff_sha,
-        "normalized_price_path_sha256": path_sha,
+        "price_path_handoff_artifact_digest": handoff_artifact_digest,
+        "price_path_sha256": price_path_sha,
         "price_path_report_sha256": report_sha,
+        "price_path_handoff_sha256": handoff_sha,
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "materialization_freeze_run_id": materialization_run,
+        "materialization_freeze_artifact_digest": materialization_digest,
+        "materialization_bundle_sha256": bundle_sha,
+        "materialization_handoff_sha256": materialization_handoff_sha,
         "universe_run_id": universe_run,
         "universe_artifact_digest": universe_digest,
         "universe_handoff_sha256": universe_handoff_sha,
         "snapshot_head_block": snapshot,
         "eligible_tokens": eligible_tokens,
         "price_points": price_points,
+        "components": 12,
         "geometry_inputs": geometry_inputs,
         "target_run_completed": True,
         "target_run_successful": True,
@@ -283,56 +314,3 @@ def validate_phase2_research_price_path_completion_receipt(
         "outcome_labels_computed": False,
         "workflow_dispatch_performed": False,
     }
-
-
-def build_price_path_launch_receipt(
-    materialization_completion: Mapping[str, object],
-    *,
-    control_run_id: int,
-    completion_run_id: int,
-    completion_artifact_digest: str,
-    price_path_run_id: int,
-) -> dict:
-    """Create a validated launch receipt from the materialization checkpoint."""
-
-    materialization = (
-        validate_phase2_research_materialization_freeze_completion_receipt(
-            materialization_completion
-        )
-    )
-    return validate_phase2_research_price_path_launch_receipt({
-        "version": PHASE2_RESEARCH_PRICE_PATH_LAUNCH_VERSION,
-        "price_path_control_run_id": control_run_id,
-        "materialization_freeze_completion_run_id": completion_run_id,
-        "materialization_freeze_completion_artifact_digest": (
-            completion_artifact_digest
-        ),
-        "price_path_run_id": price_path_run_id,
-        "execution_branch": materialization["execution_branch"],
-        "execution_head_sha": materialization["execution_head_sha"],
-        "canonical_ledger_commit_sha": materialization[
-            "canonical_ledger_commit_sha"
-        ],
-        "materialization_freeze_run_id": materialization[
-            "materialization_freeze_run_id"
-        ],
-        "materialization_freeze_artifact_digest": materialization[
-            "materialization_freeze_artifact_digest"
-        ],
-        "materialization_bundle_sha256": materialization[
-            "materialization_bundle_sha256"
-        ],
-        "materialization_handoff_sha256": materialization[
-            "materialization_handoff_sha256"
-        ],
-        "universe_run_id": materialization["universe_run_id"],
-        "universe_artifact_digest": materialization[
-            "universe_artifact_digest"
-        ],
-        "universe_handoff_sha256": materialization[
-            "universe_handoff_sha256"
-        ],
-        "target_runs_created": 1,
-        "target_run_waited_for_completion": False,
-        "workflow_dispatch_performed": True,
-    })
