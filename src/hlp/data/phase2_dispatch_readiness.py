@@ -97,6 +97,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-dump-candidate-launch.yml",
     "phase2-dump-candidate-plan.yml",
     "phase2-dump-candidate-diagnostics.yml",
+    "phase2-dump-diagnostics-completion.yml",
+    "phase2-dump-diagnostics-launch.yml",
     "phase2-dump-detector-freeze.yml",
     "phase2-outcome-labels.yml",
     "phase2-universe-outcome-dataset.yml",

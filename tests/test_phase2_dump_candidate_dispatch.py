@@ -166,3 +166,94 @@ def test_diagnostics_completion_rejects_hidden_selection():
     row["selected_candidate_id"] = "dd40-rb25"
     with pytest.raises(ValueError, match="selected a candidate"):
         validate_phase2_dump_diagnostics_completion_receipt(row)
+
+def diagnostics_launch_receipt():
+    return {
+        "version": "phase2-dump-diagnostics-launch-receipt-v1",
+        "diagnostics_control_run_id": 12301,
+        "candidate_completion_run_id": 12302,
+        "candidate_completion_artifact_digest": "sha256:" + "51" * 32,
+        "candidate_research_run_id": 12303,
+        "candidate_research_artifact_digest": "sha256:" + "52" * 32,
+        "candidate_research_handoff_sha256": "53" * 32,
+        "diagnostics_run_id": 12304,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "54" * 20,
+        "canonical_ledger_commit_sha": "54" * 20,
+        "candidate_specs_sha256": "55" * 32,
+        "candidate_count": 24,
+        "target_runs_created": 1,
+        "target_run_waited_for_completion": False,
+        "uses_outcome_labels": False,
+        "candidate_selected": False,
+        "detector_freeze_ready": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+        "workflow_dispatch_performed": True,
+    }
+
+
+def test_diagnostics_launch_remains_outcome_blind():
+    report = validate_phase2_dump_diagnostics_launch_receipt(
+        diagnostics_launch_receipt()
+    )
+    assert report["candidate_count"] == 24
+    row = diagnostics_launch_receipt()
+    row["detector_freeze_ready"] = True
+    with pytest.raises(ValueError, match="self-approves freeze"):
+        validate_phase2_dump_diagnostics_launch_receipt(row)
+
+
+def diagnostics_completion_receipt():
+    launch = diagnostics_launch_receipt()
+    ids = [f"candidate-{index:02d}" for index in range(24)]
+    return {
+        "version": "phase2-dump-diagnostics-completion-receipt-v1",
+        "diagnostics_completion_control_run_id": 12401,
+        "diagnostics_launch_run_id": 12402,
+        "diagnostics_launch_artifact_digest": "sha256:" + "61" * 32,
+        "candidate_research_run_id": launch["candidate_research_run_id"],
+        "candidate_research_artifact_digest": launch[
+            "candidate_research_artifact_digest"
+        ],
+        "candidate_research_handoff_sha256": launch[
+            "candidate_research_handoff_sha256"
+        ],
+        "diagnostics_run_id": launch["diagnostics_run_id"],
+        "diagnostics_artifact_digest": "sha256:" + "62" * 32,
+        "diagnostics_sha256": "63" * 32,
+        "diagnostics_summary_sha256": "64" * 32,
+        "diagnostics_handoff_sha256": "65" * 32,
+        "execution_branch": launch["execution_branch"],
+        "execution_head_sha": launch["execution_head_sha"],
+        "canonical_ledger_commit_sha": launch["canonical_ledger_commit_sha"],
+        "candidate_specs_sha256": launch["candidate_specs_sha256"],
+        "candidate_count": 24,
+        "candidate_ids": ids,
+        "detector_freeze_base_inputs": {
+            "candidate_research_run_id": "12303",
+            "expected_candidate_artifact_digest": "sha256:" + "52" * 32,
+            "expected_candidate_handoff_sha256": "53" * 32,
+            "diagnostics_run_id": "12304",
+            "expected_diagnostics_artifact_digest": "sha256:" + "62" * 32,
+            "expected_diagnostics_handoff_sha256": "65" * 32,
+        },
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "uses_outcome_labels": False,
+        "candidate_selected": False,
+        "detector_freeze_ready": False,
+        "phase2_dump_detector_frozen": False,
+        "outcome_labels_computed": False,
+        "workflow_dispatch_performed": False,
+    }
+
+
+def test_diagnostics_completion_requires_explicit_selected_id_later():
+    report = validate_phase2_dump_diagnostics_completion_receipt(
+        diagnostics_completion_receipt()
+    )
+    assert report["selected_candidate_id_required"] is True
+    assert len(report["candidate_ids"]) == 24
+    assert "selected_candidate_id" not in report["detector_freeze_base_inputs"]
+
