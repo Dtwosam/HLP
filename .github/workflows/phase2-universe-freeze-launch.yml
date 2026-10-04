@@ -1,0 +1,326 @@
+name: phase2-universe-freeze-launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_run_id:
+        description: Exact successful phase2-universe-freeze-plan workflow_dispatch run ID
+        required: true
+        type: string
+      expected_plan_artifact_digest:
+        description: Exact universe-freeze dispatch-plan artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: phase2-universe-freeze-launch-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+  EXPECTED_PLAN_ARTIFACT_DIGEST: ${{ inputs.expected_plan_artifact_digest }}
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: launch
+        name: Verify immutable plan and dispatch universe freeze
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.phase2_dispatch_readiness import (
+              workflow_dispatch_interface_sha256,
+          )
+          from hlp.data.phase2_universe_freeze_dispatch import (
+              UNIVERSE_FREEZE_WORKFLOW,
+              validate_phase2_universe_freeze_dispatch_plan,
+              validate_phase2_universe_freeze_launch_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(args, *, payload=None):
+              command = [
+                  "gh",
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  "-H",
+                  f"X-GitHub-Api-Version: {API_VERSION}",
+                  *args,
+              ]
+              raw = subprocess.check_output(
+                  command,
+                  input=(
+                      json.dumps(
+                          payload,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      if payload is not None
+                      else None
+                  ),
+              )
+              return json.loads(raw) if raw.strip() else None
+
+          def get_run(run_id):
+              return gh_json([f"/repos/{repo}/actions/runs/{run_id}"])
+
+          def assert_run_identity(run, *, workflow, run_id):
+              if run.get("path") != f".github/workflows/{workflow}":
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def artifact_row(run_id, name):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/actions/runs/{run_id}/"
+                      f"artifacts?name={name}"
+                  ),
+              ])
+              matches = [
+                  row
+                  for row in (payload or {}).get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              return matches[0]
+
+          def download(run_id, name, destination):
+              root = Path(destination)
+              if root.exists():
+                  shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(root),
+              ])
+              return root
+
+          def dispatch(workflow, inputs):
+              response = gh_json(
+                  [
+                      "--method", "POST",
+                      (
+                          f"/repos/{repo}/actions/workflows/"
+                          f"{workflow}/dispatches"
+                      ),
+                      "--input", "-",
+                  ],
+                  payload={"ref": branch, "inputs": inputs},
+              )
+              if not isinstance(response, dict):
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned no run details"
+                  )
+              try:
+                  run_id = int(response["workflow_run_id"])
+              except (KeyError, TypeError, ValueError) as exc:
+                  raise SystemExit(
+                      f"dispatch of {workflow} lacks workflow_run_id"
+                  ) from exc
+              if run_id <= 0:
+                  raise SystemExit(
+                      f"dispatch of {workflow} returned invalid run ID"
+                  )
+              return run_id
+
+          metadata = gh_json([f"/repos/{repo}"])
+          default_branch = str(metadata.get("default_branch") or "")
+          if not default_branch:
+              raise SystemExit(
+                  "repository default branch is unavailable"
+              )
+
+          def default_workflow_text(workflow):
+              payload = gh_json([
+                  (
+                      f"/repos/{repo}/contents/.github/workflows/"
+                      f"{workflow}?ref={default_branch}"
+                  ),
+              ])
+              if payload.get("encoding") != "base64":
+                  raise SystemExit(
+                      f"default-branch workflow encoding drift: {workflow}"
+                  )
+              return base64.b64decode(
+                  str(payload.get("content") or "").replace("\n", "")
+              ).decode("utf-8")
+
+          plan_run_id = int(os.environ["PLAN_RUN_ID"])
+          if plan_run_id <= 0:
+              raise SystemExit("plan_run_id must be positive")
+          expected_digest = str(
+              os.environ["EXPECTED_PLAN_ARTIFACT_DIGEST"]
+          ).lower()
+          if (
+              not expected_digest.startswith("sha256:")
+              or len(expected_digest) != 71
+          ):
+              raise SystemExit(
+                  "expected_plan_artifact_digest must be sha256:<64 hex chars>"
+              )
+
+          plan_workflow = "phase2-universe-freeze-plan.yml"
+          plan_run = get_run(plan_run_id)
+          assert_run_identity(
+              plan_run,
+              workflow=plan_workflow,
+              run_id=plan_run_id,
+          )
+          if plan_run.get("status") != "completed":
+              raise SystemExit("universe-freeze plan run is not completed")
+          if plan_run.get("conclusion") != "success":
+              raise SystemExit("universe-freeze plan run did not succeed")
+
+          artifact_name = "phase2-universe-freeze-dispatch-plan"
+          artifact = artifact_row(plan_run_id, artifact_name)
+          actual_digest = str(artifact.get("digest") or "").lower()
+          if actual_digest != expected_digest:
+              raise SystemExit("universe-freeze plan artifact digest drift")
+          plan_root = download(
+              plan_run_id,
+              artifact_name,
+              "upstream/universe-freeze-plan",
+          )
+          plan_path = (
+              plan_root / "phase2-universe-freeze-dispatch-plan.json"
+          )
+          plan = validate_phase2_universe_freeze_dispatch_plan(
+              json.loads(plan_path.read_text())
+          )
+          if plan["execution_head_sha"] != current_head:
+              raise SystemExit("universe-freeze plan HEAD drift")
+
+          local_interface = workflow_dispatch_interface_sha256(
+              Path(".github/workflows", UNIVERSE_FREEZE_WORKFLOW).read_text()
+          )
+          default_interface = workflow_dispatch_interface_sha256(
+              default_workflow_text(UNIVERSE_FREEZE_WORKFLOW)
+          )
+          if default_interface != local_interface:
+              raise SystemExit(
+                  "default-branch universe-freeze interface drift"
+              )
+
+          target_run_id = dispatch(
+              UNIVERSE_FREEZE_WORKFLOW,
+              dict(plan["inputs"]),
+          )
+          assert_run_identity(
+              get_run(target_run_id),
+              workflow=UNIVERSE_FREEZE_WORKFLOW,
+              run_id=target_run_id,
+          )
+          receipt = {
+              "version": "phase2-universe-freeze-launch-receipt-v1",
+              "universe_freeze_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "plan_run_id": plan_run_id,
+              "plan_artifact_digest": actual_digest,
+              "universe_freeze_run_id": target_run_id,
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_ledger_commit_sha": plan[
+                  "canonical_ledger_commit_sha"
+              ],
+              "phase2_universe_coverage_complete": True,
+              "phase2_universe_sources_ready": True,
+              "phase2_universe_frozen": False,
+              "target_runs_created": 1,
+              "target_run_waited_for_completion": False,
+              "canonical_coverage_ledger_mutated": False,
+              "workflow_dispatch_performed": True,
+          }
+          receipt = validate_phase2_universe_freeze_launch_receipt(
+              receipt
+          )
+          output = Path(
+              "artifacts/phase2-universe-freeze-launch-receipt.json"
+          )
+          output.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"universe_freeze_run_id={target_run_id}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload universe-freeze launch receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-universe-freeze-launch
+          path: artifacts/phase2-universe-freeze-launch-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish universe-freeze launch summary
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          UNIVERSE_FREEZE_RUN_ID: ${{ steps.launch.outputs.universe_freeze_run_id }}
+        run: |
+          {
+            echo "## Phase-2 universe-freeze launch"
+            echo
+            echo "- universe_freeze_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- launch_receipt_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- universe_freeze_run_id: ${UNIVERSE_FREEZE_RUN_ID}"
+            echo "- target_runs_created: 1"
+            echo "- target_run_waited_for_completion: false"
+            echo "- phase2_universe_sources_ready: true"
+            echo "- phase2_universe_frozen: false"
+          } >> "${GITHUB_STEP_SUMMARY}"
