@@ -82,9 +82,11 @@ jobs:
           if rebuilt!=handoff: raise SystemExit("detector-freeze handoff semantic drift")
           if str(manifest.get("sha256") or "").lower()!=handoff["detector_rows_sha256"]: raise SystemExit("detector rows manifest SHA drift")
           if handoff["selected_candidate_id"]!=SELECTED_CANDIDATE_ID: raise SystemExit("detector-freeze selected candidate drift")
-          price_run=int(summary["price_path_run_id"])
-          price_digest=str(summary["price_path_artifact_digest"]).lower()
-          price_handoff=str(summary["price_path_handoff_sha256"]).lower()
+          price_run=int(launch["price_path_run_id"])
+          price_digest=str(launch["price_path_artifact_digest"]).lower()
+          price_handoff=str(launch["price_path_handoff_sha256"]).lower()
+          if handoff["normalized_price_path_sha256"] != summary["normalized_price_path_sha256"]:
+              raise SystemExit("detector-freeze normalized price-path drift")
           receipt={
               "version":"phase2-dump-detector-freeze-completion-receipt-v1",
               "detector_freeze_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),

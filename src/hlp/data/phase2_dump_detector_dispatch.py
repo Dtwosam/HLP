@@ -300,6 +300,18 @@ def validate_phase2_dump_detector_freeze_launch_receipt(
         raise ValueError("detector-freeze launch candidate drift")
     if str(row.get("selection_policy") or "") != SELECTION_POLICY:
         raise ValueError("detector-freeze launch policy drift")
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="detector-freeze launch price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="detector-freeze launch price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="detector-freeze launch price-path handoff",
+    )
     if int(row.get("target_runs_created", -1)) != 1:
         raise ValueError("detector-freeze launch target-run count drift")
     if row.get("target_run_waited_for_completion") is not False:
@@ -321,6 +333,9 @@ def validate_phase2_dump_detector_freeze_launch_receipt(
         "canonical_ledger_commit_sha": canonical,
         "selected_candidate_id": SELECTED_CANDIDATE_ID,
         "selection_policy": SELECTION_POLICY,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "target_runs_created": 1,
         "target_run_waited_for_completion": False,
         "uses_outcome_labels": False,
