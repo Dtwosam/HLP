@@ -65,6 +65,7 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-direct-sushiswap-v3-promotion-review.yml",
     "phase2-direct-sushiswap-v3-promotion-propose.yml",
     "phase2-direct-sushiswap-v3-ledger-approved.yml",
+    "phase2-eligibility-wave-plan.yml",
     "phase2-archive-fanout-launch.yml",
     "phase2-archive-fanout-completion.yml",
     "phase2-post-fanout-wave-launch.yml",
