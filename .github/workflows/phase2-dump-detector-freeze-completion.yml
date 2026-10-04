@@ -1,0 +1,139 @@
+name: phase2-dump-detector-freeze-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-dump-detector-freeze-launch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact detector-freeze launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify frozen detector and publish outcome-label inputs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase2_dump_detector_dispatch import SELECTED_CANDIDATE_ID,SELECTION_POLICY,validate_phase2_dump_detector_freeze_launch_receipt,validate_phase2_dump_detector_freeze_completion_receipt
+          from hlp.data.phase2_dump_research import PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION,build_phase2_dump_detector_freeze_handoff
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[]); rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"]); lr=api(f"actions/runs/{launch_run}")
+          if lr.get("path")!=".github/workflows/phase2-dump-detector-freeze-launch.yml" or lr.get("head_branch")!=branch or str(lr.get("head_sha") or "").lower()!=head or lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("detector-freeze launch identity/status drift")
+          lname="phase2-dump-detector-freeze-launch"; la=artifact(launch_run,lname); actual=str(la.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("detector-freeze launch digest drift")
+          lroot=download(launch_run,lname,"upstream/launch")
+          launch=validate_phase2_dump_detector_freeze_launch_receipt(json.loads((lroot/"phase2-dump-detector-freeze-launch-receipt.json").read_text()))
+          target=launch["detector_freeze_run_id"]; deadline=time.monotonic()+2700
+          while True:
+              row=api(f"actions/runs/{target}")
+              if row.get("path")!=".github/workflows/phase2-dump-detector-freeze.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head: raise SystemExit("detector-freeze target identity drift")
+              if row.get("status")=="completed":
+                  if row.get("conclusion")!="success": raise SystemExit(f"detector-freeze run failed: {row.get('conclusion')}")
+                  break
+              if time.monotonic()>=deadline: raise SystemExit("detector-freeze run timed out")
+              time.sleep(10)
+          full_name="phase2-dump-detector-freeze"; handoff_name="phase2-dump-detector-freeze-handoff"
+          full_art=artifact(target,full_name); handoff_art=artifact(target,handoff_name)
+          root=download(target,full_name,"upstream/freeze"); hroot=download(target,handoff_name,"upstream/freeze-handoff")
+          summary_path=root/"phase2-dump-detector-freeze-summary.json"; manifest_path=root/"phase2-dump-detector-events.jsonl.manifest.json"; handoff_path=hroot/"phase2-dump-detector-freeze-handoff.json"
+          summary=json.loads(summary_path.read_text()); manifest=json.loads(manifest_path.read_text()); handoff=json.loads(handoff_path.read_text())
+          summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
+          if handoff.get("version")!=PHASE2_DUMP_DETECTOR_FREEZE_HANDOFF_VERSION: raise SystemExit("detector-freeze handoff version drift")
+          rebuilt=build_phase2_dump_detector_freeze_handoff(summary,freeze_summary_sha256=summary_sha,candidate_research_handoff_sha256=handoff["candidate_research_handoff_sha256"],candidate_diagnostics_handoff_sha256=handoff["candidate_diagnostics_handoff_sha256"])
+          if rebuilt!=handoff: raise SystemExit("detector-freeze handoff semantic drift")
+          if str(manifest.get("sha256") or "").lower()!=handoff["detector_rows_sha256"]: raise SystemExit("detector rows manifest SHA drift")
+          if handoff["selected_candidate_id"]!=SELECTED_CANDIDATE_ID: raise SystemExit("detector-freeze selected candidate drift")
+          price_run=int(summary["price_path_run_id"])
+          price_digest=str(summary["price_path_artifact_digest"]).lower()
+          price_handoff=str(summary["price_path_handoff_sha256"]).lower()
+          receipt={
+              "version":"phase2-dump-detector-freeze-completion-receipt-v1",
+              "detector_freeze_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),
+              "detector_freeze_launch_run_id":launch_run,
+              "detector_freeze_launch_artifact_digest":actual,
+              "detector_freeze_run_id":target,
+              "detector_freeze_artifact_digest":str(full_art.get("digest") or "").lower(),
+              "detector_freeze_handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),
+              "detector_rows_sha256":handoff["detector_rows_sha256"],
+              "freeze_summary_sha256":handoff["freeze_summary_sha256"],
+              "detector_freeze_handoff_sha256":handoff_sha,
+              "execution_branch":branch,
+              "execution_head_sha":head,
+              "canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],
+              "price_path_run_id":price_run,
+              "price_path_artifact_digest":price_digest,
+              "price_path_handoff_sha256":price_handoff,
+              "tokens":int(handoff["tokens"]),
+              "confirmed_tokens":int(handoff["confirmed_tokens"]),
+              "selected_candidate_id":handoff["selected_candidate_id"],
+              "selection_policy":SELECTION_POLICY,
+              "outcome_label_inputs":{
+                  "detector_freeze_run_id":str(target),
+                  "expected_detector_artifact_digest":str(full_art.get("digest") or "").lower(),
+                  "expected_detector_handoff_sha256":handoff_sha,
+                  "price_path_run_id":str(price_run),
+                  "expected_price_path_artifact_digest":price_digest,
+                  "expected_price_path_handoff_sha256":price_handoff,
+              },
+              "target_run_completed":True,
+              "target_run_successful":True,
+              "uses_outcome_labels":False,
+              "candidate_selected":True,
+              "detector_freeze_ready":True,
+              "dump_threshold_frozen":True,
+              "phase2_dump_detector_frozen":True,
+              "outcome_labels_computed":False,
+              "workflow_dispatch_performed":False,
+          }
+          receipt=validate_phase2_dump_detector_freeze_completion_receipt(receipt)
+          Path("artifacts/phase2-dump-detector-freeze-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              for k,v in receipt["outcome_label_inputs"].items(): h.write(f"{k}={v}\n")
+          PY
+      - name: Upload detector-freeze completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-detector-freeze-completion
+          path: artifacts/phase2-dump-detector-freeze-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90

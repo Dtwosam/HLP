@@ -1,0 +1,74 @@
+name: phase2-dump-detector-selection-plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      diagnostics_completion_run_id:
+        description: Exact successful phase2-dump-candidate-diagnostics-completion run ID
+        required: true
+        type: string
+      expected_diagnostics_completion_artifact_digest:
+        description: Exact diagnostics completion artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPLETION_RUN_ID: ${{ inputs.diagnostics_completion_run_id }}
+      EXPECTED_COMPLETION_DIGEST: ${{ inputs.expected_diagnostics_completion_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: plan
+        name: Bind explicit outcome-blind detector selection
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import json,os,shutil,subprocess
+          from pathlib import Path
+          from hlp.data.phase2_dump_candidate_dispatch import validate_phase2_dump_diagnostics_completion_receipt
+          from hlp.data.phase2_dump_detector_dispatch import build_phase2_dump_detector_selection_plan,validate_phase2_dump_detector_selection_plan
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]
+          head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          run_id=int(os.environ["COMPLETION_RUN_ID"]); row=api(f"actions/runs/{run_id}")
+          if row.get("path")!=".github/workflows/phase2-dump-candidate-diagnostics-completion.yml" or row.get("event")!="workflow_dispatch" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head or row.get("status")!="completed" or row.get("conclusion")!="success":
+              raise SystemExit("diagnostics completion run identity/status drift")
+          rows=api(f"actions/runs/{run_id}/artifacts?name=phase2-dump-candidate-diagnostics-completion").get("artifacts",[])
+          rows=[x for x in rows if x.get("name")=="phase2-dump-candidate-diagnostics-completion" and not x.get("expired")]
+          if len(rows)!=1: raise SystemExit("diagnostics completion artifact cardinality drift")
+          actual=str(rows[0].get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_COMPLETION_DIGEST"].lower(): raise SystemExit("diagnostics completion digest drift")
+          root=Path("upstream/completion")
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name","phase2-dump-candidate-diagnostics-completion","--dir",str(root)])
+          completion=validate_phase2_dump_diagnostics_completion_receipt(json.loads((root/"phase2-dump-candidate-diagnostics-completion-receipt.json").read_text()))
+          plan=validate_phase2_dump_detector_selection_plan(build_phase2_dump_detector_selection_plan(completion))
+          Path("artifacts/phase2-dump-detector-selection-plan.json").write_text(json.dumps(plan,indent=2,sort_keys=True)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as h:
+              h.write(f"selected_candidate_id={plan['selected_candidate_id']}\n")
+              h.write(f"selection_policy={plan['selection_policy']}\n")
+          PY
+      - name: Upload detector selection plan
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-dump-detector-selection-plan
+          path: artifacts/phase2-dump-detector-selection-plan.json
+          if-no-files-found: error
+          retention-days: 90
