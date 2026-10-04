@@ -68,7 +68,7 @@ jobs:
               run_id=int((response or {}).get("workflow_run_id",0))
               if run_id<=0: raise SystemExit(f"dispatch lacks run ID: {workflow}")
               targets[item["node_id"]]=run_id
-          receipt={"version":"phase3-first-wave-launch-receipt-v1","first_wave_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"first_wave_plan_run_id":plan_run,"first_wave_plan_artifact_digest":actual,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":plan["canonical_ledger_commit_sha"],"target_run_ids":targets,"target_runs_created":4,"target_runs_waited_for_completion":False,"outcome_rows_consumed":False,"workflow_dispatch_performed":True}
+          receipt={"version":"phase3-first-wave-launch-receipt-v1","first_wave_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"first_wave_plan_run_id":plan_run,"first_wave_plan_artifact_digest":actual,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":plan["canonical_ledger_commit_sha"],"feature_entry_run_id":plan["feature_entry_run_id"],"feature_entry_artifact_digest":plan["feature_entry_artifact_digest"],"feature_entry_handoff_sha256":plan["feature_entry_handoff_sha256"],"feature_subjects":plan["feature_subjects"],"target_run_ids":targets,"target_runs_created":4,"target_runs_waited_for_completion":False,"outcome_rows_consumed":False,"workflow_dispatch_performed":True}
           receipt=validate_phase3_first_wave_launch_receipt(receipt)
           Path("artifacts/phase3-first-wave-launch-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
           PY

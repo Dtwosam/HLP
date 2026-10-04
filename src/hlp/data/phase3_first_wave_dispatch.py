@@ -351,6 +351,21 @@ def validate_phase3_first_wave_launch_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-3 first-wave launch branch/HEAD drift")
+    entry_run = _positive_run_id(
+        row.get("feature_entry_run_id"),
+        label="Phase-3 first-wave launch entry run ID",
+    )
+    entry_digest = _artifact_digest(
+        row.get("feature_entry_artifact_digest"),
+        label="Phase-3 first-wave launch entry artifact",
+    )
+    entry_handoff = _sha256(
+        row.get("feature_entry_handoff_sha256"),
+        label="Phase-3 first-wave launch entry handoff",
+    )
+    expected_subjects = int(row.get("feature_subjects", -1))
+    if expected_subjects <= 0:
+        raise ValueError("Phase-3 first-wave launch subject count invalid")
     runs_raw = row.get("target_run_ids")
     if not isinstance(runs_raw, Mapping) or set(runs_raw) != {
         "canonical_transfer",
@@ -381,6 +396,10 @@ def validate_phase3_first_wave_launch_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "feature_entry_run_id": entry_run,
+        "feature_entry_artifact_digest": entry_digest,
+        "feature_entry_handoff_sha256": entry_handoff,
+        "feature_subjects": expected_subjects,
         "target_run_ids": dict(sorted(runs.items())),
         "target_runs_created": 4,
         "target_runs_waited_for_completion": False,
@@ -418,6 +437,23 @@ def validate_phase3_first_wave_completion_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-3 first-wave completion branch/HEAD drift")
+    entry_run = _positive_run_id(
+        row.get("feature_entry_run_id"),
+        label="Phase-3 first-wave completion entry run ID",
+    )
+    entry_digest = _artifact_digest(
+        row.get("feature_entry_artifact_digest"),
+        label="Phase-3 first-wave completion entry artifact",
+    )
+    entry_handoff = _sha256(
+        row.get("feature_entry_handoff_sha256"),
+        label="Phase-3 first-wave completion entry handoff",
+    )
+    expected_subjects = int(row.get("expected_feature_subjects", -1))
+    if expected_subjects <= 0:
+        raise ValueError(
+            "Phase-3 first-wave expected subject count invalid"
+        )
     outputs_raw = row.get("outputs")
     if not isinstance(outputs_raw, Mapping) or set(outputs_raw) != {
         "canonical_transfer",
@@ -477,6 +513,11 @@ def validate_phase3_first_wave_completion_receipt(
     }
     if len(subjects) != 1:
         raise ValueError("Phase-3 first-wave feature-subject coverage drift")
+    actual_subjects = next(iter(subjects))
+    if actual_subjects != expected_subjects:
+        raise ValueError(
+            "Phase-3 first-wave feature-subject count drift"
+        )
     if int(row.get("target_runs_completed", -1)) != 4:
         raise ValueError("Phase-3 first-wave completion count drift")
     if row.get("all_target_runs_successful") is not True:
@@ -498,6 +539,10 @@ def validate_phase3_first_wave_completion_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "feature_entry_run_id": entry_run,
+        "feature_entry_artifact_digest": entry_digest,
+        "feature_entry_handoff_sha256": entry_handoff,
+        "expected_feature_subjects": expected_subjects,
         "outputs": dict(sorted(outputs.items())),
         "feature_subjects": subjects.pop(),
         "universe_tokens": outputs["canonical_transfer"]["universe_tokens"],

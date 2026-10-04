@@ -64,6 +64,10 @@ def launch_receipt():
         "execution_branch": "phase1/data-acquisition-spike",
         "execution_head_sha": "22" * 20,
         "canonical_ledger_commit_sha": "22" * 20,
+        "feature_entry_run_id": 16107,
+        "feature_entry_artifact_digest": "sha256:" + "23" * 32,
+        "feature_entry_handoff_sha256": "24" * 32,
+        "feature_subjects": 456,
         "target_run_ids": {
             "canonical_transfer": 16103,
             "price_features": 16104,
@@ -91,6 +95,10 @@ def completion_receipt():
         "execution_branch": "phase1/data-acquisition-spike",
         "execution_head_sha": "32" * 20,
         "canonical_ledger_commit_sha": "32" * 20,
+        "feature_entry_run_id": 16203,
+        "feature_entry_artifact_digest": "sha256:" + "33" * 32,
+        "feature_entry_handoff_sha256": "34" * 32,
+        "expected_feature_subjects": 456,
         "outputs": {
             "canonical_transfer": {
                 "run_id": 16300,
