@@ -295,6 +295,30 @@ def validate_phase3_feature_entry_launch_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-3 feature-entry launch branch/HEAD drift")
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="Phase-3 entry launch universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="Phase-3 entry launch universe artifact",
+    )
+    universe_handoff = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="Phase-3 entry launch universe handoff",
+    )
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="Phase-3 entry launch price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="Phase-3 entry launch price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="Phase-3 entry launch price-path handoff",
+    )
     if int(row.get("target_runs_created", -1)) != 1:
         raise ValueError("Phase-3 feature-entry target-run count drift")
     if row.get("target_run_waited_for_completion") is not False:
@@ -314,6 +338,12 @@ def validate_phase3_feature_entry_launch_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "target_runs_created": 1,
         "target_run_waited_for_completion": False,
         "outcome_rows_consumed": False,
@@ -377,6 +407,30 @@ def validate_phase3_feature_entry_completion_receipt(
     )
     if not branch or head != canonical:
         raise ValueError("Phase-3 entry completion branch/HEAD drift")
+    universe_run = _positive_run_id(
+        row.get("universe_run_id"),
+        label="Phase-3 entry completion universe run ID",
+    )
+    universe_digest = _artifact_digest(
+        row.get("universe_artifact_digest"),
+        label="Phase-3 entry completion universe artifact",
+    )
+    universe_handoff = _sha256(
+        row.get("universe_handoff_sha256"),
+        label="Phase-3 entry completion universe handoff",
+    )
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="Phase-3 entry completion price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="Phase-3 entry completion price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="Phase-3 entry completion price-path handoff",
+    )
     subjects = int(row.get("feature_subjects", -1))
     if subjects <= 0:
         raise ValueError("Phase-3 feature subject count is invalid")
@@ -408,6 +462,12 @@ def validate_phase3_feature_entry_completion_receipt(
         "execution_branch": branch,
         "execution_head_sha": head,
         "canonical_ledger_commit_sha": canonical,
+        "universe_run_id": universe_run,
+        "universe_artifact_digest": universe_digest,
+        "universe_handoff_sha256": universe_handoff,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "feature_subjects": subjects,
         "snapshot_kind": "first_major_dump_confirmation",
         "target_run_completed": True,
