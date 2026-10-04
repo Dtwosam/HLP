@@ -1,0 +1,92 @@
+name: phase3-feature-entry-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase3-feature-entry-launch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact Phase-3 entry launch artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+      EXPECTED_LAUNCH_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: complete
+        name: Verify Phase-3 feature-entry subjects
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib,json,os,shutil,subprocess,time
+          from pathlib import Path
+          from hlp.data.phase3_feature_entry import PHASE3_FEATURE_ENTRY_HANDOFF_VERSION,build_phase3_feature_entry_handoff
+          from hlp.data.phase3_feature_entry_dispatch import validate_phase3_feature_entry_launch_receipt,validate_phase3_feature_entry_completion_receipt
+          repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ["GITHUB_REF_NAME"]; head=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip().lower()
+          def api(path): return json.loads(subprocess.check_output(["gh","api","-H","Accept: application/vnd.github+json",f"/repos/{repo}/{path}"]))
+          def artifact(run_id,name):
+              rows=api(f"actions/runs/{run_id}/artifacts?name={name}").get("artifacts",[]); rows=[x for x in rows if x.get("name")==name and not x.get("expired")]
+              if len(rows)!=1: raise SystemExit(f"{name} artifact cardinality drift")
+              return rows[0]
+          def download(run_id,name,dest):
+              root=Path(dest)
+              if root.exists(): shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call(["gh","run","download",str(run_id),"--repo",repo,"--name",name,"--dir",str(root)])
+              return root
+          def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          launch_run=int(os.environ["LAUNCH_RUN_ID"]); lr=api(f"actions/runs/{launch_run}")
+          if lr.get("path")!=".github/workflows/phase3-feature-entry-launch.yml" or lr.get("head_branch")!=branch or str(lr.get("head_sha") or "").lower()!=head or lr.get("status")!="completed" or lr.get("conclusion")!="success": raise SystemExit("Phase-3 entry launch identity/status drift")
+          lname="phase3-feature-entry-launch"; la=artifact(launch_run,lname); actual=str(la.get("digest") or "").lower()
+          if actual!=os.environ["EXPECTED_LAUNCH_DIGEST"].lower(): raise SystemExit("Phase-3 entry launch digest drift")
+          lroot=download(launch_run,lname,"upstream/launch"); launch=validate_phase3_feature_entry_launch_receipt(json.loads((lroot/"phase3-feature-entry-launch-receipt.json").read_text()))
+          target=launch["feature_entry_run_id"]; deadline=time.monotonic()+2700
+          while True:
+              row=api(f"actions/runs/{target}")
+              if row.get("path")!=".github/workflows/phase3-feature-entry.yml" or row.get("head_branch")!=branch or str(row.get("head_sha") or "").lower()!=head: raise SystemExit("Phase-3 entry target identity drift")
+              if row.get("status")=="completed":
+                  if row.get("conclusion")!="success": raise SystemExit(f"Phase-3 entry failed: {row.get('conclusion')}")
+                  break
+              if time.monotonic()>=deadline: raise SystemExit("Phase-3 entry timed out")
+              time.sleep(10)
+          full_name="phase3-feature-entry"; handoff_name="phase3-feature-entry-handoff"
+          full_art=artifact(target,full_name); handoff_art=artifact(target,handoff_name)
+          root=download(target,full_name,"upstream/entry"); hroot=download(target,handoff_name,"upstream/entry-handoff")
+          summary_path=root/"phase3-feature-entry-summary.json"; manifest_path=root/"phase3-feature-subjects.jsonl.manifest.json"; handoff_path=hroot/"phase3-feature-entry-handoff.json"
+          summary=json.loads(summary_path.read_text()); manifest=json.loads(manifest_path.read_text()); handoff=json.loads(handoff_path.read_text()); summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
+          if handoff.get("version")!=PHASE3_FEATURE_ENTRY_HANDOFF_VERSION: raise SystemExit("Phase-3 entry handoff version drift")
+          rebuilt=build_phase3_feature_entry_handoff(summary,entry_summary_sha256=summary_sha,phase2_dataset_handoff_sha256=summary["phase2_dataset_handoff_sha256"],detector_freeze_handoff_sha256=summary["detector_freeze_handoff_sha256"])
+          if rebuilt!=handoff: raise SystemExit("Phase-3 entry handoff semantic drift")
+          if str(manifest.get("sha256") or "").lower()!=handoff["feature_subjects_sha256"]: raise SystemExit("Phase-3 subject manifest SHA drift")
+          receipt={"version":"phase3-feature-entry-completion-receipt-v1","feature_entry_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"feature_entry_launch_run_id":launch_run,"feature_entry_launch_artifact_digest":actual,"feature_entry_run_id":target,"feature_entry_artifact_digest":str(full_art.get("digest") or "").lower(),"feature_entry_handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),"feature_subjects_sha256":handoff["feature_subjects_sha256"],"entry_summary_sha256":summary_sha,"entry_handoff_sha256":handoff_sha,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],"feature_subjects":int(handoff["feature_subjects"]),"snapshot_kind":handoff["snapshot_kind"],"target_run_completed":True,"target_run_successful":True,"outcome_rows_consumed":False,"outcome_fields_exposed":False,"future_state_allowed":False,"phase3_feature_values_computed":False,"phase3_feature_entry_ready":True,"workflow_dispatch_performed":False}
+          receipt=validate_phase3_feature_entry_completion_receipt(receipt)
+          Path("artifacts/phase3-feature-entry-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
+          PY
+      - name: Upload Phase-3 entry completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-feature-entry-completion
+          path: artifacts/phase3-feature-entry-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
