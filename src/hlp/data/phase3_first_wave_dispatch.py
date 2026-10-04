@@ -431,7 +431,7 @@ def validate_phase3_first_wave_completion_receipt(
         if not isinstance(value, Mapping):
             raise ValueError(f"{key} first-wave output invalid")
         item = dict(value)
-        outputs[key] = {
+        normalized = {
             "run_id": _positive_run_id(
                 item.get("run_id"),
                 label=f"{key} completed run ID",
@@ -448,13 +448,35 @@ def validate_phase3_first_wave_completion_receipt(
                 item.get("handoff_sha256"),
                 label=f"{key} handoff",
             ),
-            "feature_subjects": int(item.get("feature_subjects", -1)),
         }
-        if outputs[key]["feature_subjects"] <= 0:
-            raise ValueError(f"{key} subject count invalid")
-    subjects = {item["feature_subjects"] for item in outputs.values()}
+        if key == "canonical_transfer":
+            normalized["universe_tokens"] = int(
+                item.get("universe_tokens", -1)
+            )
+            normalized["transfer_rows"] = int(
+                item.get("transfer_rows", -1)
+            )
+            if normalized["universe_tokens"] <= 0:
+                raise ValueError(
+                    "canonical transfer universe-token count invalid"
+                )
+            if normalized["transfer_rows"] < 0:
+                raise ValueError(
+                    "canonical transfer row count invalid"
+                )
+        else:
+            normalized["feature_subjects"] = int(
+                item.get("feature_subjects", -1)
+            )
+            if normalized["feature_subjects"] <= 0:
+                raise ValueError(f"{key} subject count invalid")
+        outputs[key] = normalized
+    subjects = {
+        outputs[key]["feature_subjects"]
+        for key in ("price_features", "chain_regime", "venue_mechanics")
+    }
     if len(subjects) != 1:
-        raise ValueError("Phase-3 first-wave subject coverage drift")
+        raise ValueError("Phase-3 first-wave feature-subject coverage drift")
     if int(row.get("target_runs_completed", -1)) != 4:
         raise ValueError("Phase-3 first-wave completion count drift")
     if row.get("all_target_runs_successful") is not True:
@@ -478,6 +500,7 @@ def validate_phase3_first_wave_completion_receipt(
         "canonical_ledger_commit_sha": canonical,
         "outputs": dict(sorted(outputs.items())),
         "feature_subjects": subjects.pop(),
+        "universe_tokens": outputs["canonical_transfer"]["universe_tokens"],
         "target_runs_completed": 4,
         "all_target_runs_successful": True,
         "outcome_rows_consumed": False,

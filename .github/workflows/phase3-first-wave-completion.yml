@@ -87,12 +87,12 @@ jobs:
               summary=json.loads(summary_path.read_text()); handoff=json.loads(handoff_path.read_text()); summary_sha=sha(summary_path); handoff_sha=sha(handoff_path)
               if key=="canonical_transfer":
                   rebuilt=builder(summary,tape_summary_sha256=summary_sha,feature_entry_handoff_sha256=summary["feature_entry_handoff_sha256"])
-                  subjects=int(handoff["universe_tokens"])
+                  extra={"universe_tokens":int(handoff["universe_tokens"]),"transfer_rows":int(handoff["transfer_rows"])}
               else:
                   rebuilt=builder(summary,feature_summary_sha256=summary_sha,feature_entry_handoff_sha256=summary["feature_entry_handoff_sha256"],price_path_handoff_sha256=summary["price_path_handoff_sha256"])
-                  subjects=int(handoff["feature_subjects"])
+                  extra={"feature_subjects":int(handoff["feature_subjects"])}
               if rebuilt!=handoff: raise SystemExit(f"{key} handoff semantic drift")
-              outputs[key]={"run_id":run_id,"artifact_digest":str(full_art.get("digest") or "").lower(),"handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),"handoff_sha256":handoff_sha,"feature_subjects":subjects}
+              outputs[key]={"run_id":run_id,"artifact_digest":str(full_art.get("digest") or "").lower(),"handoff_artifact_digest":str(handoff_art.get("digest") or "").lower(),"handoff_sha256":handoff_sha,**extra}
           receipt={"version":"phase3-first-wave-completion-receipt-v1","first_wave_completion_control_run_id":int(os.environ["GITHUB_RUN_ID"]),"first_wave_launch_run_id":launch_run,"first_wave_launch_artifact_digest":actual,"execution_branch":branch,"execution_head_sha":head,"canonical_ledger_commit_sha":launch["canonical_ledger_commit_sha"],"outputs":outputs,"target_runs_completed":4,"all_target_runs_successful":True,"outcome_rows_consumed":False,"outcome_fields_exposed":False,"future_state_allowed":False,"workflow_dispatch_performed":False}
           receipt=validate_phase3_first_wave_completion_receipt(receipt)
           Path("artifacts/phase3-first-wave-completion-receipt.json").write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n")

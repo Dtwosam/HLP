@@ -92,19 +92,35 @@ def completion_receipt():
         "execution_head_sha": "32" * 20,
         "canonical_ledger_commit_sha": "32" * 20,
         "outputs": {
-            key: {
-                "run_id": 16300 + index,
-                "artifact_digest": "sha256:" + f"{40+index:02x}" * 32,
-                "handoff_artifact_digest": "sha256:" + f"{50+index:02x}" * 32,
-                "handoff_sha256": f"{60+index:02x}" * 32,
+            "canonical_transfer": {
+                "run_id": 16300,
+                "artifact_digest": "sha256:" + "28" * 32,
+                "handoff_artifact_digest": "sha256:" + "32" * 32,
+                "handoff_sha256": "3c" * 32,
+                "universe_tokens": 1234,
+                "transfer_rows": 98765,
+            },
+            "price_features": {
+                "run_id": 16301,
+                "artifact_digest": "sha256:" + "29" * 32,
+                "handoff_artifact_digest": "sha256:" + "33" * 32,
+                "handoff_sha256": "3d" * 32,
                 "feature_subjects": 456,
-            }
-            for index, key in enumerate((
-                "canonical_transfer",
-                "price_features",
-                "chain_regime",
-                "venue_mechanics",
-            ))
+            },
+            "chain_regime": {
+                "run_id": 16302,
+                "artifact_digest": "sha256:" + "2a" * 32,
+                "handoff_artifact_digest": "sha256:" + "34" * 32,
+                "handoff_sha256": "3e" * 32,
+                "feature_subjects": 456,
+            },
+            "venue_mechanics": {
+                "run_id": 16303,
+                "artifact_digest": "sha256:" + "2b" * 32,
+                "handoff_artifact_digest": "sha256:" + "35" * 32,
+                "handoff_sha256": "3f" * 32,
+                "feature_subjects": 456,
+            },
         },
         "target_runs_completed": 4,
         "all_target_runs_successful": True,
@@ -120,3 +136,4 @@ def test_first_wave_completion_has_equal_subject_coverage():
         completion_receipt()
     )
     assert report["feature_subjects"] == 456
+    assert report["universe_tokens"] == 1234
