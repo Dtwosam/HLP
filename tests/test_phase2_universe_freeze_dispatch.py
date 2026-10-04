@@ -6,6 +6,7 @@ from hlp.data.phase2_universe_freeze_dispatch import (
     build_phase2_universe_freeze_dispatch_plan,
     validate_phase2_universe_freeze_dispatch_plan,
     validate_phase2_universe_freeze_launch_receipt,
+    validate_phase2_universe_freeze_completion_receipt,
 )
 
 
@@ -118,3 +119,42 @@ def test_freeze_launch_receipt_requires_one_target():
     row["target_runs_created"] = 2
     with pytest.raises(ValueError, match="target-run count drift"):
         validate_phase2_universe_freeze_launch_receipt(row)
+
+def completion_receipt():
+    return {
+        "version": "phase2-universe-freeze-completion-receipt-v1",
+        "universe_freeze_completion_control_run_id": 8001,
+        "universe_freeze_launch_run_id": 8002,
+        "universe_freeze_launch_artifact_digest": "sha256:" + "99" * 32,
+        "universe_freeze_run_id": 8003,
+        "universe_freeze_artifact_digest": "sha256:" + "aa" * 32,
+        "universe_freeze_handoff_sha256": "bb" * 32,
+        "eligible_universe_sha256": "cc" * 32,
+        "universe_summary_sha256": "dd" * 32,
+        "execution_branch": "phase1/data-acquisition-spike",
+        "execution_head_sha": "ee" * 20,
+        "canonical_ledger_commit_sha": "ee" * 20,
+        "snapshot_head_block": 54_486_035,
+        "eligible_tokens": 1234,
+        "phase2_universe_coverage_complete": True,
+        "phase2_universe_frozen": True,
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "canonical_coverage_ledger_mutated": False,
+        "workflow_dispatch_performed": False,
+    }
+
+
+def test_freeze_completion_receipt_proves_frozen_universe():
+    report = validate_phase2_universe_freeze_completion_receipt(
+        completion_receipt()
+    )
+    assert report["universe_freeze_run_id"] == 8003
+    assert report["phase2_universe_frozen"] is True
+    assert report["eligible_tokens"] == 1234
+
+    row = completion_receipt()
+    row["phase2_universe_frozen"] = False
+    with pytest.raises(ValueError, match="lacks freeze proof"):
+        validate_phase2_universe_freeze_completion_receipt(row)
+

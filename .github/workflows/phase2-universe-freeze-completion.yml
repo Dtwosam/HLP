@@ -1,0 +1,353 @@
+name: phase2-universe-freeze-completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_run_id:
+        description: Exact successful phase2-universe-freeze-launch workflow_dispatch run ID
+        required: true
+        type: string
+      expected_launch_artifact_digest:
+        description: Exact universe-freeze launch receipt artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase2-universe-freeze-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LAUNCH_RUN_ID: ${{ inputs.launch_run_id }}
+  EXPECTED_LAUNCH_ARTIFACT_DIGEST: ${{ inputs.expected_launch_artifact_digest }}
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: complete
+        name: Verify frozen universe and publish immutable checkpoint
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts upstream
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          from hlp.data.phase2_universe_freeze_dispatch import (
+              validate_phase2_universe_freeze_completion_receipt,
+              validate_phase2_universe_freeze_launch_receipt,
+          )
+
+          API_VERSION = "2026-03-10"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"],
+              text=True,
+          ).strip().lower()
+
+          def gh_json(path):
+              return json.loads(
+                  subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      "-H",
+                      f"X-GitHub-Api-Version: {API_VERSION}",
+                      f"/repos/{repo}/{path}",
+                  ])
+              )
+
+          def run_row(run_id):
+              return gh_json(f"actions/runs/{run_id}")
+
+          def assert_identity(run, *, workflow, run_id):
+              if run.get("path") != f".github/workflows/{workflow}":
+                  raise SystemExit(
+                      f"run {run_id} workflow identity drift"
+                  )
+              if run.get("event") != "workflow_dispatch":
+                  raise SystemExit(
+                      f"run {run_id} is not workflow_dispatch"
+                  )
+              if run.get("head_branch") != branch:
+                  raise SystemExit(
+                      f"run {run_id} branch identity drift"
+                  )
+              if str(run.get("head_sha") or "").lower() != current_head:
+                  raise SystemExit(
+                      f"run {run_id} HEAD identity drift"
+                  )
+
+          def wait_success(run_id, workflow, timeout_seconds=3900):
+              deadline = time.monotonic() + timeout_seconds
+              while True:
+                  row = run_row(run_id)
+                  assert_identity(
+                      row,
+                      workflow=workflow,
+                      run_id=run_id,
+                  )
+                  if row.get("status") == "completed":
+                      if row.get("conclusion") != "success":
+                          raise SystemExit(
+                              f"run {run_id} failed with "
+                              f"{row.get('conclusion')!r}"
+                          )
+                      return row
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"run {run_id} timed out"
+                      )
+                  time.sleep(10)
+
+          def artifact_row(run_id, name, expected_digest=None):
+              payload = gh_json(
+                  f"actions/runs/{run_id}/artifacts?name={name}"
+              )
+              matches = [
+                  row
+                  for row in payload.get("artifacts", [])
+                  if row.get("name") == name
+                  and not row.get("expired")
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"run {run_id} expected one live {name} artifact; "
+                      f"found {len(matches)}"
+                  )
+              row = matches[0]
+              actual = str(row.get("digest") or "").lower()
+              if expected_digest is not None and actual != str(
+                  expected_digest
+              ).lower():
+                  raise SystemExit(
+                      f"{name} artifact digest drift"
+                  )
+              return row
+
+          def download(run_id, name, destination):
+              root = Path(destination)
+              if root.exists():
+                  shutil.rmtree(root)
+              root.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(root),
+              ])
+              return root
+
+          def sha256_path(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          launch_run_id = int(os.environ["LAUNCH_RUN_ID"])
+          if launch_run_id <= 0:
+              raise SystemExit("launch_run_id must be positive")
+          expected_launch_digest = str(
+              os.environ["EXPECTED_LAUNCH_ARTIFACT_DIGEST"]
+          ).lower()
+
+          launch_run = run_row(launch_run_id)
+          assert_identity(
+              launch_run,
+              workflow="phase2-universe-freeze-launch.yml",
+              run_id=launch_run_id,
+          )
+          if launch_run.get("status") != "completed":
+              raise SystemExit(
+                  "universe-freeze launch run is not completed"
+              )
+          if launch_run.get("conclusion") != "success":
+              raise SystemExit(
+                  "universe-freeze launch run did not succeed"
+              )
+          launch_name = "phase2-universe-freeze-launch"
+          launch_artifact = artifact_row(
+              launch_run_id,
+              launch_name,
+              expected_launch_digest,
+          )
+          launch_root = download(
+              launch_run_id,
+              launch_name,
+              "upstream/freeze-launch",
+          )
+          launch_path = (
+              launch_root
+              / "phase2-universe-freeze-launch-receipt.json"
+          )
+          launch = validate_phase2_universe_freeze_launch_receipt(
+              json.loads(launch_path.read_text())
+          )
+          if launch["universe_freeze_control_run_id"] != launch_run_id:
+              raise SystemExit(
+                  "universe-freeze launch receipt/control drift"
+              )
+          if launch["execution_head_sha"] != current_head:
+              raise SystemExit(
+                  "universe-freeze launch receipt HEAD drift"
+              )
+
+          target_run_id = int(launch["universe_freeze_run_id"])
+          wait_success(
+              target_run_id,
+              "phase2-universe-freeze.yml",
+          )
+          target_name = "phase2-universe-freeze"
+          target_artifact = artifact_row(
+              target_run_id,
+              target_name,
+          )
+          target_root = download(
+              target_run_id,
+              target_name,
+              "upstream/frozen-universe",
+          )
+          handoff_path = (
+              target_root / "phase2-universe-freeze-handoff.json"
+          )
+          summary_path = target_root / "phase2-universe-summary.json"
+          universe_path = target_root / "phase2-eligible-universe.jsonl"
+          if not (
+              handoff_path.is_file()
+              and summary_path.is_file()
+              and universe_path.is_file()
+          ):
+              raise SystemExit(
+                  "frozen-universe artifact lacks canonical checkpoint files"
+              )
+          handoff = json.loads(handoff_path.read_text())
+          if handoff.get("version") != (
+              "phase2-universe-freeze-handoff-v1"
+          ):
+              raise SystemExit("frozen-universe handoff version drift")
+          if handoff.get(
+              "phase2_universe_coverage_complete"
+          ) is not True:
+              raise SystemExit("frozen universe lost 14/14 coverage proof")
+          if handoff.get("phase2_universe_frozen") is not True:
+              raise SystemExit("universe freeze did not freeze universe")
+          if sha256_path(universe_path) != handoff[
+              "eligible_universe_sha256"
+          ]:
+              raise SystemExit("eligible-universe SHA drift")
+          if sha256_path(summary_path) != handoff[
+              "universe_summary_sha256"
+          ]:
+              raise SystemExit("universe summary SHA drift")
+
+          receipt = {
+              "version": "phase2-universe-freeze-completion-receipt-v1",
+              "universe_freeze_completion_control_run_id": int(
+                  os.environ["GITHUB_RUN_ID"]
+              ),
+              "universe_freeze_launch_run_id": launch_run_id,
+              "universe_freeze_launch_artifact_digest": str(
+                  launch_artifact.get("digest") or ""
+              ).lower(),
+              "universe_freeze_run_id": target_run_id,
+              "universe_freeze_artifact_digest": str(
+                  target_artifact.get("digest") or ""
+              ).lower(),
+              "universe_freeze_handoff_sha256": sha256_path(handoff_path),
+              "eligible_universe_sha256": handoff[
+                  "eligible_universe_sha256"
+              ],
+              "universe_summary_sha256": handoff[
+                  "universe_summary_sha256"
+              ],
+              "execution_branch": branch,
+              "execution_head_sha": current_head,
+              "canonical_ledger_commit_sha": launch[
+                  "canonical_ledger_commit_sha"
+              ],
+              "snapshot_head_block": int(
+                  handoff["snapshot_head_block"]
+              ),
+              "eligible_tokens": int(handoff["eligible_tokens"]),
+              "phase2_universe_coverage_complete": True,
+              "phase2_universe_frozen": True,
+              "target_run_completed": True,
+              "target_run_successful": True,
+              "canonical_coverage_ledger_mutated": False,
+              "workflow_dispatch_performed": False,
+          }
+          receipt = validate_phase2_universe_freeze_completion_receipt(
+              receipt
+          )
+          output = Path(
+              "artifacts/phase2-universe-freeze-completion-receipt.json"
+          )
+          output.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"universe_run_id={receipt['universe_freeze_run_id']}\n"
+              )
+              handle.write(
+                  "universe_artifact_digest="
+                  f"{receipt['universe_freeze_artifact_digest']}\n"
+              )
+              handle.write(
+                  "universe_handoff_sha256="
+                  f"{receipt['universe_freeze_handoff_sha256']}\n"
+              )
+              handle.write(
+                  f"eligible_tokens={receipt['eligible_tokens']}\n"
+              )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+
+      - name: Upload universe-freeze completion receipt
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-universe-freeze-completion
+          path: artifacts/phase2-universe-freeze-completion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish frozen-universe checkpoint
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          UNIVERSE_RUN_ID: ${{ steps.complete.outputs.universe_run_id }}
+          UNIVERSE_ARTIFACT_DIGEST: ${{ steps.complete.outputs.universe_artifact_digest }}
+          UNIVERSE_HANDOFF_SHA256: ${{ steps.complete.outputs.universe_handoff_sha256 }}
+          ELIGIBLE_TOKENS: ${{ steps.complete.outputs.eligible_tokens }}
+        run: |
+          {
+            echo "## Phase-2 frozen-universe checkpoint"
+            echo
+            echo "- completion_control_run_id: ${GITHUB_RUN_ID}"
+            echo "- completion_artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- universe_run_id: ${UNIVERSE_RUN_ID}"
+            echo "- universe_artifact_digest: ${UNIVERSE_ARTIFACT_DIGEST}"
+            echo "- universe_handoff_sha256: ${UNIVERSE_HANDOFF_SHA256}"
+            echo "- eligible_tokens: ${ELIGIBLE_TOKENS}"
+            echo "- phase2_universe_coverage_complete: true"
+            echo "- phase2_universe_frozen: true"
+          } >> "${GITHUB_STEP_SUMMARY}"

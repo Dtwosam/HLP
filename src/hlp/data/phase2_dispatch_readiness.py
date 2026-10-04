@@ -70,6 +70,7 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-eligibility-wave-completion.yml",
     "phase2-universe-freeze.yml",
     "phase2-universe-freeze-launch.yml",
+    "phase2-universe-freeze-completion.yml",
     "phase2-universe-freeze-plan.yml",
     "phase2-exclusion-registry.yml",
     "phase2-direct-eligibility-handoff.yml",

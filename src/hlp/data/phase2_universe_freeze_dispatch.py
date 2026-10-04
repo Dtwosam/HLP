@@ -375,3 +375,109 @@ def validate_phase2_universe_freeze_launch_receipt(
         "canonical_coverage_ledger_mutated": False,
         "workflow_dispatch_performed": True,
     }
+
+PHASE2_UNIVERSE_FREEZE_COMPLETION_RECEIPT_VERSION = (
+    "phase2-universe-freeze-completion-receipt-v1"
+)
+
+
+def validate_phase2_universe_freeze_completion_receipt(
+    receipt: Mapping[str, object],
+) -> dict:
+    """Validate immutable proof that the Phase-2 universe is frozen."""
+
+    row = dict(receipt)
+    if str(row.get("version") or "") != (
+        PHASE2_UNIVERSE_FREEZE_COMPLETION_RECEIPT_VERSION
+    ):
+        raise ValueError("Phase-2 universe-freeze completion version changed")
+    control_run_id = _positive_run_id(
+        row.get("universe_freeze_completion_control_run_id"),
+        label="universe-freeze completion control run ID",
+    )
+    launch_run_id = _positive_run_id(
+        row.get("universe_freeze_launch_run_id"),
+        label="universe-freeze launch run ID",
+    )
+    launch_digest = _artifact_digest(
+        row.get("universe_freeze_launch_artifact_digest"),
+        label="universe-freeze launch artifact digest",
+    )
+    target_run_id = _positive_run_id(
+        row.get("universe_freeze_run_id"),
+        label="universe-freeze completed run ID",
+    )
+    artifact_digest = _artifact_digest(
+        row.get("universe_freeze_artifact_digest"),
+        label="frozen-universe artifact digest",
+    )
+    handoff_sha = _sha256(
+        row.get("universe_freeze_handoff_sha256"),
+        label="frozen-universe handoff",
+    )
+    universe_sha = _sha256(
+        row.get("eligible_universe_sha256"),
+        label="eligible-universe snapshot",
+    )
+    summary_sha = _sha256(
+        row.get("universe_summary_sha256"),
+        label="universe summary",
+    )
+    branch = str(row.get("execution_branch") or "")
+    if not branch:
+        raise ValueError("universe-freeze completion branch is empty")
+    head = _commit_sha(
+        row.get("execution_head_sha"),
+        label="universe-freeze completion execution head",
+    )
+    canonical = _commit_sha(
+        row.get("canonical_ledger_commit_sha"),
+        label="universe-freeze completion canonical commit",
+    )
+    if head != canonical:
+        raise ValueError(
+            "universe-freeze completion canonical commit is not execution HEAD"
+        )
+    snapshot = int(row.get("snapshot_head_block", 0))
+    if snapshot <= 0:
+        raise ValueError("universe-freeze completion snapshot is invalid")
+    eligible_tokens = int(row.get("eligible_tokens", -1))
+    if eligible_tokens < 0:
+        raise ValueError("universe-freeze eligible-token count is invalid")
+    if row.get("phase2_universe_coverage_complete") is not True:
+        raise ValueError("universe-freeze completion lost 14/14 proof")
+    if row.get("phase2_universe_frozen") is not True:
+        raise ValueError("universe-freeze completion lacks freeze proof")
+    if row.get("target_run_completed") is not True:
+        raise ValueError("universe-freeze target run is not completed")
+    if row.get("target_run_successful") is not True:
+        raise ValueError("universe-freeze target run is not successful")
+    if row.get("canonical_coverage_ledger_mutated") is not False:
+        raise ValueError("universe-freeze completion mutated coverage ledger")
+    if row.get("workflow_dispatch_performed") is not False:
+        raise ValueError(
+            "universe-freeze completion unexpectedly dispatches workflow"
+        )
+    return {
+        **row,
+        "universe_freeze_completion_control_run_id": control_run_id,
+        "universe_freeze_launch_run_id": launch_run_id,
+        "universe_freeze_launch_artifact_digest": launch_digest,
+        "universe_freeze_run_id": target_run_id,
+        "universe_freeze_artifact_digest": artifact_digest,
+        "universe_freeze_handoff_sha256": handoff_sha,
+        "eligible_universe_sha256": universe_sha,
+        "universe_summary_sha256": summary_sha,
+        "execution_branch": branch,
+        "execution_head_sha": head,
+        "canonical_ledger_commit_sha": canonical,
+        "snapshot_head_block": snapshot,
+        "eligible_tokens": eligible_tokens,
+        "phase2_universe_coverage_complete": True,
+        "phase2_universe_frozen": True,
+        "target_run_completed": True,
+        "target_run_successful": True,
+        "canonical_coverage_ledger_mutated": False,
+        "workflow_dispatch_performed": False,
+    }
+
