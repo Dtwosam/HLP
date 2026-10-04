@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - phase1/data-acquisition-spike
   pull_request:
 
 permissions:
