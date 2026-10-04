@@ -1,0 +1,998 @@
+name: phase3-amm-trade-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_id:
+        description: One V3/V4 Phase-3 source
+        required: true
+        type: choice
+        options:
+          - pools_fun
+          - noxa
+          - direct_uniswap_v3
+          - direct_sushiswap_v3
+          - pools_trade_instant
+          - doppler
+          - direct_uniswap_v4
+      universe_run_id:
+        description: Exact phase2-universe-freeze run ID
+        required: true
+        type: string
+      expected_universe_artifact_digest:
+        description: Exact frozen-universe artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_universe_handoff_sha256:
+        description: Exact SHA-256 of phase2-universe-freeze-handoff.json
+        required: true
+        type: string
+      market_registry_descriptor_json:
+        description: JSON with run_id, artifact_name, artifact_digest, registry_file, registry_sha256
+        required: true
+        type: string
+      swap_run_id:
+        description: Exact shared direct V3/V4 swap backfill run ID
+        required: true
+        type: string
+      expected_swap_manifest_artifact_digest:
+        description: Exact shared swap manifest artifact digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-amm-trade-coverage-${{ inputs.source_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_ID: ${{ inputs.source_id }}
+  UNIVERSE_RUN_ID: ${{ inputs.universe_run_id }}
+  EXPECTED_UNIVERSE_ARTIFACT_DIGEST: ${{ inputs.expected_universe_artifact_digest }}
+  EXPECTED_UNIVERSE_HANDOFF_SHA256: ${{ inputs.expected_universe_handoff_sha256 }}
+  MARKET_REGISTRY_DESCRIPTOR_JSON: ${{ inputs.market_registry_descriptor_json }}
+  SWAP_RUN_ID: ${{ inputs.swap_run_id }}
+  EXPECTED_SWAP_MANIFEST_ARTIFACT_DIGEST: ${{ inputs.expected_swap_manifest_artifact_digest }}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      market_version: ${{ steps.setup.outputs.market_version }}
+      shards: ${{ steps.setup.outputs.shards }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - id: setup
+        name: Freeze source membership and accepted swap identity
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.config import normalize_address
+          from hlp.data.github_actions import select_equivalent_artifact_retry
+          from hlp.data.phase3_trade_source_plan import (
+              V3_SOURCES,
+              V4_SOURCES,
+              build_phase3_trade_source_plan,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          source_id = os.environ["SOURCE_ID"]
+          if source_id in V3_SOURCES:
+              version = "v3"
+              market_key = "pool"
+          elif source_id in V4_SOURCES:
+              version = "v4"
+              market_key = "pool_id"
+          else:
+              raise SystemExit(f"{source_id} is not a Phase-3 AMM source")
+
+          plan = {
+              row["source_id"]: row
+              for row in build_phase3_trade_source_plan()
+          }[source_id]
+          if (
+              plan["wallet_identity_kind"] != "transaction_from"
+              or plan["ready_for_canonical_trade_backfill"] is not True
+          ):
+              raise SystemExit(f"{source_id} AMM trade plan drift")
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              output = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh", "api",
+                      "-H", "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  rows = json.loads(raw).get("artifacts", [])
+                  output.extend(rows)
+                  if len(rows) < 100:
+                      return output
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected):
+              matches = [
+                  row for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: {actual} != {expected}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True)
+              subprocess.check_call([
+                  "gh", "run", "download", str(run_id),
+                  "--repo", repo,
+                  "--name", name,
+                  "--dir", str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          universe_root = Path("inputs/universe")
+          download_named(
+              int(os.environ["UNIVERSE_RUN_ID"]),
+              "phase2-universe-freeze",
+              universe_root,
+              "frozen Phase-2 universe",
+              os.environ["EXPECTED_UNIVERSE_ARTIFACT_DIGEST"],
+          )
+          universe_handoff_path = find_unique(
+              universe_root,
+              "phase2-universe-freeze-handoff.json",
+          )
+          if sha256_path(universe_handoff_path) != os.environ[
+              "EXPECTED_UNIVERSE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("frozen universe handoff SHA drift")
+          universe_handoff = json.loads(universe_handoff_path.read_text())
+          if (
+              universe_handoff.get("phase2_universe_frozen") is not True
+              or universe_handoff.get(
+                  "phase2_universe_coverage_complete"
+              ) is not True
+          ):
+              raise SystemExit("Phase-2 universe is not ready")
+          snapshot = int(universe_handoff["snapshot_head_block"])
+
+          universe_path = find_unique(
+              universe_root,
+              "phase2-eligible-universe.jsonl",
+          )
+          universe_manifest_path = find_unique(
+              universe_root,
+              "phase2-eligible-universe.jsonl.manifest.json",
+          )
+          universe_manifest = json.loads(universe_manifest_path.read_text())
+          if (
+              sha256_path(universe_path) != universe_manifest["sha256"]
+              or universe_manifest["sha256"]
+              != universe_handoff["eligible_universe_sha256"]
+          ):
+              raise SystemExit("frozen universe artifact drift")
+
+          eligible = []
+          for row in iter_validated_jsonl(
+              universe_path,
+              universe_manifest_path,
+          ):
+              if source_id in {
+                  str(value)
+                  for value in row.get("source_ids") or []
+              }:
+                  eligible.append(
+                      normalize_address(str(row["token"]))
+                  )
+          eligible = sorted(set(eligible))
+          if not eligible:
+              raise SystemExit(
+                  f"{source_id} has no eligible frozen-universe tokens"
+              )
+
+          try:
+              descriptor = json.loads(
+                  os.environ["MARKET_REGISTRY_DESCRIPTOR_JSON"]
+              )
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  "market_registry_descriptor_json is invalid"
+              ) from exc
+          if not isinstance(descriptor, dict):
+              raise SystemExit(
+                  "market_registry_descriptor_json must be an object"
+              )
+          try:
+              registry_run_id = int(descriptor["run_id"])
+              registry_artifact_name = str(descriptor["artifact_name"])
+              registry_artifact_digest = str(
+                  descriptor["artifact_digest"]
+              ).lower()
+              registry_file = str(descriptor["registry_file"])
+              registry_expected_sha = str(
+                  descriptor["registry_sha256"]
+              ).lower().removeprefix("sha256:")
+          except (KeyError, TypeError, ValueError) as exc:
+              raise SystemExit(
+                  "market registry descriptor is incomplete"
+              ) from exc
+          if (
+              registry_run_id <= 0
+              or not registry_artifact_name
+              or Path(registry_file).name != registry_file
+              or len(registry_expected_sha) != 64
+              or not registry_artifact_digest.startswith("sha256:")
+              or len(registry_artifact_digest) != 71
+          ):
+              raise SystemExit(
+                  "market registry descriptor identity is invalid"
+              )
+          try:
+              int(registry_expected_sha, 16)
+              int(registry_artifact_digest.split(":", 1)[1], 16)
+          except ValueError as exc:
+              raise SystemExit(
+                  "market registry descriptor digest is invalid"
+              ) from exc
+
+          registry_root = Path("inputs/registry")
+          download_named(
+              registry_run_id,
+              registry_artifact_name,
+              registry_root,
+              f"{source_id} market registry",
+              registry_artifact_digest,
+          )
+          registry_path = find_unique(registry_root, registry_file)
+          if sha256_path(registry_path) != registry_expected_sha:
+              raise SystemExit(
+                  f"{source_id} market registry SHA drift"
+              )
+
+          eligible_set = set(eligible)
+          market_rows = []
+          seen_tokens = set()
+          seen_markets = set()
+          for line in registry_path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              row = json.loads(line)
+              token = normalize_address(str(row.get("token") or ""))
+              if token not in eligible_set:
+                  continue
+              market = str(row.get(market_key) or "").lower()
+              quote = normalize_address(
+                  str(row.get("quote_token") or "")
+              )
+              if (
+                  not market
+                  or token == quote
+                  or token in seen_tokens
+                  or market in seen_markets
+              ):
+                  raise SystemExit(
+                      f"{source_id} market registry is not one-market-per-token"
+                  )
+              seen_tokens.add(token)
+              seen_markets.add(market)
+              row["token"] = token
+              row["quote_token"] = quote
+              row[market_key] = market
+              market_rows.append(row)
+          if seen_tokens != eligible_set:
+              raise SystemExit(
+                  f"{source_id} market registry/frozen universe membership drift"
+              )
+          market_rows.sort(
+              key=lambda row: (
+                  str(row[market_key]),
+                  str(row["token"]),
+              )
+          )
+          market_manifest = write_jsonl_snapshot(
+              market_rows,
+              output=Path(
+                  "artifacts/phase3-amm-market-registry.jsonl"
+              ),
+              provenance={
+                  "source_id": source_id,
+                  "market_version": version,
+                  "market_key": market_key,
+                  "upstream_registry_run_id": registry_run_id,
+                  "upstream_registry_artifact_name": (
+                      registry_artifact_name
+                  ),
+                  "upstream_registry_artifact_digest": (
+                      registry_artifact_digest
+                  ),
+                  "upstream_registry_file": registry_file,
+                  "upstream_registry_sha256": registry_expected_sha,
+                  "eligible_universe_sha256": universe_manifest["sha256"],
+                  "snapshot_head_block": snapshot,
+              },
+          )
+          write_jsonl_snapshot(
+              [{"token": token} for token in eligible],
+              output=Path(
+                  "artifacts/phase3-amm-eligible-tokens.jsonl"
+              ),
+              provenance={
+                  "source_id": source_id,
+                  "eligible_universe_sha256": universe_manifest["sha256"],
+                  "snapshot_head_block": snapshot,
+              },
+          )
+
+          swap_run_id = int(os.environ["SWAP_RUN_ID"])
+          swap_manifest_name = (
+              f"phase2-direct-{version}-swap-manifest"
+          )
+          swap_root = Path("inputs/swap-manifest")
+          download_named(
+              swap_run_id,
+              swap_manifest_name,
+              swap_root,
+              f"shared direct {version} swap manifest",
+              os.environ[
+                  "EXPECTED_SWAP_MANIFEST_ARTIFACT_DIGEST"
+              ],
+          )
+          swap_summary_path = find_unique(
+              swap_root,
+              f"direct-{version}-swap-summary.json",
+          )
+          swap_virtual_path = find_unique(
+              swap_root,
+              f"direct-{version}-swap-sharded.manifest.json",
+          )
+          swap_summary = json.loads(swap_summary_path.read_text())
+          swap_virtual = json.loads(swap_virtual_path.read_text())
+          if swap_summary.get("version") != (
+              f"phase2-direct-{version}-swap-discovery-v1"
+          ):
+              raise SystemExit("shared swap summary version drift")
+          if (
+              swap_summary.get("continuous_event_scan") is not True
+              or swap_summary.get("missing_ranges") != []
+              or int(swap_summary.get("snapshot_head_block", -1))
+              != snapshot
+              or swap_summary.get("swap_sha256")
+              != swap_virtual.get("sha256")
+          ):
+              raise SystemExit("shared swap coverage identity drift")
+          provenance = swap_virtual.get("provenance") or {}
+          shards = list(provenance.get("shards") or [])
+          if (
+              provenance.get("storage_mode")
+              != "sharded_artifacts"
+              or len(shards) != int(swap_summary.get("shards", -1))
+              or not shards
+              or int(provenance.get("to_block", -1)) != snapshot
+          ):
+              raise SystemExit("shared swap shard provenance drift")
+
+          for source_path in (
+              swap_summary_path,
+              swap_virtual_path,
+          ):
+              Path("artifacts", source_path.name).write_bytes(
+                  source_path.read_bytes()
+              )
+          setup = {
+              "version": "phase3-amm-trade-coverage-setup-v1",
+              "source_id": source_id,
+              "market_version": version,
+              "market_key": market_key,
+              "snapshot_head_block": snapshot,
+              "eligible_universe_sha256": universe_manifest["sha256"],
+              "eligible_tokens": len(eligible),
+              "market_rows": len(market_rows),
+              "market_registry_sha256": market_manifest["sha256"],
+              "upstream_market_registry_sha256": registry_expected_sha,
+              "swap_run_id": swap_run_id,
+              "swap_manifest_artifact_digest": os.environ[
+                  "EXPECTED_SWAP_MANIFEST_ARTIFACT_DIGEST"
+              ].lower(),
+              "shared_swap_sha256": swap_virtual["sha256"],
+              "shared_swap_from_block": int(provenance["from_block"]),
+              "shared_swap_to_block": int(provenance["to_block"]),
+              "shared_swap_shards": len(shards),
+              "historical_event_scan_complete": True,
+              "wallet_identity_kind": "transaction_from",
+              "outcome_rows_consumed": False,
+              "future_state_allowed": False,
+          }
+          Path(
+              "artifacts/phase3-amm-trade-coverage-setup.json"
+          ).write_text(
+              json.dumps(setup, indent=2, sort_keys=True) + "\n"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"market_version={version}\n")
+              handle.write(
+                  "shards="
+                  + json.dumps(list(range(len(shards))))
+                  + "\n"
+              )
+          print(json.dumps(setup, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase3-amm-trade-coverage-setup-${{ inputs.source_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+  shard:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.setup.outputs.shards) }}
+    env:
+      MARKET_VERSION: ${{ needs.setup.outputs.market_version }}
+      SHARD_INDEX: ${{ matrix.shard }}
+      GH_TOKEN: ${{ github.token }}
+      ROBINHOOD_ARCHIVE_RPC_API_KEY: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase3-amm-trade-coverage-setup-${{ inputs.source_id }}
+          path: inputs/setup
+      - name: Download exact shared swap shard
+        run: |
+          mkdir -p inputs/raw
+          gh run download "${SWAP_RUN_ID}"             --repo "${GITHUB_REPOSITORY}"             --name "phase2-direct-${MARKET_VERSION}-swap-${SHARD_INDEX}"             --dir inputs/raw
+      - id: filter
+        name: Filter exact source markets from shared swap shard
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          source_id = os.environ["SOURCE_ID"]
+          version = os.environ["MARKET_VERSION"]
+          index = int(os.environ["SHARD_INDEX"])
+          market_key = "pool" if version == "v3" else "pool_id"
+          setup = json.loads(
+              Path(
+                  "inputs/setup/phase3-amm-trade-coverage-setup.json"
+              ).read_text()
+          )
+          markets = {
+              str(json.loads(line)[market_key]).lower()
+              for line in Path(
+                  "inputs/setup/phase3-amm-market-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          }
+          files = sorted(
+              Path("inputs/raw").glob(
+                  f"direct-{version}-swap-*.jsonl"
+              )
+          )
+          if len(files) != 1:
+              raise SystemExit(
+                  f"expected one shared {version} swap shard; "
+                  f"found {len(files)}"
+              )
+          raw_path = files[0]
+          manifest_path = raw_path.with_suffix(
+              raw_path.suffix + ".manifest.json"
+          )
+          manifest = json.loads(manifest_path.read_text())
+          if hashlib.sha256(raw_path.read_bytes()).hexdigest() != (
+              manifest["sha256"]
+          ):
+              raise SystemExit("shared swap shard SHA drift")
+          provenance = manifest.get("provenance") or {}
+          expected_event = (
+              "uniswap_v3_swap"
+              if version == "v3"
+              else "uniswap_v4_swap"
+          )
+          if provenance.get("event") != expected_event:
+              raise SystemExit("shared swap shard event drift")
+          lo = int(provenance["from_block"])
+          hi = int(provenance["to_block"])
+          if hi > int(setup["snapshot_head_block"]):
+              raise SystemExit("shared swap shard after snapshot")
+
+          rows = []
+          for line in raw_path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              row = json.loads(line)
+              if str(row.get(market_key) or "").lower() in markets:
+                  rows.append(row)
+          rows.sort(key=lambda row: (
+              int(row["block_number"]),
+              -1 if row.get("transaction_index") is None
+              else int(row["transaction_index"]),
+              int(row["log_index"]),
+              str(row[market_key]).lower(),
+          ))
+          suffix = f"{index:03d}"
+          output = Path(
+              f"artifacts/phase3-amm-filtered-swaps-{suffix}.jsonl"
+          )
+          filtered = write_jsonl_snapshot(
+              rows,
+              output=output,
+              provenance={
+                  "version": "phase3-amm-filtered-swap-shard-v1",
+                  "source_id": source_id,
+                  "market_version": version,
+                  "market_key": market_key,
+                  "from_block": lo,
+                  "to_block": hi,
+                  "shared_swap_shard_sha256": manifest["sha256"],
+                  "shared_swap_aggregate_sha256": setup[
+                      "shared_swap_sha256"
+                  ],
+                  "market_registry_sha256": setup[
+                      "market_registry_sha256"
+                  ],
+                  "historical_event_scan_complete": True,
+              },
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"filtered_file={output}\n")
+              handle.write(f"records={filtered['records']}\n")
+              handle.write(f"from_block={lo}\n")
+              handle.write(f"to_block={hi}\n")
+          PY
+      - name: Attach transaction identities
+        if: ${{ steps.filter.outputs.records != '0' }}
+        env:
+          FILTERED_FILE: ${{ steps.filter.outputs.filtered_file }}
+        run: |
+          printf -v SHARD "%03d" "$SHARD_INDEX"
+          hlp --timeout 30 --attempts 5 --min-interval 0.1             rpc-transaction-identity-enrich             --events "$FILTERED_FILE"             --transactions-out "artifacts/phase3-amm-identities-$SHARD.jsonl"             --out "artifacts/phase3-amm-enriched-swaps-$SHARD.jsonl"             --label "${SOURCE_ID} swap"
+      - name: Materialize empty identity evidence
+        if: ${{ steps.filter.outputs.records == '0' }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from hlp.data.snapshot import write_jsonl_snapshot
+
+          suffix = f"{int(os.environ['SHARD_INDEX']):03d}"
+          source_id = os.environ["SOURCE_ID"]
+          for name, source in (
+              (
+                  f"phase3-amm-identities-{suffix}.jsonl",
+                  "empty_transaction_identity_shard",
+              ),
+              (
+                  f"phase3-amm-enriched-swaps-{suffix}.jsonl",
+                  "empty_enriched_swap_shard",
+              ),
+          ):
+              write_jsonl_snapshot(
+                  [],
+                  output=Path("artifacts") / name,
+                  provenance={
+                      "source": source,
+                      "source_id": source_id,
+                      "wallet_identity_kind": "transaction_from",
+                  },
+              )
+          PY
+      - name: Publish shard report
+        env:
+          FROM_BLOCK: ${{ steps.filter.outputs.from_block }}
+          TO_BLOCK: ${{ steps.filter.outputs.to_block }}
+          RECORDS: ${{ steps.filter.outputs.records }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          suffix = f"{int(os.environ['SHARD_INDEX']):03d}"
+          filtered = Path(
+              f"artifacts/phase3-amm-filtered-swaps-{suffix}.jsonl"
+          )
+          identity = Path(
+              f"artifacts/phase3-amm-identities-{suffix}.jsonl"
+          )
+          for path in (filtered, identity):
+              manifest = json.loads(
+                  path.with_suffix(
+                      path.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              if hashlib.sha256(path.read_bytes()).hexdigest() != (
+                  manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      f"AMM shard SHA drift: {path.name}"
+                  )
+          filtered_manifest = json.loads(
+              filtered.with_suffix(
+                  filtered.suffix + ".manifest.json"
+              ).read_text()
+          )
+          identity_manifest = json.loads(
+              identity.with_suffix(
+                  identity.suffix + ".manifest.json"
+              ).read_text()
+          )
+          report = {
+              "version": "phase3-amm-trade-coverage-shard-v1",
+              "source_id": os.environ["SOURCE_ID"],
+              "market_version": os.environ["MARKET_VERSION"],
+              "shard_index": int(os.environ["SHARD_INDEX"]),
+              "from_block": int(os.environ["FROM_BLOCK"]),
+              "to_block": int(os.environ["TO_BLOCK"]),
+              "filtered_swap_rows": int(os.environ["RECORDS"]),
+              "filtered_swap_sha256": filtered_manifest["sha256"],
+              "wallet_identity_rows": int(
+                  identity_manifest["records"]
+              ),
+              "wallet_identity_sha256": identity_manifest["sha256"],
+              "historical_event_scan_complete": True,
+              "wallet_identity_complete": True,
+              "outcome_rows_consumed": False,
+              "future_state_allowed": False,
+          }
+          Path(
+              f"artifacts/phase3-amm-shard-report-{suffix}.json"
+          ).write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase3-amm-trade-coverage-${{ inputs.source_id }}-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+  merge:
+    needs: [setup, shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: phase3-amm-trade-coverage-setup-${{ inputs.source_id }}
+          path: inputs/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: phase3-amm-trade-coverage-${{ inputs.source_id }}-*
+          path: inputs/shards
+          merge-multiple: true
+      - id: merge
+        name: Build canonical AMM source coverage
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from hlp.data.phase3_amm_trade_coverage import (
+              materialize_phase3_amm_trade_coverage,
+          )
+          from hlp.data.sharded_tape import validate_shard_block_coverage
+
+          setup = json.loads(
+              Path(
+                  "inputs/setup/phase3-amm-trade-coverage-setup.json"
+              ).read_text()
+          )
+          source_id = setup["source_id"]
+          version = setup["market_version"]
+          market_rows = [
+              json.loads(line)
+              for line in Path(
+                  "inputs/setup/phase3-amm-market-registry.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+          eligible = [
+              json.loads(line)["token"]
+              for line in Path(
+                  "inputs/setup/phase3-amm-eligible-tokens.jsonl"
+              ).read_text().splitlines()
+              if line.strip()
+          ]
+
+          reports = sorted(
+              Path("inputs/shards").glob(
+                  "phase3-amm-shard-report-*.json"
+              )
+          )
+          expected = int(setup["shared_swap_shards"])
+          if len(reports) != expected:
+              raise SystemExit(
+                  f"AMM shard report count drift: "
+                  f"{len(reports)} != {expected}"
+              )
+          coverage = []
+          raw_rows = []
+          identity_by_hash = {}
+          for report_path in reports:
+              report = json.loads(report_path.read_text())
+              suffix = report_path.stem.rsplit("-", 1)[-1]
+              if (
+                  report.get("source_id") != source_id
+                  or report.get("market_version") != version
+                  or report.get(
+                      "historical_event_scan_complete"
+                  ) is not True
+                  or report.get(
+                      "wallet_identity_complete"
+                  ) is not True
+              ):
+                  raise SystemExit(
+                      f"AMM shard report identity drift: {suffix}"
+                  )
+              filtered = Path(
+                  "inputs/shards"
+              ) / f"phase3-amm-filtered-swaps-{suffix}.jsonl"
+              identity = Path(
+                  "inputs/shards"
+              ) / f"phase3-amm-identities-{suffix}.jsonl"
+              filtered_manifest = json.loads(
+                  filtered.with_suffix(
+                      filtered.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              identity_manifest = json.loads(
+                  identity.with_suffix(
+                      identity.suffix + ".manifest.json"
+                  ).read_text()
+              )
+              if hashlib.sha256(filtered.read_bytes()).hexdigest() != (
+                  filtered_manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      f"AMM filtered shard SHA drift: {suffix}"
+                  )
+              if hashlib.sha256(identity.read_bytes()).hexdigest() != (
+                  identity_manifest["sha256"]
+              ):
+                  raise SystemExit(
+                      f"AMM identity shard SHA drift: {suffix}"
+                  )
+              if filtered_manifest["sha256"] != report[
+                  "filtered_swap_sha256"
+              ]:
+                  raise SystemExit(
+                      f"AMM filtered/report SHA drift: {suffix}"
+                  )
+              if identity_manifest["sha256"] != report[
+                  "wallet_identity_sha256"
+              ]:
+                  raise SystemExit(
+                      f"AMM identity/report SHA drift: {suffix}"
+                  )
+              coverage.append({
+                  "file": filtered.name,
+                  "records": int(filtered_manifest["records"]),
+                  "sha256": filtered_manifest["sha256"],
+                  "from_block": int(report["from_block"]),
+                  "to_block": int(report["to_block"]),
+              })
+              for line in filtered.read_text().splitlines():
+                  if line.strip():
+                      raw_rows.append(json.loads(line))
+              for line in identity.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  tx_hash = str(row["transaction_hash"]).lower()
+                  if tx_hash in identity_by_hash:
+                      raise SystemExit(
+                          f"AMM transaction identity repeats: {tx_hash}"
+                      )
+                  identity_by_hash[tx_hash] = row
+
+          validate_shard_block_coverage(
+              coverage,
+              start_block=int(setup["shared_swap_from_block"]),
+              end_block=int(setup["shared_swap_to_block"]),
+          )
+          raw_rows.sort(key=lambda row: (
+              int(row["block_number"]),
+              -1 if row.get("transaction_index") is None
+              else int(row["transaction_index"]),
+              int(row["log_index"]),
+              str(
+                  row[
+                      "pool"
+                      if version == "v3"
+                      else "pool_id"
+                  ]
+              ).lower(),
+          ))
+          identities = [
+              identity_by_hash[key]
+              for key in sorted(identity_by_hash)
+          ]
+
+          canonical_file = (
+              f"phase3-{source_id}-canonical-trades.jsonl"
+          )
+          coverage_file = (
+              f"phase3-{source_id}-trade-coverage.jsonl"
+          )
+          summary = materialize_phase3_amm_trade_coverage(
+              source_id=source_id,
+              eligible_tokens=eligible,
+              market_rows=market_rows,
+              raw_swap_rows=raw_rows,
+              transaction_rows=identities,
+              snapshot_head_block=int(
+                  setup["snapshot_head_block"]
+              ),
+              raw_scan_complete=True,
+              raw_output=Path(
+                  f"artifacts/phase3-{source_id}-raw-swaps.jsonl"
+              ),
+              market_output=Path(
+                  f"artifacts/phase3-{source_id}-market-registry.jsonl"
+              ),
+              wallet_identity_output=Path(
+                  f"artifacts/phase3-{source_id}-wallet-identities.jsonl"
+              ),
+              canonical_output=Path("artifacts") / canonical_file,
+              coverage_output=Path("artifacts") / coverage_file,
+          )
+          summary.update({
+              "upstream_market_registry_sha256": setup[
+                  "upstream_market_registry_sha256"
+              ],
+              "shared_swap_sha256": setup["shared_swap_sha256"],
+              "swap_run_id": setup["swap_run_id"],
+              "swap_manifest_artifact_digest": setup[
+                  "swap_manifest_artifact_digest"
+              ],
+              "canonical_file": canonical_file,
+              "coverage_file": coverage_file,
+          })
+          summary_path = Path(
+              f"artifacts/phase3-{source_id}-trade-coverage-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"canonical_sha256="
+                  f"{summary['canonical_trade_rows_sha256']}\n"
+              )
+              handle.write(
+                  f"coverage_sha256="
+                  f"{summary['coverage_rows_sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(
+                  f"canonical_rows="
+                  f"{summary['canonical_trade_rows']}\n"
+              )
+              handle.write(
+                  f"eligible_tokens={summary['eligible_tokens']}\n"
+              )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload AMM Phase-3 trade coverage
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-trade-coverage-${{ inputs.source_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish AMM trade coverage identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CANONICAL_SHA: ${{ steps.merge.outputs.canonical_sha256 }}
+          COVERAGE_SHA: ${{ steps.merge.outputs.coverage_sha256 }}
+          SUMMARY_SHA: ${{ steps.merge.outputs.summary_sha256 }}
+          CANONICAL_ROWS: ${{ steps.merge.outputs.canonical_rows }}
+          ELIGIBLE_TOKENS: ${{ steps.merge.outputs.eligible_tokens }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Phase-3 AMM trade coverage"
+            echo
+            echo "- source_id: ${SOURCE_ID}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-trade-coverage-${SOURCE_ID}"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- canonical_file: phase3-${SOURCE_ID}-canonical-trades.jsonl"
+            echo "- coverage_file: phase3-${SOURCE_ID}-trade-coverage.jsonl"
+            echo "- canonical_trade_rows_sha256: ${CANONICAL_SHA}"
+            echo "- coverage_rows_sha256: ${COVERAGE_SHA}"
+            echo "- summary_sha256: ${SUMMARY_SHA}"
+            echo "- canonical_trade_rows: ${CANONICAL_ROWS}"
+            echo "- eligible_tokens: ${ELIGIBLE_TOKENS}"
+            echo "- wallet_identity_kind: transaction_from"
+            echo "- historical_event_scan_complete: true"
+            echo "- wallet_identity_complete: true"
+            echo "- canonical_trade_adapter_complete: true"
+            echo "- trade_coverage_complete: true"
+            echo "- outcome_rows_consumed: false"
+            echo "- future_state_allowed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

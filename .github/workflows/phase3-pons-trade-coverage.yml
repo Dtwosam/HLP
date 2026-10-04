@@ -1,0 +1,359 @@
+name: phase3-pons-trade-coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_id:
+        description: Pons source to promote into Phase-3 trade coverage
+        required: true
+        type: choice
+        options:
+          - pons_v1
+          - pons_v2
+      research_run_id:
+        description: Exact successful phase2-research-materialize-pons run ID
+        required: true
+        type: string
+      expected_research_artifact_digest:
+        description: Exact phase2-research-materialized-<source> artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_research_report_sha256:
+        description: Exact SHA-256 of phase2-research-component-report.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-pons-trade-coverage-${{ inputs.source_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_ID: ${{ inputs.source_id }}
+  RESEARCH_RUN_ID: ${{ inputs.research_run_id }}
+  EXPECTED_RESEARCH_ARTIFACT_DIGEST: ${{ inputs.expected_research_artifact_digest }}
+  EXPECTED_RESEARCH_REPORT_SHA256: ${{ inputs.expected_research_report_sha256 }}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: coverage
+        name: Materialize accepted Pons wallet trades into Phase-3 coverage
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_pons_trade_coverage import (
+              materialize_phase3_pons_trade_coverage,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          source_id = os.environ["SOURCE_ID"]
+          if source_id not in {"pons_v1", "pons_v2"}:
+              raise SystemExit(f"unsupported Pons source: {source_id}")
+
+          run_id = int(os.environ["RESEARCH_RUN_ID"])
+          artifact_name = (
+              f"phase2-research-materialized-{source_id}"
+          )
+          expected_digest = os.environ[
+              "EXPECTED_RESEARCH_ARTIFACT_DIGEST"
+          ].lower()
+          expected_report_sha = os.environ[
+              "EXPECTED_RESEARCH_REPORT_SHA256"
+          ].lower().removeprefix("sha256:")
+
+          raw = subprocess.check_output([
+              "gh",
+              "api",
+              "-H",
+              "Accept: application/vnd.github+json",
+              (
+                  f"/repos/{repo}/actions/runs/{run_id}/artifacts"
+                  "?per_page=100"
+              ),
+          ])
+          matches = [
+              row
+              for row in json.loads(raw).get("artifacts", [])
+              if not row.get("expired")
+              and str(row.get("name") or "") == artifact_name
+          ]
+          try:
+              selected = select_equivalent_artifact_retry(
+                  matches,
+                  label=f"{source_id} accepted research component",
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
+          actual_digest = str(
+              selected.get("digest") or ""
+          ).lower()
+          if actual_digest != expected_digest:
+              raise SystemExit(
+                  f"{source_id} research artifact digest drift"
+              )
+
+          root = Path("inputs/research")
+          if root.exists():
+              shutil.rmtree(root)
+          root.mkdir(parents=True)
+          subprocess.check_call([
+              "gh",
+              "run",
+              "download",
+              str(run_id),
+              "--repo",
+              repo,
+              "--name",
+              artifact_name,
+              "--dir",
+              str(root),
+          ])
+
+          def find_unique(name):
+              matches = sorted(
+                  path
+                  for path in root.rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          report_path = find_unique(
+              "phase2-research-component-report.json"
+          )
+          report_sha = hashlib.sha256(
+              report_path.read_bytes()
+          ).hexdigest()
+          if report_sha != expected_report_sha:
+              raise SystemExit(
+                  f"{source_id} research report SHA drift"
+              )
+          report = json.loads(report_path.read_text())
+          if report.get("source_id") != source_id:
+              raise SystemExit(
+                  f"{source_id} research report source drift"
+              )
+          for flag in (
+              "eligible_token_coverage_complete",
+              "accepted_lifecycle_replay_equivalent",
+              "full_inputs_validated",
+              "research_component_ready",
+          ):
+              if report.get(flag) is not True:
+                  raise SystemExit(
+                      f"{source_id} research report lacks {flag}"
+                  )
+          if report.get("outcome_labels_computed") is not False:
+              raise SystemExit(
+                  f"{source_id} research report contains outcomes"
+              )
+          if int(report.get("snapshot_head_block", -1)) <= 0:
+              raise SystemExit(
+                  f"{source_id} research report lacks snapshot binding"
+              )
+          for field in (
+              "eligible_universe_sha256",
+              "source_binding_sha256",
+              "market_registry_sha256",
+          ):
+              value = str(report.get(field) or "").lower()
+              if len(value.removeprefix("sha256:")) != 64:
+                  raise SystemExit(
+                      f"{source_id} research report lacks {field}"
+                  )
+
+          if source_id == "pons_v1":
+              names = [
+                  "phase2-research-pons_v1.jsonl",
+              ]
+          else:
+              names = [
+                  "phase2-research-pons_v2-curve.jsonl",
+                  "phase2-research-pons_v2-graduation-seed.jsonl",
+                  "phase2-research-pons_v2-v4.jsonl",
+              ]
+
+          point_files = []
+          total_records = 0
+          for name in names:
+              path = find_unique(name)
+              manifest_path = find_unique(
+                  name + ".manifest.json"
+              )
+              manifest = json.loads(manifest_path.read_text())
+              data_sha = hashlib.sha256(
+                  path.read_bytes()
+              ).hexdigest()
+              if data_sha != manifest.get("sha256"):
+                  raise SystemExit(
+                      f"{source_id} research point SHA drift: {name}"
+                  )
+              total_records += int(manifest.get("records", -1))
+              provenance = manifest.get("provenance") or {}
+              if provenance.get("source_id") != source_id:
+                  raise SystemExit(
+                      f"{source_id} research point source drift: {name}"
+                  )
+              if provenance.get("canonical_replay") is not True:
+                  raise SystemExit(
+                      f"{source_id} research point is not canonical replay"
+                  )
+              if provenance.get("outcome_labels_computed") is not False:
+                  raise SystemExit(
+                      f"{source_id} research point contains outcomes"
+                  )
+              if provenance.get("market_registry_sha256") != report[
+                  "market_registry_sha256"
+              ]:
+                  raise SystemExit(
+                      f"{source_id} research registry provenance drift"
+                  )
+              if int(provenance.get("snapshot_head_block", -1)) != int(
+                  report["snapshot_head_block"]
+              ):
+                  raise SystemExit(
+                      f"{source_id} research snapshot provenance drift"
+                  )
+              point_files.append((path, manifest_path))
+
+          if total_records != int(
+              report.get("materialized_records", -1)
+          ):
+              raise SystemExit(
+                  f"{source_id} research point count drift"
+              )
+
+          canonical_name = (
+              f"phase3-{source_id}-canonical-trades.jsonl"
+          )
+          coverage_name = (
+              f"phase3-{source_id}-trade-coverage.jsonl"
+          )
+          summary = materialize_phase3_pons_trade_coverage(
+              source_id=source_id,
+              research_report=report,
+              research_point_files=point_files,
+              raw_output=Path(
+                  f"artifacts/phase3-{source_id}-normalized-trades.jsonl"
+              ),
+              canonical_output=Path(
+                  "artifacts"
+              ) / canonical_name,
+              wallet_identity_output=Path(
+                  f"artifacts/phase3-{source_id}-wallet-identities.jsonl"
+              ),
+              coverage_output=Path(
+                  "artifacts"
+              ) / coverage_name,
+          )
+          summary.update({
+              "research_run_id": run_id,
+              "research_artifact_name": artifact_name,
+              "research_artifact_digest": actual_digest,
+              "research_report_sha256": report_sha,
+              "canonical_file": canonical_name,
+              "coverage_file": coverage_name,
+          })
+          summary_path = Path(
+              f"artifacts/phase3-{source_id}-trade-coverage-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True)
+              + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"canonical_sha256="
+                  f"{summary['canonical_trade_rows_sha256']}\n"
+              )
+              handle.write(
+                  f"coverage_sha256="
+                  f"{summary['coverage_rows_sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(
+                  f"canonical_rows="
+                  f"{summary['canonical_trade_rows']}\n"
+              )
+              handle.write(
+                  f"eligible_tokens={summary['eligible_tokens']}\n"
+              )
+          print(json.dumps(summary, sort_keys=True))
+          PY
+
+      - name: Upload Pons Phase-3 trade coverage
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-trade-coverage-${{ inputs.source_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Pons trade coverage identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CANONICAL_SHA: ${{ steps.coverage.outputs.canonical_sha256 }}
+          COVERAGE_SHA: ${{ steps.coverage.outputs.coverage_sha256 }}
+          SUMMARY_SHA: ${{ steps.coverage.outputs.summary_sha256 }}
+          CANONICAL_ROWS: ${{ steps.coverage.outputs.canonical_rows }}
+          ELIGIBLE_TOKENS: ${{ steps.coverage.outputs.eligible_tokens }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-3 Pons trade coverage"
+            echo
+            echo "- source_id: ${SOURCE_ID}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-trade-coverage-${SOURCE_ID}"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- canonical_file: phase3-${SOURCE_ID}-canonical-trades.jsonl"
+            echo "- coverage_file: phase3-${SOURCE_ID}-trade-coverage.jsonl"
+            echo "- canonical_trade_rows_sha256: ${CANONICAL_SHA}"
+            echo "- coverage_rows_sha256: ${COVERAGE_SHA}"
+            echo "- summary_sha256: ${SUMMARY_SHA}"
+            echo "- canonical_trade_rows: ${CANONICAL_ROWS}"
+            echo "- eligible_tokens: ${ELIGIBLE_TOKENS}"
+            echo "- wallet_identity_kind: source_normalized_initiator"
+            echo "- historical_event_scan_complete: true"
+            echo "- wallet_identity_complete: true"
+            echo "- canonical_trade_adapter_complete: true"
+            echo "- trade_coverage_complete: true"
+            echo "- outcome_rows_consumed: false"
+            echo "- future_state_allowed: false"
+          } >> "${GITHUB_STEP_SUMMARY}"

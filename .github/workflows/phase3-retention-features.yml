@@ -1,0 +1,438 @@
+name: phase3-retention-features
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature_entry_run_id:
+        description: Exact phase3-feature-entry run ID
+        required: true
+        type: string
+      expected_feature_entry_artifact_digest:
+        description: Exact phase3-feature-entry artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_feature_entry_handoff_sha256:
+        description: Exact SHA-256 of phase3-feature-entry-handoff.json
+        required: true
+        type: string
+      canonical_trade_run_id:
+        description: Exact phase3-canonical-trade-tape run ID
+        required: true
+        type: string
+      expected_canonical_trade_artifact_digest:
+        description: Exact canonical trade-tape artifact digest (sha256:...)
+        required: true
+        type: string
+      expected_canonical_trade_handoff_sha256:
+        description: Exact SHA-256 of phase3-canonical-trade-handoff.json
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: phase3-retention-features-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FEATURE_ENTRY_RUN_ID: ${{ inputs.feature_entry_run_id }}
+  EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST: ${{ inputs.expected_feature_entry_artifact_digest }}
+  EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256: ${{ inputs.expected_feature_entry_handoff_sha256 }}
+  CANONICAL_TRADE_RUN_ID: ${{ inputs.canonical_trade_run_id }}
+  EXPECTED_CANONICAL_TRADE_ARTIFACT_DIGEST: ${{ inputs.expected_canonical_trade_artifact_digest }}
+  EXPECTED_CANONICAL_TRADE_HANDOFF_SHA256: ${{ inputs.expected_canonical_trade_handoff_sha256 }}
+
+jobs:
+  features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - id: features
+        name: Materialize causal participant-retention features
+        run: |
+          mkdir -p inputs artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              select_equivalent_artifact_retry,
+          )
+          from hlp.data.phase3_feature_entry import (
+              build_phase3_feature_entry_handoff,
+          )
+          from hlp.data.phase3_feature_registry import (
+              build_phase3_feature_registry,
+              validate_phase3_feature_registry,
+          )
+          from hlp.data.phase3_retention_features import (
+              build_phase3_retention_feature_handoff,
+              materialize_phase3_retention_features,
+          )
+          from hlp.data.phase3_trade_tape import (
+              build_phase3_canonical_trade_handoff,
+          )
+          from hlp.data.sharded_tape import iter_validated_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def sha256_path(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def list_artifacts(run_id):
+              rows = []
+              page = 1
+              while True:
+                  raw = subprocess.check_output([
+                      "gh",
+                      "api",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      (
+                          f"/repos/{repo}/actions/runs/{run_id}/artifacts?"
+                          f"per_page=100&page={page}"
+                      ),
+                  ])
+                  batch = json.loads(raw).get("artifacts", [])
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+                  page += 1
+                  if page > 30:
+                      raise SystemExit(
+                          f"artifact pagination exceeded 3000: run={run_id}"
+                      )
+
+          def download_named(run_id, name, destination, label, expected_digest):
+              matches = [
+                  row
+                  for row in list_artifacts(run_id)
+                  if not row.get("expired")
+                  and str(row.get("name") or "") == name
+              ]
+              try:
+                  selected = select_equivalent_artifact_retry(
+                      matches,
+                      label=label,
+                  )
+              except ValueError as exc:
+                  raise SystemExit(f"{label}: {exc}") from exc
+              actual = str(selected.get("digest") or "").lower()
+              if actual != str(expected_digest).lower():
+                  raise SystemExit(
+                      f"{label} artifact digest drift: "
+                      f"{actual} != {expected_digest}"
+                  )
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call([
+                  "gh",
+                  "run",
+                  "download",
+                  str(run_id),
+                  "--repo",
+                  repo,
+                  "--name",
+                  name,
+                  "--dir",
+                  str(destination),
+              ])
+
+          def find_unique(root, name):
+              matches = sorted(
+                  path
+                  for path in Path(root).rglob(name)
+                  if path.is_file()
+              )
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {name} under {root}; found {len(matches)}"
+                  )
+              return matches[0]
+
+          entry_root = Path("inputs/entry")
+          trade_root = Path("inputs/trades")
+          download_named(
+              int(os.environ["FEATURE_ENTRY_RUN_ID"]),
+              "phase3-feature-entry",
+              entry_root,
+              "Phase-3 feature entry",
+              os.environ["EXPECTED_FEATURE_ENTRY_ARTIFACT_DIGEST"],
+          )
+          download_named(
+              int(os.environ["CANONICAL_TRADE_RUN_ID"]),
+              "phase3-canonical-trade-tape",
+              trade_root,
+              "Phase-3 canonical trade tape",
+              os.environ["EXPECTED_CANONICAL_TRADE_ARTIFACT_DIGEST"],
+          )
+
+          subjects_path = find_unique(
+              entry_root,
+              "phase3-feature-subjects.jsonl",
+          )
+          subjects_manifest_path = find_unique(
+              entry_root,
+              "phase3-feature-subjects.jsonl.manifest.json",
+          )
+          subjects_manifest = json.loads(
+              subjects_manifest_path.read_text()
+          )
+          entry_summary_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-summary.json",
+          )
+          entry_summary = json.loads(entry_summary_path.read_text())
+          entry_summary_sha = sha256_path(entry_summary_path)
+          entry_handoff_path = find_unique(
+              entry_root,
+              "phase3-feature-entry-handoff.json",
+          )
+          entry_handoff_sha = sha256_path(entry_handoff_path)
+          if entry_handoff_sha != os.environ[
+              "EXPECTED_FEATURE_ENTRY_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 feature-entry handoff SHA drift")
+          entry_handoff = json.loads(entry_handoff_path.read_text())
+          rebuilt_entry = build_phase3_feature_entry_handoff(
+              entry_summary,
+              entry_summary_sha256=entry_summary_sha,
+              phase2_dataset_handoff_sha256=entry_summary[
+                  "phase2_dataset_handoff_sha256"
+              ],
+              detector_freeze_handoff_sha256=entry_summary[
+                  "detector_freeze_handoff_sha256"
+              ],
+          )
+          if rebuilt_entry != entry_handoff:
+              raise SystemExit(
+                  "Phase-3 feature-entry handoff content drift"
+              )
+          if subjects_manifest.get("sha256") != entry_handoff[
+              "feature_subjects_sha256"
+          ]:
+              raise SystemExit("Phase-3 feature-subject manifest SHA drift")
+
+          trade_path = find_unique(
+              trade_root,
+              "phase3-canonical-trades.jsonl",
+          )
+          trade_manifest_path = find_unique(
+              trade_root,
+              "phase3-canonical-trades.jsonl.manifest.json",
+          )
+          trade_manifest = json.loads(trade_manifest_path.read_text())
+          trade_summary_path = find_unique(
+              trade_root,
+              "phase3-canonical-trade-summary.json",
+          )
+          trade_summary = json.loads(trade_summary_path.read_text())
+          trade_summary_sha = sha256_path(trade_summary_path)
+          trade_handoff_path = find_unique(
+              trade_root,
+              "phase3-canonical-trade-handoff.json",
+          )
+          trade_handoff_sha = sha256_path(trade_handoff_path)
+          if trade_handoff_sha != os.environ[
+              "EXPECTED_CANONICAL_TRADE_HANDOFF_SHA256"
+          ].lower().removeprefix("sha256:"):
+              raise SystemExit("Phase-3 canonical-trade handoff SHA drift")
+          trade_handoff = json.loads(trade_handoff_path.read_text())
+          rebuilt_trade = build_phase3_canonical_trade_handoff(
+              trade_summary,
+              tape_summary_sha256=trade_summary_sha,
+              feature_entry_handoff_sha256=trade_summary[
+                  "feature_entry_handoff_sha256"
+              ],
+          )
+          if rebuilt_trade != trade_handoff:
+              raise SystemExit(
+                  "Phase-3 canonical-trade handoff content drift"
+              )
+          if trade_manifest.get("sha256") != trade_handoff[
+              "canonical_trade_rows_sha256"
+          ]:
+              raise SystemExit("Phase-3 canonical-trade manifest SHA drift")
+          if int(trade_manifest.get("records", -1)) != int(
+              trade_handoff["trade_rows"]
+          ):
+              raise SystemExit("Phase-3 canonical-trade row count drift")
+          if trade_handoff.get("trade_coverage_complete") is not True:
+              raise SystemExit("Phase-3 canonical trade coverage incomplete")
+          if trade_handoff.get("outcome_rows_consumed") is not False:
+              raise SystemExit("Phase-3 canonical trades consumed outcomes")
+          if trade_handoff["feature_entry_handoff_sha256"] != (
+              entry_handoff_sha
+          ):
+              raise SystemExit(
+                  "Phase-3 canonical trades/entry linkage drift"
+              )
+
+          registry = build_phase3_feature_registry()
+          registry_report = validate_phase3_feature_registry(registry)
+          Path("artifacts/phase3-feature-registry.json").write_text(
+              json.dumps(registry, indent=2, sort_keys=True) + "\n"
+          )
+          Path(
+              "artifacts/phase3-feature-registry-report.json"
+          ).write_text(
+              json.dumps(
+                  registry_report,
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+
+          output = Path("artifacts/phase3-retention-features.jsonl")
+          manifest, summary = materialize_phase3_retention_features(
+              iter_validated_jsonl(
+                  subjects_path,
+                  subjects_manifest_path,
+              ),
+              iter_validated_jsonl(
+                  trade_path,
+                  trade_manifest_path,
+              ),
+              entry_handoff=entry_handoff,
+              trade_tape_handoff=trade_handoff,
+              feature_registry=registry,
+              output=output,
+          )
+          summary.update({
+              "feature_entry_run_id": int(
+                  os.environ["FEATURE_ENTRY_RUN_ID"]
+              ),
+              "feature_entry_handoff_sha256": entry_handoff_sha,
+              "canonical_trade_run_id": int(
+                  os.environ["CANONICAL_TRADE_RUN_ID"]
+              ),
+              "canonical_trade_handoff_sha256": trade_handoff_sha,
+          })
+          summary_path = Path(
+              "artifacts/phase3-retention-features-summary.json"
+          )
+          summary_text = (
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          summary_path.write_text(summary_text)
+          summary_sha = hashlib.sha256(
+              summary_text.encode()
+          ).hexdigest()
+
+          handoff = build_phase3_retention_feature_handoff(
+              summary,
+              feature_summary_sha256=summary_sha,
+              feature_entry_handoff_sha256=entry_handoff_sha,
+              canonical_trade_handoff_sha256=trade_handoff_sha,
+          )
+          handoff_path = Path(
+              "artifacts/phase3-retention-features-handoff.json"
+          )
+          handoff_text = (
+              json.dumps(handoff, indent=2, sort_keys=True) + "\n"
+          )
+          handoff_path.write_text(handoff_text)
+          handoff_sha = hashlib.sha256(
+              handoff_text.encode()
+          ).hexdigest()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(
+                  f"feature_rows_sha256={manifest['sha256']}\n"
+              )
+              handle.write(
+                  f"registry_sha256={registry_report['registry_sha256']}\n"
+              )
+              handle.write(f"summary_sha256={summary_sha}\n")
+              handle.write(f"handoff_sha256={handoff_sha}\n")
+              handle.write(
+                  f"feature_subjects={summary['feature_subjects']}\n"
+              )
+          print(json.dumps({
+              "feature_rows_sha256": manifest["sha256"],
+              "feature_registry_sha256": registry_report[
+                  "registry_sha256"
+              ],
+              "feature_summary_sha256": summary_sha,
+              "feature_handoff_sha256": handoff_sha,
+              "feature_subjects": summary["feature_subjects"],
+              "features_per_subject": summary["features_per_subject"],
+              "trade_coverage_complete": True,
+              "future_trade_rows_used": False,
+              "outcome_rows_consumed": False,
+              "phase3_retention_features_ready": True,
+          }, sort_keys=True))
+          PY
+
+      - name: Upload Phase-3 retention features
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-retention-features
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload compact retention-feature handoff
+        id: handoff_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-retention-features-handoff
+          path: |
+            artifacts/phase3-retention-features.jsonl.manifest.json
+            artifacts/phase3-retention-features-summary.json
+            artifacts/phase3-retention-features-handoff.json
+            artifacts/phase3-feature-registry-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish retention-feature identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          HANDOFF_ARTIFACT_DIGEST: ${{ steps.handoff_upload.outputs.artifact-digest }}
+          FEATURE_ROWS_SHA256: ${{ steps.features.outputs.feature_rows_sha256 }}
+          REGISTRY_SHA256: ${{ steps.features.outputs.registry_sha256 }}
+          SUMMARY_SHA256: ${{ steps.features.outputs.summary_sha256 }}
+          HANDOFF_SHA256: ${{ steps.features.outputs.handoff_sha256 }}
+          SUBJECTS: ${{ steps.features.outputs.feature_subjects }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+          test -n "${HANDOFF_ARTIFACT_DIGEST}"
+          {
+            echo "## Phase-3 participant-retention features"
+            echo
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- artifact_name: phase3-retention-features"
+            echo "- artifact_digest: ${ARTIFACT_DIGEST}"
+            echo "- handoff_artifact_name: phase3-retention-features-handoff"
+            echo "- handoff_artifact_digest: ${HANDOFF_ARTIFACT_DIGEST}"
+            echo "- feature_rows_sha256: ${FEATURE_ROWS_SHA256}"
+            echo "- feature_registry_sha256: ${REGISTRY_SHA256}"
+            echo "- summary_sha256: ${SUMMARY_SHA256}"
+            echo "- handoff_sha256: ${HANDOFF_SHA256}"
+            echo "- feature_subjects: ${SUBJECTS}"
+            echo "- features_per_subject: 8"
+            echo "- trade_coverage_complete: true"
+            echo "- future_trade_rows_used: false"
+            echo "- outcome_rows_consumed: false"
+            echo "- phase3_retention_features_ready: true"
+          } >> "${GITHUB_STEP_SUMMARY}"
