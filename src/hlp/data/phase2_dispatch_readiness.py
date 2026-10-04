@@ -85,6 +85,8 @@ PHASE2_DYNAMIC_WORKFLOWS = (
     "phase2-research-price-path-completion.yml",
     "phase2-research-price-path-launch.yml",
     "phase2-dump-geometry-research.yml",
+    "phase2-dump-geometry-completion.yml",
+    "phase2-dump-geometry-launch.yml",
     "phase2-dump-candidate-research.yml",
     "phase2-dump-candidate-diagnostics.yml",
     "phase2-dump-detector-freeze.yml",
