@@ -1,0 +1,355 @@
+name: phase2-pons-source-coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase1/data-acquisition-spike
+    paths:
+      - '.github/phase2-pons-source-coverage.json'
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-pons-source-coverage.yml'
+      - 'src/hlp/data/phase2_pons_coverage.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'tests/test_phase2_pons_coverage.py'
+  pull_request:
+    paths:
+      - '.github/phase2-pons-source-coverage.json'
+      - '.github/phase2-source-coverage.json'
+      - '.github/workflows/phase2-pons-source-coverage.yml'
+      - 'src/hlp/data/phase2_pons_coverage.py'
+      - 'src/hlp/data/phase2_coverage.py'
+      - 'tests/test_phase2_pons_coverage.py'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Download exact accepted Pons lifecycle artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          from hlp.data.github_actions import (
+              fetch_github_actions_artifact_zip,
+              fetch_github_actions_json,
+          )
+          from hlp.data.phase2_pons_coverage import (
+              validate_pons_source_coverage_descriptor,
+          )
+
+          descriptor = validate_pons_source_coverage_descriptor(
+              json.loads(
+                  Path(
+                      ".github/phase2-pons-source-coverage.json"
+                  ).read_text()
+              )
+          )
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          for source in descriptor["sources"]:
+              artifact_id = int(source["artifact_id"])
+              metadata_url = (
+                  f"{api}/repos/{repo}/actions/artifacts/{artifact_id}"
+              )
+              metadata = fetch_github_actions_json(
+                  metadata_url,
+                  token,
+                  timeout=60,
+              )
+              if metadata.get("expired"):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact expired: {artifact_id}"
+                  )
+              if str(metadata.get("name") or "") != source["artifact_name"]:
+                  raise SystemExit(
+                      f"{source['source_id']} artifact name changed"
+                  )
+              if str(metadata.get("digest") or "").lower() != (
+                  source["artifact_digest"]
+              ):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact digest changed"
+                  )
+              workflow_run = metadata.get("workflow_run") or {}
+              if int(workflow_run.get("id", 0)) != int(
+                  source["artifact_run_id"]
+              ):
+                  raise SystemExit(
+                      f"{source['source_id']} artifact run binding changed"
+                  )
+
+              archive = fetch_github_actions_artifact_zip(
+                  f"{metadata_url}/zip",
+                  token,
+                  timeout=120,
+                  attempts=4,
+              )
+              destination = Path(
+                  "artifacts/v1"
+                  if source["source_id"] == "pons_v1"
+                  else "artifacts/v2"
+              )
+              destination.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+                  zf.extractall(destination)
+              print(
+                  json.dumps(
+                      {
+                          "source_id": source["source_id"],
+                          "artifact_id": artifact_id,
+                          "artifact_run_id": source["artifact_run_id"],
+                          "artifact_digest": source["artifact_digest"],
+                          "files": sorted(
+                              path.name
+                              for path in destination.iterdir()
+                          ),
+                      },
+                      sort_keys=True,
+                  )
+              )
+          PY
+      - id: bundle
+        name: Validate source coverage and package Phase-2 Pons handoffs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          from hlp.data.phase2_pons_coverage import (
+              build_pons_phase2_coverage_reports,
+              validate_pons_source_coverage_bundle,
+              validate_pons_source_coverage_descriptor,
+          )
+
+          descriptor = json.loads(
+              Path(".github/phase2-pons-source-coverage.json").read_text()
+          )
+          expected_descriptor = validate_pons_source_coverage_descriptor(
+              descriptor
+          )
+          report = validate_pons_source_coverage_bundle(
+              descriptor,
+              v1_directory="artifacts/v1",
+              v2_directory="artifacts/v2",
+          )
+
+          ledger = json.loads(
+              Path(".github/phase2-source-coverage.json").read_text()
+          )
+          ledger_rows = {
+              row["source_id"]: row
+              for row in ledger["sources"]
+          }
+
+          for source in report["sources"]:
+              source_id = source["source_id"]
+              row = ledger_rows[source_id]
+              expected = {
+                  "source_readiness": "phase1_proven",
+                  "coverage_status": "complete",
+                  "required_start_block": source["required_start_block"],
+                  "first_block": source["required_start_block"],
+                  "last_block": report["snapshot_head_block"],
+                  "continuous": True,
+                  "missing_ranges": [],
+                  "tokens_discovered": source["records"],
+                  "price_points": source["price_points"],
+                  "priced_points": source["priced_points"],
+                  "observed_volume_usd": None,
+                  "provenance_sha256": source["provenance_sha256"],
+                  "blocking_reason": None,
+              }
+              for key, value in expected.items():
+                  if row.get(key) != value:
+                      raise SystemExit(
+                          "Pons coverage ledger drift: "
+                          f"{source_id}.{key} "
+                          f"{row.get(key)!r} != {value!r}"
+                      )
+
+          coverage_reports = build_pons_phase2_coverage_reports(
+              expected_descriptor,
+              report,
+          )
+          specs = {
+              row["source_id"]: row
+              for row in expected_descriptor["sources"]
+          }
+          outputs = {}
+          for source_id, lane in (
+              ("pons_v1", "v1"),
+              ("pons_v2", "v2"),
+          ):
+              spec = specs[source_id]
+              source_root = Path("artifacts", lane)
+              handoff_root = Path("handoff", source_id)
+              handoff_root.mkdir(parents=True, exist_ok=True)
+              report_name = (
+                  f"{source_id.replace('_', '-')}-source-coverage-report.json"
+              )
+              report_text = (
+                  json.dumps(
+                      coverage_reports[source_id],
+                      indent=2,
+                      sort_keys=True,
+                  )
+                  + "\n"
+              )
+              (handoff_root / report_name).write_text(report_text)
+              report_sha = hashlib.sha256(
+                  report_text.encode()
+              ).hexdigest()
+
+              lifecycle_name = str(spec["lifecycle_filename"])
+              manifest_name = str(spec["manifest_filename"])
+              shutil.copy2(
+                  source_root / lifecycle_name,
+                  handoff_root / lifecycle_name,
+              )
+              shutil.copy2(
+                  source_root / manifest_name,
+                  handoff_root / manifest_name,
+              )
+              outputs[source_id] = {
+                  "report_name": report_name,
+                  "report_sha256": report_sha,
+                  "lifecycle_name": lifecycle_name,
+                  "lifecycle_sha256": str(
+                      spec["lifecycle_sha256"]
+                  ).lower(),
+              }
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for source_id, prefix_name in (
+                  ("pons_v1", "v1"),
+                  ("pons_v2", "v2"),
+              ):
+                  row = outputs[source_id]
+                  handle.write(
+                      f"{prefix_name}_report_path={row['report_name']}\n"
+                  )
+                  handle.write(
+                      f"{prefix_name}_report_sha256="
+                      f"{row['report_sha256']}\n"
+                  )
+                  handle.write(
+                      f"{prefix_name}_summary_path="
+                      f"{row['lifecycle_name']}\n"
+                  )
+                  handle.write(
+                      f"{prefix_name}_summary_sha256="
+                      f"{row['lifecycle_sha256']}\n"
+                  )
+
+          print(json.dumps(report, sort_keys=True))
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write("## Phase 2 Pons source coverage\n\n")
+                  handle.write(
+                      f"- launches covered: {report['total_launches']}\n"
+                  )
+                  handle.write(
+                      f"- eligible tokens: "
+                      f"{report['total_eligible_tokens']}\n"
+                  )
+                  handle.write(
+                      f"- priced points: {report['total_price_points']}\n"
+                  )
+                  handle.write(
+                      "- Pons source coverage complete: "
+                      f"{report['all_pons_source_coverage_complete']}\n"
+                  )
+                  handle.write(
+                      "- Phase-2 eligibility handoff packaging: ready\n"
+                  )
+          PY
+
+      - id: upload_v1
+        name: Upload Pons V1 Phase-2 coverage handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pons-source-coverage-pons_v1
+          path: handoff/pons_v1/
+          if-no-files-found: error
+          retention-days: 90
+
+      - id: upload_v2
+        name: Upload Pons V2 Phase-2 coverage handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pons-source-coverage-pons_v2
+          path: handoff/pons_v2/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Pons eligibility dispatch bindings
+        env:
+          V1_ARTIFACT_DIGEST: ${{ steps.upload_v1.outputs.artifact-digest }}
+          V2_ARTIFACT_DIGEST: ${{ steps.upload_v2.outputs.artifact-digest }}
+          V1_REPORT_PATH: ${{ steps.bundle.outputs.v1_report_path }}
+          V1_REPORT_SHA256: ${{ steps.bundle.outputs.v1_report_sha256 }}
+          V1_SUMMARY_PATH: ${{ steps.bundle.outputs.v1_summary_path }}
+          V1_SUMMARY_SHA256: ${{ steps.bundle.outputs.v1_summary_sha256 }}
+          V2_REPORT_PATH: ${{ steps.bundle.outputs.v2_report_path }}
+          V2_REPORT_SHA256: ${{ steps.bundle.outputs.v2_report_sha256 }}
+          V2_SUMMARY_PATH: ${{ steps.bundle.outputs.v2_summary_path }}
+          V2_SUMMARY_SHA256: ${{ steps.bundle.outputs.v2_summary_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${V1_ARTIFACT_DIGEST}"
+          test -n "${V2_ARTIFACT_DIGEST}"
+          {
+            echo
+            echo "### Pons V1 launchpad-eligibility inputs"
+            echo
+            echo "- source_id: pons_v1"
+            echo "- coverage_run_id: ${GITHUB_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-pons-source-coverage-pons_v1"
+            echo "- expected_coverage_artifact_digest: ${V1_ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: ${V1_REPORT_PATH}"
+            echo "- expected_coverage_report_sha256: ${V1_REPORT_SHA256}"
+            echo "- eligibility_run_id: ${GITHUB_RUN_ID}"
+            echo "- eligibility_artifact_name: phase2-pons-source-coverage-pons_v1"
+            echo "- expected_eligibility_artifact_digest: ${V1_ARTIFACT_DIGEST}"
+            echo "- eligibility_summary_path: ${V1_SUMMARY_PATH}"
+            echo "- expected_eligibility_summary_sha256: ${V1_SUMMARY_SHA256}"
+            echo
+            echo "### Pons V2 launchpad-eligibility inputs"
+            echo
+            echo "- source_id: pons_v2"
+            echo "- coverage_run_id: ${GITHUB_RUN_ID}"
+            echo "- coverage_artifact_name: phase2-pons-source-coverage-pons_v2"
+            echo "- expected_coverage_artifact_digest: ${V2_ARTIFACT_DIGEST}"
+            echo "- coverage_report_path: ${V2_REPORT_PATH}"
+            echo "- expected_coverage_report_sha256: ${V2_REPORT_SHA256}"
+            echo "- eligibility_run_id: ${GITHUB_RUN_ID}"
+            echo "- eligibility_artifact_name: phase2-pons-source-coverage-pons_v2"
+            echo "- expected_eligibility_artifact_digest: ${V2_ARTIFACT_DIGEST}"
+            echo "- eligibility_summary_path: ${V2_SUMMARY_PATH}"
+            echo "- expected_eligibility_summary_sha256: ${V2_SUMMARY_SHA256}"
+          } >> "${GITHUB_STEP_SUMMARY}"
