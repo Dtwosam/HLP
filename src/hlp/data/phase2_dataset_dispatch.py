@@ -135,6 +135,13 @@ def build_phase2_dataset_dispatch_plan(
         "detector_freeze_handoff_sha256": outcome[
             "detector_freeze_handoff_sha256"
         ],
+        "price_path_run_id": outcome["price_path_run_id"],
+        "price_path_artifact_digest": outcome[
+            "price_path_artifact_digest"
+        ],
+        "price_path_handoff_sha256": outcome[
+            "price_path_handoff_sha256"
+        ],
         "tokens": int(universe["eligible_tokens"]),
         "confirmed_dump_tokens": int(outcome["confirmed_dump_tokens"]),
         "comeback_5x_tokens": int(outcome["comeback_5x_tokens"]),
@@ -219,6 +226,18 @@ def validate_phase2_dataset_dispatch_plan(
         row.get("detector_freeze_handoff_sha256"),
         label="dataset detector handoff",
     )
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="dataset price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="dataset price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="dataset price-path handoff",
+    )
     tokens = int(row.get("tokens", -1))
     confirmed = int(row.get("confirmed_dump_tokens", -1))
     comeback = int(row.get("comeback_5x_tokens", -1))
@@ -264,6 +283,9 @@ def validate_phase2_dataset_dispatch_plan(
         "detector_freeze_run_id": detector_run,
         "detector_freeze_artifact_digest": detector_digest,
         "detector_freeze_handoff_sha256": detector_handoff,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "tokens": tokens,
         "confirmed_dump_tokens": confirmed,
         "comeback_5x_tokens": comeback,
@@ -328,6 +350,18 @@ def validate_phase2_dataset_launch_receipt(
         row.get("detector_freeze_handoff_sha256"),
         label="Phase-2 dataset launch detector handoff",
     )
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="Phase-2 dataset launch price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="Phase-2 dataset launch price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="Phase-2 dataset launch price-path handoff",
+    )
     if int(row.get("target_runs_created", -1)) != 1:
         raise ValueError("Phase-2 dataset launch target-run count drift")
     if row.get("target_run_waited_for_completion") is not False:
@@ -351,6 +385,9 @@ def validate_phase2_dataset_launch_receipt(
         "detector_freeze_run_id": detector_run,
         "detector_freeze_artifact_digest": detector_digest,
         "detector_freeze_handoff_sha256": detector_handoff,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "target_runs_created": 1,
         "target_run_waited_for_completion": False,
         "phase2_dataset_ready": False,
@@ -435,6 +472,18 @@ def validate_phase2_dataset_completion_receipt(
         row.get("detector_freeze_handoff_sha256"),
         label="Phase-2 dataset completion detector handoff",
     )
+    price_run = _positive_run_id(
+        row.get("price_path_run_id"),
+        label="Phase-2 dataset completion price-path run ID",
+    )
+    price_digest = _artifact_digest(
+        row.get("price_path_artifact_digest"),
+        label="Phase-2 dataset completion price-path artifact",
+    )
+    price_handoff = _sha256(
+        row.get("price_path_handoff_sha256"),
+        label="Phase-2 dataset completion price-path handoff",
+    )
     tokens = int(row.get("tokens", -1))
     confirmed = int(row.get("confirmed_dump_tokens", -1))
     comeback = int(row.get("comeback_5x_tokens", -1))
@@ -476,6 +525,9 @@ def validate_phase2_dataset_completion_receipt(
         "detector_freeze_run_id": detector_run,
         "detector_freeze_artifact_digest": detector_digest,
         "detector_freeze_handoff_sha256": detector_handoff,
+        "price_path_run_id": price_run,
+        "price_path_artifact_digest": price_digest,
+        "price_path_handoff_sha256": price_handoff,
         "tokens": tokens,
         "confirmed_dump_tokens": confirmed,
         "comeback_5x_tokens": comeback,
