@@ -4,8 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from hlp.data.phase2_eligibility import build_launchpad_eligibility_handoff
+
 from hlp.data.phase2_pons_coverage import (
     PONS_SOURCE_COVERAGE_VERSION,
+    build_pons_phase2_coverage_reports,
     validate_pons_lifecycle_artifact,
     validate_pons_source_coverage_descriptor,
 )
@@ -167,3 +170,85 @@ def test_repository_pons_source_coverage_descriptor_is_frozen():
         "2e880af79350530d4c30cda8d10778f"
         "ee8156c284ccb523cae226f1a886cc566"
     )
+
+def test_pons_phase2_coverage_reports_bridge_into_launchpad_eligibility():
+    sha = "cd" * 32
+    v1 = source_spec(sha)
+    v2 = {**source_spec(sha), "source_id": "pons_v2"}
+    descriptor = {
+        "version": PONS_SOURCE_COVERAGE_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [v1, v2],
+    }
+    source_report = {
+        "records": 2,
+        "eligible_tokens": 1,
+        "unknown_tokens": 0,
+        "required_start_block": 10,
+        "max_launch_block": 20,
+        "max_last_priced_block": 99,
+        "price_points": 4,
+        "priced_points": 4,
+        "unpriced_points": 0,
+        "pricing_incomplete_tokens": 0,
+        "provenance_sha256": sha,
+        "coverage_status": "complete",
+        "continuous": True,
+        "missing_ranges": [],
+        "snapshot_head_block": 100,
+    }
+    validation = {
+        "version": PONS_SOURCE_COVERAGE_VERSION,
+        "snapshot_head_block": 100,
+        "sources": [
+            {"source_id": "pons_v1", **source_report},
+            {"source_id": "pons_v2", **source_report},
+        ],
+    }
+    coverage_reports = build_pons_phase2_coverage_reports(
+        descriptor,
+        validation,
+    )
+    assert coverage_reports["pons_v1"]["source_readiness"] == "phase1_proven"
+    assert coverage_reports["pons_v1"]["tokens_discovered"] == 2
+    assert coverage_reports["pons_v1"]["priced_points"] == 4
+
+    raw_rows = [
+        {
+            "token": TOKEN1,
+            "price_points": 2,
+            "priced_points": 2,
+            "unpriced_points": 0,
+            "pricing_complete": True,
+            "max_market_cap_proxy_usd": "150000",
+            "max_market_cap_block": 50,
+            "crossed_100k": True,
+        },
+        {
+            "token": TOKEN2,
+            "price_points": 2,
+            "priced_points": 2,
+            "unpriced_points": 0,
+            "pricing_complete": True,
+            "max_market_cap_proxy_usd": "90000",
+            "max_market_cap_block": 60,
+            "crossed_100k": False,
+        },
+    ]
+    normalized, summary = build_launchpad_eligibility_handoff(
+        "pons_v1",
+        raw_rows,
+        coverage_reports["pons_v1"],
+        source_inventory=[
+            {
+                "source_id": "pons_v1",
+                "source_kind": "launchpad",
+                "readiness": "phase1_proven",
+            }
+        ],
+        provenance_sha256="ef" * 32,
+    )
+    assert len(normalized) == 2
+    assert summary["eligible_tokens"] == 1
+    assert summary["phase2_universe_source_ready"] is True
+

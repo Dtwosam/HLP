@@ -325,3 +325,83 @@ def validate_pons_source_coverage_bundle(
         ),
         "all_pons_source_coverage_complete": True,
     }
+
+def build_pons_phase2_coverage_reports(
+    descriptor: Mapping[str, object],
+    validation_report: Mapping[str, object],
+) -> dict[str, dict]:
+    """Bridge frozen Phase-1 Pons lifecycle rows into Phase-2 coverage reports."""
+
+    expected = validate_pons_source_coverage_descriptor(descriptor)
+    report = dict(validation_report)
+    if str(report.get("version") or "") != expected["version"]:
+        raise ValueError("Pons validation report version changed")
+    snapshot = int(report.get("snapshot_head_block", 0))
+    if snapshot != int(expected["snapshot_head_block"]):
+        raise ValueError("Pons validation report snapshot changed")
+
+    raw_sources = report.get("sources")
+    if not isinstance(raw_sources, list) or len(raw_sources) != 2:
+        raise ValueError("Pons validation report must contain V1 and V2")
+    by_id = {
+        str(row.get("source_id") or ""): dict(row)
+        for row in raw_sources
+        if isinstance(row, Mapping)
+    }
+    if set(by_id) != {"pons_v1", "pons_v2"}:
+        raise ValueError("Pons validation report source set changed")
+
+    output: dict[str, dict] = {}
+    for spec in expected["sources"]:
+        source_id = str(spec["source_id"])
+        row = by_id[source_id]
+        if int(row.get("records", -1)) != int(spec["records"]):
+            raise ValueError(f"{source_id} validation record count changed")
+        if int(row.get("required_start_block", -1)) != int(
+            spec["required_start_block"]
+        ):
+            raise ValueError(f"{source_id} validation start block changed")
+        if int(row.get("price_points", -1)) != int(spec["price_points"]):
+            raise ValueError(f"{source_id} validation price points changed")
+        if int(row.get("priced_points", -1)) != int(spec["price_points"]):
+            raise ValueError(f"{source_id} validation priced points changed")
+        if int(row.get("unpriced_points", -1)) != 0:
+            raise ValueError(f"{source_id} validation has unpriced points")
+        if int(row.get("unknown_tokens", -1)) != 0:
+            raise ValueError(f"{source_id} validation has unknown tokens")
+        if int(row.get("pricing_incomplete_tokens", -1)) != 0:
+            raise ValueError(
+                f"{source_id} validation has incomplete pricing"
+            )
+        if str(row.get("provenance_sha256") or "").lower() != str(
+            spec["lifecycle_sha256"]
+        ).lower():
+            raise ValueError(f"{source_id} validation provenance changed")
+        if row.get("coverage_status") != "complete":
+            raise ValueError(f"{source_id} validation coverage is incomplete")
+        if row.get("continuous") is not True:
+            raise ValueError(f"{source_id} validation is not continuous")
+        if list(row.get("missing_ranges") or []) != []:
+            raise ValueError(f"{source_id} validation has missing ranges")
+        if int(row.get("snapshot_head_block", -1)) != snapshot:
+            raise ValueError(f"{source_id} validation snapshot changed")
+
+        output[source_id] = {
+            "source_id": source_id,
+            "source_readiness": "phase1_proven",
+            "coverage_status": "complete",
+            "required_start_block": int(spec["required_start_block"]),
+            "first_block": int(spec["required_start_block"]),
+            "last_block": snapshot,
+            "snapshot_head_block": snapshot,
+            "continuous": True,
+            "missing_ranges": [],
+            "tokens_discovered": int(spec["records"]),
+            "price_points": int(spec["price_points"]),
+            "priced_points": int(spec["price_points"]),
+            "observed_volume_usd": None,
+            "provenance_sha256": str(spec["lifecycle_sha256"]).lower(),
+            "blocking_reason": None,
+        }
+    return output
+
